@@ -1,0 +1,76 @@
+<template>
+  <!-- <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"> -->
+  <h3 class="text-sm font-semibold text-base-content/80 mb-4">
+    {{ mode === 'edit' ? 'Edit clause' : 'New clause' }} </h3>
+  <div class="space-y-4">
+    <div>
+      <label class="label-text text-xs text-base-content/60 block mb-1">Clause title
+        <RequiredIndicator />
+      </label>
+      <input v-model="localTitle" type="text" class="input input-bordered input-sm w-full" placeholder="" required />
+    </div>
+    <div>
+      <label class="label-text text-xs text-base-content/60 block mb-1">Clause text
+        <RequiredIndicator />
+      </label>
+      <ClauseTextEditor :model-value="localText" :semantic-conditions="semanticConditions"
+        @update:model-value="localText = $event" />
+    </div>
+    <div class="flex justify-between items-center">
+      <button v-if="mode === 'edit'" type="button" class="btn btn-ghost btn-xs" @click="$emit('cancel')">
+        Cancel
+      </button>
+      <span v-else />
+      <button type="button" class="btn btn-secondary btn-sm" :disabled="!canSubmit" @click="handleSubmit">
+        {{ mode === 'edit' ? 'Save changes' : 'Add clause' }}
+      </button>
+    </div>
+  </div>
+  <!-- </section> -->
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import type { SemanticCondition } from '@template-repository/models/contract-templace'
+import RequiredIndicator from '@core/components/RequiredIndicator.vue'
+import ClauseTextEditor from '@template-repository/components/clauses-editor/ClauseTextEditor.vue'
+
+const props = defineProps<{
+  mode: 'create' | 'edit'
+  initialTitle: string
+  initialText: string
+  semanticConditions: SemanticCondition[]
+}>()
+
+const emit = defineEmits<{
+  submit: [payload: { title: string; text: string }]
+  cancel: []
+}>()
+
+const localTitle = ref(props.initialTitle)
+const localText = ref(props.initialText)
+
+watch(
+  () => [props.initialTitle, props.initialText] as const,
+  ([title, text]) => {
+    localTitle.value = title
+    localText.value = text
+  }
+)
+
+const canSubmit = computed(
+  () => !!localTitle.value.trim() && !!localText.value.trim()
+)
+
+function handleSubmit() {
+  if (!canSubmit.value) return
+  emit('submit', {
+    title: localTitle.value.trim(),
+    text: localText.value.trim(),
+  })
+  if (props.mode === 'create') {
+    localTitle.value = ''
+    localText.value = ''
+  }
+}
+</script>
