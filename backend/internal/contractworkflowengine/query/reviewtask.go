@@ -1,0 +1,73 @@
+package query
+
+import (
+	"context"
+	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
+	"digital-contracting-service/internal/contractworkflowengine/db"
+	"fmt"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+)
+
+type GetAllReviewTasksForDIDQry struct {
+	DID         string
+	RetrievedBy string
+}
+
+type GetAllReviewTasksForDIDResult struct {
+	ID        int
+	DID       string
+	State     reviewtaskstate.ReviewTaskState
+	Reviewer  string
+	CreatedBy string
+	CreatedAt time.Time
+}
+
+type GetAllReviewTasksForDIDHandler struct {
+	Ctx    context.Context
+	DB     *sqlx.DB
+	RTRepo db.ReviewTaskRepo
+}
+
+func (h *GetAllReviewTasksForDIDHandler) Handle(query GetAllReviewTasksForDIDQry) ([]GetAllReviewTasksForDIDResult, error) {
+
+	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	reviewTasks, err := h.RTRepo.ReadAll(tx, query.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read all review tasks: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("could not commit transaction: %w", err)
+	}
+
+	result := make([]GetAllReviewTasksForDIDResult, len(reviewTasks))
+	for i, data := range reviewTasks {
+
+		state, err := reviewtaskstate.NewReviewTaskState(data.State)
+		if err != nil {
+			return nil, fmt.Errorf("could not create review task state: %w", err)
+		}
+
+		result[i] = GetAllReviewTasksForDIDResult{
+			DID:       data.DID,
+			State:     state,
+			Reviewer:  data.Reviewer,
+			CreatedBy: data.CreatedBy,
+			CreatedAt: data.CreatedAt,
+		}
+	}
+
+	return result, nil
+}
