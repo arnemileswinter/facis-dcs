@@ -12,13 +12,15 @@ var _ = Service("ExternalTargetSystemApi", func() {
 	Method("action", func() {
 		Description("Invoke external target system action (create/deploy) from DCS.")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-
+		Security(JWTAuth)
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			// NOTE: Defined placeholder path (DCS-IR-SI-05 does not specify concrete path).
 			POST("/external/action")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 
@@ -26,13 +28,15 @@ var _ = Service("ExternalTargetSystemApi", func() {
 	Method("status", func() {
 		Description("Query external target system status from DCS.")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-
+		Security(JWTAuth)
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			// NOTE: Defined placeholder path (DCS-IR-SI-05 does not specify concrete path).
 			GET("/external/status")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 
@@ -40,13 +44,15 @@ var _ = Service("ExternalTargetSystemApi", func() {
 	Method("callback", func() {
 		Description("Receive external target system callbacks/events into DCS.")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
-
+		Security(JWTAuth)
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			// NOTE: Defined placeholder path (DCS-IR-SI-05 does not specify concrete path).
 			POST("/external/callback")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 

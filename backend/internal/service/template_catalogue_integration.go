@@ -3,34 +3,30 @@ package service
 import (
 	"context"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
+	"digital-contracting-service/internal/auth"
 
 	"goa.design/clue/log"
 )
 
-// TemplateCatalogueIntegration service example implementation.
-// The example methods log the requests and return zero values.
-type templateCatalogueIntegrationsrvc struct{}
-
-// NewTemplateCatalogueIntegration returns the TemplateCatalogueIntegration
-// service implementation.
-func NewTemplateCatalogueIntegration() templatecatalogueintegration.Service {
-	return &templateCatalogueIntegrationsrvc{}
+type templateCatalogueIntegrationsrvc struct {
+	auth.JWTAuthenticator
 }
 
-// Discover templates via XFSC Catalogue.
-func (s *templateCatalogueIntegrationsrvc) Discover(ctx context.Context) (res any, err error) {
+func NewTemplateCatalogueIntegration(jwtAuth auth.JWTAuthenticator) templatecatalogueintegration.Service {
+	return &templateCatalogueIntegrationsrvc{JWTAuthenticator: jwtAuth}
+}
+
+func (s *templateCatalogueIntegrationsrvc) Discover(ctx context.Context, p *templatecatalogueintegration.DiscoverPayload) (res any, err error) {
 	log.Printf(ctx, "templateCatalogueIntegration.discover")
 	return
 }
 
-// Request template via XFSC Catalogue.
-func (s *templateCatalogueIntegrationsrvc) Request(ctx context.Context) (res any, err error) {
+func (s *templateCatalogueIntegrationsrvc) Request(ctx context.Context, p *templatecatalogueintegration.RequestPayload) (res any, err error) {
 	log.Printf(ctx, "templateCatalogueIntegration.request")
 	return
 }
 
-// Register template into XFSC Catalogue.
-func (s *templateCatalogueIntegrationsrvc) Register(ctx context.Context) (res any, err error) {
+func (s *templateCatalogueIntegrationsrvc) Register(ctx context.Context, p *templatecatalogueintegration.RegisterPayload) (res any, err error) {
 	log.Printf(ctx, "templateCatalogueIntegration.register")
 	return
 }

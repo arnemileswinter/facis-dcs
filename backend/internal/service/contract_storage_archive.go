@@ -3,52 +3,47 @@ package service
 import (
 	"context"
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
+	"digital-contracting-service/internal/auth"
 
 	"goa.design/clue/log"
 )
 
-// ContractStorageArchive service example implementation.
-// The example methods log the requests and return zero values.
-type contractStorageArchivesrvc struct{}
-
-// NewContractStorageArchive returns the ContractStorageArchive service
-// implementation.
-func NewContractStorageArchive() contractstoragearchive.Service {
-	return &contractStorageArchivesrvc{}
+// ContractStorageArchive service implementation.
+type contractStorageArchivesrvc struct {
+	auth.JWTAuthenticator
 }
 
-// retrieve archived items.
-func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context) (res any, err error) {
+// NewContractStorageArchive returns the ContractStorageArchive service implementation.
+func NewContractStorageArchive(jwtAuth auth.JWTAuthenticator) contractstoragearchive.Service {
+	return &contractStorageArchivesrvc{JWTAuthenticator: jwtAuth}
+}
+
+func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractstoragearchive.RetrievePayload) (res any, err error) {
 	log.Printf(ctx, "contractStorageArchive.retrieve")
 	return
 }
 
-// search archived records. search records by criteria.
-func (s *contractStorageArchivesrvc) Search(ctx context.Context) (res []any, err error) {
+func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstoragearchive.SearchPayload) (res []any, err error) {
 	log.Printf(ctx, "contractStorageArchive.search")
 	return
 }
 
-// store new contract or evidence.
-func (s *contractStorageArchivesrvc) Store(ctx context.Context) (res string, err error) {
+func (s *contractStorageArchivesrvc) Store(ctx context.Context, p *contractstoragearchive.StorePayload) (res string, err error) {
 	log.Printf(ctx, "contractStorageArchive.store")
 	return
 }
 
-// terminate contract/archive entry.
-func (s *contractStorageArchivesrvc) Terminate(ctx context.Context) (res int, err error) {
+func (s *contractStorageArchivesrvc) Terminate(ctx context.Context, p *contractstoragearchive.TerminatePayload) (res int, err error) {
 	log.Printf(ctx, "contractStorageArchive.terminate")
 	return
 }
 
-// permanently delete entry.
-func (s *contractStorageArchivesrvc) Delete(ctx context.Context) (res int, err error) {
+func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstoragearchive.DeletePayload) (res int, err error) {
 	log.Printf(ctx, "contractStorageArchive.delete")
 	return
 }
 
-// retrieve audit logs.
-func (s *contractStorageArchivesrvc) Audit(ctx context.Context) (res []string, err error) {
+func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstoragearchive.AuditPayload) (res []string, err error) {
 	log.Printf(ctx, "contractStorageArchive.audit")
 	return
 }

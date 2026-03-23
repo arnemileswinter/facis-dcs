@@ -18,9 +18,11 @@
 │   ├── template_catalogue_integration.go   # Design description for the Template Catalogue integration API
 │   └── template_repository.go              # Design description for the Template Repository API
 ├── gen/              # Goa-generated transport & types (DO NOT EDIT)
-├── internal/
-│   ├── datatype/     # Used data types for the application
-│   └── service/      # Application service implementations
+├── internal
+│   └── base/         # Files that are used by every DCS component
+│   └── datatype/     # Used data types for the application
+│   └── service/      # Application endpoint implementations
+│   └── template_repository     # Implementation for the template repository component
 ├── go.mod
 ├── go.sum
 └── README.md
@@ -46,7 +48,32 @@ Generate the required glue code under `gen/` with the Goa CLI:
 goa gen digital-contracting-service/design
 ```
 
+## Running tests
+```
+export DATABASE_URL="user=username password=password dbname=test_postgres sslmode=disable"
+```
+
+```
+go test -v ./...
+```
 **Note:** Every time you modify files in **DCS/implementation/backend/design**, you must regenerate the code.
+
+## Running the API Server
+
+### Environment Variables
+```bash
+# Database configuration
+export DATABASE_URL="user=username password=password dbname=postgres sslmode=disable"
+
+# API routing
+export API_PATH_PREFIX="/api"
+
+# OIDC/Keycloak Authentication
+export OIDC_ISSUER_URL="https://keycloak.example.com/realms/yourrealm"
+export OIDC_CLIENT_ID="digital-contracting-service"
+export OIDC_REDIRECT_URI="http://localhost:5173/api/auth/callback"
+export OIDC_LOGOUT_REDIRECT_URI="http://localhost:8991/api/auth/logout-complete"
+```
 
 ### Start the DCS backend service
 ```bash
@@ -60,6 +87,13 @@ curl http://0.0.0.0:8991/template/search
 
 ### Build a Docker image
 To build a Docker image, you can use the helper script [build-image.sh](./build-image.sh).
+
+**Important:** The Docker image embeds the frontend application. The build process:
+1. Builds the Vue.js frontend from `../frontend/ClientApp`
+2. Copies the built frontend into the backend image at `/app/web/dist`
+3. The backend serves the frontend at `/ui` (root `/` redirects to `/ui`), keeping API routes at the root level
+
+The build script must be run from the `backend/` directory, as it uses the parent directory (`implementation/`) as the Docker build context to access both backend and frontend code.
 
 **Parameters:**
 - `TAG` – Sets the image tag (default: `latest`)

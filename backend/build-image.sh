@@ -23,7 +23,9 @@ if [[ -n "$REGISTRY" && -n "$REPO" ]]; then
 fi
 
 echo "Building $IMAGE_NAME..."
-docker build -t "$IMAGE_NAME" .
+# Build from parent directory context to include both backend and frontend
+# Use Dockerfile in current directory, but context is parent
+docker build -f Dockerfile -t "$IMAGE_NAME" ..
 
 if [[ -n "$REGISTRY" && -n "$REPO" ]]; then
   echo "Tagging as latest..."

@@ -11,14 +11,16 @@ var _ = Service("DcsToDcs", func() {
 	// TBD: path and method are not defined in SRS
 	Method("retrieve", func() {
 		Description("Offer a policy-gated, read-only contract information endpoint between a DCS instance and a counterparty DCS")
-
 		Meta("dcs:requirements", "DCS-IR-SI-06")
+		Security(JWTAuth)
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			// NOTE: Defined placeholder path (DCS-IR-SI-06 does not specify concrete path).
 			GET("/peer/retrieve")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 })

@@ -1,0 +1,37 @@
+package contracttemplatetype
+
+import (
+	"fmt"
+	"strings"
+)
+
+type ContractTemplateType string
+
+const (
+	FrameContract ContractTemplateType = "FRAME_CONTRACT"
+	SubContract   ContractTemplateType = "SUB_CONTRACT"
+)
+
+var validFlag = map[ContractTemplateType]bool{
+	FrameContract: true,
+	SubContract:   true,
+}
+
+func NewContractTemplateType(s string) (ContractTemplateType, error) {
+	flag := ContractTemplateType(strings.ToUpper(s))
+	if !flag.IsValid() {
+		return "", fmt.Errorf("invalid template type: %s", s)
+	}
+	return flag, nil
+}
+
+// IsValid checks if the ActionFlag is a valid role
+func (f ContractTemplateType) IsValid() bool {
+	upper := ContractTemplateType(strings.ToUpper(string(f)))
+	return validFlag[upper]
+}
+
+// String returns the string representation of the ActionFlag
+func (f ContractTemplateType) String() string {
+	return string(f)
+}

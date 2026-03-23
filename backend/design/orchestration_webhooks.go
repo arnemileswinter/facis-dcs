@@ -12,13 +12,15 @@ var _ = Service("OrchestrationWebhooks", func() {
 	Method("node_red_webhook", func() {
 		Description("Expose Node-Red - compatible endpoints and webhook callbacks.")
 		Meta("dcs:requirements", "DCS-IR-SI-02")
-
+		Security(JWTAuth)
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			// NOTE: Defined placeholder path (DCS-IR-SI-02 does not specify concrete path).
 			POST("/webhook/node-red")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 })

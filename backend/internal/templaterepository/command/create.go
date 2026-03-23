@@ -1,0 +1,72 @@
+package command
+
+import (
+	"context"
+	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
+	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/db"
+	templateevents "digital-contracting-service/internal/templaterepository/event"
+	"fmt"
+
+	"github.com/jmoiron/sqlx"
+)
+
+type CreateCmd struct {
+	DID          string
+	CreatedBy    string
+	TemplateType contracttemplatetype.ContractTemplateType
+	Name         *string
+	Description  *string
+	TemplateData *datatype.JSON
+}
+
+type Creator struct {
+	Ctx    context.Context
+	DB     *sqlx.DB
+	CTRepo db.ContractTemplateRepo
+}
+
+func (h *Creator) Handle(cmd CreateCmd) error {
+
+	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	data := db.ContractTemplate{
+		DID:          cmd.DID,
+		CreatedBy:    cmd.CreatedBy,
+		State:        contracttemplatestate.Draft.String(),
+		TemplateType: cmd.TemplateType.String(),
+		Name:         cmd.Name,
+		Description:  cmd.Description,
+		TemplateData: cmd.TemplateData,
+	}
+	createdAt, err := h.CTRepo.Create(tx, data)
+	if err != nil {
+		return fmt.Errorf("could not create contract template: %w", err)
+	}
+
+	evt := templateevents.CreateEvent{
+		DID:          cmd.DID,
+		CreatedBy:    cmd.CreatedBy,
+		Name:         cmd.Name,
+		Description:  cmd.Description,
+		TemplateData: cmd.TemplateData,
+		OccurredAt:   *createdAt,
+	}
+	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
+	if err != nil {
+		return fmt.Errorf("could not create event: %w", err)
+	}
+
+	return tx.Commit()
+}

@@ -11,89 +11,110 @@ var _ = Service("ContractStorageArchive", func() {
 	Method("retrieve", func() {
 		Description("retrieve archived items.")
 		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05")
-		Meta("dcs:roles", "Archive Manager", "Contract Observer")
 		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
 		Meta("dcs:csa:components", "Signed Contract Archive")
-
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Contract Observer")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			GET("/archive/retrieve")
 			Response(StatusOK)
 		})
-
 		Result(Any)
 	})
 
 	Method("search", func() {
 		Description("search archived records. search records by criteria.")
 		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05")
-		Meta("dcs:roles", "Archive Manager", "Contract Observer")
 		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
 		Meta("dcs:csa:components", "Signed Contract Archive")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Contract Observer")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			GET("/archive/search")
 			Response(StatusOK)
 		})
-
 		Result(ArrayOf(Any))
 	})
 
 	Method("store", func() {
 		Description("store new contract or evidence.")
 		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06")
-		Meta("dcs:roles", "Archive Manager")
 		Meta("dcs:ui", "Archive Manager Dashboard")
 		Meta("dcs:csa:components", "Signed Contract Archive")
-
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			POST("/archive/store")
 			Response(StatusOK)
 		})
-
 		Result(String)
 	})
+
 	Method("terminate", func() {
 		Description("terminate contract/archive entry.")
 		Meta("dcs:requirements", "DCS-IR-CSA-03", "DCS-IR-CSA-06")
-		Meta("dcs:roles", "Archive Manager")
 		Meta("dcs:ui", "Archive Manager Dashboard")
 		Meta("dcs:csa:components", "Automated Alerts")
-
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			POST("/archive/terminate")
 			Response(StatusOK)
 		})
-
 		Result(Int)
 	})
 
 	Method("delete", func() {
 		Description("permanently delete entry.")
 		Meta("dcs:requirements", "DCS-IR-CSA-03", "DCS-IR-CSA-06")
-		Meta("dcs:roles", "Archive Manager")
 		Meta("dcs:ui", "Archive Manager Dashboard")
 		Meta("dcs:csa:components", "Signed Contract Archive", "Automated Alerts")
-
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			DELETE("/archive/delete")
 			Response(StatusOK)
 		})
-
 		Result(Int)
 	})
 
 	Method("audit", func() {
 		Description("retrieve audit logs.")
 		Meta("dcs:requirements", "DCS-IR-CSA-04")
-		Meta("dcs:roles", "Archive Manager")
 		Meta("dcs:ui", "Archive Manager Dashboard")
 		Meta("dcs:csa:components", "")
-
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
 		HTTP(func() {
 			GET("/archive/audit")
 			Response(StatusOK)
 		})
-
 		Result(ArrayOf(String))
 	})
-
 })

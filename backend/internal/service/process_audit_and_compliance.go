@@ -3,40 +3,35 @@ package service
 import (
 	"context"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/auth"
 
 	"goa.design/clue/log"
 )
 
-// ProcessAuditAndCompliance service example implementation.
-// The example methods log the requests and return zero values.
-type processAuditAndCompliancesrvc struct{}
-
-// NewProcessAuditAndCompliance returns the ProcessAuditAndCompliance service
-// implementation.
-func NewProcessAuditAndCompliance() processauditandcompliance.Service {
-	return &processAuditAndCompliancesrvc{}
+type processAuditAndCompliancesrvc struct {
+	auth.JWTAuthenticator
 }
 
-// trigger an audit on selected scope.
-func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context) (res string, err error) {
+func NewProcessAuditAndCompliance(jwtAuth auth.JWTAuthenticator) processauditandcompliance.Service {
+	return &processAuditAndCompliancesrvc{JWTAuthenticator: jwtAuth}
+}
+
+func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, p *processauditandcompliance.AuditPayload) (res string, err error) {
 	log.Printf(ctx, "processAuditAndCompliance.audit")
 	return
 }
 
-// generate and retrieve audit reports.
-func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context) (res any, err error) {
+func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *processauditandcompliance.AuditReportPayload) (res any, err error) {
 	log.Printf(ctx, "processAuditAndCompliance.audit_report")
 	return
 }
 
-// continuous monitoring and event retrieval.
-func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context) (res any, err error) {
+func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processauditandcompliance.MonitorPayload) (res any, err error) {
 	log.Printf(ctx, "processAuditAndCompliance.monitor")
 	return
 }
 
-// submit non-compliance findings as case records.
-func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context) (res any, err error) {
+func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *processauditandcompliance.IncidentReportPayload) (res any, err error) {
 	log.Printf(ctx, "processAuditAndCompliance.incident_report")
 	return
 }
