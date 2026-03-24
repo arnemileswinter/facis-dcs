@@ -36,7 +36,7 @@ func mountSwaggerUI(mux goahttp.Muxer) {
 			return
 		}
 
-		// Update the servers field with the runtime API path prefix
+		// UpdateState the servers field with the runtime API path prefix
 		// Determine scheme from X-Forwarded-Proto header (proxy) or TLS status (direct)
 		scheme := r.Header.Get("X-Forwarded-Proto")
 		if scheme == "" {

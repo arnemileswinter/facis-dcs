@@ -20,7 +20,7 @@ type ApprovalTaskRepo interface {
 	ReopenTasks(tx *sqlx.Tx, did string) error
 	ReadAll(dtx *sqlx.Tx, id string) ([]ApprovalTaskData, error)
 	ReadAllByApprover(tx *sqlx.Tx, approver string) ([]ApprovalTaskData, error)
-	Update(tx *sqlx.Tx, did string, approver string, state string) error
+	UpdateState(tx *sqlx.Tx, did string, approver string, state string) error
 	IsValidApprover(tx *sqlx.Tx, did string, approver string) (bool, error)
 	TaskExistsInState(tx *sqlx.Tx, did string, approver string, state string) (bool, error)
 	TaskExists(tx *sqlx.Tx, did string) (bool, error)

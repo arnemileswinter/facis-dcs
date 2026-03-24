@@ -54,7 +54,7 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 	}
 
 	if hasTask {
-		err := h.RTRepo.Update(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String())
+		err := h.RTRepo.UpdateState(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String())
 		if err != nil {
 			return err
 		}

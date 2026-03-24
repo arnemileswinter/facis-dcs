@@ -146,9 +146,9 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 					return errors.New("contract template needs to be verified before")
 				}
 
-				err = h.RTRepo.Update(tx, processData.DID, cmd.SubmittedBy, contracttemplatestate.Approved.String())
+				err = h.RTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, contracttemplatestate.Approved.String())
 				if err != nil {
-					return fmt.Errorf("could not update approval task: %w", err)
+					return fmt.Errorf("could not update review task: %w", err)
 				}
 
 				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String(), reviewtaskstate.Verified.String())
