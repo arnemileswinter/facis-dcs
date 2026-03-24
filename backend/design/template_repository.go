@@ -701,6 +701,7 @@ var _ = Service("TemplateRepository", func() {
 
 		HTTP(func() {
 			GET("/template/audit")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

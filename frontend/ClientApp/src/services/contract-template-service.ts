@@ -3,6 +3,7 @@ import type { ContractTemplate } from '@/models/contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,
+  ContractTemplateAuditRequest,
   ContractTemplateCreateRequest,
   ContractTemplateRegisterRequest,
   ContractTemplateRejectRequest,
@@ -16,6 +17,7 @@ import type {
 import type {
   ContractTemplateApproveResponse,
   ContractTemplateArchiveResponse,
+  ContractTemplateAuditResponse,
   ContractTemplateCreateResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -110,6 +112,10 @@ export const contractTemplateService: ContractTemplateService = {
   },
 
   async register(request: ContractTemplateRegisterRequest) {
-    return http.post<ContractTemplateRegisterResponse>('/template/archive', request).then((res) => res.data)
+    return http.post<ContractTemplateRegisterResponse>('/template/register', request).then((res) => res.data)
+  },
+
+  async audit(request: ContractTemplateAuditRequest) {
+    return http.get<ContractTemplateAuditResponse>('/template/audit', { params: request }).then((res) => res.data)
   },
 }

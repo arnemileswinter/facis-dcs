@@ -6,6 +6,7 @@ import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
 import { toProperCase } from '@/utils/string'
 import { computed } from 'vue'
+import TemplateManagerActions from './TemplateManagerActions.vue'
 
 const props = defineProps<{
   item: PartialContractTemplate
@@ -37,6 +38,10 @@ const resolveViewRouteName = computed(() => {
     return ROUTES.TEMPLATES.APPROVE
   }
   return ROUTES.TEMPLATES.VIEW
+})
+
+const isManager = computed(() => {
+  return authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false
 })
 </script>
 
@@ -77,6 +82,7 @@ const resolveViewRouteName = computed(() => {
             >
               Edit
             </RouterLink>
+            <TemplateManagerActions v-if="isManager" :item="item" />
           </div>
         </div>
       </div>

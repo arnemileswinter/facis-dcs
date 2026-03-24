@@ -20,8 +20,6 @@ const filterLabels = {
   // did: 'DID',
   document_number: 'Document number',
   version: 'Version',
-  template_type: 'Template type',
-  // state: 'State',
   name: 'Name',
   description: 'Description',
   // filter: 'Filter',
@@ -186,7 +184,7 @@ function onFilterSelect(label: FilterLabelValue) {
               v-slot="{ active, selected }"
             >
               <li v-if="searchKey" :class="autocompleteOptionClasses(active, selected)">
-                <span>{{ item[searchKey] }}</span>
+                <span class="block truncate">{{ item[searchKey] }}</span>
               </li>
             </ComboboxOption>
           </template>

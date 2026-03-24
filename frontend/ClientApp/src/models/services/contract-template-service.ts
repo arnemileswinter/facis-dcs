@@ -2,6 +2,7 @@ import type { ContractTemplate } from '../contract-template'
 import type {
   ContractTemplateApproveRequest,
   ContractTemplateArchiveRequest,
+  ContractTemplateAuditRequest,
   ContractTemplateCreateRequest,
   ContractTemplateRegisterRequest,
   ContractTemplateRejectRequest,
@@ -15,6 +16,7 @@ import type {
 import type {
   ContractTemplateApproveResponse,
   ContractTemplateArchiveResponse,
+  ContractTemplateAuditResponse,
   ContractTemplateCreateResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -37,4 +39,5 @@ export interface ContractTemplateService {
   verify: (request: ContractTemplateVerifyRequest) => Promise<ContractTemplateVerifyResponse>
   archive: (request: ContractTemplateArchiveRequest) => Promise<ContractTemplateArchiveResponse>
   register: (request: ContractTemplateRegisterRequest) => Promise<ContractTemplateRegisterResponse>
+  audit: (request: ContractTemplateAuditRequest) => Promise<ContractTemplateAuditResponse>
 }

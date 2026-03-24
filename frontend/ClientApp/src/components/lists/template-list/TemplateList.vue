@@ -3,7 +3,7 @@ import type { PartialContractTemplate } from '@/models/contract-template'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
 import { storeToRefs } from 'pinia'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import ListSearch from '../ListSearch.vue'
+import ListSearch from './ListSearch.vue'
 import ListSort from '../ListSort.vue'
 import TemplateListItem from './TemplateListItem.vue'
 
@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const sorter = new Map([
   ['created_at', 'Creation date'],
-  ['state', 'Status'],
+  ['state', 'Template state'],
 ])
 const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
