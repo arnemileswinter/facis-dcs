@@ -5,6 +5,7 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
@@ -61,6 +62,11 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 
 	if !exist {
 		return errors.New("invalid user")
+	}
+
+	err = h.ATRepo.UpdateState(tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())
+	if err != nil {
+		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
 	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Draft.String())

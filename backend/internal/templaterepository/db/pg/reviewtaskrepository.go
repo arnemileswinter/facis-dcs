@@ -97,7 +97,7 @@ func (r *PostgresReviewTaskRepo) ReadAllByReviewer(tx *sqlx.Tx, reviewer string)
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) Update(tx *sqlx.Tx, did string, reviewer string, state string) error {
+func (r *PostgresReviewTaskRepo) UpdateState(tx *sqlx.Tx, did string, reviewer string, state string) error {
 	statement := `
         UPDATE contract_templates_review_task SET state = $3
         WHERE did = $1 AND reviewer = $2

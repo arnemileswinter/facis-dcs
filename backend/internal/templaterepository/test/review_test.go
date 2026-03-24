@@ -118,7 +118,7 @@ func TestReview_CreateReviewTasksAndApproveThem(t *testing.T) {
 	}
 
 	for _, assignee := range assignees {
-		err := repo.RTRepo.Update(tx, *did, assignee, contracttemplatestate.Approved.String())
+		err := repo.RTRepo.UpdateState(tx, *did, assignee, contracttemplatestate.Approved.String())
 		if err != nil {
 			t.Fatalf("Failed to approve review task: %v", err)
 		}

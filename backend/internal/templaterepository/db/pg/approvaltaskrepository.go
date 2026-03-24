@@ -68,7 +68,7 @@ func (r *PostgresApprovalTaskRepo) ReadAllByApprover(tx *sqlx.Tx, approver strin
 	return approvalTasks, nil
 }
 
-func (r *PostgresApprovalTaskRepo) Update(tx *sqlx.Tx, did string, approver string, state string) error {
+func (r *PostgresApprovalTaskRepo) UpdateState(tx *sqlx.Tx, did string, approver string, state string) error {
 	statement := `
         UPDATE contract_templates_approval_task SET state = $3
         WHERE did = $1 AND approver = $2
