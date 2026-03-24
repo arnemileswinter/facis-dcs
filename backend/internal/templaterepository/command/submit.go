@@ -125,17 +125,17 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Submitted.String() {
 
+		isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
+		if err != nil {
+			return err
+		}
+
+		if !isValid {
+			return errors.New("invalid user")
+		}
+
 		if cmd.ActionFlag != nil {
 			if *cmd.ActionFlag == actionflag.Approval {
-
-				valid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
-				if err != nil {
-					return err
-				}
-
-				if !valid {
-					return errors.New("invalid user")
-				}
 
 				exist, err := h.RTRepo.TaskExistsInState(tx, processData.DID, cmd.SubmittedBy, reviewtaskstate.Open.String())
 				if err != nil {
@@ -161,15 +161,6 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 				}
 
 			} else if *cmd.ActionFlag == actionflag.Draft {
-
-				isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
-				if err != nil {
-					return err
-				}
-
-				if !isValid {
-					return errors.New("invalid user")
-				}
 
 				err = h.RTRepo.ReopenTasks(tx, cmd.DID)
 				if err != nil {
