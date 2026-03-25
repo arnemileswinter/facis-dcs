@@ -17,6 +17,7 @@ import (
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/migrations"
 	"flag"
@@ -117,6 +118,10 @@ func main() {
 		log.Fatalf(ctx, err, "failed to create contract workflow engine")
 	}
 
+	// Initialize the Federated Catalogue client.
+	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
+	templateCatalogueClient := fcclient.NewFederatedCatalogueClient(fcURL)
+
 	// Initialize the service.
 	var (
 		authSvc                         genauth.Service
@@ -139,7 +144,7 @@ func main() {
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(jwtAuth)
 		signatureManagementSvc = service.NewSignatureManagement(jwtAuth)
-		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth)
+		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo)
 	}
 
