@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { useConfirmDialog } from '@vueuse/core'
-import { ref, useTemplateRef, watch } from 'vue'
+import { ref, useTemplateRef, watch, type Ref } from 'vue'
 
 interface ModalData {
   message: string
 }
 
 const actionModal = useTemplateRef('action-modal')
-const modalData = ref<ModalData>({ message: 'Confirm selection' })
+const modalData: Ref<ModalData> = ref({ message: 'Confirm selection' })
 
 const { isRevealed, reveal, confirm, cancel, onReveal } = useConfirmDialog<ModalData>()
 
 onReveal((data) => {
-  modalData.value = data
+  if (data) {
+    modalData.value = data
+  }
 })
 
 watch(isRevealed, (value) => {

@@ -15,7 +15,7 @@ const props = defineProps<{
   item: PartialContractTemplate
 }>()
 
-const confirmationModal = useTemplateRef('confirmation-modal')
+const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -35,7 +35,8 @@ const canRegister = computed(() => {
 
 const archive = async () => {
   try {
-    const { isCanceled } = await confirmationModal.value!.reveal({ message: 'Proceed with archiving?' })
+    if (!confirmationModal.value) return
+    const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with archiving?' })
     if (!isCanceled) {
       await contractTemplateService.archive({ did: props.item.did, updated_at: props.item.updated_at })
       router.go(0)
@@ -44,9 +45,11 @@ const archive = async () => {
     console.error('Archiving failed:', err)
   }
 }
+
 const register = async () => {
   try {
-    const { isCanceled } = await confirmationModal.value!.reveal({ message: 'Proceed with registration?' })
+    if (!confirmationModal.value) return
+    const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with registration?' })
     if (!isCanceled) {
       await contractTemplateService.register({ did: props.item.did, updated_at: props.item.updated_at })
       router.go(0)
@@ -66,8 +69,8 @@ const audit = async () => {
 </script>
 
 <template>
-  <button v-if="canRegister" @click="register" class="btn btn-sm btn-primary rounded-box mb-1">Register</button>
-  <button v-if="canArchive" @click="archive" class="btn btn-sm btn-primary hover:btn-error rounded-box mb-1">Archive</button>
-  <button v-if="isManager" @click="audit" class="btn btn-sm btn-secondary rounded-box">Audit</button>
+  <button v-if="canRegister" :class="$attrs.class" @click="register">Register</button>
+  <button v-if="canArchive" :class="[$attrs.class, 'hover:btn-error']" @click="archive">Archive</button>
+  <button v-if="isManager" :class="$attrs.class" @click="audit">Audit</button>
   <ConfirmationModal ref="confirmation-modal" />
 </template>

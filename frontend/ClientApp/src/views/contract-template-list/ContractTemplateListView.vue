@@ -1,5 +1,5 @@
 <template>
-  <div class="flex justify-between mb-8">
+  <div class="flex justify-between p-4 mb-4">
     <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight">
       {{ $route.meta.name }}
     </h2>

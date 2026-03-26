@@ -29,7 +29,7 @@ const hasFilters = computed(() => {
   return activeFilters.value.length > 0
 })
 
-function setFilter(stateFilter: ContractTemplateStateFilter) {
+const setFilter = (stateFilter: ContractTemplateStateFilter) => {
   if (stateFilters.value.has(stateFilter)) {
     stateFilterStore.removeFilter(stateFilter)
     showAll.value = !hasFilters.value
@@ -39,34 +39,44 @@ function setFilter(stateFilter: ContractTemplateStateFilter) {
   }
 }
 
-function isSelected(type: ContractTemplateStateFilter) {
+const isSelected = (type: ContractTemplateStateFilter) => {
   return stateFilters.value.has(type)
 }
 </script>
 
 <template>
-  <div>
-    <div class="collapse collapse-arrow bg-base-300 border-base-300 border hover:bg-base-100">
-      <input type="checkbox" />
-      <div class="collapse-title text-sm">Contract Template</div>
-      <div class="collapse-content">
-        <ul class="list rounded-box shadow-sm">
-          <li
-            v-for="filter in shownFilters"
-            :key="filter"
-            class="list-row flex justify-between w-full cursor-pointer py-2 hover:bg-base-200"
-            @click="setFilter(filter)"
-          >
-            <label class="label flex-1 cursor-pointer" :class="{ 'font-bold': isSelected(filter) }">{{ filter }}</label>
-          </li>
-          <li class="text-sm opacity-60 px-4">
-            <label v-if="hasFilters" class="link" @click="showAll = !showAll">
-              <div v-if="!showAll">See all</div>
-              <div v-else>See less</div>
-            </label>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </div>
+  <button id="popover-btn" popovertarget="filter-popover" class="select select-secondary w-fit gap-2 m-2">
+    Filter
+  </button>
+  <ul id="filter-popover" popover class="dropdown menu rounded-box rounded-md bg-base-300 shadow-sm">
+    <li>
+      <label class="label">Contract Template</label>
+      <ul>
+        <li
+          v-for="filter in shownFilters"
+          :key="filter"
+          class="flex justify-between transition-colors"
+          @click="setFilter(filter)"
+        >
+          <label class="label flex-1" :class="{ 'font-bold': isSelected(filter) }">{{ filter }}</label>
+        </li>
+        <li v-if="hasFilters" class="text-sm w-full opacity-60 px-4 py-2 border-t border-base-300">
+          <label class="link cursor-pointer" @click="showAll = !showAll">
+            <div v-if="!showAll">See all</div>
+            <div v-else>See less</div>
+          </label>
+        </li>
+      </ul>
+    </li>
+  </ul>
 </template>
+
+<style scoped>
+#popover-btn {
+  anchor-name: --anchor-filter-popover;
+}
+
+#filter-popover {
+  position-anchor: --anchor-filter-popover;
+}
+</style>

@@ -20,7 +20,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight">
+  <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight p-4 mb-4">
     {{ $route.meta.name }}
   </h2>
 

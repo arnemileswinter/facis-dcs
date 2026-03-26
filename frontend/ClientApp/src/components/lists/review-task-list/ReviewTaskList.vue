@@ -4,7 +4,9 @@ import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
-import { computed } from 'vue'
+import { toComparableValue } from '@/utils/comparison'
+import { computed, ref } from 'vue'
+import ListSort from '../ListSort.vue'
 
 const props = defineProps<{
   items: ContractTemplateReviewTask[]
@@ -13,10 +15,29 @@ const props = defineProps<{
 const templatesStore = useContractTemplatesStore()
 const authStore = useAuthStore()
 
+const sorter = new Map([['created_at', 'Creation date']])
+const defaultSort = sorter.keys().next().value!
+const sortBy = ref(defaultSort)
+const sortOrder = ref(1)
+
 const sortedItems = computed(() =>
-  props.items.sort((taskA, taskB) =>
-    new Date(taskA.created_at).getTime() < new Date(taskB.created_at).getTime() ? 1 : -1,
-  ),
+  props.items.slice().sort((taskA, taskB) => {
+    const aSortValue = taskA[sortBy.value as keyof ContractTemplateReviewTask]
+    const bSortValue = taskB[sortBy.value as keyof ContractTemplateReviewTask]
+    const aValue = toComparableValue(aSortValue)
+    const bValue = toComparableValue(bSortValue)
+    if (!aValue && !bValue) return 0
+    if (!aValue) return sortOrder.value
+    if (!bValue) return sortOrder.value * -1
+
+    let result: number
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      result = Math.sign(bValue - aValue)
+    } else {
+      result = String(bValue).localeCompare(String(aValue))
+    }
+    return sortOrder.value * result
+  }),
 )
 
 const getTemplateName = (item: ContractTemplateReviewTask) => {
@@ -32,10 +53,20 @@ const canEdit = (item: ContractTemplateReviewTask) => {
     state === TemplateState.submitted
   )
 }
+
+const resolveViewRouteName = (item: ContractTemplateReviewTask) => {
+  if (item.state === 'OPEN') {
+    return ROUTES.TEMPLATES.REVIEW
+  }
+  return ROUTES.TEMPLATES.VIEW
+}
 </script>
 
 <template>
   <ul class="list">
+    <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
+      <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
+    </li>
     <li v-for="item in sortedItems" class="list-row">
       <div class="list-col-grow card bg-base-200 card-border hover:bg-base-300">
         <div class="card-body">
@@ -52,7 +83,7 @@ const canEdit = (item: ContractTemplateReviewTask) => {
             <div class="card-actions justify-end">
               <RouterLink
                 :to="{
-                  name: ROUTES.TEMPLATES.VIEW,
+                  name: resolveViewRouteName(item),
                   params: { did: item.did },
                 }"
                 class="btn btn-sm btn-primary rounded-box"
@@ -68,13 +99,6 @@ const canEdit = (item: ContractTemplateReviewTask) => {
                 class="btn btn-sm btn-secondary rounded-box gap-2"
               >
                 Edit
-              </RouterLink>
-              <RouterLink
-                v-if="item.state === 'OPEN'"
-                :to="{ name: ROUTES.TEMPLATES.REVIEW, params: { did: item.did } }"
-                class="btn btn-sm btn-primary rounded-box gap-2"
-              >
-                Review
               </RouterLink>
             </div>
           </div>

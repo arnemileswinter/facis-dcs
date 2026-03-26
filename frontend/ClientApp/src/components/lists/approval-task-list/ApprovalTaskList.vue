@@ -3,7 +3,9 @@ import type { ContractTemplateApprovalTask } from '@/models/contract-template-ap
 import { ROUTES } from '@/router/router'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
-import { computed } from 'vue'
+import { toComparableValue } from '@/utils/comparison'
+import { computed, ref } from 'vue'
+import ListSort from '../ListSort.vue'
 
 const props = defineProps<{
   items: ContractTemplateApprovalTask[]
@@ -11,10 +13,29 @@ const props = defineProps<{
 
 const templatesStore = useContractTemplatesStore()
 
+const sorter = new Map([['created_at', 'Creation date']])
+const defaultSort = sorter.keys().next().value!
+const sortBy = ref(defaultSort)
+const sortOrder = ref(1)
+
 const sortedItems = computed(() =>
-  props.items.sort((taskA, taskB) =>
-    new Date(taskA.created_at).getTime() < new Date(taskB.created_at).getTime() ? 1 : -1,
-  ),
+  props.items.slice().sort((taskA, taskB) => {
+    const aSortValue = taskA[sortBy.value as keyof ContractTemplateApprovalTask]
+    const bSortValue = taskB[sortBy.value as keyof ContractTemplateApprovalTask]
+    const aValue = toComparableValue(aSortValue)
+    const bValue = toComparableValue(bSortValue)
+    if (!aValue && !bValue) return 0
+    if (!aValue) return sortOrder.value
+    if (!bValue) return sortOrder.value * -1
+
+    let result: number
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      result = Math.sign(bValue - aValue)
+    } else {
+      result = String(bValue).localeCompare(String(aValue))
+    }
+    return sortOrder.value * result
+  }),
 )
 
 const getTemplateName = (item: ContractTemplateApprovalTask) => {
@@ -28,10 +49,20 @@ const getTemplateState = (item: ContractTemplateApprovalTask) => {
 const canApprove = (item: ContractTemplateApprovalTask) => {
   return item.state === 'OPEN' && getTemplateState(item) === TemplateState.reviewed
 }
+
+const resolveViewRouteName = (item: ContractTemplateApprovalTask) => {
+  if (canApprove(item)) {
+    return ROUTES.TEMPLATES.APPROVE
+  }
+  return ROUTES.TEMPLATES.VIEW
+}
 </script>
 
 <template>
   <ul class="list">
+    <li class="tracking-wide px-4 flex justify-end flex-col sm:flex-row">
+      <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
+    </li>
     <li v-for="item in sortedItems" class="list-row">
       <div class="list-col-grow card bg-base-200 card-border hover:bg-base-300">
         <div class="card-body">
@@ -48,23 +79,13 @@ const canApprove = (item: ContractTemplateApprovalTask) => {
             <div class="card-actions justify-end">
               <RouterLink
                 :to="{
-                  name: ROUTES.TEMPLATES.VIEW,
+                  name: resolveViewRouteName(item),
                   params: { did: item.did },
                 }"
                 class="btn btn-sm btn-primary rounded-box"
               >
                 View
               </RouterLink>
-              <RouterLink
-                v-if="canApprove(item)"
-                :to="{ name: ROUTES.TEMPLATES.APPROVE, params: { did: item.did } }"
-                class="btn btn-sm btn-primary rounded-box gap-2"
-              >
-                Approve
-              </RouterLink>
-              <div v-else class="tooltip tooltip-left tooltip-accent" data-tip="All review tasks must be verified">
-                <button class="btn btn-sm btn-primary rounded-box gap-2 btn-disabled">Approve</button>
-              </div>
             </div>
           </div>
         </div>

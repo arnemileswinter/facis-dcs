@@ -23,6 +23,7 @@
           <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
           Forward to approval
         </button>
+        <TemplateManagerActions v-if="contractTemplate && isManager" :item="contractTemplate" class="btn btn-primary flex-1" />
       </div>
     </div>
 
@@ -30,9 +31,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import TemplateManagerActions from '@/components/lists/template-list/TemplateManagerActions.vue'
+import type { PartialContractTemplate } from '@/models/contract-template'
 import { ROUTES } from '@/router/router'
+import { useAuthStore } from '@/stores/auth-store'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
@@ -43,12 +47,19 @@ import { isApprovedTemplateBlock } from '@template-repository/models/contract-te
 const router = useRouter()
 const route = useRoute()
 
+const authStore = useAuthStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
 const approvedSubTemplateStore = useApprovedSubTemplateStore()
 const draftStore = useTemplateDraftStore()
 
 const hasDid = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
+
+const isManager = computed(() => {
+  return hasDid.value && (authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false)
+})
+
+const contractTemplate: Ref<PartialContractTemplate | null> = ref(null)
 
 watch(hasDid, (hasDidVal) => {
   approvedSubTemplateStore.resetTemplates()
@@ -64,6 +75,7 @@ watch(hasDid, (hasDidVal) => {
         return
       }
       templateEditorUiStore.setTemplateEditable(false)
+      contractTemplate.value = template
 
       draftStore.reset({
         did: template.did,

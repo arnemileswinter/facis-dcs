@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { PartialContractTemplate } from '@/models/contract-template'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
+import { toComparableValue } from '@/utils/comparison'
 import { storeToRefs } from 'pinia'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import ListSearch from './ListSearch.vue'
 import ListSort from '../ListSort.vue'
+import ListSearch from './ListSearch.vue'
 import TemplateListItem from './TemplateListItem.vue'
+import TemplateListStateFilter from './TemplateListStateFilter.vue'
 
 const props = defineProps<{
   items: PartialContractTemplate[]
@@ -15,24 +17,17 @@ const props = defineProps<{
 
 const sorter = new Map([
   ['created_at', 'Creation date'],
+  ['updated_at', 'Update date'],
   ['state', 'Template state'],
+  ['name', 'Name'],
 ])
+
 const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
 
 const stateFilterStore = useContractTemplateStateFilterStore()
 const { stateFilters } = storeToRefs(stateFilterStore)
-
-function valueToComparable(value: unknown) {
-  if (typeof value === 'number') return value
-  if (value instanceof Date) return value.getTime()
-  if (typeof value === 'string') {
-    const dateTime = new Date(value).getTime()
-    return Number.isNaN(dateTime) ? value : dateTime
-  }
-  return undefined
-}
 
 const searchedItems: Ref<PartialContractTemplate[]> = ref(props.items)
 
@@ -43,17 +38,17 @@ const sortedItems = computed(() => {
   return searchedItems.value.slice().sort((a, b) => {
     const aSortValue = a[sortBy.value as keyof PartialContractTemplate]
     const bSortValue = b[sortBy.value as keyof PartialContractTemplate]
-    const aValue = valueToComparable(aSortValue)
-    const bValue = valueToComparable(bSortValue)
+    const aValue = toComparableValue(aSortValue)
+    const bValue = toComparableValue(bSortValue)
     if (!aValue && !bValue) return 0
     if (!aValue) return sortOrder.value
     if (!bValue) return sortOrder.value * -1
 
     let result: number
     if (typeof aValue === 'number' && typeof bValue === 'number') {
-      result = aValue > bValue ? 1 : -1
+      result = Math.sign(bValue - aValue)
     } else {
-      result = String(aValue) > String(bValue) ? 1 : -1
+      result = String(aValue) > String(bValue) ? 1 : String(aValue) < String(bValue) ? -1 : 0
     }
     return sortOrder.value * result
   })
@@ -76,7 +71,8 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <ul class="list">
     <li class="tracking-wide px-4 flex justify-between flex-col sm:flex-row">
-      <ListSearch :items="items" class="grow" @search-result="applySearchResult" />
+      <TemplateListStateFilter />
+      <ListSearch :items="items" class="flex-1" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
     <TemplateListItem

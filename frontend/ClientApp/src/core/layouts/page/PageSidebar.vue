@@ -21,8 +21,6 @@
     </ul>
   </nav>
 
-  <TemplateListStateFilter v-if="$route.matched.some(route => route.name === ROUTES.TEMPLATES.LIST) && !isSidebarCollapsed" class="px-3" />
-
   <div class="flex-1"></div>
 
   <div class="p-4 border-t border-base-content/10 bg-base-300/20">
@@ -43,7 +41,6 @@
 </template>
 
 <script setup lang="ts">
-import TemplateListStateFilter from '@/components/lists/template-list/TemplateListStateFilter.vue'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
 import { usePageStore } from '@core/store/page'

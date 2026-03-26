@@ -6,30 +6,41 @@
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
         <button class="btn btn-ghost md:w-32" @click="router.back()">Back</button>
+        <TemplateManagerActions v-if="contractTemplate && isManager" :item="contractTemplate" class="btn btn-primary flex-1" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateManagerActions from '@/components/lists/template-list/TemplateManagerActions.vue'
+import type { PartialContractTemplate } from '@/models/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
-import { useApprovedSubTemplateStore } from '@template-repository/store/approvedSubTemplateStore'
+import { useAuthStore } from '@/stores/auth-store'
+import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { isApprovedTemplateBlock } from '@template-repository/models/contract-templace'
+import { useApprovedSubTemplateStore } from '@template-repository/store/approvedSubTemplateStore'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { computed, ref, watch, type Ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
 
+const authStore = useAuthStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
 const approvedSubTemplateStore = useApprovedSubTemplateStore()
 const draftStore = useTemplateDraftStore()
 
 const hasDid = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
+
+const isManager = computed(() => {
+  return hasDid.value && (authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false)
+})
+
+const contractTemplate: Ref<PartialContractTemplate | null> = ref(null)
 
 watch(hasDid, (hasDid) => {
   approvedSubTemplateStore.resetTemplates()
@@ -45,6 +56,7 @@ watch(hasDid, (hasDid) => {
         return
       }
       templateEditorUiStore.setTemplateEditable(false)
+      contractTemplate.value = template
 
       draftStore.reset({
         did: template.did,
