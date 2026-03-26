@@ -266,7 +266,7 @@ type AuditEvt struct {
 
 // EventType implements the Event interface.
 func (e AuditEvt) EventType() string {
-	return eventtype.Register.String()
+	return eventtype.Audit.String()
 }
 
 // GetDID implements the Event interface.
