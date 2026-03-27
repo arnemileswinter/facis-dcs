@@ -16,8 +16,7 @@ import (
 )
 
 type GetAllMetadataByFilterQry struct {
-	RetrievedBy string
-
+	RetrievedBy     string
 	DID             *string
 	ContractVersion *int
 	Version         *int

@@ -110,8 +110,9 @@ func main() {
 	cweRepo := cwerepo.PostgresContractRepo{Ctx: ctx}
 	cweRTRepo := cwerepo.PostgresReviewTaskRepo{Ctx: ctx}
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
+	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
 
-	cweSvc, err := service.NewContractWorkflowEngine(db, jwtAuth, &eventBus, &cweRepo, &cweRTRepo, &cweATRepo)
+	cweSvc, err := service.NewContractWorkflowEngine(db, jwtAuth, &eventBus, &cweRepo, &cweRTRepo, &cweATRepo, &cweNRepo)
 	if err != nil {
 		log.Fatalf(ctx, err, "failed to create contract workflow engine")
 	}

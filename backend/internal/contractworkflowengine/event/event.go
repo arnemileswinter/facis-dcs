@@ -108,7 +108,6 @@ func (e RetrieveAllEvent) GetDID() string {
 type VerifyEvent struct {
 	DID             string    `json:"did"`
 	ContractVersion *int      `json:"contract_version,omitempty"`
-	Version         *int      `json:"version,omitempty"`
 	VerifiedBy      string    `json:"verified_by"`
 	OccurredAt      time.Time `json:"occurred_at"`
 }
@@ -120,5 +119,62 @@ func (e VerifyEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e VerifyEvent) GetDID() string {
+	return e.DID
+}
+
+// NegotiationEvent is emitted when a template is verified.
+type NegotiationEvent struct {
+	DID             string         `json:"did"`
+	ContractVersion *int           `json:"contract_version,omitempty"`
+	ChangeRequest   *datatype.JSON `json:"change_request,omitempty"`
+	NegotiatedBy    string         `json:"negotiated_by"`
+	OccurredAt      time.Time      `json:"occurred_at"`
+	Reviewers       []string       `json:"reviewers"`
+}
+
+// EventType implements the Event interface.
+func (e NegotiationEvent) EventType() string {
+	return eventtype.Negotiation.String()
+}
+
+// GetDID implements the Event interface.
+func (e NegotiationEvent) GetDID() string {
+	return e.DID
+}
+
+// AcceptNegotiationEvent is emitted when a template is verified.
+type AcceptNegotiationEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion *int      `json:"contract_version,omitempty"`
+	AcceptedBy      string    `json:"accepted_by"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e AcceptNegotiationEvent) EventType() string {
+	return eventtype.Response.String()
+}
+
+// GetDID implements the Event interface.
+func (e AcceptNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
+// RejectNegotiationEvent is emitted when a template is verified.
+type RejectNegotiationEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion *int      `json:"contract_version,omitempty"`
+	RejectedBy      string    `json:"rejected_by"`
+	RejectionReason *string   `json:"rejection_reason,omitempty"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e RejectNegotiationEvent) EventType() string {
+	return eventtype.Response.String()
+}
+
+// GetDID implements the Event interface.
+func (e RejectNegotiationEvent) GetDID() string {
 	return e.DID
 }

@@ -25,6 +25,7 @@ type contractWorkflowEnginesrvc struct {
 	CRepo    db.ContractRepo
 	RTRepo   db.ReviewTaskRepo
 	ATRepo   db.ApprovalTaskRepo
+	NRepo    db.NegotiationRepo
 	auth.JWTAuthenticator
 }
 
@@ -32,7 +33,9 @@ func messageHandler(data []byte) {
 
 }
 
-func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, eb eventbus.EventBus, cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo) (contractworkflowengine.Service, error) {
+func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, eb eventbus.EventBus,
+	cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo,
+	nRepo db.NegotiationRepo) (contractworkflowengine.Service, error) {
 
 	err := eb.SubscribeAsync(eventbuschannel.ContractWorkflowEngine.String(), messageHandler)
 	if err != nil {
@@ -46,6 +49,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, eb ev
 		CRepo:            cRepo,
 		RTRepo:           rtRepo,
 		ATRepo:           atRepo,
+		NRepo:            nRepo,
 	}, nil
 }
 

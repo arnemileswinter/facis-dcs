@@ -18,7 +18,7 @@ type ApprovalTaskData struct {
 type ApprovalTaskRepo interface {
 	Create(tx *sqlx.Tx, data ApprovalTaskData) (*time.Time, error)
 	ReopenTasks(tx *sqlx.Tx, did string) error
-	ReadAll(dtx *sqlx.Tx, id string) ([]ApprovalTaskData, error)
+	ReadAll(dtx *sqlx.Tx, did string) ([]ApprovalTaskData, error)
 	ReadAllByApprover(tx *sqlx.Tx, approver string) ([]ApprovalTaskData, error)
 	UpdateState(tx *sqlx.Tx, did string, approver string, state string) error
 	IsValidApprover(tx *sqlx.Tx, did string, approver string) (bool, error)

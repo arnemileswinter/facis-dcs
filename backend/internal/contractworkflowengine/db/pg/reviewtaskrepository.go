@@ -67,14 +67,14 @@ func (r *PostgresReviewTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.ReviewTa
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) ReadAllByID(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
+func (r *PostgresReviewTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
 	query := `
         SELECT id, did, state, reviewer,
                created_by, created_at
         FROM contract_review_task WHERE did = $1
     `
 	var reviewTasks []db.ReviewTaskData
-	err := tx.SelectContext(r.Ctx, &reviewTasks, query)
+	err := tx.SelectContext(r.Ctx, &reviewTasks, query, did)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +93,19 @@ func (r *PostgresReviewTaskRepo) ReadAllByReviewer(tx *sqlx.Tx, reviewer string)
 		return nil, err
 	}
 	return reviewTasks, nil
+}
+
+func (r *PostgresReviewTaskRepo) ReadReviewersForDID(tx *sqlx.Tx, did string) ([]string, error) {
+	query := `
+        SELECT reviewer
+        FROM contract_review_task WHERE did = $1
+    `
+	var reviewers []string
+	err := tx.SelectContext(r.Ctx, &reviewers, query, did)
+	if err != nil {
+		return nil, err
+	}
+	return reviewers, nil
 }
 
 func (r *PostgresReviewTaskRepo) UpdateState(tx *sqlx.Tx, did string, reviewer string, state string) error {

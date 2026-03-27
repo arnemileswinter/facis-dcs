@@ -32,6 +32,7 @@ type Submitter struct {
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
+	NRepo  db.NegotiationRepo
 }
 
 func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, cmd SubmitCmd) error {
@@ -75,7 +76,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("could not process core data: %w", err)
+		return fmt.Errorf("could not read process data: %w", err)
 	}
 
 	if cmd.UpdatedAt.Before(processData.UpdatedAt) {
@@ -106,11 +107,34 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		if cmd.SubmittedBy != processData.CreatedBy {
+		isValidNegotiator, err := h.NRepo.IsValidNegotiator(tx, processData.DID, processData.ContractVersion, cmd.SubmittedBy)
+		if err != nil {
+			return fmt.Errorf("could not validate negotiator: %w", err)
+		}
+
+		if cmd.SubmittedBy != processData.CreatedBy && !isValidNegotiator {
 			return errors.New("invalid user")
 		}
 
-		nextState = contractstate.Submitted
+		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiations(tx, cmd.DID, processData.ContractVersion)
+		if err != nil {
+			return fmt.Errorf("could not check open negotiations: %w", err)
+		}
+
+		if hasOpenNegotiations {
+			return errors.New("not all negations are processed")
+		}
+
+		allNegotiationsAccepted, err := h.NRepo.AllNegotiationsAccepted(tx, cmd.DID, processData.ContractVersion)
+		if err != nil {
+			return fmt.Errorf("could not check all negotiations: %w", err)
+		}
+
+		if allNegotiationsAccepted {
+			nextState = contractstate.Submitted
+		} else {
+			// Update contract data regarding the accepted
+		}
 
 	} else if processData.State == contractstate.Submitted.String() {
 

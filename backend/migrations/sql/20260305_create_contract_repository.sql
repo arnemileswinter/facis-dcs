@@ -81,3 +81,27 @@ CREATE TABLE IF NOT EXISTS contract_approval_task
         FOREIGN KEY (did)
             REFERENCES contracts (did)
 );
+
+------------------------------------------------------------------------------------------------------------------------
+
+CREATE TYPE contract_negotiation_decision AS ENUM ('ACCEPTED', 'REJECTED', 'CLOSED');
+
+CREATE TABLE IF NOT EXISTS contract_negotiations
+(
+    id              BIGSERIAL PRIMARY KEY,
+
+    did                 VARCHAR(255) NOT NULL CHECK (did <> ''),
+    contract_version    INT,
+    change_request      JSONB DEFAULT '{}'::jsonb,
+
+    assigned_to         VARCHAR(255) NOT NULL,
+    decision            contract_negotiation_decision,
+    rejection_reason    TEXT,
+
+    created_by VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_approval_task_contract
+        FOREIGN KEY (did)
+            REFERENCES contracts (did)
+);

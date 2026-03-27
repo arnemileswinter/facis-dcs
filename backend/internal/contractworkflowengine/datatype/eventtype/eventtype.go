@@ -10,6 +10,8 @@ type EventType string
 const (
 	Create       EventType = "CREATE_CONTRACT"
 	Submit       EventType = "SUBMIT_CONTRACT"
+	Negotiation  EventType = "NEGOTIATE_CONTRACT"
+	Response     EventType = "RESPONSE_CONTRACT"
 	Approve      EventType = "APPROVE_CONTRACT"
 	Reject       EventType = "REJECT_CONTRACT"
 	Verify       EventType = "VERIFY_CONTRACT"
@@ -18,12 +20,13 @@ const (
 	RetrieveByID EventType = "RETRIEVE_CONTRACT_BY_ID"
 	Search       EventType = "SEARCH_CONTRACT"
 	Archive      EventType = "ARCHIVE_CONTRACT"
-	Register     EventType = "REGISTER_CONTRACT"
 )
 
 var validStates = map[EventType]bool{
 	Create:       true,
 	Submit:       true,
+	Negotiation:  true,
+	Response:     true,
 	Approve:      true,
 	Reject:       true,
 	Verify:       true,
@@ -32,7 +35,6 @@ var validStates = map[EventType]bool{
 	RetrieveByID: true,
 	Search:       true,
 	Archive:      true,
-	Register:     true,
 }
 
 func NewEventType(s string) (EventType, error) {
