@@ -1,24 +1,31 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string[]">
+import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
+import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
-import {
-  contractTemplateStates,
-  type ContractTemplateState as ContractTemplateStateFilter,
-} from '@/types/contract-template-state'
-import { storeToRefs } from 'pinia'
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 
-const filters: Ref<ContractTemplateStateFilter[]> = ref(contractTemplateStates)
-const stateFilterStore = useContractTemplateStateFilterStore()
-const { stateFilters } = storeToRefs(stateFilterStore)
+const props = defineProps<{
+  filters: T
+  label: string
+  storeType: 'templates' | 'reviewTasks' | 'approvalTasks'
+}>()
+
+const storeMap = {
+  templates: useContractTemplateStateFilterStore,
+  reviewTasks: useContractTemplateReviewTaskStateFilterStore,
+  approvalTasks: useContractTemplateApprovalTaskStateFilterStore,
+} as const
+
+const filterStore = storeMap[props.storeType]()
 
 const showAll = ref(true)
 
 const activeFilters = computed(() => {
-  return filters.value.filter((filter) => stateFilters.value.has(filter))
+  return props.filters.filter((filter) => filterStore.hasFilter(filter as any))
 })
 
 const inactiveFilters = computed(() => {
-  return showAll.value ? filters.value.filter((filter) => !stateFilters.value.has(filter)) : []
+  return showAll.value ? props.filters.filter((filter) => !filterStore.hasFilter(filter as any)) : []
 })
 
 const shownFilters = computed(() => {
@@ -29,18 +36,18 @@ const hasFilters = computed(() => {
   return activeFilters.value.length > 0
 })
 
-const setFilter = (stateFilter: ContractTemplateStateFilter) => {
-  if (stateFilters.value.has(stateFilter)) {
-    stateFilterStore.removeFilter(stateFilter)
+const setFilter = (stateFilter: T[number]) => {
+  if (filterStore.hasFilter(stateFilter as any)) {
+    filterStore.removeFilter(stateFilter as any)
     showAll.value = !hasFilters.value
   } else {
-    stateFilterStore.setFilter(stateFilter)
+    filterStore.setFilter(stateFilter as any)
     showAll.value = false
   }
 }
 
-const isSelected = (type: ContractTemplateStateFilter) => {
-  return stateFilters.value.has(type)
+const isSelected = (type: T[number]) => {
+  return filterStore.hasFilter(type as any)
 }
 </script>
 
@@ -50,7 +57,7 @@ const isSelected = (type: ContractTemplateStateFilter) => {
   </button>
   <ul id="filter-popover" popover class="dropdown menu rounded-box rounded-md bg-base-300 shadow-sm">
     <li>
-      <label class="label">Contract Template</label>
+      <label class="label">{{ label }}</label>
       <ul>
         <li
           v-for="filter in shownFilters"

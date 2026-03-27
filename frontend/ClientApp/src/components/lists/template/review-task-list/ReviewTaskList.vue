@@ -3,12 +3,15 @@ import type { PartialContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
+import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
+import { ContractTemplateReviewTaskState, reviewTaskStates } from '@/types/review-task-state'
 import { toComparableValue } from '@/utils/comparison'
-import { computed, ref, type Ref } from 'vue'
+import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
 import TemplateListSearch from '../TemplateListSearch.vue'
+import TemplateListStateFilter from '../TemplateListStateFilter.vue'
 
 const props = defineProps<{
   items: ContractTemplateReviewTask[]
@@ -16,6 +19,7 @@ const props = defineProps<{
 
 const templatesStore = useContractTemplatesStore()
 const authStore = useAuthStore()
+const stateFilterStore = useContractTemplateReviewTaskStateFilterStore()
 
 const sorter = new Map([
   ['created_at', 'Creation date'],
@@ -50,6 +54,13 @@ const sortedItems = computed(() => {
   })
 })
 
+const filteredItems = computed(() => {
+  if (stateFilterStore.hasFilters) {
+    return sortedItems.value.filter((item) => stateFilterStore.hasFilter(item.state))
+  }
+  return sortedItems.value
+})
+
 const templates = computed(() => {
   return templatesStore.contractTemplates.filter((template) =>
     props.items.map((task) => task.did).includes(template.did),
@@ -71,7 +82,7 @@ const canEdit = (item: ContractTemplateReviewTask) => {
 }
 
 const resolveViewRouteName = (item: ContractTemplateReviewTask) => {
-  if (item.state === 'OPEN') {
+  if (item.state === ContractTemplateReviewTaskState.open) {
     return ROUTES.TEMPLATES.REVIEW
   }
   return ROUTES.TEMPLATES.VIEW
@@ -80,15 +91,18 @@ const resolveViewRouteName = (item: ContractTemplateReviewTask) => {
 const applySearchResult = (searchResult: PartialContractTemplate[]) => {
   searchedItems.value = props.items.filter((task) => searchResult.map((template) => template.did).includes(task.did))
 }
+
+onUnmounted(() => stateFilterStore.reset())
 </script>
 
 <template>
   <ul class="list">
     <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
+      <TemplateListStateFilter label="Review Task" :filters="reviewTaskStates" store-type="reviewTasks" />
       <TemplateListSearch class="flex-1" :items="templates" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
-    <li v-for="item in sortedItems" class="list-row">
+    <li v-for="item in filteredItems" class="list-row">
       <div class="list-col-grow card bg-base-200 card-border hover:bg-base-300">
         <div class="card-body">
           <h2 class="card-title flex-wrap justify-between">

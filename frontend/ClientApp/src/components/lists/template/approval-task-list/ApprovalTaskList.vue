@@ -2,18 +2,22 @@
 import type { PartialContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
 import { ROUTES } from '@/router/router'
+import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import { approvalTaskStates, ContractTemplateApprovalTaskState } from '@/types/approval-task-state'
 import { TemplateState } from '@/types/contract-template-state'
 import { toComparableValue } from '@/utils/comparison'
-import { computed, ref, type Ref } from 'vue'
+import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
 import TemplateListSearch from '../TemplateListSearch.vue'
+import TemplateListStateFilter from '../TemplateListStateFilter.vue'
 
 const props = defineProps<{
   items: ContractTemplateApprovalTask[]
 }>()
 
 const templatesStore = useContractTemplatesStore()
+const stateFilterStore = useContractTemplateApprovalTaskStateFilterStore()
 
 const sorter = new Map([
   ['created_at', 'Creation date'],
@@ -48,6 +52,13 @@ const sortedItems = computed(() => {
   })
 })
 
+const filteredItems = computed(() => {
+  if (stateFilterStore.hasFilters) {
+    return sortedItems.value.filter((item) => stateFilterStore.hasFilter(item.state))
+  }
+  return sortedItems.value
+})
+
 const templates = computed(() => {
   return templatesStore.contractTemplates.filter((template) =>
     props.items.map((task) => task.did).includes(template.did),
@@ -63,7 +74,7 @@ const getTemplateState = (item: ContractTemplateApprovalTask) => {
 }
 
 const canApprove = (item: ContractTemplateApprovalTask) => {
-  return item.state === 'OPEN' && getTemplateState(item) === TemplateState.reviewed
+  return item.state === ContractTemplateApprovalTaskState.open && getTemplateState(item) === TemplateState.reviewed
 }
 
 const resolveViewRouteName = (item: ContractTemplateApprovalTask) => {
@@ -76,15 +87,18 @@ const resolveViewRouteName = (item: ContractTemplateApprovalTask) => {
 const applySearchResult = (searchResult: PartialContractTemplate[]) => {
   searchedItems.value = props.items.filter((task) => searchResult.map((template) => template.did).includes(task.did))
 }
+
+onUnmounted(() => stateFilterStore.reset())
 </script>
 
 <template>
   <ul class="list">
     <li class="tracking-wide px-4 flex justify-end flex-col sm:flex-row">
+      <TemplateListStateFilter label="Approval Task" :filters="approvalTaskStates" store-type="approvalTasks" />
       <TemplateListSearch class="flex-1" :items="templates" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
-    <li v-for="item in sortedItems" class="list-row">
+    <li v-for="item in filteredItems" class="list-row">
       <div class="list-col-grow card bg-base-200 card-border hover:bg-base-300">
         <div class="card-body">
           <h2 class="card-title flex-wrap justify-between">
