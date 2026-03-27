@@ -4,6 +4,7 @@ import ReviewContractTemplateView from '@/modules/template-repository/views/Revi
 import ViewContractTemplateView from '@/modules/template-repository/views/ViewContractTemplateView.vue'
 import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
+import { useDataRouteStore } from '@/stores/data-route-store'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
@@ -115,6 +116,13 @@ const routes: RouteRecordRaw[] = [
       title: 'DCS - Review Tasks',
       order: 2,
       roles: ['TEMPLATE_REVIEWER'],
+      requiresData: true,
+    },
+    beforeEnter: (to) => {
+      const dataRouteStore = useDataRouteStore()
+      if (!dataRouteStore.isRouteDataLoaded(to.name)) {
+        return { name: ROUTES.TEMPLATES.LIST }
+      }
     },
   },
   {
@@ -128,6 +136,13 @@ const routes: RouteRecordRaw[] = [
       title: 'DCS - Approval Tasks',
       order: 3,
       roles: ['TEMPLATE_APPROVER'],
+      requiresData: true,
+    },
+    beforeEnter: (to) => {
+      const dataRouteStore = useDataRouteStore()
+      if (!dataRouteStore.isRouteDataLoaded(to.name)) {
+        return { name: ROUTES.TEMPLATES.LIST }
+      }
     },
   },
   {

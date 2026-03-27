@@ -1,22 +1,12 @@
 <script setup lang="ts">
-import ApprovalTaskList from '@/components/lists/template/approval-task-list/ApprovalTaskList.vue';
-import ReviewTaskList from '@/components/lists/template/review-task-list/ReviewTaskList.vue';
-import { ROUTES } from '@/router/router';
-import { useContractTemplatesStore } from '@/stores/contract-templates-store';
-import { storeToRefs } from 'pinia';
-import { onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-
-const router = useRouter()
+import ApprovalTaskList from '@/components/lists/template/approval-task-list/ApprovalTaskList.vue'
+import ReviewTaskList from '@/components/lists/template/review-task-list/ReviewTaskList.vue'
+import { ROUTES } from '@/router/router'
+import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import { storeToRefs } from 'pinia'
 
 const templatesStore = useContractTemplatesStore()
 const { reviewTasks, approvalTasks } = storeToRefs(templatesStore)
-
-onMounted(() => {
-  if (!templatesStore.hasTemplates) {
-    router.push({ name: ROUTES.TEMPLATES.LIST })
-  }
-})
 </script>
 
 <template>
