@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import type { PartialContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { TemplateState } from '@/types/contract-template-state'
 import { toComparableValue } from '@/utils/comparison'
-import { computed, ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import ListSort from '../ListSort.vue'
+import ListSearch from '../template-list/ListSearch.vue'
 
 const props = defineProps<{
   items: ContractTemplateReviewTask[]
@@ -15,13 +17,21 @@ const props = defineProps<{
 const templatesStore = useContractTemplatesStore()
 const authStore = useAuthStore()
 
-const sorter = new Map([['created_at', 'Creation date']])
+const sorter = new Map([
+  ['created_at', 'Creation date'],
+  ['state', 'Task state'],
+])
 const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
 
-const sortedItems = computed(() =>
-  props.items.slice().sort((taskA, taskB) => {
+const searchedItems: Ref<ContractTemplateReviewTask[]> = ref(props.items)
+
+const sortedItems = computed(() => {
+  if (!sorter.has(sortBy.value)) {
+    return searchedItems.value
+  }
+  return searchedItems.value.slice().sort((taskA, taskB) => {
     const aSortValue = taskA[sortBy.value as keyof ContractTemplateReviewTask]
     const bSortValue = taskB[sortBy.value as keyof ContractTemplateReviewTask]
     const aValue = toComparableValue(aSortValue)
@@ -34,11 +44,17 @@ const sortedItems = computed(() =>
     if (typeof aValue === 'number' && typeof bValue === 'number') {
       result = Math.sign(bValue - aValue)
     } else {
-      result = String(bValue).localeCompare(String(aValue))
+      result = String(aValue).localeCompare(String(bValue))
     }
     return sortOrder.value * result
-  }),
-)
+  })
+})
+
+const templates = computed(() => {
+  return templatesStore.contractTemplates.filter((template) =>
+    props.items.map((task) => task.did).includes(template.did),
+  )
+})
 
 const getTemplateName = (item: ContractTemplateReviewTask) => {
   return templatesStore.contractTemplates.find((template) => template.did === item.did)?.name ?? 'Nameless Template'
@@ -60,11 +76,16 @@ const resolveViewRouteName = (item: ContractTemplateReviewTask) => {
   }
   return ROUTES.TEMPLATES.VIEW
 }
+
+const applySearchResult = (searchResult: PartialContractTemplate[]) => {
+  searchedItems.value = props.items.filter((task) => searchResult.map((template) => template.did).includes(task.did))
+}
 </script>
 
 <template>
   <ul class="list">
     <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
+      <ListSearch class="flex-1" :items="templates" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
     <li v-for="item in sortedItems" class="list-row">
