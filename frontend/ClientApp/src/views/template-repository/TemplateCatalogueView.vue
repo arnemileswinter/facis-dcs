@@ -18,54 +18,105 @@
                 {{ catalogue?.name || 'Template details' }}
               </h3>
             </div>
-            <div v-if="catalogue?.templateType" class="badge badge-md badge-accent shrink-0">
-              {{ String(catalogue.templateType) }}
+            <div v-if="catalogue?.template_type" class="badge badge-md badge-accent shrink-0">
+              {{ String(catalogue.template_type) }}
             </div>
           </div>
 
-          <template v-if="catalogue?.sdMeta" class="mt-4">
-            <div class="mt-4">
-              <div class="flex flex-col gap-3">
-                <div class="form-control">
-                  <label class="label">
-                    <span class="label-text text-xs font-semibold tracking-wide">{{ toReadableName('sdHash') }}</span>
-                  </label>
-                  <input class="input input-bordered input-sm w-full font-mono text-xs" :value="catalogue.sdMeta.sdHash"
-                    readonly />
+          <div v-if="catalogue" class="space-y-5 mt-4">
+            <section class="rounded-xl border border-base-300 bg-base-100">
+              <div class="px-4 py-3 border-b border-base-300">
+                <div class="font-semibold text-sm">Template</div>
+              </div>
+              <div class="p-4 space-y-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">DID</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.did) }}</div>
                 </div>
-                <div class="form-control">
-                  <label class="label">
-                    <span class="label-text text-xs font-semibold tracking-wide">{{ toReadableName('issuer') }}</span>
-                  </label>
-                  <input class="input input-bordered input-sm w-full font-mono text-xs" :value="catalogue.sdMeta.issuer"
-                    readonly />
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Document Number</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.document_number) }}
+                  </div>
                 </div>
-                <div class="form-control">
-                  <label class="label">
-                    <span class="label-text text-xs font-semibold tracking-wide">{{
-                      toReadableName('uploadDatetime') }}
-                    </span>
-                  </label>
-                  <input class="input input-bordered input-sm w-full font-mono text-xs"
-                    :value="toReadableValue('uploadDatetime', catalogue.sdMeta.uploadDatetime)" readonly />
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Version</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.version) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Name</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.name) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Description</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.description) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Template Type</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.template_type) }}
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Created At</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayDate(catalogue.created_at) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Updated At</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayDate(catalogue.updated_at) }}</div>
                 </div>
               </div>
-            </div>
-            <div class="divider my-4"></div>
-          </template>
+            </section>
 
-          <div v-if="catalogue" class="flex flex-col gap-3">
-            <template v-for="(value, key) in displayFields" :key="key">
-              <div v-if="value" class="form-control">
-                <label class="label">
-                  <span class="label-text text-xs font-semibold tracking-wide">
-                    {{ toReadableName(key) }}
-                  </span>
-                </label>
-                <input class="input input-bordered input-sm w-full font-mono text-xs"
-                  :value="toReadableValue(key, value)" readonly />
+            <section v-if="catalogue.participant" class="rounded-xl border border-base-300 bg-base-100">
+              <div class="px-4 py-3 border-b border-base-300">
+                <div class="font-semibold text-sm">Participant</div>
               </div>
-            </template>
+              <div class="p-4 space-y-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Legal Name</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                    displayValue(catalogue.participant.legal_name) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Registration Number</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                    displayValue(catalogue.participant.registration_number) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">LEI Code</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{ displayValue(catalogue.participant.lei_code)
+                  }}</div>
+                </div>
+                <div v-if="catalogue.participant.ethereum_address"
+                  class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Ethereum Address</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                    displayValue(catalogue.participant.ethereum_address) }}</div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                  <div class="text-xs font-semibold text-base-content/60">Terms and Conditions</div>
+                  <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                    displayValue(catalogue.participant.terms_and_conditions) }}</div>
+                </div>
+
+                <div v-if="catalogue.participant.headquarter_address" class="pt-2">
+                  <div class="text-xs font-semibold text-base-content/60 mb-2">Headquarter Address</div>
+                  <div class="rounded-lg p-3 space-y-2">
+                    <div v-if="catalogue.participant.headquarter_address?.country"
+                      class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                      <div class="text-xs font-semibold text-base-content/60">Country</div>
+                      <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                        displayValue(catalogue.participant.headquarter_address?.country) }}</div>
+                    </div>
+                    <div v-if="catalogue.participant.headquarter_address?.locality"
+                      class="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                      <div class="text-xs font-semibold text-base-content/60">Locality</div>
+                      <div class="sm:col-span-2 text-sm font-mono break-all">{{
+                        displayValue(catalogue.participant.headquarter_address?.locality) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
           <p v-else class="text-sm text-base-content/70">No data loaded.</p>
         </div>
@@ -95,55 +146,42 @@
 
 </template>
 <script setup lang="ts">
-import { useSelfDescriptionConverter } from '@/modules/template-catalogue/composables/useSelfDescriptionConverter';
-import type { TemplateCatalogue } from '@/modules/template-catalogue/models/template-catalogue';
-import { computed, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { templateCatalogueIntegrationService } from '@/services/template-catalogue-integration-service'
+import type { TemplateResource } from '@/modules/template-catalogue/models/template-resource'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-const { loading, error, loadTemplateCatalogue } = useSelfDescriptionConverter()
-const catalogue = ref<TemplateCatalogue | null>(null)
 
-const did = computed(() => `${route.params.did ?? ""}`)
+const loading = ref(false)
+const error = ref<string | null>(null)
+const catalogue = ref<TemplateResource | null>(null)
 
-const displayFields = computed(() => {
-  if (!catalogue.value) return {}
-  const { sdMeta, ...rest } = catalogue.value
-  return rest as Record<string, unknown>
-})
+const did = computed(() => `${route.params.did ?? ''}`)
 
 async function load() {
-  catalogue.value = await loadTemplateCatalogue(did.value)
+  loading.value = true
+  error.value = null
+  try {
+    catalogue.value = await templateCatalogueIntegrationService.retrieve_template_by_id({ did: did.value })
+  } catch (e: any) {
+    error.value = e?.message || 'Error loading template catalogue'
+  } finally {
+    loading.value = false
+  }
 }
+
 load()
 
-function toReadableName(key: string): string {
-  if (!key) return "";
-  if (key.toLowerCase() === "did") return "DID"
-  if (key.toLowerCase() === "sdhash") return "SD Hash"
-  if (key.toLowerCase() === "uploaddatetime") return "Upload datetime"
-  if (key.toLowerCase() === "statusdatetime") return "Status datetime"
-  const words = key
-    // split camelCase boundaries
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    // split cases like ABCWord → ABC Word
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
-    .split(" ");
-
-  return words.map(word =>
-    word.length ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : ""
-  ).join(" ");
+function displayValue(value: unknown): string {
+  return value === null || value === undefined || value === '' ? '' : String(value)
 }
 
-function toReadableValue(key: string, value: unknown): string {
-  if (!value) return ""
-  const lower = key.toLowerCase()
-  if (["createdat", "updatedat", "uploaddatetime", "statusdatetime"].includes(lower)) {
-    const d = new Date(String(value))
-    return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString()
-  }
-  return String(value)
+function displayDate(value: unknown): string {
+  if (value === null || value === undefined || value === '') return ''
+  const d = new Date(String(value))
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString()
 }
 
 </script>
