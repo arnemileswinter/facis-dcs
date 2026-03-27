@@ -48,7 +48,7 @@ const sortedItems = computed(() => {
     if (typeof aValue === 'number' && typeof bValue === 'number') {
       result = Math.sign(bValue - aValue)
     } else {
-      result = String(aValue) > String(bValue) ? 1 : String(aValue) < String(bValue) ? -1 : 0
+      result = String(aValue).localeCompare(String(bValue))
     }
     return sortOrder.value * result
   })
