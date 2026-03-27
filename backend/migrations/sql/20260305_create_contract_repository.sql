@@ -46,7 +46,7 @@ CREATE TYPE contract_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 
 
 CREATE TABLE IF NOT EXISTS contract_review_task
 (
-    id              BIGSERIAL PRIMARY KEY,
+    id              uuid PRIMARY KEY,
 
     did             VARCHAR(255) NOT NULL CHECK (did <> ''),
 
@@ -67,7 +67,7 @@ CREATE TYPE contract_approval_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED'
 
 CREATE TABLE IF NOT EXISTS contract_approval_task
 (
-    id              BIGSERIAL PRIMARY KEY,
+    id              uuid PRIMARY KEY,
 
     did             VARCHAR(255) NOT NULL CHECK (did <> ''),
 
@@ -88,20 +88,32 @@ CREATE TYPE contract_negotiation_decision AS ENUM ('ACCEPTED', 'REJECTED', 'CLOS
 
 CREATE TABLE IF NOT EXISTS contract_negotiations
 (
-    id              BIGSERIAL PRIMARY KEY,
+    id                  uuid PRIMARY KEY,
 
     did                 VARCHAR(255) NOT NULL CHECK (did <> ''),
     contract_version    INT,
     change_request      JSONB DEFAULT '{}'::jsonb,
 
-    assigned_to         VARCHAR(255) NOT NULL,
-    decision            contract_negotiation_decision,
-    rejection_reason    TEXT,
-
     created_by VARCHAR(255) NOT NULL,
     created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_approval_task_contract
+    CONSTRAINT fk_contracts
         FOREIGN KEY (did)
             REFERENCES contracts (did)
+);
+
+CREATE TABLE IF NOT EXISTS contract_negotiation_decisions
+(
+    id                  uuid PRIMARY KEY,
+
+    negotiation_id      uuid,
+
+    counterpart         VARCHAR(255) NOT NULL,
+    decision            contract_negotiation_decision,
+    rejection_reason    TEXT,
+
+    CONSTRAINT fk_contract_negotiations
+        FOREIGN KEY (negotiation_id)
+            REFERENCES contract_negotiations (id)
+            ON DELETE CASCADE
 );
