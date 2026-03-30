@@ -161,24 +161,24 @@ func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(tx *sqlx.Tx, did st
 	return exists, nil
 }
 
-func (r PostgresNegotiationRepo) AllNegotiationsAccepted(tx *sqlx.Tx, did string, contractVersion *int) (bool, error) {
-	query := `
-        SELECT NOT EXISTS (
-            SELECT 1
-            FROM contract_negotiations cn
-            JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
-            WHERE cn.did = $1
-              AND (contract_version = $2 OR ($2 IS NULL AND contract_version IS NULL))
-              AND cnd.decision != 'ACCEPTED'
-        )
-    `
-	var exists bool
-	err := tx.GetContext(r.Ctx, &exists, query, did, contractVersion)
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
-}
+//func (r PostgresNegotiationRepo) AllNegotiationsForContractVersionAccepted(tx *sqlx.Tx, did string, contractVersion *int) (bool, error) {
+//	query := `
+//        SELECT NOT EXISTS (
+//            SELECT 1
+//            FROM contract_negotiations cn
+//            JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
+//            WHERE cn.did = $1
+//              AND (contract_version = $2 OR ($2 IS NULL AND contract_version IS NULL))
+//              AND cnd.decision != 'ACCEPTED'
+//        )
+//    `
+//var exists bool
+//err := tx.GetContext(r.Ctx, &exists, query, did, contractVersion)
+//if err != nil {
+//return false, err
+//}
+//return exists, nil
+//}
 
 func (r PostgresNegotiationRepo) Delete(tx *sqlx.Tx, did string) error {
 	statement := `

@@ -58,9 +58,10 @@ var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
 	Attribute("forward_to", String, "Action flag: approval | reject")
+	Attribute("comments", ArrayOf(String), "Optional comments")
 
-	Attribute("reviewers", ArrayOf(String), "A list of reviewers for that contract template")
-	Attribute("approver", String, "The approver for that contract template")
+	Attribute("reviewers", ArrayOf(String), "A list of reviewers for that contract")
+	Attribute("approver", String, "The approver for that contract")
 
 	Required("did", "updated_at")
 })
@@ -92,27 +93,27 @@ var ContractItem = Type("ContractItem", func() {
 })
 
 var ContractReviewTaskItem = Type("ContractReviewTaskItem", func() {
-	Attribute("did", String, "DID of the contract template")
+	Attribute("did", String, "DID of the contract")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "State of the review task")
-	Attribute("reviewer", String, "The reviewer of the contract template")
+	Attribute("reviewer", String, "The reviewer of the contract")
 	Attribute("created_at", String, "Created at")
 
 	Required("did", "state", "reviewer", "created_at")
 })
 
 var ContractApprovalTaskItem = Type("ContractApprovalTaskItem", func() {
-	Attribute("did", String, "DID of the contract template")
+	Attribute("did", String, "DID of the contract ")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "State of the approval task")
-	Attribute("approver", String, "The approver for the contract template")
+	Attribute("approver", String, "The approver for the contract")
 	Attribute("created_at", String, "Created at")
 
 	Required("did", "state", "approver", "created_at")
 })
 
 var ContractRetrieveResponse = Type("ContractRetrieveResponse", func() {
-	Description("Result for retrieving a contract template by id")
+	Description("Result for retrieving a contract by id")
 
 	Attribute("contracts", ArrayOf(ContractItem), "A list of contracts")
 
@@ -128,9 +129,24 @@ var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {
 
 	Token("token", String, "JWT token")
 
-	Attribute("did", String, "DID of the contract template")
+	Attribute("did", String, "DID of the contract")
 
 	Required("did")
+})
+
+var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", func() {
+	Attribute("counterpart", String, "Counterpart who has to decide this negotiation decision")
+	Attribute("decision", String, "Decision that was taken")
+	Attribute("rejection_reason", String, "Reason why it was rejected")
+})
+
+var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
+	Attribute("id", String, "id of the negotiation")
+	Attribute("change_request", Any, "Change request")
+	Attribute("created_by", String, "Identifier of who created the contract negotiation")
+	Attribute("created_at", String, "Created at")
+
+	Attribute("negotiation_decisions", ArrayOf(ContractNegotiationDecisionItem), "List with decisions for that negotiation")
 })
 
 var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
@@ -142,25 +158,27 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 
+	Attribute("negotiations", ArrayOf(ContractNegotiationItem), "List with negotiations for that contract")
+
 	Required("did", "state", "created_at", "updated_at")
 })
 
 var ContractVerifyRequest = Type("ContractVerifyRequest", func() {
-	Description("Contract template verify request")
+	Description("Contract verify request")
 
 	Token("token", String, "JWT token")
 
-	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("did", String, "Decentralized Identifier of the contract")
 
-	Attribute("updated_at", String, "The timestamp when the contract template was updated")
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
 	Required("did", "updated_at")
 })
 
 var ContractVerifyResponse = Type("ContractVerifyResponse", func() {
-	Description("Result for verifying a contract template")
+	Description("Result for verifying a contract")
 
-	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("did", String, "Decentralized Identifier of the contract")
 
 	Attribute("findings", ArrayOf(String), "A list of findings")
 
@@ -172,7 +190,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 	Description("Contract Workflow Engine APIs (/contract/...)")
 
 	Method("create", func() {
-		Description("initiate new contract draft from template.")
+		Description("initiate new contract draft from.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-02")
 		Meta("dcs:cwe:components", "Contract Assembling")
 		Meta("dcs:ui", "Contract Creation")
@@ -399,7 +417,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 	})
 
 	Method("search", func() {
-		Description("locate contracts by template data or state. filter/search across lifecycle states.")
+		Description("locate contracts by data or state. filter/search across lifecycle states.")
 		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
 		Meta("dcs:cwe:components", "")
 		Meta("dcs:ui", "Contract Review", "Contract Management Dashboard")

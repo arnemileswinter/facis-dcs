@@ -2,6 +2,7 @@ package event
 
 import (
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"time"
 )
@@ -54,11 +55,14 @@ func (e UpdateEvent) GetDID() string {
 
 // SubmitEvent is emitted when a contract is submitted
 type SubmitEvent struct {
-	DID           string    `json:"did"`
-	PreviousState string    `json:"previous_state"`
-	NewState      string    `json:"new_state"`
-	SubmittedBy   string    `json:"submitted_by"`
-	OccurredAt    time.Time `json:"occurred_at"`
+	DID             string                 `json:"did"`
+	PreviousState   string                 `json:"previous_state"`
+	NewState        string                 `json:"new_state"`
+	SubmittedBy     string                 `json:"submitted_by"`
+	OccurredAt      time.Time              `json:"occurred_at"`
+	ContractVersion *int                   `json:"contract_version,omitempty"`
+	ActionFlag      *actionflag.ActionFlag `json:"action_flag,omitempty"`
+	Comments        []string               `json:"comments"`
 }
 
 // EventType implements the Event interface.

@@ -136,6 +136,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		UpdatedAt:   updatedAt,
 		SubmittedBy: middleware.GetUsername(ctx),
 		ActionFlag:  actionFlag,
+		Comments:    req.Comments,
 		Reviewer:    req.Reviewers,
 		Approver:    req.Approver,
 	}

@@ -30,12 +30,14 @@ type GetByIDResult struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ContractData    *datatype.JSON
+	Negotiations    []db.NegotiationData
 }
 
 type GetByIDHandler struct {
 	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
+	NRepo db.NegotiationRepo
 }
 
 func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
@@ -52,6 +54,11 @@ func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
 	data, err := h.CRepo.ReadDataByID(tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get contract data: %w", err)
+	}
+
+	negotiations, err := h.NRepo.ReadAllByContractDID(tx, query.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not get negotiations: %w", err)
 	}
 
 	evt := contractevents.RetrieveByIDEvent{
@@ -84,5 +91,6 @@ func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
 		CreatedAt:       data.CreatedAt,
 		UpdatedAt:       data.UpdatedAt,
 		ContractData:    data.ContractData,
+		Negotiations:    negotiations,
 	}, nil
 }

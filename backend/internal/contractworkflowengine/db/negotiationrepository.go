@@ -33,6 +33,6 @@ type NegotiationRepo interface {
 	IsValidCounterpart(tx *sqlx.Tx, did string, contractVersion *int, counterpart string) (bool, error)
 	ReadAllByContractDID(tx *sqlx.Tx, did string) ([]NegotiationData, error)
 	HasOpenNegotiationDecisions(tx *sqlx.Tx, did string, contractVersion *int) (bool, error)
-	AllNegotiationsAccepted(tx *sqlx.Tx, did string, contractVersion *int) (bool, error)
+	//	AllNegotiationsForContractVersionAccepted(tx *sqlx.Tx, did string, contractVersion *int) (bool, error)
 	Delete(tx *sqlx.Tx, did string) error
 }

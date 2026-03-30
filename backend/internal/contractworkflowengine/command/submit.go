@@ -24,6 +24,7 @@ type SubmitCmd struct {
 	Reviewer    []string
 	Approver    *string
 	ActionFlag  *actionflag.ActionFlag
+	Comments    []string
 }
 
 type Submitter struct {
@@ -125,16 +126,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("not all negations are processed")
 		}
 
-		allNegotiationsAccepted, err := h.NRepo.AllNegotiationsAccepted(tx, cmd.DID, processData.ContractVersion)
-		if err != nil {
-			return fmt.Errorf("could not check all negotiations: %w", err)
-		}
-
-		if allNegotiationsAccepted {
-			nextState = contractstate.Submitted
-		} else {
-			// Update contract data regarding the accepted
-		}
+		nextState = contractstate.Submitted
 
 	} else if processData.State == contractstate.Submitted.String() {
 
@@ -186,8 +178,8 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 				}
 
 				nextState = contractstate.Negotiation
-
 			}
+
 		} else {
 			return errors.New("action flags is missing")
 		}
@@ -216,11 +208,14 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		}
 
 		evt := contractevents.SubmitEvent{
-			DID:           cmd.DID,
-			SubmittedBy:   cmd.SubmittedBy,
-			PreviousState: processData.State,
-			NewState:      nextState.String(),
-			OccurredAt:    time.Now(),
+			DID:             cmd.DID,
+			ContractVersion: processData.ContractVersion,
+			SubmittedBy:     cmd.SubmittedBy,
+			PreviousState:   processData.State,
+			NewState:        nextState.String(),
+			ActionFlag:      cmd.ActionFlag,
+			Comments:        cmd.Comments,
+			OccurredAt:      time.Now(),
 		}
 		err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
 		if err != nil {

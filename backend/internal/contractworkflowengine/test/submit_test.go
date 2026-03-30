@@ -4,6 +4,7 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
@@ -147,6 +148,173 @@ func TestSubmit_SubmitContractInDraftStateWithInvalidUser(t *testing.T) {
 		ATRepo: repo.ATRepo,
 	}
 	err = handler.Handle(cmd)
+
+	assert.NotNil(t, err)
+}
+
+func TestSubmit_SubmitContractInNegotiationStateWithOpenNegotiations(t *testing.T) {
+
+	db := setupTestDB(t)
+
+	cleanupContractTable(t, db)
+
+	did, err := base.GetDID()
+	if err != nil {
+		t.Fatalf("Failed to get new DID: %v", err)
+	}
+
+	creator := "Test User"
+
+	tmpCtx := context.Background()
+	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	defer cancel()
+
+	repo := NewTestRepo(ctx)
+
+	createContract(t, db, repo, did, contractstate.Negotiation, creator)
+
+	reviewers := []string{
+		"Test User 1",
+		"Test User 2",
+		"Test User 3",
+	}
+
+	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
+
+	var changeRequest map[string]interface{}
+	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
+	cmd := command.NegotiationCmd{
+		DID:           *did,
+		NegotiatedBy:  "Test User",
+		ChangeRequest: &jsonChangeRequest,
+	}
+	handler := command.Negotiator{
+		Ctx:    ctx,
+		DB:     db,
+		CRepo:  repo.CRepo,
+		RTRepo: repo.RTRepo,
+		NTRepo: repo.NRepo,
+	}
+	err = handler.Handle(cmd)
+	if err != nil {
+		t.Fatalf("Failed to create negotiation: %v", err)
+	}
+
+	submitCmd := command.SubmitCmd{
+		DID:         *did,
+		UpdatedAt:   time.Now(),
+		SubmittedBy: creator,
+	}
+	submitHandler := command.Submitter{
+		Ctx:    ctx,
+		DB:     db,
+		CRepo:  repo.CRepo,
+		RTRepo: repo.RTRepo,
+		ATRepo: repo.ATRepo,
+		NRepo:  repo.NRepo,
+	}
+	err = submitHandler.Handle(submitCmd)
+
+	assert.NotNil(t, err)
+}
+
+func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *testing.T) {
+
+	db := setupTestDB(t)
+
+	cleanupContractTable(t, db)
+
+	did, err := base.GetDID()
+	if err != nil {
+		t.Fatalf("Failed to get new DID: %v", err)
+	}
+
+	creator := "Test User"
+
+	tmpCtx := context.Background()
+	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	defer cancel()
+
+	repo := NewTestRepo(ctx)
+
+	createContract(t, db, repo, did, contractstate.Negotiation, creator)
+
+	reviewers := []string{
+		"Test User 1",
+		"Test User 2",
+		"Test User 3",
+	}
+
+	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
+
+	var changeRequest map[string]interface{}
+	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
+	cmd := command.NegotiationCmd{
+		DID:           *did,
+		NegotiatedBy:  "Test User",
+		ChangeRequest: &jsonChangeRequest,
+	}
+	handler := command.Negotiator{
+		Ctx:    ctx,
+		DB:     db,
+		CRepo:  repo.CRepo,
+		RTRepo: repo.RTRepo,
+		NTRepo: repo.NRepo,
+	}
+	err = handler.Handle(cmd)
+	if err != nil {
+		t.Fatalf("Failed to create negotiation: %v", err)
+	}
+
+	tx, err := db.BeginTxx(ctx, nil)
+	defer tx.Rollback()
+	if err != nil {
+		t.Fatalf("Failed to begin transaction: %v", err)
+	}
+
+	negotiations, err := repo.NRepo.ReadAllByContractDID(tx, *did)
+	if err != nil {
+		t.Fatalf("Failed to read all negotiations for did: %v", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		t.Fatalf("Failed to commit transaction: %v", err)
+	}
+
+	rejectionReason := "RejectionReason"
+	rejectionCmd := command.RejectNegotiationCmd{
+		DID:             *did,
+		ID:              negotiations[0].ID,
+		RejectionReason: &rejectionReason,
+		RejectedBy:      negotiations[0].Counterpart,
+	}
+	rejectionHandler := command.NegotiationRejector{
+		Ctx:    ctx,
+		DB:     db,
+		CRepo:  repo.CRepo,
+		RTRepo: repo.RTRepo,
+		NRepo:  repo.NRepo,
+	}
+	err = rejectionHandler.Handle(rejectionCmd)
+	if err != nil {
+		t.Fatalf("Failed to reject negotiation: %v", err)
+	}
+
+	submitCmd := command.SubmitCmd{
+		DID:         *did,
+		UpdatedAt:   time.Now(),
+		SubmittedBy: creator,
+	}
+	submitHandler := command.Submitter{
+		Ctx:    ctx,
+		DB:     db,
+		CRepo:  repo.CRepo,
+		RTRepo: repo.RTRepo,
+		ATRepo: repo.ATRepo,
+		NRepo:  repo.NRepo,
+	}
+	err = submitHandler.Handle(submitCmd)
 
 	assert.NotNil(t, err)
 }
