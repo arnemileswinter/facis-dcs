@@ -123,7 +123,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		}
 
 		if hasOpenNegotiations {
-			return errors.New("not all negations are processed")
+			return errors.New("not all negotiations are processed")
 		}
 
 		nextState = contractstate.Submitted

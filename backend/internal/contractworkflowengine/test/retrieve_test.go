@@ -42,6 +42,7 @@ func TestRetrieve_RetrieveContractById(t *testing.T) {
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	contractItem, err := queryHandler.Handle(qry)
 	if err != nil {

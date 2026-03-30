@@ -74,6 +74,7 @@ func TestSubmit_SubmitContractInDraftState(t *testing.T) {
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {
@@ -315,8 +316,27 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 		NRepo:  repo.NRepo,
 	}
 	err = submitHandler.Handle(submitCmd)
+	if err != nil {
+		t.Fatalf("Failed to submit contract: %v", err)
+	}
 
-	assert.NotNil(t, err)
+	qry := contract.GetByIDQry{
+		DID: *did,
+
+		RetrievedBy: creator,
+	}
+	queryHandler := contract.GetByIDHandler{
+		Ctx:   ctx,
+		DB:    db,
+		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
+	}
+	result, err := queryHandler.Handle(qry)
+	if err != nil {
+		t.Fatalf("Failed to query contract: %v", err)
+	}
+
+	assert.Equal(t, contractstate.Submitted, result.State)
 }
 
 func TestSubmit_OneReviewerApprovedContractInSubmittedState(t *testing.T) {
@@ -377,6 +397,7 @@ func TestSubmit_OneReviewerApprovedContractInSubmittedState(t *testing.T) {
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {
@@ -544,6 +565,7 @@ func TestSubmit_AllReviewersApprovedContractInSubmittedState(t *testing.T) {
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {
@@ -608,14 +630,14 @@ func TestSubmit_OneReviewerDeclinesContractInSubmittedState(t *testing.T) {
 	retrievedBy := "Test User"
 
 	qry := contract.GetByIDQry{
-		DID: *did,
-
+		DID:         *did,
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler := contract.GetByIDHandler{
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {
@@ -681,8 +703,7 @@ func TestSubmit_SubmitContractInSubmittedStateWithoutActionFlag(t *testing.T) {
 	createContract(t, db, repo, did, contractstate.Submitted, creator)
 
 	cmd := command.SubmitCmd{
-		DID: *did,
-
+		DID:         *did,
 		UpdatedAt:   time.Now(),
 		SubmittedBy: creator,
 		ActionFlag:  nil,
@@ -725,8 +746,7 @@ func TestSubmit_SubmitContractInReviewedStateWithInvalidUser(t *testing.T) {
 	createApprovalTasks(t, ctx, db, repo, *did, approvaltaskstate.Open, creator, approver)
 
 	cmd := command.SubmitCmd{
-		DID: *did,
-
+		DID:         *did,
 		UpdatedAt:   time.Now(),
 		SubmittedBy: "Test User 2",
 	}
@@ -777,8 +797,7 @@ func TestSubmit_SubmitContractInSubmittedStateWithApproverUser(t *testing.T) {
 
 	aFlag := actionflag.Approval
 	cmd := command.SubmitCmd{
-		DID: *did,
-
+		DID:         *did,
 		UpdatedAt:   time.Now(),
 		SubmittedBy: approver,
 		ActionFlag:  &aFlag,
@@ -822,8 +841,7 @@ func TestSubmit_SubmitContractInReviewedStateWithApproverUser(t *testing.T) {
 
 	aFlag := actionflag.Approval
 	cmd := command.SubmitCmd{
-		DID: *did,
-
+		DID:         *did,
 		UpdatedAt:   time.Now(),
 		SubmittedBy: approver,
 		ActionFlag:  &aFlag,
@@ -841,14 +859,14 @@ func TestSubmit_SubmitContractInReviewedStateWithApproverUser(t *testing.T) {
 	}
 
 	qry := contract.GetByIDQry{
-		DID: *did,
-
+		DID:         *did,
 		RetrievedBy: creator,
 	}
 	queryHandler := contract.GetByIDHandler{
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {

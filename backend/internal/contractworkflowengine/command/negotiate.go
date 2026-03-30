@@ -17,10 +17,10 @@ import (
 )
 
 type NegotiationCmd struct {
-	DID             string
-	ContractVersion *int
-	NegotiatedBy    string
-	ChangeRequest   *datatype.JSON
+	DID           string
+	NegotiatedBy  string
+	ChangeRequest *datatype.JSON
+	UpdatedAt     time.Time
 }
 
 type Negotiator struct {
@@ -70,7 +70,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 
 	data := db.NegotiationCreateData{
 		DID:             cmd.DID,
-		ContractVersion: cmd.ContractVersion,
+		ContractVersion: processData.ContractVersion,
 		ChangeRequest:   cmd.ChangeRequest,
 		CreatedBy:       cmd.NegotiatedBy,
 	}
@@ -81,7 +81,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 
 	evt := contractevents.NegotiationEvent{
 		DID:             cmd.DID,
-		ContractVersion: cmd.ContractVersion,
+		ContractVersion: processData.ContractVersion,
 		ChangeRequest:   cmd.ChangeRequest,
 		NegotiatedBy:    cmd.NegotiatedBy,
 		Counterparts:    counterparts,

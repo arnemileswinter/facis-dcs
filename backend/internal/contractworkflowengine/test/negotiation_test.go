@@ -7,7 +7,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
-	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationdescision"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationaction"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"testing"
 
@@ -500,7 +500,7 @@ func TestNegotiation_OneAcceptionOneRejectionOfChangeRequest(t *testing.T) {
 	assert.Equal(t, closeAmount, 1)
 }
 
-func TestNegotiation_TestForOpenNegationDecisions(t *testing.T) {
+func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 
 	db := setupTestDB(t)
 
@@ -585,9 +585,9 @@ func TestNegotiation_TestForOpenNegationDecisions(t *testing.T) {
 		t.Fatalf("Failed to begin transaction: %v", err)
 	}
 
-	hasOpenNegationDecisions, err := repo.NRepo.HasOpenNegotiationDecisions(tx, *did, nil)
+	hasOpenNegotiationDecisions, err := repo.NRepo.HasOpenNegotiationDecisions(tx, *did, nil)
 	if err != nil {
-		t.Fatalf("Failed to check for open negation decisions %v", err)
+		t.Fatalf("Failed to check for open negotiation decisions %v", err)
 	}
 
 	err = tx.Commit()
@@ -595,5 +595,5 @@ func TestNegotiation_TestForOpenNegationDecisions(t *testing.T) {
 		t.Fatalf("Failed to commit transaction: %v", err)
 	}
 
-	assert.Equal(t, hasOpenNegationDecisions, true)
+	assert.Equal(t, hasOpenNegotiationDecisions, true)
 }

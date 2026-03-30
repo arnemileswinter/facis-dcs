@@ -57,7 +57,7 @@ type GetAllMetadataResult struct {
 type GetAllMetadataHandler struct {
 	Ctx    context.Context
 	DB     *sqlx.DB
-	CTRepo db.ContractRepo
+	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 }
@@ -73,7 +73,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 	}
 	defer tx.Rollback()
 
-	contractsMetadata, err := h.CTRepo.ReadAllMetaData(tx)
+	contractsMetadata, err := h.CRepo.ReadAllMetaData(tx)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all contracts: %w", err)
 	}

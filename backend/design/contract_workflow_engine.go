@@ -138,6 +138,8 @@ var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", fu
 	Attribute("counterpart", String, "Counterpart who has to decide this negotiation decision")
 	Attribute("decision", String, "Decision that was taken")
 	Attribute("rejection_reason", String, "Reason why it was rejected")
+
+	Required("counterpart")
 })
 
 var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
@@ -147,6 +149,8 @@ var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("created_at", String, "Created at")
 
 	Attribute("negotiation_decisions", ArrayOf(ContractNegotiationDecisionItem), "List with decisions for that negotiation")
+
+	Required("id", "change_request", "created_by", "created_at", "negotiation_decisions")
 })
 
 var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
@@ -155,12 +159,16 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 	Attribute("state", String, "Current state of the contract")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "The description of the contract")
+
+	Attribute("created_by", String, "Identifier of who created the contract")
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 
+	Attribute("contract_data", Any, "The data of that contract")
+
 	Attribute("negotiations", ArrayOf(ContractNegotiationItem), "List with negotiations for that contract")
 
-	Required("did", "state", "created_at", "updated_at")
+	Required("did", "state", "created_by", "created_at", "updated_at", "contract_data", "negotiations")
 })
 
 var ContractVerifyRequest = Type("ContractVerifyRequest", func() {
@@ -183,6 +191,81 @@ var ContractVerifyResponse = Type("ContractVerifyResponse", func() {
 	Attribute("findings", ArrayOf(String), "A list of findings")
 
 	Required("did")
+})
+
+var ContractSearchRequest = Type("ContractSearchRequest", func() {
+	Description("Contract search request")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("contract_version", Int, "The version number of the contract")
+	Attribute("state", String, "The state of the contract")
+	Attribute("name", String, "The name of the contract")
+	Attribute("description", String, "A description for that contract")
+	Attribute("filter", String, "Search value for full text search in contract data")
+})
+
+var ContractSearchResponse = Type("ContractSearchResponse", func() {
+	Description("Result for searching a contract by filter")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Attribute("contract_version", Int, "The version number of the contract")
+	Attribute("state", String, "The state of the contract")
+	Attribute("name", String, "The name of the contract")
+	Attribute("description", String, "A description for that contract")
+
+	Attribute("created_at", String, "The timestamp when the contract template was created")
+
+	Attribute("updated_at", String, "The timestamp when the contract template was updated")
+
+	Required("did", "state", "created_at", "updated_at")
+})
+
+var ContractNegotiationRequest = Type("ContractNegotiationRequest", func() {
+	Description("Contract negotiation request")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("negotiated_by", String, "The name of the negotiator")
+	Attribute("change_request", Any, "The change request for the negotiation")
+
+	Required("did", "negotiated_by", "change_request", "updated_at")
+})
+
+var ContractNegotiationResponse = Type("ContractNegotiationResponse", func() {
+	Description("Result for creating a contract negotiation")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
+var ContractNegotiationRespondRequest = Type("ContractNegotiationRespondRequest", func() {
+	Description("Contract negotiation decision request")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "ID of the negotiation")
+
+	Attribute("action_flag", String, "Decision for that negotiation (ACCEPTING | REJECTING)")
+	Attribute("responded_by", String, "The user who responded to that negotiation")
+	Attribute("RejectionReason", String, "The reason for that rejection")
+
+	Required("id", "action_flag", "responded_by")
+})
+
+var ContractNegotiationRespondResponse = Type("ContractNegotiationRespondResponse", func() {
+	Description("Result for creating a contract negotiation decision")
+
+	Attribute("id", String, "ID of the negotiation")
+
+	Required("id")
 })
 
 // Contract Workflow Engine Service  (/contract/...)
@@ -275,17 +358,23 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:requirements", "DCS-IR-CWE-03")
 		Meta("dcs:cwe:components", "Contract Assembling", "Contract Versioning")
 		Meta("dcs:ui", "Contract Negotiation")
+
 		Security(JWTAuth, func() {
 			Scope("Contract Negotiator")
 		})
-		Payload(func() {
-			Token("token", String, "JWT token")
-		})
+
+		Payload(ContractNegotiationRequest)
+		Result(ContractNegotiationResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
 		HTTP(func() {
 			POST("/contract/negotiate")
 			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
-		Result(String)
 	})
 
 	Method("respond", func() {
@@ -293,19 +382,25 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-IR-CWE-05", "DCS-IR-CWE-06")
 		Meta("dcs:cwe:components", "Contract Versioning")
 		Meta("dcs:ui", "Contract Negotiation", "Contract Review")
+
 		Security(JWTAuth, func() {
 			Scope("Contract Negotiator")
 			Scope("Contract Reviewer")
 			Scope("Sys. Contract Reviewer")
 		})
-		Payload(func() {
-			Token("token", String, "JWT token")
-		})
+
+		Payload(ContractNegotiationRespondRequest)
+		Result(ContractNegotiationRespondResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
 		HTTP(func() {
 			POST("/contract/respond")
 			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
-		Result(String)
 	})
 
 	Method("review", func() {
@@ -421,20 +516,32 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
 		Meta("dcs:cwe:components", "")
 		Meta("dcs:ui", "Contract Review", "Contract Management Dashboard")
+
 		Security(JWTAuth, func() {
 			Scope("Contract Reviewer")
 			Scope("Sys. Contract Reviewer")
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
 		})
-		Payload(func() {
-			Token("token", String, "JWT token")
-		})
+
+		Payload(ContractSearchRequest)
+		Result(ArrayOfRequired(ContractSearchResponse))
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
 		HTTP(func() {
 			GET("/contract/search")
+			Param("did")
+			Param("contract_version")
+			Param("state")
+			Param("name")
+			Param("description")
+			Param("filter")
 			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
-		Result(ArrayOf(Any))
 	})
 
 	Method("approve", func() {

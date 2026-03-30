@@ -64,6 +64,7 @@ func TestCreate_CreateNewContract(t *testing.T) {
 		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
+		NRepo: repo.NRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {

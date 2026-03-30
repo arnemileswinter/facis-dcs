@@ -19,7 +19,6 @@ type GetAllMetadataByFilterQry struct {
 	RetrievedBy     string
 	DID             *string
 	ContractVersion *int
-	Version         *int
 	State           *contractstate.ContractState
 	Name            *string
 	Description     *string
