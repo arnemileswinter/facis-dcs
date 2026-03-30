@@ -13,7 +13,7 @@
 </template>
 
 <script setup lang="ts">
-import TemplateManagerActions from '@/components/lists/template-list/TemplateManagerActions.vue'
+import TemplateManagerActions from '@/components/lists/template/template-list/TemplateManagerActions.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useAuthStore } from '@/stores/auth-store'

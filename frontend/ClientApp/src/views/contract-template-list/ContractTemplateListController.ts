@@ -1,9 +1,11 @@
 import type { PartialContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
 import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
+import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import { useDataRouteStore } from '@/stores/data-route-store'
 import type { UserRole } from '@/types/user-role'
 import { onMounted, ref, type Ref } from 'vue'
 
@@ -16,6 +18,7 @@ export function useTemplateTable() {
     const loading = ref(true)
     const error = ref('')
     const authStore = useAuthStore()
+    const dataRouteStore = useDataRouteStore()
 
     const loadTemplates = async () => {
         loading.value = true
@@ -29,6 +32,12 @@ export function useTemplateTable() {
             approvalTasks.value = data.approval_tasks
             templatesStore.approvalTasks = approvalTasks.value
             roles.value = authStore.user?.roles ?? []
+            if (reviewTasks.value.length > 0) {
+                dataRouteStore.addDataRouteLoaded(ROUTES.TEMPLATES.TASKS.REVIEW)
+            }
+            if (approvalTasks.value.length > 0) {
+                dataRouteStore.addDataRouteLoaded(ROUTES.TEMPLATES.TASKS.APPROVAL)
+            }
         } catch (err: any) {
             error.value = err.message || 'Fehler beim Laden der Templates'
         } finally {

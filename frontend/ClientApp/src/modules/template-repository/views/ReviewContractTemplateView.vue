@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import TemplateManagerActions from '@/components/lists/template-list/TemplateManagerActions.vue'
+import TemplateManagerActions from '@/components/lists/template/template-list/TemplateManagerActions.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'

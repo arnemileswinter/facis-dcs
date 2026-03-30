@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { PartialContractTemplate } from '@/models/contract-template'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
+import { contractTemplateStates } from '@/types/contract-template-state'
 import { toComparableValue } from '@/utils/comparison'
-import { storeToRefs } from 'pinia'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import ListSort from '../ListSort.vue'
-import ListSearch from './ListSearch.vue'
+import ListSort from '../../ListSort.vue'
+import TemplateListSearch from '../TemplateListSearch.vue'
+import TemplateListStateFilter from '../TemplateListStateFilter.vue'
 import TemplateListItem from './TemplateListItem.vue'
-import TemplateListStateFilter from './TemplateListStateFilter.vue'
 
 const props = defineProps<{
   items: PartialContractTemplate[]
@@ -27,7 +27,6 @@ const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
 
 const stateFilterStore = useContractTemplateStateFilterStore()
-const { stateFilters } = storeToRefs(stateFilterStore)
 
 const searchedItems: Ref<PartialContractTemplate[]> = ref(props.items)
 
@@ -55,8 +54,8 @@ const sortedItems = computed(() => {
 })
 
 const filteredItems = computed(() => {
-  if (stateFilters.value.size > 0) {
-    return sortedItems.value.filter((item) => stateFilters.value.has(item.state))
+  if (stateFilterStore.hasFilters) {
+    return sortedItems.value.filter((item) => stateFilterStore.hasFilter(item.state))
   }
   return sortedItems.value
 })
@@ -71,8 +70,8 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <ul class="list">
     <li class="tracking-wide px-4 flex justify-between flex-col sm:flex-row">
-      <TemplateListStateFilter />
-      <ListSearch :items="items" class="flex-1" @search-result="applySearchResult" />
+      <TemplateListStateFilter label="Contract Template" :filters="contractTemplateStates" store-type="templates" />
+      <TemplateListSearch :items="items" class="flex-1" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
     <TemplateListItem
