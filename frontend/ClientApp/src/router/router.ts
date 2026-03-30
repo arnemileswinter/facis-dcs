@@ -9,6 +9,9 @@ import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import ContractTemplateTaskView from '@/views/contract-template-list/ContractTemplateTaskView.vue'
+import TemplateCatalogueListView from '@/views/template-repository/TemplateCatalogueListView.vue'
+import TemplateCatalogueView from '@/views/template-repository/TemplateCatalogueView.vue'
+import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
 import { DocumentCheckIcon, DocumentMagnifyingGlassIcon, DocumentTextIcon } from '@heroicons/vue/20/solid'
 import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
@@ -26,6 +29,11 @@ const ROUTES = {
       REVIEW: 'templates.tasks.review',
       APPROVAL: 'templates.tasks.approve',
     },
+  },
+  TEMPLATE_CATALOGUES: {
+    LIST: 'template.catalogues.list',
+    VIEW: 'template.catalogues.view',
+    ADMIN: 'template.catalogues.admin',
   },
   AUTH: {
     SUCCESS: 'auth.success',
@@ -143,6 +151,42 @@ const routes: RouteRecordRaw[] = [
       if (!dataRouteStore.isRouteDataLoaded(to.name)) {
         return { name: ROUTES.TEMPLATES.LIST }
       }
+    },
+  },
+  {
+    path: '/catalogues',
+    name: ROUTES.TEMPLATE_CATALOGUES.LIST,
+    component: TemplateCatalogueListView,
+    meta: {
+      name: 'Template Catalogues',
+      icon: DocumentTextIcon,
+      requiresAuth: true,
+      title: 'DCS - Template Catalogues',
+      order: 4,
+    },
+  },
+  {
+    path: '/catalogues/:did',
+    name: ROUTES.TEMPLATE_CATALOGUES.VIEW,
+    component: TemplateCatalogueView,
+    meta: {
+      name: 'Template Catalogue',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS - Template Catalogue',
+    },
+  },
+  {
+    path: '/catalogues/admin',
+    name: ROUTES.TEMPLATE_CATALOGUES.ADMIN,
+    component: TemplateCatalogueAdminView,
+    meta: {
+      name: 'Template Catalogue Admin',
+      icon: DocumentTextIcon,
+      requiresAuth: true,
+      title: 'DCS - Template Catalogue Admin',
+      order: 5,
+      roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
   {

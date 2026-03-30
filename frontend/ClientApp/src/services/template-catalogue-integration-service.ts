@@ -39,7 +39,12 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueGetCurrentParticipantResponse>('/catalogue/participant/current')
       .then((res) => res.data)
-      .catch(() => null)
+      .catch((err: any) => {
+        if (err?.response?.status === 404) {
+          return null
+        }
+        throw err
+      })
   },
 
   async update_participant(
@@ -69,7 +74,12 @@ export const templateCatalogueIntegrationService = {
     return http
       .get<TemplateCatalogueGetCurrentServiceOfferingResponse>('/catalogue/service-offering/current')
       .then((res) => res.data)
-      .catch(() => null)
+      .catch((err: any) => {
+        if (err?.response?.status === 404) {
+          return null
+        }
+        throw err
+      })
   },
 
   async update_service_offering(
