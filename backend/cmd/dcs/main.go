@@ -13,10 +13,12 @@ import (
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	nats2 "digital-contracting-service/internal/base/eventbus/nats"
+	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
+	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/migrations"
-	"digital-contracting-service/internal/templaterepository/db/pg"
 	"flag"
 	"fmt"
 	"net"
@@ -61,6 +63,8 @@ func main() {
 	}
 	defer db.Close()
 
+	log.Printf(ctx, "Connecting to database")
+
 	// Run database migrations
 	if err := migrations.Run(db); err != nil {
 		log.Fatalf(ctx, err, "Could not run database migrations")
@@ -72,12 +76,12 @@ func main() {
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
 	}
-	natsClient, err := nats.Connect(natsURL)
+	natsConn, err := nats.Connect(natsURL)
 	if err != nil {
 		log.Printf(ctx, "Nats support will be deactivated: Could not connect to nats service: %v", err)
 	}
-	if natsClient != nil {
-		defer natsClient.Close()
+	if natsConn != nil {
+		defer natsConn.Close()
 	}
 
 	// Initialize OIDC validator and JWT authenticator.
@@ -95,9 +99,23 @@ func main() {
 	}
 	jwtAuth := auth.NewJWTAuthenticator(oidcValidator)
 
-	ctRepo := pg.PostgresContractTemplateRepo{Ctx: ctx}
-	rtRepo := pg.PostgresReviewTaskRepo{Ctx: ctx}
-	atRepo := pg.PostgresApprovalTaskRepo{Ctx: ctx}
+	ctRepo := tplrepo.PostgresContractTemplateRepo{Ctx: ctx}
+	ctRTRepo := tplrepo.PostgresReviewTaskRepo{Ctx: ctx}
+	ctATRepo := tplrepo.PostgresApprovalTaskRepo{Ctx: ctx}
+
+	eventBus := nats2.NatsEventBus{
+		Conn: natsConn,
+	}
+
+	cweRepo := cwerepo.PostgresContractRepo{Ctx: ctx}
+	cweRTRepo := cwerepo.PostgresReviewTaskRepo{Ctx: ctx}
+	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
+	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
+
+	cweSvc, err := service.NewContractWorkflowEngine(db, jwtAuth, &eventBus, &cweRepo, &cweRTRepo, &cweATRepo, &cweNRepo)
+	if err != nil {
+		log.Fatalf(ctx, err, "failed to create contract workflow engine")
+	}
 
 	// Initialize the service.
 	var (
@@ -115,14 +133,14 @@ func main() {
 	{
 		authSvc = service.NewAuth()
 		contractStorageArchiveSvc = service.NewContractStorageArchive(jwtAuth)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(jwtAuth)
+		contractWorkflowEngineSvc = cweSvc
 		dcsToDcsSvc = service.NewDcsToDcs(jwtAuth)
 		externalTargetSystemAPISvc = service.NewExternalTargetSystemAPI(jwtAuth)
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(jwtAuth)
 		signatureManagementSvc = service.NewSignatureManagement(jwtAuth)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth)
-		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &rtRepo, &atRepo)
+		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo)
 	}
 
 	// Wrap the service in endpoints that can be invoked from other service

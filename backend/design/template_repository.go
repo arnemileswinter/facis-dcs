@@ -284,8 +284,6 @@ var ContractTemplateVerifyRequest = Type("ContractTemplateVerifyRequest", func()
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("decision_notes", ArrayOf(String), "A list of decision notes")
-
 	Required("did", "updated_at")
 })
 
@@ -293,6 +291,8 @@ var ContractTemplateVerifyResponse = Type("ContractTemplateVerifyResponse", func
 	Description("Result for verifying a contract template")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
+
+	Attribute("findings", ArrayOf(String), "A list of findings")
 
 	Required("did")
 })
