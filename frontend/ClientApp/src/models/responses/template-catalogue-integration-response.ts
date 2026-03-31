@@ -5,6 +5,7 @@ import type {
 import type {
   ParticipantHeadquarterAddress,
   ParticipantLegalAddress,
+  Participant,
 } from '@/modules/template-catalogue/models/participant'
 
 // ---- Template retrieval ----
@@ -31,6 +32,9 @@ export interface TemplateCatalogueGetCurrentParticipantResponse {
   legal_address: ParticipantLegalAddress
   terms_and_conditions: string
 }
+
+export type TemplateCatalogueGetCurrentParticipantSummaryResponse = Participant
+export type TemplateCatalogueGetOtherParticipantsResponse = Participant[]
 
 export interface TemplateCatalogueUpdateParticipantResponse {
   id: string

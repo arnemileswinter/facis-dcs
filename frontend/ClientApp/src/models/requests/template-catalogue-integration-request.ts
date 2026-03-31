@@ -17,6 +17,8 @@ export interface TemplateCatalogueRetrieveByIdRequest {
 // ---- Participant management ----
 
 export interface TemplateCatalogueGetCurrentParticipantRequest { }
+export interface TemplateCatalogueGetCurrentParticipantSummaryRequest { }
+export interface TemplateCatalogueGetOtherParticipantsRequest { }
 export interface TemplateCatalogueCreateParticipantRequest {
   legal_name: string
   registration_number: string

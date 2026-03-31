@@ -9,6 +9,7 @@ import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import ContractTemplateTaskView from '@/views/contract-template-list/ContractTemplateTaskView.vue'
+import CreateNegotiationView from '@/views/template-repository/CreateNegotiationView.vue'
 import TemplateCatalogueListView from '@/views/template-repository/TemplateCatalogueListView.vue'
 import TemplateCatalogueView from '@/views/template-repository/TemplateCatalogueView.vue'
 import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
@@ -33,6 +34,7 @@ const ROUTES = {
   TEMPLATE_CATALOGUES: {
     LIST: 'template.catalogues.list',
     VIEW: 'template.catalogues.view',
+    NEGOTIATION_CREATE: 'template.catalogues.negotiation.create',
     ADMIN: 'template.catalogues.admin',
   },
   AUTH: {
@@ -174,6 +176,18 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       requiresAuth: true,
       title: 'DCS - Template Catalogue',
+    },
+  },
+  {
+    path: '/catalogues/:did/negotiation/create',
+    name: ROUTES.TEMPLATE_CATALOGUES.NEGOTIATION_CREATE,
+    component: CreateNegotiationView,
+    meta: {
+      name: 'Create Negotiation',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS - Create Negotiation',
+      roles: ['CONTRACT_CREATOR'],
     },
   },
   {
