@@ -290,3 +290,22 @@ func (e ReviewEvent) EventType() string {
 func (e ReviewEvent) GetDID() string {
 	return e.DID
 }
+
+// IncreaseContractVersionEvent is emitted when change requests for contract merged
+type IncreaseContractVersionEvent struct {
+	DID                string    `json:"did"`
+	OldContractVersion *int      `json:"old_contract_version,omitempty"`
+	NewContractVersion *int      `json:"new_contract_version,omitempty"`
+	TriggeredBy        string    `json:"reviewed_by"`
+	OccurredAt         time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e IncreaseContractVersionEvent) EventType() string {
+	return eventtype.IncreaseContractVersion.String()
+}
+
+// GetDID implements the Event interface.
+func (e IncreaseContractVersionEvent) GetDID() string {
+	return e.DID
+}

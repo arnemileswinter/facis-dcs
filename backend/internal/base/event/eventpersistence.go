@@ -50,7 +50,7 @@ func Create(ctx context.Context, tx *sqlx.Tx, evt Event, component componenttype
 
 	did := evt.GetDID()
 	if did == "" {
-		return errors.New("template did cannot be empty")
+		return errors.New("did cannot be empty")
 	}
 
 	// Serialize event to JSON
