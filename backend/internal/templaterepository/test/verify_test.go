@@ -4,9 +4,9 @@ import (
 	"context"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
-	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 	"testing"
 	"time"
 
@@ -37,12 +37,12 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 	reviewers := []string{"Test User 1"}
 	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
 
-	cmd := contracttemplate.VerifyCmd{
+	cmd := command.VerifyCmd{
 		DID:        *did,
 		VerifiedBy: reviewers[0],
 		UpdatedAt:  time.Now(),
 	}
-	handler := contracttemplate.Verifier{
+	handler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -89,12 +89,12 @@ func TestVerify_VerifyNonExistingContractTemplate(t *testing.T) {
 
 	repo := NewTestRepo(ctx)
 
-	cmd := contracttemplate.VerifyCmd{
+	cmd := command.VerifyCmd{
 		DID:        *did,
 		UpdatedAt:  time.Now(),
 		VerifiedBy: "Test User 1",
 	}
-	handler := contracttemplate.Verifier{
+	handler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -126,12 +126,12 @@ func TestVerify_VerifyContractTemplateAfterUpdate(t *testing.T) {
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
-	cmd := contracttemplate.VerifyCmd{
+	cmd := command.VerifyCmd{
 		DID:        *did,
 		VerifiedBy: creator,
 		UpdatedAt:  time.Now().Add(-5 * time.Second),
 	}
-	handler := contracttemplate.Verifier{
+	handler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,

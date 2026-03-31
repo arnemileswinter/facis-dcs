@@ -198,13 +198,13 @@ func TestSubmit_OneReviewerApprovedContractTemplateInSubmittedState(t *testing.T
 		t.Fatalf("Failed to commit transaction: %v", err)
 	}
 
-	verifyCmd := contracttemplate.VerifyCmd{
+	verifyCmd := command.VerifyCmd{
 		DID: *did,
 
 		UpdatedAt:  time.Now(),
 		VerifiedBy: reviewers[0],
 	}
-	verifyHandler := contracttemplate.Verifier{
+	verifyHandler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -464,12 +464,12 @@ func TestSubmit_AllReviewersApprovedContractTemplateInSubmittedState(t *testing.
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -882,13 +882,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 	/**
 	First reviewer verifies contract template
 	*/
-	verifyCmd := contracttemplate.VerifyCmd{
+	verifyCmd := command.VerifyCmd{
 		DID: *did,
 
 		UpdatedAt:  time.Now(),
 		VerifiedBy: reviewers[0],
 	}
-	verifyHandler := contracttemplate.Verifier{
+	verifyHandler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -1063,12 +1063,12 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -1168,12 +1168,12 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -1386,13 +1386,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 	/**
 	First reviewer verifies contract template
 	*/
-	verifyCmd := contracttemplate.VerifyCmd{
+	verifyCmd := command.VerifyCmd{
 		DID: *did,
 
 		UpdatedAt:  time.Now(),
 		VerifiedBy: reviewers[0],
 	}
-	verifyHandler := contracttemplate.Verifier{
+	verifyHandler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -1567,12 +1567,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -1672,12 +1672,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -1735,13 +1735,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 	/**
 	Approver verifies reviewed contract template
 	*/
-	verifyCmd = contracttemplate.VerifyCmd{
+	verifyCmd = command.VerifyCmd{
 		DID: *did,
 
 		UpdatedAt:  time.Now(),
 		VerifiedBy: approver,
 	}
-	verifyHandler = contracttemplate.Verifier{
+	verifyHandler = command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -1908,13 +1908,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 	/**
 	First reviewer verifies contract template
 	*/
-	verifyCmd := contracttemplate.VerifyCmd{
+	verifyCmd := command.VerifyCmd{
 		DID: *did,
 
 		UpdatedAt:  time.Now(),
 		VerifiedBy: reviewers[0],
 	}
-	verifyHandler := contracttemplate.Verifier{
+	verifyHandler := command.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
@@ -2103,12 +2103,12 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,
@@ -2212,12 +2212,12 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 	All reviewers verify contract template
 	*/
 	for _, reviewer := range reviewers {
-		verifyCmd := contracttemplate.VerifyCmd{
+		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			UpdatedAt:  time.Now(),
 			VerifiedBy: reviewer,
 		}
-		verifyHandler := contracttemplate.Verifier{
+		verifyHandler := command.Verifier{
 			Ctx:    ctx,
 			DB:     db,
 			CTRepo: repo.CTRepo,

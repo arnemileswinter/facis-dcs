@@ -1,4 +1,4 @@
-package contracttemplate
+package command
 
 import (
 	"context"

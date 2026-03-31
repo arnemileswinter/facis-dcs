@@ -392,12 +392,12 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
-	cmd := contracttemplate.VerifyCmd{
+	cmd := command.VerifyCmd{
 		DID:        req.Did,
 		UpdatedAt:  updatedAt,
 		VerifiedBy: middleware.GetUsername(ctx),
 	}
-	handler := contracttemplate.Verifier{
+	handler := command.Verifier{
 		Ctx:    ctx,
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
