@@ -273,3 +273,20 @@ func (e AuditEvent) EventType() string {
 func (e AuditEvent) GetDID() string {
 	return e.DID
 }
+
+// ReviewEvent is emitted when contract is reviewed.
+type ReviewEvent struct {
+	DID        string    `json:"did"`
+	ReviewedBy string    `json:"reviewed_by"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ReviewEvent) EventType() string {
+	return eventtype.Review.String()
+}
+
+// GetDID implements the Event interface.
+func (e ReviewEvent) GetDID() string {
+	return e.DID
+}

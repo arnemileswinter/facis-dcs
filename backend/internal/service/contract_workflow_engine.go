@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"goa.design/clue/log"
 )
 
 type contractWorkflowEnginesrvc struct {
@@ -384,11 +383,28 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractworkflowengine.ContractReviewRequest) (res *contractworkflowengine.ContractReviewResponse, err error) {
-	log.Printf(ctx, "contractWorkflowEngine.review")
-	return
+
+	cmd := contract.ReviewCmd{
+		DID:        req.Did,
+		ReviewedBy: middleware.GetUsername(ctx),
+	}
+	handler := contract.Reviewer{
+		Ctx:   ctx,
+		DB:    s.DB,
+		CRepo: s.CRepo,
+	}
+	err = handler.Handle(cmd)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	return &contractworkflowengine.ContractReviewResponse{
+		Did: req.Did,
+	}, nil
 }
 
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
+
 	var state *contractstate.ContractState
 	if req.State != nil {
 		tState, err := contractstate.NewContractState(*req.State)
@@ -535,6 +551,22 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 }
 
 func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractworkflowengine.ContractAuditRequest) (res *contractworkflowengine.ContractAuditResponse, err error) {
-	log.Printf(ctx, "contractWorkflowEngine.audit")
-	return
+
+	cmd := contract.AuditCmd{
+		DID:       req.Did,
+		AuditedBy: middleware.GetUsername(ctx),
+	}
+	handler := contract.Auditor{
+		Ctx:   ctx,
+		DB:    s.DB,
+		CRepo: s.CRepo,
+	}
+	err = handler.Handle(cmd)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	return &contractworkflowengine.ContractAuditResponse{
+		Did: req.Did,
+	}, nil
 }

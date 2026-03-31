@@ -19,6 +19,7 @@ const (
 	RetrieveAll    EventType = "RETRIEVE_ALL_CONTRACTS"
 	RetrieveByID   EventType = "RETRIEVE_CONTRACT_BY_ID"
 	Search         EventType = "SEARCH_CONTRACT"
+	Review         EventType = "REVIEW_CONTRACT"
 	Audit          EventType = "AUDIT_CONTRACT"
 	Terminate      EventType = "TERMINATE_CONTRACT"
 	RecordEvidence EventType = "RECORD_EVIDENCE"
@@ -36,6 +37,7 @@ var validStates = map[EventType]bool{
 	RetrieveAll:    true,
 	RetrieveByID:   true,
 	Search:         true,
+	Review:         true,
 	Audit:          true,
 	Terminate:      true,
 	RecordEvidence: true,
