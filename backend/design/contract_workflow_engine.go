@@ -307,7 +307,7 @@ var ContractApproveResponse = Type("ContractApproveResponse", func() {
 })
 
 var ContractRejectRequest = Type("ContractRejectRequest", func() {
-	Description("Contract retrieve by id request")
+	Description("Contract reject request")
 
 	Token("token", String, "JWT token")
 
