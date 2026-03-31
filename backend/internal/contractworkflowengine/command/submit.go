@@ -108,12 +108,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		isValidCounterpart, err := h.NRepo.IsValidCounterpart(tx, processData.DID, processData.ContractVersion, cmd.SubmittedBy)
-		if err != nil {
-			return fmt.Errorf("could not validate counterpart: %w", err)
-		}
-
-		if cmd.SubmittedBy != processData.CreatedBy && isValidCounterpart == false {
+		if cmd.SubmittedBy != processData.CreatedBy {
 			return errors.New("invalid user")
 		}
 

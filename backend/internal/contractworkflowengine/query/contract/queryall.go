@@ -78,7 +78,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 		return nil, fmt.Errorf("could not read all contracts: %w", err)
 	}
 
-	evt := events.RetrieveByIDEvent{
+	evt := events.RetrieveAllEvent{
 		RetrievedBy: query.RetrievedBy,
 		OccurredAt:  time.Now(),
 	}
