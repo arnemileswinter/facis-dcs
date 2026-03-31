@@ -1,5 +1,5 @@
 import type { TemplateType } from '@/types/template-type'
-import type { ActionFlag } from '../../types/action-flag'
+import type { ContractTemplateActionFlag } from '../../types/action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { ContractTemplateData } from '../contract-template'
 
@@ -16,7 +16,7 @@ export interface ContractTemplateSubmitRequest {
   updated_at: string
   reviewers?: string[]
   approver?: string
-  forward_to?: ActionFlag
+  forward_to?: ContractTemplateActionFlag
   comments?: string[]
 }
 

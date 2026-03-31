@@ -8,8 +8,13 @@ const { errors } = storeToRefs(errorStore)
 
 <template>
   <div class="toast">
-    <div v-for="error in errors" :key="error.id" class="alert alert-error shadow-lg">
-        <span>{{ error.message }}</span>
+    <div
+      v-for="error in errors"
+      :key="error.id"
+      :class="['alert', `alert-${error.type}`, 'shadow-lg']"
+      :role="error.type === 'error' ? 'alert' : 'status'"
+    >
+      <span>{{ error.message }}</span>
     </div>
   </div>
 </template>

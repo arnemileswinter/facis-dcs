@@ -76,7 +76,7 @@ const mockUsers: UserProfile[] = [
     firstName: 'Test',
     lastName: 'User',
     email: 'test@example.com',
-    roleIds: ['TEMPLATE_APPROVER', 'TEMPLATE_CREATOR', 'TEMPLATE_MANAGER', 'TEMPLATE_REVIEWER'],
+    roleIds: ['TEMPLATE_APPROVER', 'TEMPLATE_CREATOR', 'TEMPLATE_MANAGER', 'TEMPLATE_REVIEWER', 'CONTRACT_CREATOR'],
     id: 'user-000',
     username: 'test',
   },

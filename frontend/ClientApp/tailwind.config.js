@@ -6,6 +6,10 @@ export default {
         "./index.html",
         "./src/**/*.{vue,js,ts,jsx,tsx}" 
     ],
+    safelist: [
+        "alert-error",
+        "alert-info",
+    ]
     theme: {
         extend: {},
     },
