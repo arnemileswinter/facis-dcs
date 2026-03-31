@@ -1,4 +1,4 @@
-package contract
+package command
 
 import (
 	"context"
