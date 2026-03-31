@@ -39,12 +39,12 @@ func TestApprove_ApproveContractTemplateInReviewedState(t *testing.T) {
 
 	createApprovalTasks(t, ctx, db, repo, *did, approvaltaskstate.Open, creator, approver)
 
-	verifyCmd := command.VerifyCmd{
+	verifyCmd := contracttemplate.VerifyCmd{
 		DID:        *did,
 		UpdatedAt:  time.Now(),
 		VerifiedBy: approver,
 	}
-	verifyHandler := command.Verifier{
+	verifyHandler := contracttemplate.Verifier{
 		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,

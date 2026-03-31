@@ -392,12 +392,12 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
-	cmd := command.VerifyCmd{
+	cmd := contracttemplate.VerifyCmd{
 		DID:        req.Did,
 		UpdatedAt:  updatedAt,
 		VerifiedBy: middleware.GetUsername(ctx),
 	}
-	handler := command.Verifier{
+	handler := contracttemplate.Verifier{
 		Ctx:    ctx,
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
@@ -537,11 +537,11 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 // retrieve audit history of template actions.
 func (s *templateRepositorysrvc) Audit(ctx context.Context, req *templaterepository.ContractTemplateAuditRequest) (res *templaterepository.ContractTemplateAuditResponse, err error) {
 
-	cmd := command.AuditCmd{
+	cmd := contracttemplate.AuditCmd{
 		DID:       req.Did,
 		AuditedBy: middleware.GetUsername(ctx),
 	}
-	handler := command.Auditor{
+	handler := contracttemplate.Auditor{
 		Ctx:    ctx,
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
