@@ -5,6 +5,10 @@ import type { UserRole } from '@/types/user-role'
 import { toProperCase } from '@/utils/string'
 import { computed, ref, useTemplateRef, type Ref } from 'vue'
 
+const props = defineProps<{
+  dialogType: 'template' | 'contract'
+}>()
+
 const emit = defineEmits<{
   submit: [value: SelectedUserRole[]]
 }>()
@@ -17,6 +21,16 @@ const isLoading = ref(true)
 const selectedUsers = ref<Record<string, boolean>>({})
 const selectedRole = ref<Record<string, UserRole>>({})
 
+const roles = computed(() => {
+  const roleMap: Record<typeof props.dialogType, {review: UserRole, approve: UserRole}> = {
+    template: { review: 'TEMPLATE_REVIEWER', approve: 'TEMPLATE_APPROVER'},
+    contract: {review: 'CONTRACT_REVIEWER', approve: 'CONTRACT_APPROVER'},
+  }
+  return roleMap[props.dialogType]
+})
+const reviewRole = computed(() => roles.value.review)
+const approveRole = computed(() => roles.value.approve)
+
 const hasSelectedUsers = computed(() => {
   return users.value.some((user) => selectedUsers.value[user.id])
 })
@@ -25,15 +39,15 @@ const allSelectedUsersHaveRoles = computed(() => {
 })
 const hasValidSelection = computed(() => {
   return (
-    users.value.filter((user) => selectedRole.value[user.id] === 'TEMPLATE_APPROVER').length === 1 &&
-    users.value.some((user) => selectedRole.value[user.id] === 'TEMPLATE_REVIEWER')
+    users.value.filter((user) => selectedRole.value[user.id] === approveRole.value).length === 1 &&
+    users.value.some((user) => selectedRole.value[user.id] === reviewRole.value)
   )
 })
 const isSubmitDisabled = computed(() => !hasValidSelection.value || !allSelectedUsersHaveRoles.value)
 
 async function openModal() {
   userSelectionModal.value?.showModal()
-  users.value = await userService.getAuthorizedUsersWithRoles('TEMPLATE_APPROVER', 'TEMPLATE_REVIEWER')
+  users.value = await userService.getAuthorizedUsersWithRoles(approveRole.value, reviewRole.value)
   isLoading.value = false
 }
 
@@ -55,7 +69,7 @@ function onModalClose() {
 
 function isRoleDisabled(role: UserRole, userId: string) {
   const roles = Object.values(selectedRole.value)
-  return role === 'TEMPLATE_APPROVER' && selectedRole.value[userId] !== role && roles.includes(role)
+  return role === approveRole.value && selectedRole.value[userId] !== role && roles.includes(role)
 }
 
 function onCheckboxChange(event: Event, userId: string) {

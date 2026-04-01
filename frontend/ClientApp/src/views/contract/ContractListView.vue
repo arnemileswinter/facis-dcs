@@ -29,7 +29,7 @@ async function loadContracts() {
     loading.value = false
   }
 }
-console.log(authStore.user?.roles)
+
 const isContractCreator = computed(() => authStore.user?.roles?.some((role) => ['CONTRACT_CREATOR'].includes(role)))
 
 onMounted(loadContracts)

@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
 import type { Contract } from '@/models/contract/contract'
+import type { SelectedUserRole } from '@/models/user'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useErrorStore } from '@/stores/error-store'
+import { ContractState } from '@/types/contract-state'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -34,11 +37,11 @@ const submit = async () => {
       errorStore.add('Contract created.', 'info')
     } else if (contract.value) {
       await contractWorkflowService.update({
-          did: contract.value.did,
-          updated_at: contract.value.updated_at,
-          name: contract.value.name,
-          description: contract.value.description
-        })
+        did: contract.value.did,
+        updated_at: contract.value.updated_at,
+        name: contract.value.name,
+        description: contract.value.description,
+      })
       router.push({ name: ROUTES.CONTRACTS.LIST })
     }
   } catch (error) {
@@ -56,7 +59,6 @@ watch(
         const id = did.value || route.params.did
         if (id && !Array.isArray(id)) {
           contract.value = await contractWorkflowService.retrieveById({ did: id })
-          console.log(contract.value)
         }
       } catch (err: any) {
         console.error('Failed to load contract')
@@ -65,6 +67,21 @@ watch(
   },
   { immediate: true },
 )
+
+const submitContract = async (result: SelectedUserRole[]) => {
+  if (!contract.value) return
+  const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
+  const approver = result.find((user) => user.role === 'CONTRACT_APPROVER')?.user.username!
+  const response = await contractWorkflowService.submit({
+    did: contract.value?.did,
+    updated_at: contract.value?.updated_at,
+    reviewers,
+    approver,
+  })
+  if (response.did) {
+    router.push({ name: ROUTES.CONTRACTS.LIST })
+  }
+}
 </script>
 
 <template>
@@ -93,6 +110,12 @@ watch(
           <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
           {{ isEditMode ? 'Update Template' : 'Create' }}
         </button>
+        <SubmitSelectionDialog
+          v-if="isEditMode && contract?.state === ContractState.draft"
+          dialog-type="contract"
+          @submit="submitContract"
+          class="btn btn-primary flex-1"
+        />
       </div>
     </div>
   </div>

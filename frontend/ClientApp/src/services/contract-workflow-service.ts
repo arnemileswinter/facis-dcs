@@ -57,7 +57,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async review(request: ContractReviewRequest) {
-    return http.get<ContractReviewResponse>('/contract/review').then((res) => res.data)
+    return http.get<ContractReviewResponse>('/contract/review', { params: request }).then((res) => res.data)
   },
 
   async retrieve(_request?: ContractRetrieveRequest) {
