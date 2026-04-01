@@ -7,7 +7,9 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -15,6 +17,7 @@ import (
 type AuditCmd struct {
 	DID       string
 	AuditedBy string
+	UpdatedAt time.Time
 }
 
 type Auditor struct {
@@ -33,6 +36,15 @@ func (h *Auditor) Handle(cmd AuditCmd) error {
 		return fmt.Errorf("could not start transaction: %w", err)
 	}
 	defer tx.Rollback()
+
+	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read process data: %w", err)
+	}
+
+	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+		return errors.New("contract was updated elsewhere, please reload")
+	}
 
 	evt := contractevents.AuditEvent{
 		DID:       cmd.DID,

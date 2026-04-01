@@ -10,6 +10,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationaction"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -47,6 +48,7 @@ func TestNegotiation_CreateNegotiation(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
@@ -112,6 +114,7 @@ func TestNegotiation_CreateNegotiationAndCounterpartSet(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User 2",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
@@ -186,6 +189,7 @@ func TestNegotiation_AllCounterpartsAcceptChangeRequest(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
@@ -296,6 +300,7 @@ func TestNegotiation_OneCounterpartRejectChangeRequest(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
@@ -406,6 +411,7 @@ func TestNegotiation_OneAcceptionOneRejectionOfChangeRequest(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
@@ -533,6 +539,7 @@ func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 		DID:           *did,
 		NegotiatedBy:  "Test User",
 		ChangeRequest: &jsonChangeRequest,
+		UpdatedAt:     time.Now(),
 	}
 	handler := command.Negotiator{
 		Ctx:    ctx,
