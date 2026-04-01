@@ -232,6 +232,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
+		NRepo: s.NRepo,
 	}
 	contractResult, err := queryHandler.Handle(qry)
 	if err != nil {
