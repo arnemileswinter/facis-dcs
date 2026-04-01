@@ -45,7 +45,7 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 	}
 
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
-		return errors.New("contract template was updated elsewhere, please reload")
+		return errors.New("contract was updated elsewhere, please reload")
 	}
 
 	hasTask, err := h.RTRepo.TaskExistsInState(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())

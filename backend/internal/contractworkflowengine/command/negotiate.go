@@ -47,6 +47,10 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
 
+	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+		return errors.New("contract was updated elsewhere, please reload")
+	}
+
 	if processData.State != contractstate.Negotiation.String() {
 		return errors.New("current contract state is invalid")
 	}

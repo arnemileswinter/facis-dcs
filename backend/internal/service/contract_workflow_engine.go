@@ -511,9 +511,15 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 
 func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
 
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
 	cmd := command.RecordEvidenceCmd{
 		DID:        req.Did,
 		RecordedBy: middleware.GetUsername(ctx),
+		UpdatedAt:  updatedAt,
 	}
 	handler := command.EvidenceRecorder{
 		Ctx:   ctx,
@@ -532,9 +538,15 @@ func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractwor
 
 func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
 
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
 	cmd := command.TerminateCmd{
 		DID:          req.Did,
 		TerminatedBy: middleware.GetUsername(ctx),
+		UpdatedAt:    updatedAt,
 	}
 	handler := command.Terminator{
 		Ctx:   ctx,
@@ -553,9 +565,15 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 
 func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractworkflowengine.ContractAuditRequest) (res *contractworkflowengine.ContractAuditResponse, err error) {
 
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
 	cmd := contract.AuditCmd{
 		DID:       req.Did,
 		AuditedBy: middleware.GetUsername(ctx),
+		UpdatedAt: updatedAt,
 	}
 	handler := contract.Auditor{
 		Ctx:   ctx,

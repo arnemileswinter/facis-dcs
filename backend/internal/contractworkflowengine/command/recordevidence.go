@@ -7,6 +7,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type RecordEvidenceCmd struct {
 	DID        string
 	RecordedBy string
+	UpdatedAt  time.Time
 }
 
 type EvidenceRecorder struct {
@@ -38,6 +40,10 @@ func (h *EvidenceRecorder) Handle(cmd RecordEvidenceCmd) error {
 	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
+	}
+
+	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+		return errors.New("contract was updated elsewhere, please reload")
 	}
 
 	evt := contractevents.RecordEvidenceEvent{

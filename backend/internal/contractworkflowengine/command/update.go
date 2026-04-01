@@ -48,7 +48,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		return fmt.Errorf("could not read contract data: %w", err)
 	}
 
-	if cmd.UpdatedAt.Before(oldData.UpdatedAt) {
+	if cmd.UpdatedAt.Unix() < oldData.UpdatedAt.Unix() {
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 

@@ -5,6 +5,7 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/contractworkflowengine"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
@@ -80,7 +81,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
-	if cmd.UpdatedAt.Before(processData.UpdatedAt) {
+	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 
@@ -121,20 +122,59 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("not all negotiations are processed")
 		}
 
+		err = contractworkflowengine.MergeChangeRequests(tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
+		if err != nil {
+			return fmt.Errorf("could not merge change requests: %w", err)
+		}
+
+		newVersion := 1
+		if processData.ContractVersion != nil {
+			newVersion = *processData.ContractVersion + 1
+		}
+
+		err = h.CRepo.Update(tx, db.ContractUpdateData{
+			DID:             cmd.DID,
+			ContractVersion: &newVersion,
+		})
+		if err != nil {
+			return fmt.Errorf("could not update contract version: %w", err)
+		}
+
+		evt := contractevents.IncreaseContractVersionEvent{
+			DID:                cmd.DID,
+			OldContractVersion: processData.ContractVersion,
+			NewContractVersion: &newVersion,
+			SubmittedBy:        cmd.SubmittedBy,
+			OccurredAt:         time.Now(),
+		}
+		err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
+		if err != nil {
+			return fmt.Errorf("could not create event: %w", err)
+		}
+
 		nextState = contractstate.Submitted
 
 	} else if processData.State == contractstate.Submitted.String() {
 
+		isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
+		if err != nil {
+			return err
+		}
+
+		if !isValid {
+			return errors.New("invalid user")
+		}
+
 		if cmd.ActionFlag != nil {
 			if *cmd.ActionFlag == actionflag.Approval {
 
-				valid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
+				exist, err := h.RTRepo.TaskExistsInState(tx, processData.DID, cmd.SubmittedBy, reviewtaskstate.Open.String())
 				if err != nil {
 					return err
 				}
 
-				if !valid {
-					return errors.New("invalid user")
+				if exist {
+					return errors.New("contract template needs to be verified before")
 				}
 
 				err = h.RTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, contractstate.Approved.String())
@@ -142,7 +182,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 					return fmt.Errorf("could not update approval task: %w", err)
 				}
 
-				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String())
+				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String(), reviewtaskstate.Verified.String())
 				if err != nil {
 					return fmt.Errorf("could not check if review task exists: %w", err)
 				}
@@ -152,15 +192,6 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 				}
 
 			} else if *cmd.ActionFlag == actionflag.Reject {
-
-				isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
-				if err != nil {
-					return err
-				}
-
-				if !isValid {
-					return errors.New("invalid user")
-				}
 
 				err = h.RTRepo.ReopenTasks(tx, cmd.DID)
 				if err != nil {
@@ -178,19 +209,6 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		} else {
 			return errors.New("action flags is missing")
 		}
-
-	} else if processData.State == contractstate.Reviewed.String() {
-
-		isValid, err := h.ATRepo.IsValidApprover(tx, processData.DID, cmd.SubmittedBy)
-		if err != nil {
-			return err
-		}
-
-		if !isValid {
-			return errors.New("invalid user")
-		}
-
-		nextState = contractstate.Approved
 
 	} else {
 		return errors.New("current contract state is invalid")

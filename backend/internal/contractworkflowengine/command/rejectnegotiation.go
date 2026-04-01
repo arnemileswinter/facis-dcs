@@ -75,38 +75,6 @@ func (h *NegotiationRejector) Handle(cmd RejectNegotiationCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
 	}
-	/*
-		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(tx, cmd.DID, processData.ContractVersion)
-		if err != nil {
-			return fmt.Errorf("could not check open negotiations: %w", err)
-		}
 
-		if hasOpenNegotiations == false {
-			err := contractworkflowengine.MergeChangeRequests(tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
-			if err != nil {
-				return fmt.Errorf("could not merge change requests: %w", err)
-			}
-
-			newVersion := *processData.ContractVersion + 1
-			err = h.CRepo.Update(tx, db.ContractUpdateData{
-				ContractVersion: &newVersion,
-			})
-			if err != nil {
-				return fmt.Errorf("could not update contract version: %w", err)
-			}
-
-			evt := contractevents.IncreaseContractVersionEvent{
-				DID:                cmd.DID,
-				OldContractVersion: processData.ContractVersion,
-				NewContractVersion: &newVersion,
-				TriggeredBy:        cmd.RejectedBy,
-				OccurredAt:         time.Now(),
-			}
-			err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
-			if err != nil {
-				return fmt.Errorf("could not create event: %w", err)
-			}
-		}
-	*/
 	return tx.Commit()
 }

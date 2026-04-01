@@ -334,8 +334,9 @@ var ContractStoreRequest = Type("ContractStoreRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "Updated at")
 
-	Required("did")
+	Required("did", "updated_at")
 })
 
 var ContractStoreResponse = Type("ContractStoreResponse", func() {
@@ -352,8 +353,9 @@ var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "Updated at")
 
-	Required("did")
+	Required("did", "updated_at")
 })
 
 var ContractTerminateResponse = Type("ContractTerminateResponse", func() {
@@ -370,8 +372,9 @@ var ContractAuditRequest = Type("ContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "Updated at")
 
-	Required("did")
+	Required("did", "updated_at")
 })
 
 var ContractAuditResponse = Type("ContractAuditResponse", func() {
