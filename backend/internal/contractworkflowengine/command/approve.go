@@ -9,7 +9,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
-	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"errors"
 	"fmt"
 	"time"
@@ -69,7 +68,7 @@ func (h *Approver) Handle(cmd ApproveCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Approved.String())
+	err = h.CRepo.UpdateState(tx, cmd.DID, contractstate.Approved.String())
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}

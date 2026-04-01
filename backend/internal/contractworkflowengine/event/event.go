@@ -296,7 +296,7 @@ type IncreaseContractVersionEvent struct {
 	DID                string    `json:"did"`
 	OldContractVersion *int      `json:"old_contract_version,omitempty"`
 	NewContractVersion *int      `json:"new_contract_version,omitempty"`
-	TriggeredBy        string    `json:"reviewed_by"`
+	SubmittedBy        string    `json:"submitted_by"`
 	OccurredAt         time.Time `json:"occurred_at"`
 }
 
