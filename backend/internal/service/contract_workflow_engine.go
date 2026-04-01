@@ -101,6 +101,7 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 		DID:             req.Did,
 		ContractVersion: req.ContractVersion,
 		UpdatedAt:       updatedAt,
+		UpdatedBy:       middleware.GetUsername(ctx),
 		Name:            req.Name,
 		Description:     req.Description,
 		ContractData:    &metaData,
