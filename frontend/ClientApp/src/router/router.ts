@@ -27,10 +27,10 @@ const ROUTES = {
     VIEW: 'templates.view',
     REVIEW: 'templates.review',
     APPROVE: 'templates.approve',
-    TASKS: {
-      REVIEW: 'templates.tasks.review',
-      APPROVAL: 'templates.tasks.approve',
-    },
+  },
+  TASKS: {
+    REVIEWS: 'tasks.reviews',
+    APPROVALS: 'tasks.approvals',
   },
   TEMPLATE_CATALOGUES: {
     LIST: 'template.catalogues.list',
@@ -121,8 +121,8 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/templates/tasks/review',
-    name: ROUTES.TEMPLATES.TASKS.REVIEW,
+    path: '/tasks/reviews',
+    name: ROUTES.TASKS.REVIEWS,
     component: ContractTemplateTaskView,
     meta: {
       name: 'Assigned Review Tasks',
@@ -141,8 +141,8 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/templates/tasks/approve',
-    name: ROUTES.TEMPLATES.TASKS.APPROVAL,
+    path: '/tasks/approvals',
+    name: ROUTES.TASKS.APPROVALS,
     component: ContractTemplateTaskView,
     meta: {
       name: 'Assigned Approval Tasks',

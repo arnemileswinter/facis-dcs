@@ -14,10 +14,10 @@ const { reviewTasks, approvalTasks } = storeToRefs(templatesStore)
     {{ $route.meta.name }}
   </h2>
 
-  <div v-if="$route.name === ROUTES.TEMPLATES.TASKS.REVIEW">
+  <div v-if="$route.name === ROUTES.TASKS.REVIEWS">
     <ReviewTaskList :items="reviewTasks" />
   </div>
-  <div v-else-if="$route.name === ROUTES.TEMPLATES.TASKS.APPROVAL">
+  <div v-else-if="$route.name === ROUTES.TASKS.APPROVALS">
     <ApprovalTaskList :items="approvalTasks" />
   </div>
 </template>

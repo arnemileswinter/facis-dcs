@@ -33,10 +33,10 @@ export function useTemplateTable() {
             templatesStore.approvalTasks = approvalTasks.value
             roles.value = authStore.user?.roles ?? []
             if (reviewTasks.value.length > 0) {
-                dataRouteStore.addDataRouteLoaded(ROUTES.TEMPLATES.TASKS.REVIEW)
+                dataRouteStore.addDataRouteLoaded(ROUTES.TASKS.REVIEWS)
             }
             if (approvalTasks.value.length > 0) {
-                dataRouteStore.addDataRouteLoaded(ROUTES.TEMPLATES.TASKS.APPROVAL)
+                dataRouteStore.addDataRouteLoaded(ROUTES.TASKS.APPROVALS)
             }
         } catch (err: any) {
             error.value = err.message || 'Fehler beim Laden der Templates'
