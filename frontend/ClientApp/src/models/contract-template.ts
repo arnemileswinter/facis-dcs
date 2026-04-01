@@ -23,4 +23,15 @@ export interface ContractTemplateData {
     semanticConditions: SemanticCondition[]
     documentBlocks: DocumentBlock[]
     customMetaData: MetaData[]
+    // Only when the template is a frame contract, it can have sub-templates
+    subTemplateSnapshots?: SubTemplateSnapshot[]
+}
+
+export interface SubTemplateSnapshot {
+    did: string
+    document_number?: string
+    version?: number
+    name?: string
+    description?: string
+    template_data?: Omit<ContractTemplateData, 'subTemplateSnapshots'>
 }

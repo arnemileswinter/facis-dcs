@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type { TemplateDraftState, AddBlockPayload, AddBlockOptions } from "@template-repository/models/template-draft-store"
 import type { DocumentOutline, DocumentOutlineBlock, DocumentBlock, TemplateTypeValue, SemanticCondition, MetaData } from "@template-repository/models/contract-templace"
 import { DocumentBlockType, TemplateType, isClauseBlock, isSectionBlock, isApprovedTemplateBlock } from "@template-repository/models/contract-templace"
+import type { ContractTemplate, SubTemplateSnapshot } from '@/models/contract-template'
 import type { ContractTemplateCreateRequest, ContractTemplateUpdateRequest } from '@/models/requests/template-request'
 
 const storeId = "templateDraft"
@@ -13,6 +14,7 @@ const defaultState: Readonly<TemplateDraftState> = {
   documentBlocks: [],
   semanticConditions: [],
   customMetaData: [],
+  subTemplateSnapshots: [],
   templateType: TemplateType.subContract,
   state: null,
   document_number: null,
@@ -39,6 +41,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
+          subTemplateSnapshots: this.subTemplateSnapshots,
         }
       }
     },
@@ -54,6 +57,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
+          subTemplateSnapshots: this.subTemplateSnapshots,
         },
       }
     }
@@ -186,6 +190,23 @@ export const useTemplateDraftStore = defineStore(storeId, {
     },
     updateDescription(description: string): void {
       this.description = description
+    },
+    addSubTemplateSnapshot(template: ContractTemplate): void {
+      const snapshot:SubTemplateSnapshot = {
+        did: template.did,
+        version: template.version,
+        document_number: template.document_number,
+        name: template.name,
+        description: template.description,
+        template_data: template.template_data,
+      }
+      this.subTemplateSnapshots = [
+        ... this.subTemplateSnapshots.filter((item) => !isSameTemplate(item, snapshot)),
+        snapshot
+      ]
+    },
+    removeSubTemplateSnapshot(template: { did: string, version?: number, document_number?: string }): void {
+      this.subTemplateSnapshots = this.subTemplateSnapshots.filter((item) => !isSameTemplate(item, template))
     },
     reset(overrides?: Partial<TemplateDraftState>) {
       Object.assign(this, getInitialState())
@@ -377,5 +398,13 @@ function getInitialState(): TemplateDraftState {
     documentBlocks: [...defaultState.documentBlocks],
     semanticConditions: [...defaultState.semanticConditions],
     customMetaData: [...defaultState.customMetaData],
+    subTemplateSnapshots: [...defaultState.subTemplateSnapshots],
   }
+}
+
+function isSameTemplate(
+  t1: { did: string, version?: number, document_number?: string },
+  t2: { did: string, version?: number, document_number?: string }
+): boolean {
+  return t1.did === t2.did && t1.version === t2.version && t1.document_number === t2.document_number
 }

@@ -1,4 +1,5 @@
 import type { ContractTemplateState } from "@/types/contract-template-state"
+import type { SubTemplateSnapshot } from "@/models/contract-template"
 import type {
   DocumentOutline,
   DocumentBlock,
@@ -16,6 +17,7 @@ interface TemplateDraftState {
   documentBlocks: DocumentBlock[]
   semanticConditions: SemanticCondition[]
   customMetaData: MetaData[]
+  subTemplateSnapshots: SubTemplateSnapshot[]
   templateType: TemplateTypeValue
   state: ContractTemplateState | null
   document_number: string | null

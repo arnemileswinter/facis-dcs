@@ -18,8 +18,6 @@ import type { PartialContractTemplate } from '@/models/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useAuthStore } from '@/stores/auth-store'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
-import { isApprovedTemplateBlock } from '@template-repository/models/contract-templace'
-import { useApprovedSubTemplateStore } from '@template-repository/store/approvedSubTemplateStore'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
 import { computed, ref, watch, type Ref } from 'vue'
@@ -30,7 +28,6 @@ const route = useRoute()
 
 const authStore = useAuthStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
-const approvedSubTemplateStore = useApprovedSubTemplateStore()
 const draftStore = useTemplateDraftStore()
 
 const hasDid = computed(() => !!route.params.did)
@@ -43,14 +40,13 @@ const isManager = computed(() => {
 const contractTemplate: Ref<PartialContractTemplate | null> = ref(null)
 
 watch(hasDid, (hasDid) => {
-  approvedSubTemplateStore.resetTemplates()
   templateEditorUiStore.reset()
   if (!hasDid) return
 
   hasChosenType.value = true
   const did = `${route.params.did}`
   contractTemplateService.retrieveById({ did })
-    .then(async template => {
+    .then(template => {
       if (!template) {
         draftStore.reset()
         return
@@ -66,21 +62,13 @@ watch(hasDid, (hasDid) => {
         documentBlocks: template.template_data?.documentBlocks ?? [],
         semanticConditions: template.template_data?.semanticConditions ?? [],
         customMetaData: template.template_data?.customMetaData ?? [],
+        subTemplateSnapshots: template.template_data?.subTemplateSnapshots ?? [],
         templateType: template.template_type,
         state: template.state,
         version: template.version ?? null,
         document_number: template.document_number ?? null,
         updated_at: template.updated_at ?? null,
       })
-
-      const approvedBlocks = draftStore.documentBlocks.filter((b) => isApprovedTemplateBlock(b))
-
-      for (const block of approvedBlocks) {
-        const template = await contractTemplateService.retrieveById({ did: block.templateId })
-        if (template) {
-          approvedSubTemplateStore.addTemplate(template)
-        }
-      }
     })
     .catch(error => {
       console.error('Failed to load template for editing', error)
