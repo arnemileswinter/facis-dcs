@@ -538,6 +538,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		HTTP(func() {
 			GET("/contract/review")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
