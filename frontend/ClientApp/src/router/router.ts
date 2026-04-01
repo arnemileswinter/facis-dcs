@@ -29,9 +29,6 @@ const ROUTES = {
     },
   },
   TEMPLATE_CATALOGUES: {
-    LIST: 'template.catalogues.list',
-    VIEW: 'template.catalogues.view',
-    NEGOTIATION_CREATE: 'template.catalogues.negotiation.create',
     ADMIN: 'template.catalogues.admin',
   },
   AUTH: {
