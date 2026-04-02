@@ -3,6 +3,8 @@ import type {
   TemplateCatalogueCreateParticipantRequest,
   TemplateCatalogueDeleteParticipantRequest,
   TemplateCatalogueGetCurrentParticipantRequest,
+  TemplateCatalogueGetCurrentParticipantSummaryRequest,
+  TemplateCatalogueGetOtherParticipantsRequest,
   TemplateCatalogueRetrieveByIdRequest,
   TemplateCatalogueRetrieveRequest,
   TemplateCatalogueUpdateParticipantRequest,
@@ -15,6 +17,8 @@ import type {
   TemplateCatalogueCreateParticipantResponse,
   TemplateCatalogueDeleteParticipantResponse,
   TemplateCatalogueGetCurrentParticipantResponse,
+  TemplateCatalogueGetCurrentParticipantSummaryResponse,
+  TemplateCatalogueGetOtherParticipantsResponse,
   TemplateCatalogueRetrieveByIdResponse,
   TemplateCatalogueRetrieveResponse,
   TemplateCatalogueUpdateParticipantResponse,
@@ -45,6 +49,28 @@ export const templateCatalogueIntegrationService = {
         }
         throw err
       })
+  },
+
+  async get_current_participant_summary(
+    _request: TemplateCatalogueGetCurrentParticipantSummaryRequest = {},
+  ): Promise<TemplateCatalogueGetCurrentParticipantSummaryResponse | null> {
+    return http
+      .get<TemplateCatalogueGetCurrentParticipantSummaryResponse>('/catalogue/participant/current/summary')
+      .then((res) => res.data)
+      .catch((err: any) => {
+        if (err?.response?.status === 404) {
+          return null
+        }
+        throw err
+      })
+  },
+
+  async get_other_participants(
+    _request: TemplateCatalogueGetOtherParticipantsRequest = {},
+  ): Promise<TemplateCatalogueGetOtherParticipantsResponse> {
+    return http
+      .get<TemplateCatalogueGetOtherParticipantsResponse>('/catalogue/participant/others')
+      .then((res) => res.data)
   },
 
   async update_participant(

@@ -10,8 +10,6 @@ import ContractListView from '@/views/contract/ContractListView.vue'
 import NewContractView from '@/views/contract/NewContractView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
-import TemplateCatalogueListView from '@/views/template-repository/TemplateCatalogueListView.vue'
-import TemplateCatalogueView from '@/views/template-repository/TemplateCatalogueView.vue'
 import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
 import { DocumentCheckIcon, DocumentDuplicateIcon, DocumentMagnifyingGlassIcon, DocumentTextIcon } from '@heroicons/vue/20/solid'
 import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
@@ -32,8 +30,6 @@ const ROUTES = {
     APPROVALS: 'tasks.approvals',
   },
   TEMPLATE_CATALOGUES: {
-    LIST: 'template.catalogues.list',
-    VIEW: 'template.catalogues.view',
     ADMIN: 'template.catalogues.admin',
   },
   AUTH: {
@@ -146,29 +142,6 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/catalogues',
-    name: ROUTES.TEMPLATE_CATALOGUES.LIST,
-    component: TemplateCatalogueListView,
-    meta: {
-      name: 'Template Catalogues',
-      icon: DocumentTextIcon,
-      requiresAuth: true,
-      title: 'DCS - Template Catalogues',
-      order: 4,
-    },
-  },
-  {
-    path: '/catalogues/:did',
-    name: ROUTES.TEMPLATE_CATALOGUES.VIEW,
-    component: TemplateCatalogueView,
-    meta: {
-      name: 'Template Catalogue',
-      hideInSidebar: true,
-      requiresAuth: true,
-      title: 'DCS - Template Catalogue',
-    },
-  },
-  {
     path: '/catalogues/admin',
     name: ROUTES.TEMPLATE_CATALOGUES.ADMIN,
     component: TemplateCatalogueAdminView,
@@ -177,7 +150,7 @@ const routes: RouteRecordRaw[] = [
       icon: DocumentTextIcon,
       requiresAuth: true,
       title: 'DCS - Template Catalogue Admin',
-      order: 5,
+      order: 4,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
