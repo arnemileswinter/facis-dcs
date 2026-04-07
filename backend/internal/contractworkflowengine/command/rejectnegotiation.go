@@ -26,8 +26,8 @@ type NegotiationRejector struct {
 	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
-	RTRepo db.ReviewTaskRepo
 	NRepo  db.NegotiationRepo
+	NTRepo db.NegotiationTaskRepo
 }
 
 func (h *NegotiationRejector) Handle(cmd RejectNegotiationCmd) error {
@@ -50,12 +50,12 @@ func (h *NegotiationRejector) Handle(cmd RejectNegotiationCmd) error {
 		return errors.New("current contract state is invalid")
 	}
 
-	isValidCounterpart, err := h.NRepo.IsValidCounterpart(tx, cmd.DID, processData.ContractVersion, cmd.RejectedBy)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.RejectedBy)
 	if err != nil {
 		return fmt.Errorf("could not validate negotiator: %w", err)
 	}
 
-	if cmd.RejectedBy != processData.CreatedBy && isValidCounterpart == false {
+	if isValidNegotiator == false {
 		return errors.New("invalid user")
 	}
 

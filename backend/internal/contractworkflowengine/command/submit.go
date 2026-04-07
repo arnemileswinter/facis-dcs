@@ -8,6 +8,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -22,8 +23,9 @@ type SubmitCmd struct {
 	DID         string
 	UpdatedAt   time.Time
 	SubmittedBy string
-	Reviewer    []string
+	Reviewers   []string
 	Approver    *string
+	Negotiators []string
 	ActionFlag  *actionflag.ActionFlag
 	Comments    []string
 }
@@ -35,10 +37,11 @@ type Submitter struct {
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 	NRepo  db.NegotiationRepo
+	NTRepo db.NegotiationTaskRepo
 }
 
-func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, cmd SubmitCmd) error {
-	for _, reviewer := range cmd.Reviewer {
+func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, ntRepo db.NegotiationTaskRepo, cmd SubmitCmd) error {
+	for _, reviewer := range cmd.Reviewers {
 		reviewTask := db.ReviewTaskData{
 			DID:       cmd.DID,
 			Reviewer:  reviewer,
@@ -47,7 +50,31 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 		}
 		_, err := rtRepo.Create(tx, reviewTask)
 		if err != nil {
-			return fmt.Errorf("could not create review tasks: %w", err)
+			return fmt.Errorf("could not create review task: %w", err)
+		}
+	}
+
+	negotiationTask := db.NegotiationTaskData{
+		DID:        cmd.DID,
+		Negotiator: cmd.SubmittedBy,
+		State:      reviewtaskstate.Open.String(),
+		CreatedBy:  cmd.SubmittedBy,
+	}
+	_, err := ntRepo.Create(tx, negotiationTask)
+	if err != nil {
+		return fmt.Errorf("could not create negotiation task: %w", err)
+	}
+
+	for _, negotiator := range cmd.Negotiators {
+		negotiationTask := db.NegotiationTaskData{
+			DID:        cmd.DID,
+			Negotiator: negotiator,
+			State:      reviewtaskstate.Open.String(),
+			CreatedBy:  cmd.SubmittedBy,
+		}
+		_, err := ntRepo.Create(tx, negotiationTask)
+		if err != nil {
+			return fmt.Errorf("could not create negotiation task: %w", err)
 		}
 	}
 
@@ -57,7 +84,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 		Approver:  *cmd.Approver,
 		State:     reviewtaskstate.Open.String(),
 	}
-	_, err := atRepo.Create(tx, data)
+	_, err = atRepo.Create(tx, data)
 	if err != nil {
 		return fmt.Errorf("could not create approval task: %w", err)
 	}
@@ -92,15 +119,19 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("invalid user")
 		}
 
-		if len(cmd.Reviewer) == 0 {
+		if len(cmd.Reviewers) == 0 {
 			return errors.New("no reviewer provided")
+		}
+
+		if len(cmd.Negotiators) == 0 {
+			return errors.New("no negotiators provided")
 		}
 
 		if cmd.Approver == nil || len(*cmd.Approver) == 0 {
 			return errors.New("no approver provided")
 		}
 
-		err := createTasks(tx, h.RTRepo, h.ATRepo, cmd)
+		err := createTasks(tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd)
 		if err != nil {
 			return err
 		}
@@ -118,6 +149,11 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("could not reopen review tasks")
 		}
 
+		err = h.NTRepo.ReopenTasks(tx, cmd.DID)
+		if err != nil {
+			return errors.New("could not reopen negotiation tasks")
+		}
+
 		err = h.ATRepo.ReopenTasks(tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen approval tasks")
@@ -127,7 +163,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		if cmd.SubmittedBy != processData.CreatedBy {
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.SubmittedBy)
+		if err != nil {
+			return fmt.Errorf("could not validate negotiator: %w", err)
+		}
+
+		if isValidNegotiator == false {
 			return errors.New("invalid user")
 		}
 
@@ -140,37 +181,50 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("not all negotiations are processed")
 		}
 
-		err = contractworkflowengine.MergeChangeRequests(tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
+		err = h.NTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, negotiationtaskstate.Accepted.String())
 		if err != nil {
-			return fmt.Errorf("could not merge change requests: %w", err)
+			return fmt.Errorf("could not update negotiation task: %w", err)
 		}
 
-		newVersion := 1
-		if processData.ContractVersion != nil {
-			newVersion = *processData.ContractVersion + 1
-		}
-
-		err = h.CRepo.Update(tx, db.ContractUpdateData{
-			DID:             cmd.DID,
-			ContractVersion: &newVersion,
-		})
+		existOpenTasks, err := h.NTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String())
 		if err != nil {
-			return fmt.Errorf("could not update contract version: %w", err)
+			return fmt.Errorf("could not check if review task exists: %w", err)
 		}
 
-		evt := contractevents.IncreaseContractVersionEvent{
-			DID:                cmd.DID,
-			OldContractVersion: processData.ContractVersion,
-			NewContractVersion: &newVersion,
-			SubmittedBy:        cmd.SubmittedBy,
-			OccurredAt:         time.Now(),
-		}
-		err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
-		if err != nil {
-			return fmt.Errorf("could not create event: %w", err)
-		}
+		if existOpenTasks == false {
 
-		nextState = contractstate.Submitted
+			err = contractworkflowengine.MergeChangeRequests(tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
+			if err != nil {
+				return fmt.Errorf("could not merge change requests: %w", err)
+			}
+
+			newVersion := 1
+			if processData.ContractVersion != nil {
+				newVersion = *processData.ContractVersion + 1
+			}
+
+			err = h.CRepo.Update(tx, db.ContractUpdateData{
+				DID:             cmd.DID,
+				ContractVersion: &newVersion,
+			})
+			if err != nil {
+				return fmt.Errorf("could not update contract version: %w", err)
+			}
+
+			evt := contractevents.IncreaseContractVersionEvent{
+				DID:                cmd.DID,
+				OldContractVersion: processData.ContractVersion,
+				NewContractVersion: &newVersion,
+				SubmittedBy:        cmd.SubmittedBy,
+				OccurredAt:         time.Now(),
+			}
+			err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
+			if err != nil {
+				return fmt.Errorf("could not create event: %w", err)
+			}
+
+			nextState = contractstate.Submitted
+		}
 
 	} else if processData.State == contractstate.Submitted.String() {
 
@@ -212,6 +266,11 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			} else if *cmd.ActionFlag == actionflag.Reject {
 
 				err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+				if err != nil {
+					return err
+				}
+
+				err = h.NTRepo.ReopenTasks(tx, cmd.DID)
 				if err != nil {
 					return err
 				}

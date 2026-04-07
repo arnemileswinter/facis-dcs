@@ -11,11 +11,11 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type PostgresNegotiatorTaskRepo struct {
+type PostgresNegotiationTaskRepo struct {
 	Ctx context.Context
 }
 
-func (r *PostgresNegotiatorTaskRepo) Create(tx *sqlx.Tx, data db.NegotiationTaskData) (*time.Time, error) {
+func (r *PostgresNegotiationTaskRepo) Create(tx *sqlx.Tx, data db.NegotiationTaskData) (*time.Time, error) {
 	statement := `
         INSERT INTO contract_negotiation_task (
             did, state, negotiator, created_by
@@ -31,7 +31,7 @@ func (r *PostgresNegotiatorTaskRepo) Create(tx *sqlx.Tx, data db.NegotiationTask
 	return &createdAt, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) IsValidNegotiator(tx *sqlx.Tx, did string, negotiator string) (bool, error) {
+func (r *PostgresNegotiationTaskRepo) IsValidNegotiator(tx *sqlx.Tx, did string, negotiator string) (bool, error) {
 	query := `
         SELECT COUNT(*) FROM contract_negotiation_task
         WHERE did = $1 AND negotiator = $2
@@ -44,7 +44,7 @@ func (r *PostgresNegotiatorTaskRepo) IsValidNegotiator(tx *sqlx.Tx, did string, 
 	return count > 0, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) ReopenTasks(tx *sqlx.Tx, did string) error {
+func (r *PostgresNegotiationTaskRepo) ReopenTasks(tx *sqlx.Tx, did string) error {
 	statement := `
         UPDATE contract_negotiation_task SET state = 'OPEN'
         WHERE did = $1
@@ -53,7 +53,7 @@ func (r *PostgresNegotiatorTaskRepo) ReopenTasks(tx *sqlx.Tx, did string) error 
 	return err
 }
 
-func (r *PostgresNegotiatorTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
+func (r *PostgresNegotiationTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
 	query := `
         SELECT id, did, state, negotiator,
                created_by, created_at
@@ -67,7 +67,7 @@ func (r *PostgresNegotiatorTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.Nego
 	return negotiationTasks, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
+func (r *PostgresNegotiationTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db.NegotiationTaskData, error) {
 	query := `
         SELECT id, did, state, negotiator,
                created_by, created_at
@@ -81,7 +81,7 @@ func (r *PostgresNegotiatorTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db
 	return negotiationTasks, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) ReadAllByReviewer(tx *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
+func (r *PostgresNegotiationTaskRepo) ReadAllByNegotiator(tx *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
 	query := `
         SELECT id, did, state, negotiator,
                created_by, created_at
@@ -95,7 +95,7 @@ func (r *PostgresNegotiatorTaskRepo) ReadAllByReviewer(tx *sqlx.Tx, negotiator s
 	return negotiationTasks, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) ReadNegotiatorsForDID(tx *sqlx.Tx, did string) ([]string, error) {
+func (r *PostgresNegotiationTaskRepo) ReadNegotiatorsForDID(tx *sqlx.Tx, did string) ([]string, error) {
 	query := `
         SELECT negotiator
         FROM contract_negotiation_task WHERE did = $1
@@ -108,7 +108,7 @@ func (r *PostgresNegotiatorTaskRepo) ReadNegotiatorsForDID(tx *sqlx.Tx, did stri
 	return reviewers, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) UpdateState(tx *sqlx.Tx, did string, negotiator string, state string) error {
+func (r *PostgresNegotiationTaskRepo) UpdateState(tx *sqlx.Tx, did string, negotiator string, state string) error {
 	statement := `
         UPDATE contract_negotiation_task SET state = $3
         WHERE did = $1 AND negotiator = $2
@@ -127,7 +127,7 @@ func (r *PostgresNegotiatorTaskRepo) UpdateState(tx *sqlx.Tx, did string, negoti
 	return nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error) {
+func (r *PostgresNegotiationTaskRepo) AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error) {
 	placeholders := make([]string, len(states))
 	args := []interface{}{did}
 
@@ -150,7 +150,7 @@ func (r *PostgresNegotiatorTaskRepo) AnyTasksInState(tx *sqlx.Tx, did string, st
 	return count > 0, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) TaskExistsInState(tx *sqlx.Tx, did string, negotiator string, state string) (bool, error) {
+func (r *PostgresNegotiationTaskRepo) TaskExistsInState(tx *sqlx.Tx, did string, negotiator string, state string) (bool, error) {
 	query := `
         SELECT COUNT(*) 
         FROM contract_negotiation_task 
@@ -164,7 +164,7 @@ func (r *PostgresNegotiatorTaskRepo) TaskExistsInState(tx *sqlx.Tx, did string, 
 	return count > 0, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) TaskExist(tx *sqlx.Tx, did string) (bool, error) {
+func (r *PostgresNegotiationTaskRepo) TaskExist(tx *sqlx.Tx, did string) (bool, error) {
 	query := `
         SELECT COUNT(*) 
         FROM contract_negotiation_task 
@@ -178,7 +178,7 @@ func (r *PostgresNegotiatorTaskRepo) TaskExist(tx *sqlx.Tx, did string) (bool, e
 	return count > 0, nil
 }
 
-func (r *PostgresNegotiatorTaskRepo) Delete(tx *sqlx.Tx, did string) error {
+func (r *PostgresNegotiationTaskRepo) Delete(tx *sqlx.Tx, did string) error {
 	statement := `
         DELETE FROM contract_negotiation_task
         WHERE did = $1

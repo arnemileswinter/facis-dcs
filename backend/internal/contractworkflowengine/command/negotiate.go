@@ -28,7 +28,8 @@ type Negotiator struct {
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
-	NTRepo db.NegotiationRepo
+	NRepo  db.NegotiationRepo
+	NTRepo db.NegotiationTaskRepo
 }
 
 func (h *Negotiator) Handle(cmd NegotiationCmd) error {
@@ -55,30 +56,23 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		return errors.New("current contract state is invalid")
 	}
 
-	isValidReviewer, err := h.RTRepo.IsValidReviewer(tx, cmd.DID, cmd.NegotiatedBy)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.NegotiatedBy)
 	if err != nil {
-		return fmt.Errorf("could not validate negotiator as reviewer: %w", err)
+		return fmt.Errorf("could not validate negotiator: %w", err)
 	}
 
-	if cmd.NegotiatedBy != processData.CreatedBy && isValidReviewer == false {
+	if isValidNegotiator == false {
 		return errors.New("invalid user")
 	}
 
-	counterparts, err := h.RTRepo.ReadReviewersForDID(tx, cmd.DID)
-	for idx, _ := range counterparts {
-		if counterparts[idx] == cmd.NegotiatedBy {
-			counterparts[idx] = processData.CreatedBy
-			break
-		}
-	}
-
+	negotiators, err := h.NTRepo.ReadNegotiatorsForDID(tx, cmd.DID)
 	data := db.NegotiationCreateData{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
 		ChangeRequest:   cmd.ChangeRequest,
 		CreatedBy:       cmd.NegotiatedBy,
 	}
-	_, err = h.NTRepo.Create(tx, data, counterparts)
+	_, err = h.NRepo.Create(tx, data, negotiators)
 	if err != nil {
 		return fmt.Errorf("could not create negotiation: %w", err)
 	}
@@ -88,7 +82,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		ContractVersion: processData.ContractVersion,
 		ChangeRequest:   cmd.ChangeRequest,
 		NegotiatedBy:    cmd.NegotiatedBy,
-		Counterparts:    counterparts,
+		Negotiators:     negotiators,
 		OccurredAt:      time.Now(),
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)

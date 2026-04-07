@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS contract_negotiation_decisions
 
     negotiation_id      uuid,
 
-    counterpart         VARCHAR(255) NOT NULL,
+    negotiator         VARCHAR(255) NOT NULL,
     decision            contract_negotiation_decision,
     rejection_reason    TEXT,
 
