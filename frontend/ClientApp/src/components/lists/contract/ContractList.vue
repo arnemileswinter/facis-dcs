@@ -2,10 +2,11 @@
 import type { Contract } from '@/models/contract/contract'
 import { contractStates } from '@/types/contract-state'
 import { toComparableValue } from '@/utils/comparison'
-import { computed, ref, type Ref } from 'vue'
+import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import ContractListItem from './ContractListItem.vue'
+import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
 
 const props = defineProps<{
   items: Contract[]
@@ -21,6 +22,8 @@ const sorter = new Map([
 const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
+
+const stateFilterStore = useContractStateFilterStore()
 
 const searchedItems: Ref<Contract[]> = ref(props.items)
 
@@ -46,6 +49,15 @@ const sortedItems = computed(() => {
     return sortOrder.value * result
   })
 })
+
+const filteredItems = computed(() => {
+  if (stateFilterStore.hasFilters) {
+    return sortedItems.value.filter((item) => stateFilterStore.hasFilter(item.state))
+  }
+  return sortedItems.value
+})
+
+onUnmounted(() => stateFilterStore.reset())
 </script>
 
 <template>
@@ -59,8 +71,8 @@ const sortedItems = computed(() => {
         v-model:sort-order="sortOrder"
       />
     </li>
-    <template v-if="sortedItems.length > 0">
-      <ContractListItem v-for="item in sortedItems" :key="`${item.did}|${item.contract_version}`" :item="item" />
+    <template v-if="filteredItems.length > 0">
+      <ContractListItem v-for="item in filteredItems" :key="`${item.did}|${item.contract_version}`" :item="item" />
     </template>
     <li v-else class="px-4">No contracts found.</li>
   </ul>
