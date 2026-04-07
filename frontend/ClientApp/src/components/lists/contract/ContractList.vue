@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { Contract } from '@/models/contract/contract'
+import { contractStates } from '@/types/contract-state'
 import { toComparableValue } from '@/utils/comparison'
 import { computed, ref, type Ref } from 'vue'
-import type { Contract } from '@/models/contract/contract'
-import ContractListItem from './ContractListItem.vue'
 import ListSort from '../ListSort.vue'
+import ListStateFilter from '../ListStateFilter.vue'
+import ContractListItem from './ContractListItem.vue'
 
 const props = defineProps<{
   items: Contract[]
@@ -48,7 +50,8 @@ const sortedItems = computed(() => {
 
 <template>
   <ul class="list">
-    <li class="tracking-wide px-4 flex justify-end flex-col sm:flex-row">
+    <li class="tracking-wide px-4 flex justify-between flex-col sm:flex-row">
+      <ListStateFilter label="Contract" :filters="contractStates" store-type="contracts" />
       <ListSort
         :class="{ 'btn-disabled': sortedItems.length === 0 }"
         :sorter="sorter"

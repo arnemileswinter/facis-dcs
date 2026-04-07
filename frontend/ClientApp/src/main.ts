@@ -7,15 +7,15 @@ import { useErrorStore } from './stores/error-store'
 
 const app = createApp(App).use(createPinia()).use(router)
 
-const errorStore = useErrorStore()
-
 app.config.errorHandler = (err, _instance, _info) => {
-    const message = err instanceof Error ? err.message : `Error: ${err ? String(err) : 'unknown'}`
-    errorStore.add(message)
+  const errorStore = useErrorStore()
+  const message = err instanceof Error ? err.message : `Error: ${err ? String(err) : 'unknown'}`
+  errorStore.add(message)
 }
 
-window.addEventListener('unhandledrejection', event => {
-    errorStore.add(event.reason)
+window.addEventListener('unhandledrejection', (event) => {
+  const errorStore = useErrorStore()
+  errorStore.add(event.reason)
 })
 
 app.mount('#app')

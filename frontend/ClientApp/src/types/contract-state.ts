@@ -8,3 +8,5 @@ export const ContractState = {
   deleted: 'DELETED',
   deprecated: 'DEPRECATED',
 } as const
+
+export const contractStates: ContractState[] = Object.values(ContractState)

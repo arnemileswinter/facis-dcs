@@ -5,8 +5,8 @@ import { contractTemplateStates } from '@/types/contract-template-state'
 import { toComparableValue } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
+import ListStateFilter from '../../ListStateFilter.vue'
 import TemplateListSearch from '../TemplateListSearch.vue'
-import TemplateListStateFilter from '../TemplateListStateFilter.vue'
 import TemplateListItem from './TemplateListItem.vue'
 
 const props = defineProps<{
@@ -70,7 +70,7 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <ul class="list">
     <li class="tracking-wide px-4 flex justify-between flex-col sm:flex-row">
-      <TemplateListStateFilter label="Contract Template" :filters="contractTemplateStates" store-type="templates" />
+      <ListStateFilter label="Contract Template" :filters="contractTemplateStates" store-type="templates" />
       <TemplateListSearch :items="items" class="flex-1" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>

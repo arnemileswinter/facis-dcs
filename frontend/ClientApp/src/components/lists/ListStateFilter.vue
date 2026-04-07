@@ -1,4 +1,5 @@
 <script setup lang="ts" generic="T extends string[]">
+import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
 import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
 import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
@@ -7,11 +8,12 @@ import { computed, ref } from 'vue'
 const props = defineProps<{
   filters: T
   label: string
-  storeType: 'templates' | 'reviewTasks' | 'approvalTasks'
+  storeType: 'templates' | 'contracts' | 'reviewTasks' | 'approvalTasks'
 }>()
 
 const storeMap = {
   templates: useContractTemplateStateFilterStore,
+  contracts: useContractStateFilterStore,
   reviewTasks: useContractTemplateReviewTaskStateFilterStore,
   approvalTasks: useContractTemplateApprovalTaskStateFilterStore,
 } as const

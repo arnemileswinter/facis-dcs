@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import ApprovalTaskList from '@/components/lists/template/approval-task-list/ApprovalTaskList.vue'
-import ReviewTaskList from '@/components/lists/template/review-task-list/ReviewTaskList.vue'
+import ApprovalTaskList from '@/components/lists/task/approval/ApprovalTaskList.vue'
+import ReviewTaskList from '@/components/lists/task/review/ReviewTaskList.vue'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'

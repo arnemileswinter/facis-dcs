@@ -1,27 +1,29 @@
 <script setup lang="ts">
 import type { PartialContractTemplate } from '@/models/contract-template'
-import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
-import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
+import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
+import type { ContractReviewTask } from '@/models/contract/contract-review-task'
 import { ROUTES } from '@/router/router'
-import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
+import { useAuthStore } from '@/stores/auth-store'
+import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
-import { approvalTaskStates, ApprovalTaskState } from '@/types/approval-task-state'
 import { TemplateState } from '@/types/contract-template-state'
+import { ReviewTaskState, reviewTaskStates } from '@/types/review-task-state'
 import { toComparableValue } from '@/utils/comparison'
+import { toProperCase } from '@/utils/string'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
-import TemplateListSearch from '../TemplateListSearch.vue'
-import TemplateListStateFilter from '../TemplateListStateFilter.vue'
-import { toProperCase } from '@/utils/string'
+import ListStateFilter from '../../ListStateFilter.vue'
+import TemplateListSearch from '../../template/TemplateListSearch.vue'
 
 const props = defineProps<{
-  items: (ContractTemplateApprovalTask | ContractApprovalTask)[]
+  items: (ContractTemplateReviewTask | ContractReviewTask)[]
 }>()
 
 const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
-const stateFilterStore = useContractTemplateApprovalTaskStateFilterStore()
+const authStore = useAuthStore()
+const stateFilterStore = useContractTemplateReviewTaskStateFilterStore()
 
 const sorter = new Map([
   ['created_at', 'Creation date'],
@@ -31,7 +33,7 @@ const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
 
-const searchFilteredItems: Ref<(ContractTemplateApprovalTask | ContractApprovalTask)[]> = ref(props.items)
+const searchFilteredItems: Ref<(ContractTemplateReviewTask | ContractReviewTask)[]> = ref([])
 
 const searchedItems = computed(() => {
   return searchFilteredItems.value.length > 0 ? searchFilteredItems.value : props.items
@@ -42,8 +44,8 @@ const sortedItems = computed(() => {
     return searchedItems.value
   }
   return searchedItems.value.slice().sort((taskA, taskB) => {
-    const aSortValue = taskA[sortBy.value as keyof (ContractTemplateApprovalTask | ContractApprovalTask)]
-    const bSortValue = taskB[sortBy.value as keyof (ContractTemplateApprovalTask | ContractApprovalTask)]
+    const aSortValue = taskA[sortBy.value as keyof (ContractTemplateReviewTask | ContractReviewTask)]
+    const bSortValue = taskB[sortBy.value as keyof (ContractTemplateReviewTask | ContractReviewTask)]
     const aValue = toComparableValue(aSortValue)
     const bValue = toComparableValue(bSortValue)
     if (!aValue && !bValue) return 0
@@ -73,26 +75,33 @@ const templates = computed(() => {
   )
 })
 
-const getTemplateName = (item: ContractTemplateApprovalTask) => {
+const getTemplateName = (item: ContractTemplateReviewTask) => {
   return templatesStore.contractTemplates.find((template) => template.did === item.did)?.name ?? 'Nameless Template'
 }
 
-const getContractName = (item: ContractApprovalTask) => {
+const getContractName = (item: ContractReviewTask) => {
   return contractsStore.contracts.find((contract) => contract.did === item.did)?.name ?? 'Nameless Contract'
 }
 
-const getTemplateState = (item: ContractTemplateApprovalTask) => {
-  return templatesStore.contractTemplates.find((template) => template.did === item.did)?.state
-}
-
-const canApprove = (item: ContractTemplateApprovalTask) => {
-  return item.state === ApprovalTaskState.open && getTemplateState(item) === TemplateState.reviewed
-}
-
-const resolveViewRouteName = (item: ContractTemplateApprovalTask | ContractApprovalTask) => {
+const canEdit = (item: ContractTemplateReviewTask | ContractReviewTask) => {
   if (item.type === 'template') {
-    if (canApprove(item)) {
-      return ROUTES.TEMPLATES.APPROVE
+    const template = templatesStore.contractTemplates.find((template) => template.did === item.did)
+    const state = template?.state
+    return (
+      (template?.created_by === authStore.user?.username &&
+        (state === TemplateState.draft || state === TemplateState.rejected)) ||
+      state === TemplateState.submitted
+    )
+  } else {
+    // TODO:
+    return false
+  }
+}
+
+const resolveViewRouteName = (item: ContractTemplateReviewTask | ContractReviewTask) => {
+  if (item.type === 'template') {
+    if (item.state === ReviewTaskState.open) {
+      return ROUTES.TEMPLATES.REVIEW
     }
     return ROUTES.TEMPLATES.VIEW
   } else {
@@ -111,8 +120,8 @@ onUnmounted(() => stateFilterStore.reset())
 
 <template>
   <ul class="list">
-    <li class="tracking-wide px-4 flex justify-end flex-col sm:flex-row">
-      <TemplateListStateFilter label="Approval Task" :filters="approvalTaskStates" store-type="approvalTasks" />
+    <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
+      <ListStateFilter label="Review Task" :filters="reviewTaskStates" store-type="reviewTasks" />
       <TemplateListSearch class="flex-1" :items="templates" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
@@ -120,14 +129,16 @@ onUnmounted(() => stateFilterStore.reset())
       <div class="list-col-grow card bg-base-200 card-border hover:bg-base-300">
         <div class="card-body">
           <h2 class="card-title flex-wrap justify-between">
-            <div v-if="item.type === 'template'">Approval Task for Contract Template: {{ getTemplateName(item) }}</div>
-            <div v-else>Approval Task for Contract: {{ getContractName(item) }}</div>
+            <div v-if="item.type === 'template'">Review Task for Contract Template: {{ getTemplateName(item) }}</div>
+            <div v-else>Review Task for Contract: {{ getContractName(item) }}</div>
             <div class="flex-1"></div>
             <div class="badge badge-accent">{{ toProperCase(item.type) }} Task</div>
             <div class="badge badge-secondary">{{ item.state }}</div>
           </h2>
           <div class="flex justify-between">
-            <div v-if="item.type === 'template' && item.document_number">Document number: {{ item.document_number }}</div>
+            <div v-if="item.type === 'template' && item.document_number">
+              Document number: {{ item.document_number }}
+            </div>
             <div v-if="item.type === 'template' && item.version">Version: {{ item.version }}</div>
             <div v-else-if="item.type === 'contract' && item.contract_version">Version: {{ item.contract_version }}</div>
           </div>
@@ -142,6 +153,16 @@ onUnmounted(() => stateFilterStore.reset())
                 class="btn btn-sm btn-primary rounded-box"
               >
                 View
+              </RouterLink>
+              <RouterLink
+                v-if="canEdit(item)"
+                :to="{
+                  name: ROUTES.TEMPLATES.EDIT,
+                  params: { did: item.did },
+                }"
+                class="btn btn-sm btn-secondary rounded-box gap-2"
+              >
+                Edit
               </RouterLink>
             </div>
           </div>
