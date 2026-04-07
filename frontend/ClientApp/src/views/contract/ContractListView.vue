@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, type Ref } from 'vue'
+import { computed, onMounted } from 'vue'
 
 const contractsStore = useContractsStore()
 
