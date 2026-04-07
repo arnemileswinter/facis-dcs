@@ -13,6 +13,7 @@ interface TemplateDraftState {
   did: string | null
   name: string
   description: string
+  templateDataVersion: number
   documentOutline: DocumentOutline
   documentBlocks: DocumentBlock[]
   semanticConditions: SemanticCondition[]

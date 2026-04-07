@@ -25,6 +25,7 @@ export interface ContractTemplateData {
     customMetaData: MetaData[]
     // Only when the template is a frame contract, it can have sub-templates
     subTemplateSnapshots?: SubTemplateSnapshot[]
+    templateDataVersion?: number
 }
 
 export interface SubTemplateSnapshot {

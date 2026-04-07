@@ -10,6 +10,7 @@ const defaultState: Readonly<TemplateDraftState> = {
   did: null,
   name: '',
   description: '',
+  templateDataVersion: 1,
   documentOutline: [],
   documentBlocks: [],
   semanticConditions: [],
@@ -42,6 +43,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
           subTemplateSnapshots: this.subTemplateSnapshots,
+          templateDataVersion: this.templateDataVersion,
         }
       }
     },
