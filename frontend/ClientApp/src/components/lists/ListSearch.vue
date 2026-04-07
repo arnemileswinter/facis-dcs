@@ -1,6 +1,4 @@
-<script setup lang="ts" generic="T extends PartialContractTemplate | Contract">
-import type { PartialContractTemplate } from '@/models/contract-template'
-import type { Contract } from '@/models/contract/contract'
+<script setup lang="ts" generic="T extends { did: string }">
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
 import { computed, ref, useTemplateRef, type Ref } from 'vue'
 
@@ -26,7 +24,9 @@ type FilterLabels = typeof props.filterLabels
 type FilterLabelKey = keyof FilterLabels
 type FilterLabelValue = FilterLabels[FilterLabelKey]
 
-const selectedFilter = ref<FilterLabelValue>(props.filterLabels.name)
+const selectedFilter = ref<FilterLabelValue>(
+  (Object.values(props.filterLabels)[0] as FilterLabelValue) ?? ('' as FilterLabelValue),
+)
 const filterPopover = useTemplateRef('filterPopover')
 const searchResults: Ref<T[]> = ref([])
 
@@ -123,6 +123,7 @@ function onFilterSelect(label: FilterLabelValue) {
         type="button"
         class="select select-secondary w-full rounded-t-md rounded-b-none sm:rounded-l-md sm:rounded-tr-none"
         popovertarget="list-popover-search"
+        :class="{ 'btn-disabled': Object.entries(filterLabels).length === 1 }"
       >
         {{ selectedFilter }}
       </button>

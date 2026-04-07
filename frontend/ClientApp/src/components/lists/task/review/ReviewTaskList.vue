@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { PartialContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateReviewTask } from '@/models/contract-template-review-task'
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
 import { ROUTES } from '@/router/router'
@@ -14,7 +13,7 @@ import { toProperCase } from '@/utils/string'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
 import ListStateFilter from '../../ListStateFilter.vue'
-import TemplateListSearch from '../../template/TemplateListSearch.vue'
+import TaskListSearch from '../TaskListSearch.vue'
 
 const props = defineProps<{
   items: (ContractTemplateReviewTask | ContractReviewTask)[]
@@ -69,12 +68,6 @@ const filteredItems = computed(() => {
   return sortedItems.value
 })
 
-const templates = computed(() => {
-  return templatesStore.contractTemplates.filter((template) =>
-    props.items.map((task) => task.did).includes(template.did),
-  )
-})
-
 const getTemplateName = (item: ContractTemplateReviewTask) => {
   return templatesStore.contractTemplates.find((template) => template.did === item.did)?.name ?? 'Nameless Template'
 }
@@ -109,7 +102,7 @@ const resolveViewRouteName = (item: ContractTemplateReviewTask | ContractReviewT
   }
 }
 
-const applySearchResult = (searchResult: PartialContractTemplate[]) => {
+const applySearchResult = (searchResult: (ContractTemplateReviewTask | ContractReviewTask)[]) => {
   searchFilteredItems.value = props.items.filter((task) =>
     searchResult.map((template) => template.did).includes(task.did),
   )
@@ -122,7 +115,7 @@ onUnmounted(() => stateFilterStore.reset())
   <ul class="list">
     <li class="tracking-wide w-full px-4 flex justify-end flex-col sm:flex-row">
       <ListStateFilter label="Review Task" :filters="reviewTaskStates" store-type="reviewTasks" />
-      <TemplateListSearch class="flex-1" :items="templates" @search-result="applySearchResult" />
+      <TaskListSearch class="flex-1" :items="items" @search-result="applySearchResult" />
       <ListSort :sorter="sorter" v-model:sort-by="sortBy" v-model:sort-order="sortOrder" />
     </li>
     <li v-for="item in filteredItems" class="list-row">
