@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { Contract } from '@/models/contract/contract'
+import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
 import { contractStates } from '@/types/contract-state'
 import { toComparableValue } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
 import ContractListItem from './ContractListItem.vue'
-import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
+import ContractListSearch from './ContractListSearch.vue'
 
 const props = defineProps<{
   items: Contract[]
@@ -57,6 +58,10 @@ const filteredItems = computed(() => {
   return sortedItems.value
 })
 
+const applySearchResult = (searchResult: Contract[]) => {
+  searchedItems.value = searchResult
+}
+
 onUnmounted(() => stateFilterStore.reset())
 </script>
 
@@ -64,6 +69,7 @@ onUnmounted(() => stateFilterStore.reset())
   <ul class="list">
     <li class="tracking-wide px-4 flex justify-between flex-col sm:flex-row">
       <ListStateFilter label="Contract" :filters="contractStates" store-type="contracts" />
+      <ContractListSearch :items="items" class="flex-1" @search-result="applySearchResult" />
       <ListSort
         :class="{ 'btn-disabled': sortedItems.length === 0 }"
         :sorter="sorter"
