@@ -34,5 +34,5 @@ export interface SubTemplateSnapshot {
     version?: number
     name?: string
     description?: string
-    template_data?: Omit<ContractTemplateData, 'subTemplateSnapshots'>
+    template_data?: Omit<ContractTemplateData, 'subTemplateSnapshots' | 'templateDataVersion'>
 }

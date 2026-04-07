@@ -42,7 +42,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
-          subTemplateSnapshots: this.subTemplateSnapshots,
+          subTemplateSnapshots: normalizeSubTemplateSnapshots(this.subTemplateSnapshots),
           templateDataVersion: this.templateDataVersion,
         }
       }
@@ -59,7 +59,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
           documentBlocks: this.documentBlocks,
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
-          subTemplateSnapshots: this.subTemplateSnapshots,
+          subTemplateSnapshots: normalizeSubTemplateSnapshots(this.subTemplateSnapshots),
         },
       }
     }
@@ -194,7 +194,7 @@ export const useTemplateDraftStore = defineStore(storeId, {
       this.description = description
     },
     addSubTemplateSnapshot(template: ContractTemplate): void {
-      const snapshot:SubTemplateSnapshot = {
+      const snapshot: SubTemplateSnapshot = {
         did: template.did,
         version: template.version,
         document_number: template.document_number,
@@ -409,4 +409,21 @@ function isSameTemplate(
   t2: { did: string, version?: number, document_number?: string }
 ): boolean {
   return t1.did === t2.did && t1.version === t2.version && t1.document_number === t2.document_number
+}
+
+function normalizeSubTemplateSnapshots(snapshots: SubTemplateSnapshot[]): SubTemplateSnapshot[] {
+  return snapshots.map((snapshot) => {
+    if (!snapshot.template_data) return snapshot
+
+    const td = snapshot.template_data
+    return {
+      ...snapshot,
+      template_data: {
+        documentOutline: td.documentOutline,
+        semanticConditions: td.semanticConditions,
+        documentBlocks: td.documentBlocks,
+        customMetaData: td.customMetaData,
+      },
+    }
+  })
 }
