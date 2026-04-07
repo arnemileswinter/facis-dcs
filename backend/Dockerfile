@@ -31,6 +31,9 @@ RUN go mod download
 # Copy source code
 COPY backend/ ./
 
+# Generate Goa transport/types from the design package.
+RUN go run goa.design/goa/v3/cmd/goa@v3.24.2 gen digital-contracting-service/design
+
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o dcs ./cmd/dcs
 
