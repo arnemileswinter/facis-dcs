@@ -6,5 +6,5 @@ import type { UserProfile } from "../user"
 export interface UserService {
   getAllUsers: (request?: UserAllRequest) => Promise<UserProfile[]>
   getRolesByUser: (request: UserRolesByUserIdRequest) => Promise<UserRolesByUserIdResponse>
-  getAuthorizedUsersWithRoles: (...roles: [UserRole, ...UserRole[]]) => Promise<UserProfile[]>
+  getAuthorizedUsersWithRoles: (...roles: [...UserRole[], UserRole | undefined]) => Promise<UserProfile[]>
 }

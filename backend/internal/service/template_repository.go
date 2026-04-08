@@ -388,14 +388,8 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 // run policy, schema, and semantic validations; return findings.
 func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templaterepository.ContractTemplateVerifyRequest) (res *templaterepository.ContractTemplateVerifyResponse, err error) {
 
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
-	}
-
 	cmd := command.VerifyCmd{
 		DID:        req.Did,
-		UpdatedAt:  updatedAt,
 		VerifiedBy: middleware.GetUsername(ctx),
 	}
 	handler := command.Verifier{

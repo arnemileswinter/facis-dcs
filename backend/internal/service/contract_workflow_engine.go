@@ -27,13 +27,14 @@ type contractWorkflowEnginesrvc struct {
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
+	NTRepo db.NegotiationTaskRepo
 	NRepo  db.NegotiationRepo
 	auth.JWTAuthenticator
 }
 
 func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo,
-	nRepo db.NegotiationRepo) contractworkflowengine.Service {
+	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo) contractworkflowengine.Service {
 
 	return &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -41,6 +42,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		CRepo:            cRepo,
 		RTRepo:           rtRepo,
 		ATRepo:           atRepo,
+		NTRepo:           ntRepo,
 		NRepo:            nRepo,
 	}
 }
@@ -130,8 +132,9 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		SubmittedBy: middleware.GetUsername(ctx),
 		ActionFlag:  actionFlag,
 		Comments:    req.Comments,
-		Reviewer:    req.Reviewers,
+		Reviewers:   req.Reviewers,
 		Approver:    req.Approver,
+		Negotiators: req.Negotiators,
 	}
 	handler := command.Submitter{
 		Ctx:    ctx,
@@ -140,6 +143,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		RTRepo: s.RTRepo,
 		ATRepo: s.ATRepo,
 		NRepo:  s.NRepo,
+		NTRepo: s.NTRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -162,15 +166,16 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 		CRepo:  s.CRepo,
 		RTRepo: s.RTRepo,
 		ATRepo: s.ATRepo,
+		NTRepo: s.NTRepo,
 	}
 	result, err := queryHandler.Handle(qry)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
-	var contractTemplates []*contractworkflowengine.ContractItem
+	var contracts []*contractworkflowengine.ContractItem
 	for _, item := range result.Contracts {
-		contractTemplates = append(contractTemplates, &contractworkflowengine.ContractItem{
+		contracts = append(contracts, &contractworkflowengine.ContractItem{
 			Did:             item.DID,
 			ContractVersion: item.ContractVersion,
 			State:           item.State.String(),
@@ -203,10 +208,22 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 		})
 	}
 
+	var negotiationTasks []*contractworkflowengine.ContractNegotiationTaskItem
+	for _, item := range result.NegotiatorTasks {
+		negotiationTasks = append(negotiationTasks, &contractworkflowengine.ContractNegotiationTaskItem{
+			Did:             item.DID,
+			ContractVersion: item.ContractVersion,
+			State:           item.State.String(),
+			Negotiator:      item.Negotiator,
+			CreatedAt:       item.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
 	return &contractworkflowengine.ContractRetrieveResponse{
-		Contracts:     contractTemplates,
-		ReviewTasks:   reviewTasks,
-		ApprovalTasks: approvalTasks,
+		Contracts:        contracts,
+		ReviewTasks:      reviewTasks,
+		ApprovalTasks:    approvalTasks,
+		NegotiationTasks: negotiationTasks,
 	}, nil
 }
 
@@ -241,7 +258,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		}
 
 		negotiation.NegotiationDecisions = append(negotiation.NegotiationDecisions, &contractworkflowengine.ContractNegotiationDecisionItem{
-			Counterpart:     item.Counterpart,
+			Negotiator:      item.Negotiator,
 			Decision:        item.Decision,
 			RejectionReason: item.RejectionReason,
 		})
@@ -265,14 +282,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 
 func (s *contractWorkflowEnginesrvc) Verify(ctx context.Context, req *contractworkflowengine.ContractVerifyRequest) (res *contractworkflowengine.ContractVerifyResponse, err error) {
 
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
 	cmd := command.VerifyCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
 		VerifiedBy: middleware.GetUsername(ctx),
 	}
 	handler := command.Verifier{
@@ -310,9 +320,12 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 		ChangeRequest: &changeRequest,
 	}
 	handler := command.Negotiator{
-		Ctx:   ctx,
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		Ctx:    ctx,
+		DB:     s.DB,
+		CRepo:  s.CRepo,
+		NRepo:  s.NRepo,
+		RTRepo: s.RTRepo,
+		NTRepo: s.NTRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -338,9 +351,11 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			AcceptedBy: middleware.GetUsername(ctx),
 		}
 		handler := command.NegotiationAcceptor{
-			Ctx:   ctx,
-			DB:    s.DB,
-			CRepo: s.CRepo,
+			Ctx:    ctx,
+			DB:     s.DB,
+			CRepo:  s.CRepo,
+			NRepo:  s.NRepo,
+			NTRepo: s.NTRepo,
 		}
 		err = handler.Handle(cmd)
 		if err != nil {
@@ -355,15 +370,16 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			RejectionReason: req.RejectionReason,
 		}
 		handler := command.NegotiationRejector{
-			Ctx:   ctx,
-			DB:    s.DB,
-			CRepo: s.CRepo,
+			Ctx:    ctx,
+			DB:     s.DB,
+			CRepo:  s.CRepo,
+			NRepo:  s.NRepo,
+			NTRepo: s.NTRepo,
 		}
 		err = handler.Handle(cmd)
 		if err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
-
 	}
 
 	return &contractworkflowengine.ContractNegotiationRespondResponse{

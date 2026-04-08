@@ -122,7 +122,7 @@ func (r *PostgresReviewTaskRepo) UpdateState(tx *sqlx.Tx, did string, reviewer s
 		return err
 	}
 	if rowsAffected == 0 {
-		return errors.New("user has no review task for this contract template")
+		return errors.New("user has no review task for this contract")
 	}
 	return nil
 }

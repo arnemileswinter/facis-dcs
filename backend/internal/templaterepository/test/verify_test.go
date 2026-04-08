@@ -8,7 +8,6 @@ import (
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -40,7 +39,6 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 	cmd := command.VerifyCmd{
 		DID:        *did,
 		VerifiedBy: reviewers[0],
-		UpdatedAt:  time.Now(),
 	}
 	handler := command.Verifier{
 		Ctx:    ctx,
@@ -91,45 +89,7 @@ func TestVerify_VerifyNonExistingContractTemplate(t *testing.T) {
 
 	cmd := command.VerifyCmd{
 		DID:        *did,
-		UpdatedAt:  time.Now(),
 		VerifiedBy: "Test User 1",
-	}
-	handler := command.Verifier{
-		Ctx:    ctx,
-		DB:     db,
-		CTRepo: repo.CTRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = handler.Handle(cmd)
-
-	assert.NotNil(t, err)
-}
-
-func TestVerify_VerifyContractTemplateAfterUpdate(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTemplateTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo(ctx)
-
-	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
-
-	cmd := command.VerifyCmd{
-		DID:        *did,
-		VerifiedBy: creator,
-		UpdatedAt:  time.Now().Add(-5 * time.Second),
 	}
 	handler := command.Verifier{
 		Ctx:    ctx,

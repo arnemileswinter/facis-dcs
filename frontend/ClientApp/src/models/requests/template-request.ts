@@ -76,8 +76,6 @@ export interface ContractTemplateRejectRequest {
 
 export interface ContractTemplateVerifyRequest {
   did: string
-  updated_at: string
-  decision_notes: string[]
 }
 
 export interface ContractTemplateArchiveRequest {

@@ -7,7 +7,7 @@ import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
 import type { UserRole } from '@/types/user-role'
-import { computed, nextTick, onMounted } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -46,18 +46,23 @@ const loadTasks = async () => {
   }
 }
 
-onMounted(async () => {
+const redirectOnEmptyTasks = async () => {
   await loadTasks()
   await nextTick()
   if (route.name === ROUTES.TASKS.REVIEWS && reviewTasks.value.length < 1) {
     errorStore.add('No review tasks assigned', 'info')
     router.back()
-  }
-  if (route.name === ROUTES.TASKS.APPROVALS && reviewTasks.value.length < 1) {
+  } else if (route.name === ROUTES.TASKS.APPROVALS && approvalTasks.value.length < 1) {
     errorStore.add('No approval tasks assigned', 'info')
     router.back()
   }
-})
+}
+
+watch(
+  () => route.name,
+  () => redirectOnEmptyTasks(),
+  { immediate: true },
+)
 </script>
 
 <template>

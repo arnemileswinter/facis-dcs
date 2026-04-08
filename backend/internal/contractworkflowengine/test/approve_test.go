@@ -41,7 +41,6 @@ func TestApprove_ApproveContractInReviewedState(t *testing.T) {
 
 	verifyCmd := command.VerifyCmd{
 		DID:        *did,
-		UpdatedAt:  time.Now(),
 		VerifiedBy: approver,
 	}
 	verifyHandler := command.Verifier{

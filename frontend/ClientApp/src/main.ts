@@ -5,7 +5,12 @@ import App from './App.vue'
 import { router } from './router/router'
 import { useErrorStore } from './stores/error-store'
 
-const app = createApp(App).use(createPinia()).use(router)
+const app = createApp(App).use(createPinia())
+
+window.addEventListener('unhandledrejection', (event) => {
+  const errorStore = useErrorStore()
+  errorStore.add(event.reason)
+})
 
 app.config.errorHandler = (err, _instance, _info) => {
   const errorStore = useErrorStore()
@@ -13,9 +18,6 @@ app.config.errorHandler = (err, _instance, _info) => {
   errorStore.add(message)
 }
 
-window.addEventListener('unhandledrejection', (event) => {
-  const errorStore = useErrorStore()
-  errorStore.add(event.reason)
-})
+app.use(router)
 
 app.mount('#app')

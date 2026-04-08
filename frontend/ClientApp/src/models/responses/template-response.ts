@@ -67,7 +67,7 @@ export interface ContractTemplateRejectResponse {
 
 export interface ContractTemplateVerifyResponse {
   did: string
-  findings?: string[]
+  findings: string[]
 }
 
 export interface ContractTemplateArchiveResponse {

@@ -15,15 +15,15 @@ export const useErrorStore = defineStore('error', () => {
 
   function add(message: string, type: ErrorType = 'error', duration: number = 4000) {
     const id = nextId++
-    errors.value.push({id, type, message})
-    
+    errors.value.push({ id, type, message })
+
     if (duration) {
       setTimeout(() => remove(id), duration)
     }
   }
 
   function remove(id: number) {
-    errors.value = errors.value.filter(err => err.id !== id)
+    errors.value = errors.value.filter((err) => err.id !== id)
   }
 
   return { errors, add, remove }

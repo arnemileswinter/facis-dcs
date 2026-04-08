@@ -19,7 +19,7 @@ type NegotiationData struct {
 	DID             string         `db:"did"`
 	ContractVersion *int           `db:"contract_version"`
 	ChangeRequest   *datatype.JSON `db:"change_request"`
-	Counterpart     string         `db:"counterpart"`
+	Negotiator      string         `db:"negotiator"`
 	Decision        *string        `db:"decision"`
 	RejectionReason *string        `db:"rejection_reason"`
 	CreatedBy       string         `db:"created_by"`
@@ -32,10 +32,9 @@ type NegotiationChangeData struct {
 }
 
 type NegotiationRepo interface {
-	Create(tx *sqlx.Tx, data NegotiationCreateData, counterpart []string) (*time.Time, error)
+	Create(tx *sqlx.Tx, data NegotiationCreateData, negotiators []string) (*time.Time, error)
 	Accept(tx *sqlx.Tx, id string, acceptedBy string) error
 	Reject(tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error
-	IsValidCounterpart(tx *sqlx.Tx, did string, contractVersion *int, counterpart string) (bool, error)
 	ReadAllByContractDID(tx *sqlx.Tx, did string) ([]NegotiationData, error)
 	ReadAllAcceptedByContractDIDAndVersion(tx *sqlx.Tx, did string, contractVersion *int) ([]NegotiationChangeData, error)
 	HasOpenNegotiationDecisions(tx *sqlx.Tx, did string, contractVersion *int) (bool, error)

@@ -82,7 +82,7 @@ func (r *PostgresApprovalTaskRepo) UpdateState(tx *sqlx.Tx, did string, approver
 		return err
 	}
 	if rowsAffected == 0 {
-		return errors.New("user has no review task for this contract template")
+		return errors.New("user has no review task for this contract")
 	}
 	return nil
 }

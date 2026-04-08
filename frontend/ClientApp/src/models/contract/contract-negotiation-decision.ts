@@ -1,8 +1,8 @@
 import type { NegotiationDecision } from "@/types/negotiation-decision";
 
 export interface ContractNegotiationDecision {
-  /** Counterpart who has to decide this negotiation decision */
-  counterpart: string;
+  /** Negotiator who has to decide this negotiation decision */
+  negotiator: string;
   decision?: NegotiationDecision;
   rejection_reason?: string;
 }

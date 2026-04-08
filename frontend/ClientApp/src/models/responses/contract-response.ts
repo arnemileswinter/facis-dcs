@@ -3,6 +3,7 @@ import type { Contract } from '../contract/contract'
 import type { ContractApprovalTask } from '../contract/contract-approval-task'
 import type { ContractReviewTask } from '../contract/contract-review-task'
 import type { ContractNegotiation } from '../contract/contract-negotiation'
+import type { ContractNegotiationTask } from '../contract/contract-negotiation-task'
 
 export interface ContractCreateResponse {
   did: string
@@ -20,6 +21,7 @@ export interface ContractRetrieveResponse {
   contracts: Contract[]
   review_tasks: ContractReviewTask[]
   approval_tasks: ContractApprovalTask[]
+  negotiation_tasks: ContractNegotiationTask[]
 }
 
 export interface ContractRetrieveByIdResponse {

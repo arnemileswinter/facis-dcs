@@ -9,6 +9,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/query"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
@@ -46,7 +47,12 @@ func TestSubmit_SubmitContractInDraftState(t *testing.T) {
 		UpdatedAt:   time.Now(),
 		SubmittedBy: creator,
 		ActionFlag:  nil,
-		Reviewer: []string{
+		Reviewers: []string{
+			"Test User 2",
+			"Test User 3",
+			"Test User 4",
+		},
+		Negotiators: []string{
 			"Test User 2",
 			"Test User 3",
 			"Test User 4",
@@ -59,6 +65,8 @@ func TestSubmit_SubmitContractInDraftState(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NRepo:  repo.NRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -101,7 +109,7 @@ func TestSubmit_SubmitContractInDraftState(t *testing.T) {
 	for _, reviewTask := range reviewTasks {
 		assert.Equal(t, reviewtaskstate.Open, reviewTask.State)
 
-		if !slices.Contains(cmd.Reviewer, reviewTask.Reviewer) {
+		if !slices.Contains(cmd.Reviewers, reviewTask.Reviewer) {
 			t.Fatalf("Reviewer not found in review tasks: %v", reviewTask)
 		}
 	}
@@ -134,7 +142,7 @@ func TestSubmit_SubmitContractInDraftStateWithInvalidUser(t *testing.T) {
 		UpdatedAt:   time.Now(),
 		SubmittedBy: "Test User 6",
 		ActionFlag:  nil,
-		Reviewer: []string{
+		Reviewers: []string{
 			"Test User 2",
 			"Test User 3",
 			"Test User 4",
@@ -153,7 +161,7 @@ func TestSubmit_SubmitContractInDraftStateWithInvalidUser(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestSubmit_SubmitContractInNegationState(t *testing.T) {
+func TestSubmit_SubmitContractInNegotiationState(t *testing.T) {
 
 	db := setupTestDB(t)
 
@@ -174,18 +182,14 @@ func TestSubmit_SubmitContractInNegationState(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	approver := "Test User 5"
+	negotiators := []string{"Test User 1"}
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
+
 	cmd := command.SubmitCmd{
 		DID:         *did,
 		UpdatedAt:   time.Now(),
-		SubmittedBy: creator,
+		SubmittedBy: negotiators[0],
 		ActionFlag:  nil,
-		Reviewer: []string{
-			"Test User 2",
-			"Test User 3",
-			"Test User 4",
-		},
-		Approver: &approver,
 	}
 	handler := command.Submitter{
 		Ctx:    ctx,
@@ -193,6 +197,7 @@ func TestSubmit_SubmitContractInNegationState(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 		NRepo:  repo.NRepo,
 	}
 	err = handler.Handle(cmd)
@@ -240,19 +245,19 @@ func TestSubmit_SubmitContractInNegotiationStateWithOpenNegotiations(t *testing.
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	reviewers := []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
 	}
 
-	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -261,7 +266,8 @@ func TestSubmit_SubmitContractInNegotiationStateWithOpenNegotiations(t *testing.
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
-		NTRepo: repo.NRepo,
+		NTRepo: repo.NTRepo,
+		NRepo:  repo.NRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -271,7 +277,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithOpenNegotiations(t *testing.
 	submitCmd := command.SubmitCmd{
 		DID:         *did,
 		UpdatedAt:   time.Now(),
-		SubmittedBy: creator,
+		SubmittedBy: negotiators[0],
 	}
 	submitHandler := command.Submitter{
 		Ctx:    ctx,
@@ -279,6 +285,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithOpenNegotiations(t *testing.
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 		NRepo:  repo.NRepo,
 	}
 	err = submitHandler.Handle(submitCmd)
@@ -307,19 +314,19 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	reviewers := []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
 	}
 
-	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -328,7 +335,8 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
-		NTRepo: repo.NRepo,
+		NTRepo: repo.NTRepo,
+		NRepo:  repo.NRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -356,13 +364,13 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 		DID:             *did,
 		ID:              negotiations[0].ID,
 		RejectionReason: &rejectionReason,
-		RejectedBy:      negotiations[0].Counterpart,
+		RejectedBy:      negotiations[0].Negotiator,
 	}
 	rejectionHandler := command.NegotiationRejector{
 		Ctx:    ctx,
 		DB:     db,
 		CRepo:  repo.CRepo,
-		RTRepo: repo.RTRepo,
+		NTRepo: repo.NTRepo,
 		NRepo:  repo.NRepo,
 	}
 	err = rejectionHandler.Handle(rejectionCmd)
@@ -373,7 +381,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 	submitCmd := command.SubmitCmd{
 		DID:         *did,
 		UpdatedAt:   time.Now(),
-		SubmittedBy: creator,
+		SubmittedBy: negotiators[0],
 	}
 	submitHandler := command.Submitter{
 		Ctx:    ctx,
@@ -381,6 +389,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 		NRepo:  repo.NRepo,
 	}
 	err = submitHandler.Handle(submitCmd)
@@ -389,8 +398,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 	}
 
 	qry := contract.GetByIDQry{
-		DID: *did,
-
+		DID:         *did,
 		RetrievedBy: creator,
 	}
 	queryHandler := contract.GetByIDHandler{
@@ -434,7 +442,7 @@ func TestSubmit_SubmitContractInNegationStateWithInvalidUser(t *testing.T) {
 		UpdatedAt:   time.Now(),
 		SubmittedBy: "Test User 6",
 		ActionFlag:  nil,
-		Reviewer: []string{
+		Reviewers: []string{
 			"Test User 2",
 			"Test User 3",
 			"Test User 4",
@@ -446,6 +454,7 @@ func TestSubmit_SubmitContractInNegationStateWithInvalidUser(t *testing.T) {
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
+		NTRepo: repo.NTRepo,
 		ATRepo: repo.ATRepo,
 	}
 	err = handler.Handle(cmd)
@@ -535,7 +544,6 @@ func TestSubmit_SubmitContractInReviewedStateWithVerifying(t *testing.T) {
 		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			VerifiedBy: reviewer,
-			UpdatedAt:  time.Now(),
 		}
 
 		verifyHandler := command.Verifier{
@@ -870,6 +878,7 @@ func TestSubmit_OneReviewerDeclinesContractInSubmittedState(t *testing.T) {
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
+		NTRepo: repo.NTRepo,
 		ATRepo: repo.ATRepo,
 	}
 	err = handler.Handle(cmd)
@@ -925,6 +934,7 @@ func TestSubmit_SubmitNonExistingContract(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 
@@ -964,6 +974,7 @@ func TestSubmit_SubmitContractInSubmittedStateWithoutActionFlag(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 
@@ -1006,6 +1017,7 @@ func TestSubmit_SubmitContractInReviewedStateWithInvalidUser(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 
@@ -1058,6 +1070,7 @@ func TestSubmit_SubmitContractInSubmittedStateWithApproverUser(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 
@@ -1110,6 +1123,7 @@ func TestSubmit_SubmitContractReviewedState(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 
@@ -1143,7 +1157,7 @@ func TestSubmit_SubmitContractTemplateAfterUpdate(t *testing.T) {
 		UpdatedAt:   time.Now().Add(-5 * time.Minute),
 		SubmittedBy: submittedBy,
 		ActionFlag:  nil,
-		Reviewer: []string{
+		Reviewers: []string{
 			"Test User 2",
 			"Test User 3",
 			"Test User 4",
@@ -1156,6 +1170,7 @@ func TestSubmit_SubmitContractTemplateAfterUpdate(t *testing.T) {
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
+		NTRepo: repo.NTRepo,
 	}
 	err = handler.Handle(cmd)
 

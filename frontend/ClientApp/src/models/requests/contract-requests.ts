@@ -23,6 +23,7 @@ export interface ContractSubmitRequest {
   comments?: string[]
   reviewers?: string[]
   approver?: string
+  negotiators?: string[]
 }
 
 export interface ContractRetrieveRequest {}
@@ -37,7 +38,6 @@ export interface ContractReviewRequest {
 
 export interface ContractVerifyRequest {
   did: string
-  updated_at: string
 }
 
 export interface ContractSearchRequest {

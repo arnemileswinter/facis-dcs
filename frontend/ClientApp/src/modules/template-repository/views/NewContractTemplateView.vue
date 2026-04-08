@@ -19,12 +19,6 @@
                         <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
                         {{ isEditMode ? 'Update Template' : 'Create' }}
                     </button>
-                    <SubmitSelectionDialog
-                        v-if="isEditMode && (state === TemplateState.draft || state === TemplateState.rejected)"
-                        dialog-type="template"
-                        @submit="submitTemplate"
-                        class="btn btn-primary flex-1"
-                    />
                 </div>
             </div>
         </template>
@@ -32,9 +26,6 @@
 </template>
 
 <script setup lang="ts">
-import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
-import type { ContractTemplateSubmitRequest } from '@/models/requests/template-request'
-import type { SelectedUserRole } from '@/models/user'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { TemplateState } from '@/types/contract-template-state'
@@ -51,7 +42,7 @@ const route = useRoute()
 
 const templateEditorUiStore = useTemplateEditorUiStore()
 const draftStore = useTemplateDraftStore()
-const { state, templateType } = storeToRefs(draftStore)
+const { templateType } = storeToRefs(draftStore)
 
 const isEditMode = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
@@ -128,22 +119,6 @@ const submit = async () => {
         console.error('Submission failed', error)
     } finally {
         isSubmitting.value = false
-    }
-}
-
-const submitTemplate = async (result: SelectedUserRole[]) => {
-    if (!draftStore.did || !draftStore.updated_at) return
-    const reviewers = result.filter((user) => user.role === 'TEMPLATE_REVIEWER').map((user) => user.user.username)
-    const approver = result.find((user) => user.role === 'TEMPLATE_APPROVER')?.user.username!
-    const request: ContractTemplateSubmitRequest = {
-        did: draftStore.did,
-        updated_at: draftStore.updated_at,
-        reviewers: reviewers,
-        approver: approver,
-    }
-    const response = await contractTemplateService.submit(request)
-    if (response?.did) {
-        router.push({ name: ROUTES.TEMPLATES.LIST })
     }
 }
 </script>

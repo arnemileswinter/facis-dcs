@@ -1,4 +1,4 @@
-CREATE TYPE contract_state AS ENUM ('DRAFT', 'NEGOTIATION', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'DELETED', 'DEPRECATED');
+CREATE TYPE contract_state AS ENUM ('DRAFT', 'NEGOTIATION', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'DELETED', 'TERMINATED');
 
 
 CREATE TABLE IF NOT EXISTS contracts (
@@ -84,6 +84,27 @@ CREATE TABLE IF NOT EXISTS contract_approval_task
 
 ------------------------------------------------------------------------------------------------------------------------
 
+CREATE TYPE contract_negotiation_task_state AS ENUM ('OPEN', 'ACCEPTED');
+
+CREATE TABLE IF NOT EXISTS contract_negotiation_task
+(
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    did             VARCHAR(255) NOT NULL CHECK (did <> ''),
+
+    state    contract_negotiation_task_state NOT NULL,
+    negotiator VARCHAR(255)        NOT NULL CHECK (negotiator <> ''),
+
+    created_by VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_contract_negotiation_task
+        FOREIGN KEY (did)
+            REFERENCES contracts (did)
+);
+
+------------------------------------------------------------------------------------------------------------------------
+
 CREATE TYPE contract_negotiation_decision AS ENUM ('ACCEPTED', 'REJECTED', 'CLOSED');
 
 CREATE TABLE IF NOT EXISTS contract_negotiations
@@ -108,7 +129,7 @@ CREATE TABLE IF NOT EXISTS contract_negotiation_decisions
 
     negotiation_id      uuid,
 
-    counterpart         VARCHAR(255) NOT NULL,
+    negotiator         VARCHAR(255) NOT NULL,
     decision            contract_negotiation_decision,
     rejection_reason    TEXT,
 
