@@ -60,9 +60,10 @@ export const useTemplateDraftStore = defineStore(storeId, {
           semanticConditions: this.semanticConditions,
           customMetaData: this.customMetaData,
           subTemplateSnapshots: normalizeSubTemplateSnapshots(this.subTemplateSnapshots),
+          templateDataVersion: this.templateDataVersion,
         },
       }
-    }
+    },
   },
   actions: {
     // Block operations: add, delete, update, move
