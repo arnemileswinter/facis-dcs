@@ -161,7 +161,7 @@ func TestSubmit_SubmitContractInDraftStateWithInvalidUser(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestSubmit_SubmitContractInNegationState(t *testing.T) {
+func TestSubmit_SubmitContractInNegotiationState(t *testing.T) {
 
 	db := setupTestDB(t)
 
@@ -326,7 +326,7 @@ func TestSubmit_SubmitContractInNegotiationStateWithRejectedNegotiations(t *test
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}

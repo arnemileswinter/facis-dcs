@@ -36,17 +36,19 @@ func TestNegotiation_CreateNegotiation(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -103,11 +105,13 @@ func TestNegotiation_CreateNegotiationWithInvalidUser(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
@@ -151,17 +155,19 @@ func TestNegotiation_AllNegotiatorsAcceptChangeRequest(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -263,17 +269,19 @@ func TestNegotiation_OneNegotiatorRejectChangeRequest(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -375,17 +383,19 @@ func TestNegotiation_OneAcceptionOneRejectionOfChangeRequest(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
@@ -504,17 +514,19 @@ func TestNegotiation_TestForOpenNegotiationDecisions(t *testing.T) {
 
 	createContract(t, db, repo, did, contractstate.Negotiation, creator)
 
-	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, []string{
+	negotiators := []string{
 		"Test User 1",
 		"Test User 2",
 		"Test User 3",
-	})
+	}
+
+	createNegotiationTasks(t, ctx, db, repo, *did, negotiationtaskstate.Open, creator, negotiators)
 
 	var changeRequest map[string]interface{}
 	jsonChangeRequest, err := datatype.NewJSON(changeRequest)
 	cmd := command.NegotiationCmd{
 		DID:           *did,
-		NegotiatedBy:  "Test User 1",
+		NegotiatedBy:  negotiators[0],
 		ChangeRequest: &jsonChangeRequest,
 		UpdatedAt:     time.Now(),
 	}
