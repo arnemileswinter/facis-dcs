@@ -288,8 +288,9 @@ var ContractTemplateVerifyResponse = Type("ContractTemplateVerifyResponse", func
 	Description("Result for verifying a contract template")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("findings", ArrayOf(String), "A list of findings")
 
-	Required("did")
+	Required("did", "findings")
 })
 
 var ContractTemplateArchiveRequest = Type("ContractTemplateArchiveRequest", func() {
