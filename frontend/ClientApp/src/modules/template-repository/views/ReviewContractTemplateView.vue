@@ -114,8 +114,6 @@ const forwardToApproval = async () => {
     }
     await contractTemplateService.verify({
       did,
-      updated_at: updatedAt,
-      decision_notes: comment.value ? [comment.value] : [],
     })
     await contractTemplateService.submit({
       did,

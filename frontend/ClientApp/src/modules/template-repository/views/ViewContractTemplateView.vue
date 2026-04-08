@@ -6,6 +6,13 @@
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
         <button class="btn btn-ghost md:w-32" @click="router.back()">Back</button>
+        <SubmitSelectionDialog
+          v-if="state === TemplateState.draft"
+          dialog-type="template"
+          @submit="submitTemplate"
+          class="btn btn-primary flex-1"
+        />
+        <button v-if="state === TemplateState.rejected" class="btn btn-primary flex-1" @click="submitRejectedTemplate">Submit</button>
         <TemplateManagerActions v-if="contractTemplate && isManager" :item="contractTemplate" class="btn btn-primary flex-1" />
       </div>
     </div>
@@ -14,12 +21,17 @@
 
 <script setup lang="ts">
 import TemplateManagerActions from '@/components/lists/template/template-list/TemplateManagerActions.vue'
+import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
+import type { SelectedUserRole } from '@/models/user'
+import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useAuthStore } from '@/stores/auth-store'
+import { TemplateState } from '@/types/contract-template-state'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { storeToRefs } from 'pinia'
 import { computed, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -29,6 +41,7 @@ const route = useRoute()
 const authStore = useAuthStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
 const draftStore = useTemplateDraftStore()
+const { state } = storeToRefs(draftStore)
 
 const hasDid = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
@@ -76,4 +89,37 @@ watch(hasDid, (hasDid) => {
 
 }, { immediate: true })
 
+const submitTemplate = async (result: SelectedUserRole[]) => {
+  try {
+    if (!draftStore.did || !draftStore.updated_at) return
+    const reviewers = result.filter((user) => user.role === 'TEMPLATE_REVIEWER').map((user) => user.user.username)
+    const approver = result.find((user) => user.role === 'TEMPLATE_APPROVER')?.user.username!
+    const response = await contractTemplateService.submit({
+      did: draftStore.did,
+      updated_at: draftStore.updated_at,
+      reviewers: reviewers,
+      approver: approver,
+    })
+    if (response?.did) {
+      router.push({ name: ROUTES.TEMPLATES.LIST })
+    }
+  } catch (error) {
+    console.error('Contract Template Submission failed', error)
+  }
+}
+
+const submitRejectedTemplate = async () => {
+  try {
+    if (!draftStore.did || !draftStore.updated_at) return
+    const response = await contractTemplateService.submit({
+      did: draftStore.did,
+      updated_at: draftStore.updated_at
+    })
+    if (response.did) {
+      router.push({ name: ROUTES.TEMPLATES.LIST })
+    }
+  } catch (error) {
+    console.error('Contract Template Submission failed', error)
+  }
+}
 </script>
