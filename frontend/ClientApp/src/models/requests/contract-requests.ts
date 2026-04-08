@@ -38,7 +38,6 @@ export interface ContractReviewRequest {
 
 export interface ContractVerifyRequest {
   did: string
-  updated_at: string
 }
 
 export interface ContractSearchRequest {

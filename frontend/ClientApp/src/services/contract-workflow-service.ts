@@ -66,7 +66,12 @@ export const contractWorkflowService: ContractWorkflowService = {
       .then((res) => res.data)
       .catch((err) => {
         console.error('Retrieve Error:', err)
-        return { contracts: [], review_tasks: [], approval_tasks: [] } as ContractRetrieveResponse
+        return {
+          contracts: [],
+          review_tasks: [],
+          approval_tasks: [],
+          negotiation_tasks: [],
+        } as ContractRetrieveResponse
       })
   },
 
@@ -81,7 +86,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async verify(request: ContractVerifyRequest) {
-    return http.post<ContractVerifyResponse>('/contract/verify', request).then((res) => res.data)
+    return http.get<ContractVerifyResponse>(`/contract/verify/${request.did}`).then((res) => res.data)
   },
 
   async search(request: ContractSearchRequest) {
