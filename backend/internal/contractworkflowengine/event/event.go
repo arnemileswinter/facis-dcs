@@ -133,7 +133,7 @@ type NegotiationEvent struct {
 	ChangeRequest   *datatype.JSON `json:"change_request,omitempty"`
 	NegotiatedBy    string         `json:"negotiated_by"`
 	OccurredAt      time.Time      `json:"occurred_at"`
-	Counterparts    []string       `json:"counterparts"`
+	Negotiators     []string       `json:"negotiators"`
 }
 
 // EventType implements the Event interface.

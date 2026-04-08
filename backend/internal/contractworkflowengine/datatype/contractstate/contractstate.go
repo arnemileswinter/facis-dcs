@@ -11,22 +11,22 @@ type ContractState string
 
 const (
 	Draft       ContractState = "DRAFT"
+	Rejected    ContractState = "REJECTED"
 	Negotiation ContractState = "NEGOTIATION"
 	Submitted   ContractState = "SUBMITTED"
 	Reviewed    ContractState = "REVIEWED"
 	Approved    ContractState = "APPROVED"
-	Deleted     ContractState = "DELETED"
-	Deprecated  ContractState = "DEPRECATED"
+	Terminated  ContractState = "TERMINATED"
 )
 
 var validStates = map[ContractState]bool{
 	Draft:       true,
+	Rejected:    true,
 	Negotiation: true,
 	Submitted:   true,
 	Reviewed:    true,
 	Approved:    true,
-	Deleted:     true,
-	Deprecated:  true,
+	Terminated:  true,
 }
 
 func NewContractState(s string) (ContractState, error) {

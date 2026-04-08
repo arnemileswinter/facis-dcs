@@ -62,6 +62,7 @@ var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 
 	Attribute("reviewers", ArrayOf(String), "A list of reviewers for that contract")
 	Attribute("approver", String, "The approver for that contract")
+	Attribute("negotiators", ArrayOf(String), "A list of negotiators for that contract")
 
 	Required("did", "updated_at")
 })
@@ -112,6 +113,16 @@ var ContractApprovalTaskItem = Type("ContractApprovalTaskItem", func() {
 	Required("did", "state", "approver", "created_at")
 })
 
+var ContractNegotiationTaskItem = Type("ContractNegotiationTaskItem", func() {
+	Attribute("did", String, "DID of the contract ")
+	Attribute("contract_version", Int, "The version of the contract")
+	Attribute("state", String, "State of the approval task")
+	Attribute("negotiator", String, "The negotiator for the contract")
+	Attribute("created_at", String, "Created at")
+
+	Required("did", "state", "negotiator", "created_at")
+})
+
 var ContractRetrieveResponse = Type("ContractRetrieveResponse", func() {
 	Description("Result for retrieving a contract by id")
 
@@ -121,7 +132,9 @@ var ContractRetrieveResponse = Type("ContractRetrieveResponse", func() {
 
 	Attribute("approval_tasks", ArrayOf(ContractApprovalTaskItem), "A list of approval tasks")
 
-	Required("contracts", "review_tasks", "approval_tasks")
+	Attribute("negotiation_tasks", ArrayOf(ContractNegotiationTaskItem), "A list of negotiation tasks")
+
+	Required("contracts", "review_tasks", "approval_tasks", "negotiation_tasks")
 })
 
 var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {
@@ -135,11 +148,11 @@ var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {
 })
 
 var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", func() {
-	Attribute("counterpart", String, "Counterpart who has to decide this negotiation decision")
+	Attribute("negotiator", String, "Negotiator who has to decide this negotiation decision")
 	Attribute("decision", String, "Decision that was taken")
 	Attribute("rejection_reason", String, "Reason why it was rejected")
 
-	Required("counterpart")
+	Required("negotiator")
 })
 
 var ContractNegotiationItem = Type("ContractNegotiationItem", func() {

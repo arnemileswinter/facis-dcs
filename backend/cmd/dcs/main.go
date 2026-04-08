@@ -105,6 +105,7 @@ func main() {
 	cweRepo := cwerepo.PostgresContractRepo{Ctx: ctx}
 	cweRTRepo := cwerepo.PostgresReviewTaskRepo{Ctx: ctx}
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
+	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{}
 	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
 
 	// Initialize the service.
@@ -123,7 +124,7 @@ func main() {
 	{
 		authSvc = service.NewAuth()
 		contractStorageArchiveSvc = service.NewContractStorageArchive(jwtAuth)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNRepo)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo)
 		dcsToDcsSvc = service.NewDcsToDcs(jwtAuth)
 		externalTargetSystemAPISvc = service.NewExternalTargetSystemAPI(jwtAuth)
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)

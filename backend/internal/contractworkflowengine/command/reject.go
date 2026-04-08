@@ -69,7 +69,7 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CRepo.UpdateState(tx, cmd.DID, contractstate.Draft.String())
+	err = h.CRepo.UpdateState(tx, cmd.DID, contractstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current state: %w", err)
 	}

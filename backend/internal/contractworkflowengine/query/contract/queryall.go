@@ -8,6 +8,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	events "digital-contracting-service/internal/contractworkflowengine/event"
@@ -48,10 +49,19 @@ type ApprovalTaskItem struct {
 	CreatedAt       time.Time
 }
 
+type NegotiatorTaskItem struct {
+	DID             string
+	ContractVersion *int
+	State           negotiationtaskstate.NegotiationTaskState
+	Negotiator      string
+	CreatedAt       time.Time
+}
+
 type GetAllMetadataResult struct {
-	Contracts     []MetadataItem
-	ReviewerTasks []ReviewTaskItem
-	ApprovalTasks []ApprovalTaskItem
+	Contracts       []MetadataItem
+	ReviewerTasks   []ReviewTaskItem
+	ApprovalTasks   []ApprovalTaskItem
+	NegotiatorTasks []NegotiatorTaskItem
 }
 
 type GetAllMetadataHandler struct {
@@ -60,6 +70,7 @@ type GetAllMetadataHandler struct {
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
+	NTRepo db.NegotiationTaskRepo
 }
 
 func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadataResult, error) {
@@ -90,6 +101,11 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 	reviewerTasks, err := h.RTRepo.ReadAllByReviewer(tx, query.RetrievedBy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
+	}
+
+	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(tx, query.RetrievedBy)
+	if err != nil {
+		return nil, fmt.Errorf("could not read all negotiation tasks: %w", err)
 	}
 
 	approvalTasks, err := h.ATRepo.ReadAllByApprover(tx, query.RetrievedBy)
@@ -130,7 +146,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 
 		state, err := reviewtaskstate.NewReviewTaskState(data.State)
 		if err != nil {
-			return nil, fmt.Errorf("could not create contract template state: %w", err)
+			return nil, fmt.Errorf("could not create review task state: %w", err)
 		}
 
 		metadata, exists := didToMetadata[data.DID]
@@ -148,12 +164,35 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 		})
 	}
 
+	var negotiationTaskItems []NegotiatorTaskItem
+	for _, data := range negotiationTasks {
+
+		state, err := negotiationtaskstate.NewNegotiationTaskState(data.State)
+		if err != nil {
+			return nil, fmt.Errorf("could not create negotiation task state: %w", err)
+		}
+
+		metadata, exists := didToMetadata[data.DID]
+		var contractVersion *int
+		if exists {
+			contractVersion = metadata.ContractVersion
+		}
+
+		negotiationTaskItems = append(negotiationTaskItems, NegotiatorTaskItem{
+			DID:             data.DID,
+			State:           state,
+			ContractVersion: contractVersion,
+			Negotiator:      data.Negotiator,
+			CreatedAt:       data.CreatedAt,
+		})
+	}
+
 	var approvalTasksItems []ApprovalTaskItem
 	for _, data := range approvalTasks {
 
 		state, err := approvaltaskstate.NewApprovalTaskState(data.State)
 		if err != nil {
-			return nil, fmt.Errorf("could not create contract template state: %w", err)
+			return nil, fmt.Errorf("could not create approval task state: %w", err)
 		}
 
 		metadata, exists := didToMetadata[data.DID]
@@ -172,8 +211,9 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 	}
 
 	return &GetAllMetadataResult{
-		Contracts:     contractItems,
-		ReviewerTasks: reviewTaskItems,
-		ApprovalTasks: approvalTasksItems,
+		Contracts:       contractItems,
+		ReviewerTasks:   reviewTaskItems,
+		ApprovalTasks:   approvalTasksItems,
+		NegotiatorTasks: negotiationTaskItems,
 	}, nil
 }

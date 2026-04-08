@@ -7,7 +7,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
-	templateevents "digital-contracting-service/internal/contractworkflowengine/event"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"errors"
 	"fmt"
 	"time"
@@ -60,7 +60,7 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 		}
 	}
 
-	evt := templateevents.VerifyEvent{
+	evt := contractevents.VerifyEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
 		VerifiedBy:      cmd.VerifiedBy,
