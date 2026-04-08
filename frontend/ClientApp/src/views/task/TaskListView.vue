@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ApprovalTaskList from '@/components/lists/task/approval/ApprovalTaskList.vue'
+import NegotiationTaskList from '@/components/lists/task/negotiation/NegotiationTaskList.vue'
 import ReviewTaskList from '@/components/lists/task/review/ReviewTaskList.vue'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
@@ -20,6 +21,7 @@ const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
 const reviewTasks = computed(() => [...templatesStore.reviewTasks, ...contractsStore.reviewTasks])
 const approvalTasks = computed(() => [...templatesStore.approvalTasks, ...contractsStore.approvalTasks])
+const negotiationTasks = computed(() => contractsStore.negotiationTasks)
 
 const hasTemplateRole = computed(() => {
   return (
@@ -75,5 +77,8 @@ watch(
   </template>
   <template v-else-if="$route.name === ROUTES.TASKS.APPROVALS">
     <ApprovalTaskList :items="approvalTasks" />
+  </template>
+  <template v-else-if="$route.name === ROUTES.TASKS.NEGOTIATIONS">
+    <NegotiationTaskList :items="negotiationTasks" />
   </template>
 </template>

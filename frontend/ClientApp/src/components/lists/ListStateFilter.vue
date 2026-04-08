@@ -1,33 +1,53 @@
-<script setup lang="ts" generic="T extends string[]">
+<script setup lang="ts">
+import type { FilterStore } from '@/models/stores/filter-store'
+import { useContractNeogtiationTaskStateFilterStore } from '@/stores/contract-negotiation-task-state-filter-store'
 import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
 import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
 import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
+import type { ApprovalTaskState } from '@/types/approval-task-state'
+import type { ContractState } from '@/types/contract-state'
+import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { NegotiationTaskState } from '@/types/negotiation-task-state'
+import type { ReviewTaskState } from '@/types/review-task-state'
 import { computed, ref } from 'vue'
-
-const props = defineProps<{
-  filters: T
-  label: string
-  storeType: 'templates' | 'contracts' | 'reviewTasks' | 'approvalTasks'
-}>()
 
 const storeMap = {
   templates: useContractTemplateStateFilterStore,
   contracts: useContractStateFilterStore,
   reviewTasks: useContractTemplateReviewTaskStateFilterStore,
   approvalTasks: useContractTemplateApprovalTaskStateFilterStore,
+  negotiationTasks: useContractNeogtiationTaskStateFilterStore,
 } as const
 
-const filterStore = storeMap[props.storeType]()
+type StoreType = keyof typeof storeMap
+
+type FilterMap = {
+  templates: ContractTemplateState
+  contracts: ContractState
+  reviewTasks: ReviewTaskState
+  approvalTasks: ApprovalTaskState
+  negotiationTasks: NegotiationTaskState
+}
+
+interface Props {
+  filters: FilterMap[StoreType][]
+  label: string
+  storeType: StoreType
+}
+
+const props = defineProps<Props>()
+
+const filterStore = storeMap[props.storeType]() as unknown as FilterStore<FilterMap[StoreType]>
 
 const showAll = ref(true)
 
 const activeFilters = computed(() => {
-  return props.filters.filter((filter) => filterStore.hasFilter(filter as any))
+  return props.filters.filter((filter) => filterStore.hasFilter(filter))
 })
 
 const inactiveFilters = computed(() => {
-  return showAll.value ? props.filters.filter((filter) => !filterStore.hasFilter(filter as any)) : []
+  return showAll.value ? props.filters.filter((filter) => !filterStore.hasFilter(filter)) : []
 })
 
 const shownFilters = computed(() => {
@@ -38,18 +58,18 @@ const hasFilters = computed(() => {
   return activeFilters.value.length > 0
 })
 
-const setFilter = (stateFilter: T[number]) => {
-  if (filterStore.hasFilter(stateFilter as any)) {
-    filterStore.removeFilter(stateFilter as any)
+const setFilter = (stateFilter: FilterMap[typeof props.storeType]) => {
+  if (filterStore.hasFilter(stateFilter)) {
+    filterStore.removeFilter(stateFilter)
     showAll.value = !hasFilters.value
   } else {
-    filterStore.setFilter(stateFilter as any)
+    filterStore.setFilter(stateFilter)
     showAll.value = false
   }
 }
 
-const isSelected = (type: T[number]) => {
-  return filterStore.hasFilter(type as any)
+const isSelected = (type: FilterMap[typeof props.storeType]) => {
+  return filterStore.hasFilter(type)
 }
 </script>
 
