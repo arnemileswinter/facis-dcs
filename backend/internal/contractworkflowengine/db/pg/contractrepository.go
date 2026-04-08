@@ -38,7 +38,7 @@ func (r *PostgresContractRepo) Create(tx *sqlx.Tx, data db.Contract) (*time.Time
 func (r *PostgresContractRepo) ReadDataByID(tx *sqlx.Tx, did string) (*db.Contract, error) {
 	query := `
         SELECT did, state, name, description,
-               created_by, created_at, updated_at, contract_version
+               created_by, created_at, updated_at, contract_version, contract_data
         FROM contracts WHERE did = $1
     `
 	var ct db.Contract
