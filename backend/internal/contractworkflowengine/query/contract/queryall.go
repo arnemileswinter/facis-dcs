@@ -89,13 +89,9 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 		return nil, fmt.Errorf("could not read all contracts: %w", err)
 	}
 
-	evt := events.RetrieveAllEvent{
-		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now(),
-	}
-	err = event.Create(h.Ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(tx, query.RetrievedBy)
 	if err != nil {
-		return nil, fmt.Errorf("could not create event: %w", err)
+		return nil, fmt.Errorf("could not read all negotiation tasks: %w", err)
 	}
 
 	reviewerTasks, err := h.RTRepo.ReadAllByReviewer(tx, query.RetrievedBy)
@@ -103,14 +99,18 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}
 
-	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(tx, query.RetrievedBy)
-	if err != nil {
-		return nil, fmt.Errorf("could not read all negotiation tasks: %w", err)
-	}
-
 	approvalTasks, err := h.ATRepo.ReadAllByApprover(tx, query.RetrievedBy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
+	}
+
+	evt := events.RetrieveAllEvent{
+		RetrievedBy: query.RetrievedBy,
+		OccurredAt:  time.Now(),
+	}
+	err = event.Create(h.Ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	if err != nil {
+		return nil, fmt.Errorf("could not create event: %w", err)
 	}
 
 	err = tx.Commit()

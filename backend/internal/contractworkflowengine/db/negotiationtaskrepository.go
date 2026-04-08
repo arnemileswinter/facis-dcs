@@ -21,7 +21,7 @@ type NegotiationTaskRepo interface {
 	ReopenTasks(tx *sqlx.Tx, did string) error
 	ReadAll(tx *sqlx.Tx, did string) ([]NegotiationTaskData, error)
 	ReadAllByDID(tx *sqlx.Tx, did string) ([]NegotiationTaskData, error)
-	ReadAllByNegotiator(tx *sqlx.Tx, reviewer string) ([]NegotiationTaskData, error)
+	ReadAllByNegotiator(tx *sqlx.Tx, negotiator string) ([]NegotiationTaskData, error)
 	ReadNegotiatorsForDID(tx *sqlx.Tx, did string) ([]string, error)
 	UpdateState(tx *sqlx.Tx, did string, negotiator string, state string) error
 	AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error)
