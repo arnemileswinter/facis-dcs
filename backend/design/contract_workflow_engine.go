@@ -209,8 +209,6 @@ var ContractVerifyRequest = Type("ContractVerifyRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
-	Attribute("updated_at", String, "The timestamp when the contract was updated")
-
 	Required("did", "updated_at")
 })
 
@@ -218,7 +216,6 @@ var ContractVerifyResponse = Type("ContractVerifyResponse", func() {
 	Description("Result for verifying a contract")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-
 	Attribute("findings", ArrayOf(String), "A list of findings")
 
 	Required("did")
@@ -620,7 +617,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 		})
 	})
 
-	// POST /contract/verify
+	// GET /contract/verify
 	Method("verify", func() {
 		Description("run policy, schema, and semantic validations; return findings.")
 		Meta("dcs:ui", "Contract Negotiation", "Contract Review", "Contract Approval", "Contract Management Dashboard")
@@ -642,7 +639,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			POST("/contract/verify")
+			POST("/contract/verify/{did}")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
