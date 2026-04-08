@@ -132,9 +132,9 @@ var ContractRetrieveResponse = Type("ContractRetrieveResponse", func() {
 
 	Attribute("approval_tasks", ArrayOf(ContractApprovalTaskItem), "A list of approval tasks")
 
-	Attribute("negotiator_tasks", ArrayOf(ContractNegotiationTaskItem), "A list of negotiator tasks")
+	Attribute("negotiation_tasks", ArrayOf(ContractNegotiationTaskItem), "A list of negotiation tasks")
 
-	Required("contracts", "review_tasks", "approval_tasks")
+	Required("contracts", "review_tasks", "approval_tasks", "negotiation_tasks")
 })
 
 var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {

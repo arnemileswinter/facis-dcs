@@ -208,10 +208,22 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 		})
 	}
 
+	var negotiationTasks []*contractworkflowengine.ContractNegotiationTaskItem
+	for _, item := range result.NegotiatorTasks {
+		negotiationTasks = append(negotiationTasks, &contractworkflowengine.ContractNegotiationTaskItem{
+			Did:             item.DID,
+			ContractVersion: item.ContractVersion,
+			State:           item.State.String(),
+			Negotiator:      item.Negotiator,
+			CreatedAt:       item.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
 	return &contractworkflowengine.ContractRetrieveResponse{
-		Contracts:     contracts,
-		ReviewTasks:   reviewTasks,
-		ApprovalTasks: approvalTasks,
+		Contracts:        contracts,
+		ReviewTasks:      reviewTasks,
+		ApprovalTasks:    approvalTasks,
+		NegotiationTasks: negotiationTasks,
 	}, nil
 }
 
