@@ -544,7 +544,6 @@ func TestSubmit_SubmitContractInReviewedStateWithVerifying(t *testing.T) {
 		verifyCmd := command.VerifyCmd{
 			DID:        *did,
 			VerifiedBy: reviewer,
-			UpdatedAt:  time.Now(),
 		}
 
 		verifyHandler := command.Verifier{

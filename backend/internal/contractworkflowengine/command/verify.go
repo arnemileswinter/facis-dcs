@@ -8,7 +8,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
-	"errors"
 	"fmt"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 
 type VerifyCmd struct {
 	DID        string
-	UpdatedAt  time.Time
 	VerifiedBy string
 }
 
@@ -42,10 +40,6 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
-	}
-
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
-		return errors.New("contract was updated elsewhere, please reload")
 	}
 
 	hasTask, err := h.RTRepo.TaskExistsInState(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
