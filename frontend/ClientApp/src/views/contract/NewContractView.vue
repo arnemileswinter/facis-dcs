@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
-import type { ContractTemplateData, PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template'
 import type { Contract } from '@/models/contract/contract'
 import type { SelectedUserRole } from '@/models/user'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
 import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
 import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
+import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { ContractData } from '@/models/contract-data'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +25,7 @@ const router = useRouter()
 const errorStore = useErrorStore()
 const templatesStore = useContractTemplatesStore()
 const templateDraftStore = useTemplateDraftStore()
+const contractContentValuesStore = useContractContentValuesStore()
 const contractEditorUiStore = useContractEditorUiStore()
 const { approvedTemplates } = storeToRefs(templatesStore)
 const { activeTab, tabs } = storeToRefs(contractEditorUiStore)
@@ -35,6 +39,11 @@ const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
 const contract: Ref<Contract | null> = ref(null)
 
 const canSubmit = computed(() => isEditMode.value || selectedTemplate.value !== null)
+const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
+  if (!isEditMode.value) return null
+  return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number, subBlockId?: string) =>
+    contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue, subBlockId })
+})
 
 const submit = async () => {
   isSubmitting.value = true
@@ -79,6 +88,12 @@ watch(
   { immediate: true },
 )
 
+onUnmounted(() => {
+  templateDraftStore.reset()
+  contractContentValuesStore.reset()
+  contractEditorUiStore.reset()
+})
+
 const submitContract = async (result: SelectedUserRole[]) => {
   if (!contract.value) return
   const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
@@ -100,9 +115,10 @@ const submitContract = async (result: SelectedUserRole[]) => {
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
     templateDraftStore.reset()
+    contractContentValuesStore.reset()
     return
   }
-  const cd = contractData as Partial<ContractTemplateData>
+  const cd = contractData as ContractData
   templateDraftStore.reset({
     documentOutline: cd.documentOutline ?? [],
     documentBlocks: cd.documentBlocks ?? [],
@@ -110,6 +126,7 @@ function applyContractDataToDraft(contractData?: unknown) {
     subTemplateSnapshots: cd.subTemplateSnapshots ?? [],
     templateDataVersion: cd.templateDataVersion ?? 1,
   })
+  contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
 }
 </script>
 
@@ -150,7 +167,8 @@ function applyContractDataToDraft(contractData?: unknown) {
                     <TemplatePreview :document-outline="templateDraftStore.documentOutline"
                       :document-blocks="templateDraftStore.documentBlocks"
                       :semantic-conditions="templateDraftStore.semanticConditions"
-                      :sub-template-snapshots="templateDraftStore.subTemplateSnapshots" />
+                      :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
+                      :set-semantic-condition-value="setSemanticConditionValue" />
                   </div>
                 </div>
               </div>

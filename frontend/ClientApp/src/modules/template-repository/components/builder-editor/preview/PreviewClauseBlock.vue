@@ -1,7 +1,13 @@
 <template>
   <template v-for="(seg, index) in segments" :key="index">
     <PreviewTextBlock v-if="seg.type === 'text'" :text="seg.value" />
-    <PreviewParamInput v-else-if="seg.type === 'param'" :type="seg.paramType" :label="seg.label" />
+    <PreviewParamInput
+      v-else-if="seg.type === 'param'"
+      :type="seg.paramType"
+      :label="seg.label"
+      :value="seg.value"
+      @update:value="(val) => onParamValueChange(seg, val)"
+    />
     <span v-else-if="seg.type === 'newline'" :class="previewNewlineSpanClass" aria-hidden="true" />
   </template>
 </template>
@@ -10,18 +16,22 @@
 import { computed } from 'vue'
 import type { SemanticCondition, SemanticParameterType } from '@template-repository/models/contract-templace'
 import { parseSegments, isText, isPlaceholder, type Segment, isNewline } from '@template-repository/composables/useClauseTextChips'
+import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
 import PreviewParamInput from './PreviewParamInput.vue'
 import PreviewTextBlock from './PreviewTextBlock.vue'
 import { PREVIEW_NEWLINE_SPAN_CLASS } from './preview-classes'
 
 const props = defineProps<{
+  blockId: string
+  subBlockId?: string
   text: string
   semanticConditions: SemanticCondition[]
+  setSemanticConditionValue?: SemanticConditionValueSetter
 }>()
 
 type PreviewSegment =
   | { type: 'text'; value: string }
-  | { type: 'param'; paramType: SemanticParameterType; label: string }
+  | { type: 'param'; conditionId: string; parameterName: string; paramType: SemanticParameterType; label: string; value?: string | number }
   | { type: 'newline' }
 
 const previewNewlineSpanClass = PREVIEW_NEWLINE_SPAN_CLASS
@@ -39,6 +49,8 @@ const segments = computed<PreviewSegment[]>(() => {
       const paramType: SemanticParameterType = param?.type ?? 'string'
       result.push({
         type: 'param',
+        conditionId: seg.conditionId,
+        parameterName: seg.parameterName,
         paramType,
         label: seg.parameterName,
       })
@@ -48,4 +60,9 @@ const segments = computed<PreviewSegment[]>(() => {
   }
   return result
 })
+
+function onParamValueChange(seg: PreviewSegment, value: string | number) {
+  if (seg.type !== 'param') return
+  props.setSemanticConditionValue?.(props.blockId, seg.conditionId, seg.parameterName, value, props.subBlockId)
+}
 </script>
