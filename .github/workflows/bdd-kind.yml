@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Ensure BDD reports directory exists
+        run: mkdir -p tests/bdd/.reports/junit
+
       - name: Install kind
         uses: helm/kind-action@v1.10.0
         with:
@@ -49,12 +52,17 @@ jobs:
           kubectl logs deployment/dcs-digital-contracting-service -n dcs-bdd --tail=200 || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
 
+      - name: Recreate BDD reports directory if missing
+        if: always()
+        run: mkdir -p tests/bdd/.reports/junit
+
       - name: Upload BDD reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bdd-reports
           path: tests/bdd/.reports/
+          if-no-files-found: ignore
 
       - name: Teardown kind cluster
         if: always()
