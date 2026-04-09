@@ -34,6 +34,7 @@ export function useSemanticValueVerification() {
     let isValid = false
 
     semanticConditionValues.forEach((value) => {
+      const fieldName = value.parameterName || 'this field'
       const condition = semanticConditions.find((cond) => cond.conditionId === value.conditionId)
       // check if the condition exists, if not, it's an error
       if (!condition) {
@@ -42,7 +43,7 @@ export function useSemanticValueVerification() {
           subBlockId: value.subBlockId,
           conditionId: value.conditionId,
           parameterName: value.parameterName,
-          message: 'Condition not found',
+          message: 'Semantic rule not found.',
         })
         return
       }
@@ -54,7 +55,7 @@ export function useSemanticValueVerification() {
           subBlockId: value.subBlockId,
           conditionId: value.conditionId,
           parameterName: value.parameterName,
-          message: 'Parameter not found in condition',
+          message: `"${fieldName}" is not defined in the selected semantic rule.`,
         })
         return
       }
@@ -65,7 +66,7 @@ export function useSemanticValueVerification() {
           subBlockId: value.subBlockId,
           conditionId: value.conditionId,
           parameterName: value.parameterName,
-          message: 'Required parameter value is missing',
+          message: `"${fieldName}" is required but has no value.`,
         })
         return
       }
@@ -78,7 +79,7 @@ export function useSemanticValueVerification() {
             subBlockId: value.subBlockId,
             conditionId: value.conditionId,
             parameterName: value.parameterName,
-            message: `Parameter value type mismatch. Expected ${parameter.type}`,
+            message: `"${fieldName}" has an invalid value type. Expected ${parameter.type}.`,
           })
           return
         }
