@@ -5,6 +5,8 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
+import { useSemanticValueVerification } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import type { VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
 import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
@@ -26,6 +28,7 @@ const { approvedTemplates, hasApprovedTemplates } = storeToRefs(templatesStore)
 const templateDraftStore = useTemplateDraftStore()
 const contractContentValuesStore = useContractContentValuesStore()
 const contractEditorUiStore = useContractEditorUiStore()
+const { verifySemanticValue } = useSemanticValueVerification()
 const { activeTab, tabs } = storeToRefs(contractEditorUiStore)
 const { setActiveTab } = contractEditorUiStore
 
@@ -33,6 +36,7 @@ const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
 
@@ -101,6 +105,7 @@ onUnmounted(() => {
   templateDraftStore.reset()
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
+  verificationResult.value = null
 })
 
 // Contract data includes the template data used to fill the contract template
@@ -108,6 +113,7 @@ function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
     templateDraftStore.reset()
     contractContentValuesStore.reset()
+    verificationResult.value = null
     return
   }
   const cd = contractData as ContractData
@@ -119,6 +125,7 @@ function applyContractDataToDraft(contractData?: unknown) {
     templateDataVersion: cd.templateDataVersion ?? 1,
   })
   contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  verificationResult.value = null
 }
 
 </script>
@@ -162,6 +169,7 @@ function applyContractDataToDraft(contractData?: unknown) {
                       :document-blocks="templateDraftStore.documentBlocks"
                       :semantic-conditions="templateDraftStore.semanticConditions"
                       :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                      :verification-result="verificationResult"
                       :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
                       :set-semantic-condition-value="setSemanticConditionValue"
                     />

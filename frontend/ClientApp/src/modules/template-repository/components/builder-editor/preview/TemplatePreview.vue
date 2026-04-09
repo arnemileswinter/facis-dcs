@@ -10,6 +10,7 @@
       :semantic-conditions="semanticConditions"
       :sub-template-snapshots="subTemplateSnapshots"
       :semantic-condition-values="semanticConditionValues"
+      :verification-result="verificationResult"
       :set-semantic-condition-value="setSemanticConditionValue"
     />
   </template>
@@ -28,6 +29,7 @@
             :semantic-conditions="semanticConditions"
             :sub-template-snapshots="subTemplateSnapshots"
             :semantic-condition-values="semanticConditionValues"
+            :verification-result="verificationResult"
             :set-semantic-condition-value="setSemanticConditionValue"
           />
         </template>
@@ -43,6 +45,7 @@
       :text="block.text ?? ''"
       :semantic-conditions="semanticConditions"
       :semantic-condition-values="semanticConditionValues"
+      :verification-result="verificationResult"
       :set-semantic-condition-value="setSemanticConditionValue"
     />
     <!-- Approved template block -->
@@ -56,6 +59,7 @@
         :sub-block-id="block.blockId"
         :section-level="sectionLevel"
         :semantic-condition-values="semanticConditionValues"
+        :verification-result="verificationResult"
         :set-semantic-condition-value="setSemanticConditionValue"
       />
       <template v-for="childId in childrenIds" :key="childId">
@@ -68,6 +72,7 @@
           :semantic-conditions="semanticConditions"
           :sub-template-snapshots="subTemplateSnapshots"
           :semantic-condition-values="semanticConditionValues"
+          :verification-result="verificationResult"
           :set-semantic-condition-value="setSemanticConditionValue"
         />
       </template>
@@ -79,6 +84,7 @@
 import { computed } from 'vue'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
 import type { SemanticConditionValue } from '@/models/contract-data'
+import type { VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
 import type {
   DocumentBlock,
   DocumentOutline,
@@ -106,9 +112,10 @@ const props = withDefaults(
     semanticConditions: SemanticCondition[]
     subTemplateSnapshots?: SubTemplateSnapshot[]
     semanticConditionValues?: SemanticConditionValue[]
+    verificationResult?: VerificationResult | null
     setSemanticConditionValue?: SemanticConditionValueSetter
   }>(),
-  { sectionLevel: 1, semanticConditionValues: () => [], setSemanticConditionValue: null }
+  { sectionLevel: 1, semanticConditionValues: () => [], verificationResult: null, setSemanticConditionValue: null }
 )
 const hasBlockId = computed(() => props.blockId != null)
 
@@ -116,6 +123,7 @@ const documentOutline = computed(() => props.documentOutline)
 const documentBlocks = computed(() => props.documentBlocks)
 const semanticConditions = computed(() => props.semanticConditions)
 const semanticConditionValues = computed(() => props.semanticConditionValues)
+const verificationResult = computed(() => props.verificationResult)
 const subBlockId = computed(() => props.subBlockId)
 const setSemanticConditionValue = computed(() => props.setSemanticConditionValue)
 

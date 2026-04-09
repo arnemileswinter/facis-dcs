@@ -1,24 +1,26 @@
 <template>
-  <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="label">
+  <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="tipText">
     <input v-if="type === 'string'" v-model="stringValue" type="text" @input="emitStringValue"
-      class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
+      :class="inputClass" :aria-label="label" />
     <input v-else-if="type === 'integer'" v-model="numberValue" type="text" inputmode="numeric" @keydown="onIntegerKeyDown" @input="emitIntegerValue"
-      class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
+      :class="inputClass" :aria-label="label" />
     <input v-else-if="type === 'decimal'" v-model="numberValue" type="number" @input="emitDecimalValue"
-      class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
+      :class="inputClass" :aria-label="label" />
     <input v-else-if="type === 'date'" v-model="dateValue" type="date" @input="emitDateValue"
-      class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
+      :class="inputClass" :aria-label="label" />
   </span>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { SemanticParameterType } from '@template-repository/models/contract-templace'
 
 const props = defineProps<{
   type: SemanticParameterType
   label?: string
   value?: string | number
+  isInvalid?: boolean
+  invalidTip?: string
 }>()
 const emit = defineEmits<{
   (e: 'update:value', value: string | number): void
@@ -27,6 +29,10 @@ const emit = defineEmits<{
 const stringValue = ref('')
 const numberValue = ref('')
 const dateValue = ref('')
+const tipText = computed(() => props.invalidTip || props.label || '')
+const inputClass = computed(() =>
+  `border-b bg-transparent text-sm leading-relaxed px-0.5 outline-none ${props.isInvalid ? 'border-error text-error' : 'border-base-400'}`,
+)
 
 watch(
   () => props.type,

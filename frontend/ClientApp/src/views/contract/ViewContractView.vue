@@ -2,6 +2,10 @@
 import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { SelectedUserRole } from '@/models/user'
+import { useSemanticValueVerification, type VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
+import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
+import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
@@ -13,9 +17,14 @@ const route = useRoute()
 const router = useRouter()
 
 const authStore = useAuthStore()
+const templateDraftStore = useTemplateDraftStore()
+const contractEditorUiStore = useContractEditorUiStore()
+const contractContentValuesStore = useContractContentValuesStore()
+const { verifySemanticValue } = useSemanticValueVerification()
+const { setActiveTab } = contractEditorUiStore
 
 const contract: Ref<Contract | null> = ref(null)
-
+  const verificationResult: Ref<VerificationResult | null> = ref(null)
 const isCreator = computed(() => {
   return contract.value?.created_by === authStore.user?.username
 })
@@ -39,6 +48,8 @@ watch(
 
 const submitContract = async (result: SelectedUserRole[]) => {
   if (!contract.value) return
+  const isSemanticValueValid = verifySemanticValues()
+  if (!isSemanticValueValid) return
   const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
   const approver = result.find((user) => user.role === 'CONTRACT_APPROVER')?.user.username!
   const negotiators = result
@@ -55,6 +66,22 @@ const submitContract = async (result: SelectedUserRole[]) => {
     router.push({ name: ROUTES.CONTRACTS.LIST })
   }
 }
+
+const verifySemanticValues = (): boolean => {
+  const combinedConditions = [...templateDraftStore.semanticConditions]
+  templateDraftStore?.subTemplateSnapshots?.forEach((snapshot) => {
+    combinedConditions.push(...(snapshot?.template_data?.semanticConditions ?? []))
+  })
+  const result = verifySemanticValue(combinedConditions, contractContentValuesStore.semanticConditionValues)
+  verificationResult.value = result
+  if (result.isValid) {
+    return true
+  }
+  // go to content tab and highlight semantic inconsistencies
+  setActiveTab('content')
+  return false
+}
+
 </script>
 
 <template>
