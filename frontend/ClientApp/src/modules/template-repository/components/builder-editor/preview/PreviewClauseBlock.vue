@@ -14,6 +14,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { SemanticConditionValue } from '@/models/contract-data'
 import type { SemanticCondition, SemanticParameterType } from '@template-repository/models/contract-templace'
 import { parseSegments, isText, isPlaceholder, type Segment, isNewline } from '@template-repository/composables/useClauseTextChips'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
@@ -26,6 +27,7 @@ const props = defineProps<{
   subBlockId?: string
   text: string
   semanticConditions: SemanticCondition[]
+  semanticConditionValues?: SemanticConditionValue[]
   setSemanticConditionValue?: SemanticConditionValueSetter
 }>()
 
@@ -53,6 +55,7 @@ const segments = computed<PreviewSegment[]>(() => {
         parameterName: seg.parameterName,
         paramType,
         label: seg.parameterName,
+        value: findSemanticValue(seg.conditionId, seg.parameterName),
       })
     } else if (isNewline(seg)) {
       result.push({ type: 'newline' })
@@ -64,5 +67,17 @@ const segments = computed<PreviewSegment[]>(() => {
 function onParamValueChange(seg: PreviewSegment, value: string | number) {
   if (seg.type !== 'param') return
   props.setSemanticConditionValue?.(props.blockId, seg.conditionId, seg.parameterName, value, props.subBlockId)
+}
+
+function findSemanticValue(conditionId: string, parameterName: string): string | number | undefined {
+  return props.semanticConditionValues?.find((item) => {
+    const sameSub = (item.subBlockId ?? undefined) === (props.subBlockId ?? undefined)
+    return (
+      item.blockId === props.blockId &&
+      sameSub &&
+      item.conditionId === conditionId &&
+      item.parameterName === parameterName
+    )
+  })?.parameterValue
 }
 </script>

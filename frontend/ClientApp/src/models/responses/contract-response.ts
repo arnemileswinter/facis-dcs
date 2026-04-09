@@ -4,6 +4,7 @@ import type { ContractApprovalTask } from '../contract/contract-approval-task'
 import type { ContractReviewTask } from '../contract/contract-review-task'
 import type { ContractNegotiation } from '../contract/contract-negotiation'
 import type { ContractNegotiationTask } from '../contract/contract-negotiation-task'
+import type { ContractData } from '../contract-data'
 
 export interface ContractCreateResponse {
   did: string
@@ -34,7 +35,7 @@ export interface ContractRetrieveByIdResponse {
   created_at: string
   updated_at: string
   /** The data of that contract */
-  contract_data: unknown
+  contract_data: ContractData
   negotiations: ContractNegotiation[]
 }
 

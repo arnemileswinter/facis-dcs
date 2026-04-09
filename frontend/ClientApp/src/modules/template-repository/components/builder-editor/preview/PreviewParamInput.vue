@@ -2,7 +2,9 @@
   <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="label">
     <input v-if="type === 'string'" v-model="stringValue" type="text" @input="emitStringValue"
       class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
-    <input v-else-if="type === 'decimal' || type === 'integer'" v-model="numberValue" type="number" @input="emitNumberValue"
+    <input v-else-if="type === 'integer'" v-model="numberValue" type="text" inputmode="numeric" @keydown="onIntegerKeyDown" @input="emitIntegerValue"
+      class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
+    <input v-else-if="type === 'decimal'" v-model="numberValue" type="number" @input="emitDecimalValue"
       class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
     <input v-else-if="type === 'date'" v-model="dateValue" type="date" @input="emitDateValue"
       class="border-b border-base-400 bg-transparent text-sm leading-relaxed px-0.5 outline-none" :aria-label="label" />
@@ -51,7 +53,17 @@ function emitStringValue(event: Event) {
   emit('update:value', next)
 }
 
-function emitNumberValue(event: Event) {
+function emitIntegerValue(event: Event) {
+  const next =  getIntegerInput((event.target as HTMLInputElement | null)?.value ?? '')
+  if (next === '' || next === '-') {
+    emit('update:value', '')
+    return
+  }
+  const parsed = Number(next)
+  emit('update:value', Number.isInteger(parsed) ? parsed : '')
+}
+
+function emitDecimalValue(event: Event) {
   const next = (event.target as HTMLInputElement | null)?.value ?? ''
   if (next === '') {
     emit('update:value', '')
@@ -64,5 +76,33 @@ function emitNumberValue(event: Event) {
 function emitDateValue(event: Event) {
   const next = (event.target as HTMLInputElement | null)?.value ?? ''
   emit('update:value', next)
+}
+
+function getIntegerInput(value: string): string {
+  if (!value) return ''
+  const trimmed = value.trim()
+  const negative = trimmed.startsWith('-')
+  const digitsOnly = trimmed.replace(/[^\d]/g, '')
+  if (!digitsOnly) return negative ? '-' : ''
+  return `${negative ? '-' : ''}${digitsOnly}`
+}
+
+function onIntegerKeyDown(event: KeyboardEvent) {
+  const allowedControlKeys = new Set([
+    'Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'Home', 'End',
+  ])
+  if (allowedControlKeys.has(event.key) || event.metaKey || event.ctrlKey) return
+  if (event.key === '-') {
+    const input = event.target as HTMLInputElement | null
+    const cursorAtStart = (input?.selectionStart ?? 0) === 0
+    const hasMinus = numberValue.value.includes('-')
+    const allSelected = input?.selectionStart === 0 && input?.selectionEnd === input?.value.length
+    if ((cursorAtStart || allSelected) && !hasMinus) return
+    event.preventDefault()
+    return
+  }
+  if (event.key.length === 1 && !/\d/.test(event.key)) {
+    event.preventDefault()
+  }
 }
 </script>
