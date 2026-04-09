@@ -30,13 +30,11 @@ type FilterMap = {
   negotiationTasks: NegotiationTaskState
 }
 
-interface Props {
+const props = defineProps<{
   filters: FilterMap[StoreType][]
   label: string
   storeType: StoreType
-}
-
-const props = defineProps<Props>()
+}>()
 
 const filterStore = storeMap[props.storeType]() as unknown as FilterStore<FilterMap[StoreType]>
 

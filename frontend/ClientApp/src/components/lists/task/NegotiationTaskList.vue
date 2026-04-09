@@ -6,9 +6,9 @@ import { negotiationTaskStates } from '@/types/negotiation-task-state'
 import { toComparableValue } from '@/utils/comparison'
 import { toProperCase } from '@/utils/string'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import ListSort from '../../ListSort.vue'
-import ListStateFilter from '../../ListStateFilter.vue'
-import TaskListSearch from '../TaskListSearch.vue'
+import ListSort from '../ListSort.vue'
+import ListStateFilter from '../ListStateFilter.vue'
+import TaskListSearch from './TaskListSearch.vue'
 
 const props = defineProps<{
   items: ContractNegotiationTask[]
