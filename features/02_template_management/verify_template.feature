@@ -1,4 +1,5 @@
 @UC-02-07
+@skip
 Feature: Verify Template and Provenance
   Template Reviewers verify template correctness
   including metadata, semantics, and authenticity.

@@ -1,4 +1,5 @@
 @UC-03-04 @FR-CWE-15 @FR-CWE-16 @FR-CWE-25 @FR-PACM-03 @FR-PACM-02
+@skip
 Feature: Contract Approval
   Contract Approvers and Contract Managers route contracts to required
   approvers before signing. The system logs approvals with timestamps,

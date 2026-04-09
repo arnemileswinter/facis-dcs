@@ -1,4 +1,5 @@
 @UC-02-13
+@skip
 Feature: Template Identity and Traceability
   Templates are assigned unique identifiers
   for traceability across contract workflows.

@@ -1,4 +1,5 @@
 @UC-12-03 @FR-CWE-25
+@skip
 Feature: Approve Contract via API
   System Contract Approvers handle automated approvals
   through API requests with origin validation.

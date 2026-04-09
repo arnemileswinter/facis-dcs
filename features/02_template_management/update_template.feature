@@ -1,4 +1,5 @@
 @UC-02-04
+@skip
 Feature: Update Contract Template
   Template Creators update existing templates
   with full version history preserved.

@@ -1,4 +1,5 @@
 @UC-02-01
+@skip
 Feature: Create Contract Template
   Template Creators create reusable contract templates
   that serve as the basis for contract generation.

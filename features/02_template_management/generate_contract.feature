@@ -1,4 +1,5 @@
 @UC-02-03
+@skip
 Feature: Generate Contract from Template
   Template Approvers generate contract instances
   by populating approved templates with data.

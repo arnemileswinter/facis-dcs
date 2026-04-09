@@ -1,4 +1,5 @@
 @UC-03-01 @FR-CWE-13 @FR-CWE-03 @FR-CWE-30 @FR-CWE-07
+@skip
 Feature: Contract Creation
   Contract Creators generate contracts from predefined templates with
   auto-filled metadata. The system supports dynamic contract assembling

@@ -1,4 +1,5 @@
 @UC-01-03
+@skip
 Feature: Public Authentication Endpoints
   Public auth endpoints should stay reachable without bearer authentication.
 

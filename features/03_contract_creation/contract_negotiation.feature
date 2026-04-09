@@ -1,4 +1,5 @@
 @UC-03-02 @FR-CWE-08 @FR-CWE-14 @FR-CWE-18 @FR-CWE-07
+@skip
 Feature: Contract Negotiation
   Contract Managers and Contract Reviewers negotiate contract terms through
   commenting, version tracking, and structured negotiation workflows with

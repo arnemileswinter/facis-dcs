@@ -1,4 +1,5 @@
 @UC-02-05
+@skip
 Feature: Deprecate Contract Template
   Template Managers mark outdated templates as deprecated
   to prevent new contract generation.

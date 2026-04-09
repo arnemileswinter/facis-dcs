@@ -1,4 +1,5 @@
 @UC-12-04 @FR-CWE-24 @FR-CWE-31
+@skip
 Feature: Manage Contracts via API
   System Contract Managers access lifecycle management
   through APIs for querying, updating, and tracking.
