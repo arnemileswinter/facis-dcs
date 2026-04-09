@@ -54,7 +54,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bdd-reports
-          path: tests/bdd/.reports/
+          path: tests/bdd/.reports/**
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
 

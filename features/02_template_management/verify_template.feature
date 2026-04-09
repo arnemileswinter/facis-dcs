@@ -1,11 +1,11 @@
 @UC-02-07
 Feature: Verify Template and Provenance
-  Template Managers verify template correctness
+  Template Reviewers verify template correctness
   including metadata, semantics, and authenticity.
 
   @executable
   Scenario: Verify template with valid provenance
-    Given I am authenticated with role "Template Manager"
+    Given I am authenticated with role "Template Reviewer"
     And template "Standard NDA" has provenance metadata
     When I verify template "Standard NDA"
     Then the JSON-LD context is validated
