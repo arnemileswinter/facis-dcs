@@ -462,55 +462,6 @@ func TestSubmit_SubmitContractInNegationStateWithInvalidUser(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestSubmit_SubmitContractInReviewedStateWithoutVerifying(t *testing.T) {
-
-	db := setupTestDB(t)
-
-	cleanupContractTable(t, db)
-
-	did, err := base.GetDID()
-	if err != nil {
-		t.Fatalf("Failed to get new DID: %v", err)
-	}
-
-	creator := "Test User"
-
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
-	defer cancel()
-
-	repo := NewTestRepo(ctx)
-
-	createContract(t, db, repo, did, contractstate.Submitted, creator)
-
-	reviewers := []string{
-		"Test User 1",
-		"Test User 2",
-		"Test User 3",
-	}
-
-	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
-
-	actionFlag := actionflag.Approval
-
-	cmd := command.SubmitCmd{
-		DID:         *did,
-		UpdatedAt:   time.Now(),
-		SubmittedBy: reviewers[0],
-		ActionFlag:  &actionFlag,
-	}
-	handler := command.Submitter{
-		Ctx:    ctx,
-		DB:     db,
-		CRepo:  repo.CRepo,
-		RTRepo: repo.RTRepo,
-		ATRepo: repo.ATRepo,
-	}
-	err = handler.Handle(cmd)
-
-	assert.NotNil(t, err)
-}
-
 func TestSubmit_SubmitContractInReviewedStateWithVerifying(t *testing.T) {
 
 	db := setupTestDB(t)
@@ -539,24 +490,6 @@ func TestSubmit_SubmitContractInReviewedStateWithVerifying(t *testing.T) {
 	}
 
 	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
-
-	for _, reviewer := range reviewers {
-		verifyCmd := command.VerifyCmd{
-			DID:        *did,
-			VerifiedBy: reviewer,
-		}
-
-		verifyHandler := command.Verifier{
-			Ctx:    ctx,
-			DB:     db,
-			CRepo:  repo.CRepo,
-			RTRepo: repo.RTRepo,
-		}
-		err := verifyHandler.Handle(verifyCmd)
-		if err != nil {
-			t.Fatalf("Failed to verify contract: %v", err)
-		}
-	}
 
 	actionFlag := actionflag.Approval
 
@@ -624,7 +557,7 @@ func TestSubmit_OneReviewerApprovedContractInSubmittedState(t *testing.T) {
 		"Test User 3",
 	}
 
-	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Verified, creator, reviewers)
+	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
 
 	actionFlag := actionflag.Approval
 
@@ -790,7 +723,7 @@ func TestSubmit_AllReviewersApprovedContractInSubmittedState(t *testing.T) {
 		"Test User 3",
 	}
 
-	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Verified, creator, reviewers)
+	createReviewTasks(t, ctx, db, repo, *did, reviewtaskstate.Open, creator, reviewers)
 
 	actionFlag := actionflag.Approval
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
-	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
@@ -13,7 +12,6 @@ import (
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -27,7 +25,6 @@ type SubmitCmd struct {
 	Comments    []string
 	Reviewer    []string
 	Approver    *string
-	UserRoles   []string
 }
 
 type Submitter struct {
@@ -89,9 +86,8 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 	var nextTemplateState contracttemplatestate.ContractTemplateState
 	if processData.State == contracttemplatestate.Draft.String() {
 
-		isTemplateManager := slices.Contains(cmd.UserRoles, userrole.TemplateManager.String())
-		if isTemplateManager {
-			return errors.New("invalid user role")
+		if cmd.SubmittedBy != processData.CreatedBy {
+			return errors.New("invalid user")
 		}
 
 		if len(cmd.Reviewer) == 0 {
@@ -111,9 +107,8 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Rejected.String() {
 
-		isTemplateManager := slices.Contains(cmd.UserRoles, userrole.TemplateManager.String())
-		if isTemplateManager {
-			return errors.New("invalid user role")
+		if cmd.SubmittedBy != processData.CreatedBy {
+			return errors.New("invalid user")
 		}
 
 		err := h.RTRepo.ReopenTasks(tx, cmd.DID)

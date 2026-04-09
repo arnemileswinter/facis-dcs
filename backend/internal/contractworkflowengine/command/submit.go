@@ -240,21 +240,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		if cmd.ActionFlag != nil {
 			if *cmd.ActionFlag == actionflag.Approval {
 
-				exist, err := h.RTRepo.TaskExistsInState(tx, processData.DID, cmd.SubmittedBy, reviewtaskstate.Open.String())
-				if err != nil {
-					return err
-				}
-
-				if exist {
-					return errors.New("contract template needs to be verified before")
-				}
-
 				err = h.RTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, contractstate.Approved.String())
 				if err != nil {
 					return fmt.Errorf("could not update approval task: %w", err)
 				}
 
-				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String(), reviewtaskstate.Verified.String())
+				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String())
 				if err != nil {
 					return fmt.Errorf("could not check if review task exists: %w", err)
 				}

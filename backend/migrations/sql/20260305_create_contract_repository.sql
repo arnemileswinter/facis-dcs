@@ -55,7 +55,7 @@ FROM contracts;
 
 ------------------------------------------------------------------------------------------------------------------------
 
-CREATE TYPE contract_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'VERIFIED');
+CREATE TYPE contract_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED');
 
 CREATE TABLE IF NOT EXISTS contract_review_task
 (
