@@ -4,9 +4,9 @@ import { useContractTemplateStateFilterStore } from '@/stores/contract-template-
 import { contractTemplateStates } from '@/types/contract-template-state'
 import { toComparableValue } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
-import ListSort from '../../ListSort.vue'
-import ListStateFilter from '../../ListStateFilter.vue'
-import TemplateListSearch from '../TemplateListSearch.vue'
+import ListSort from '../ListSort.vue'
+import ListStateFilter from '../ListStateFilter.vue'
+import TemplateListSearch from './TemplateListSearch.vue'
 import TemplateListItem from './TemplateListItem.vue'
 
 const props = defineProps<{

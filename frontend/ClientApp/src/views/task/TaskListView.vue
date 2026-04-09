@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import ApprovalTaskList from '@/components/lists/task/approval/ApprovalTaskList.vue'
-import ReviewTaskList from '@/components/lists/task/review/ReviewTaskList.vue'
+import ApprovalTaskList from '@/components/lists/task/ApprovalTaskList.vue'
+import NegotiationTaskList from '@/components/lists/task/NegotiationTaskList.vue'
+import ReviewTaskList from '@/components/lists/task/ReviewTaskList.vue'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
@@ -20,6 +21,7 @@ const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
 const reviewTasks = computed(() => [...templatesStore.reviewTasks, ...contractsStore.reviewTasks])
 const approvalTasks = computed(() => [...templatesStore.approvalTasks, ...contractsStore.approvalTasks])
+const negotiationTasks = computed(() => contractsStore.negotiationTasks)
 
 const hasTemplateRole = computed(() => {
   return (
@@ -38,7 +40,7 @@ const hasContractRole = computed(() => {
 })
 
 const loadTasks = async () => {
-  if (!templatesStore.hasTemplates && hasTemplateRole.value) {
+  if (route.name !== ROUTES.TASKS.NEGOTIATIONS && !templatesStore.hasTemplates && hasTemplateRole.value) {
     await templatesStore.loadTemplates()
   }
   if (!contractsStore.hasContracts && hasContractRole.value) {
@@ -75,5 +77,8 @@ watch(
   </template>
   <template v-else-if="$route.name === ROUTES.TASKS.APPROVALS">
     <ApprovalTaskList :items="approvalTasks" />
+  </template>
+  <template v-else-if="$route.name === ROUTES.TASKS.NEGOTIATIONS">
+    <NegotiationTaskList :items="negotiationTasks" />
   </template>
 </template>

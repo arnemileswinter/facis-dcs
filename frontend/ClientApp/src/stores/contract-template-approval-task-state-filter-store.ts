@@ -1,3 +1,4 @@
+import type { FilterStore } from '@/models/stores/filter-store'
 import type { ApprovalTaskState } from '@/types/approval-task-state'
 import { defineStore } from 'pinia'
 import { computed, ref, type Ref } from 'vue'
@@ -25,6 +26,13 @@ export const useContractTemplateApprovalTaskStateFilterStore = defineStore(
       stateFilters.value.clear()
     }
 
-    return { stateFilters, hasFilters, hasFilter, setFilter, removeFilter, reset }
+    return {
+      stateFilters,
+      hasFilters,
+      hasFilter,
+      setFilter,
+      removeFilter,
+      reset,
+    } satisfies FilterStore<ApprovalTaskState>
   },
 )

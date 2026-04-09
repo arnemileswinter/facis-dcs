@@ -11,7 +11,13 @@ import NewContractView from '@/views/contract/NewContractView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
 import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
-import { DocumentCheckIcon, DocumentDuplicateIcon, DocumentMagnifyingGlassIcon, DocumentTextIcon } from '@heroicons/vue/20/solid'
+import {
+  ChatBubbleLeftRightIcon,
+  DocumentCheckIcon,
+  DocumentDuplicateIcon,
+  DocumentMagnifyingGlassIcon,
+  DocumentTextIcon,
+} from '@heroicons/vue/20/solid'
 import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
@@ -28,6 +34,7 @@ const ROUTES = {
   TASKS: {
     REVIEWS: 'tasks.reviews',
     APPROVALS: 'tasks.approvals',
+    NEGOTIATIONS: 'tasks.negotiations',
   },
   TEMPLATE_CATALOGUES: {
     ADMIN: 'template.catalogues.admin',
@@ -142,6 +149,19 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/tasks/negotiations',
+    name: ROUTES.TASKS.NEGOTIATIONS,
+    component: TaskListView,
+    meta: {
+      name: 'Assigned Negotiation Tasks',
+      icon: ChatBubbleLeftRightIcon,
+      requiresAuth: true,
+      title: 'DCS - Negotiation Tasks',
+      order: 3.3,
+      roles: ['CONTRACT_NEGOTIATOR'],
+    },
+  },
+  {
     path: '/catalogues/admin',
     name: ROUTES.TEMPLATE_CATALOGUES.ADMIN,
     component: TemplateCatalogueAdminView,
@@ -164,7 +184,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Contracts',
       order: 2,
-      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_APPROVER', 'CONTRACT_MANAGER']
+      roles: ['CONTRACT_CREATOR', 'CONTRACT_REVIEWER', 'CONTRACT_APPROVER', 'CONTRACT_MANAGER'],
     },
   },
   {
