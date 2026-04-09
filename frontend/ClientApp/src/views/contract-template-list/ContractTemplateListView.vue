@@ -27,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import TemplateList from '@/components/lists/template/template-list/TemplateList.vue';
+import TemplateList from '@/components/lists/template/TemplateList.vue';
 import { useTemplateTable } from './ContractTemplateListController'
 import { ROUTES } from '@/router/router';
 

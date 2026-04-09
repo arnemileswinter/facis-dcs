@@ -39,7 +39,7 @@ const archive = async () => {
     const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with archiving?' })
     if (!isCanceled) {
       await contractTemplateService.archive({ did: props.item.did, updated_at: props.item.updated_at })
-      router.go(0)
+      router.back()
     }
   } catch (err) {
     console.error('Archiving failed:', err)
@@ -52,7 +52,7 @@ const register = async () => {
     const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with registration?' })
     if (!isCanceled) {
       await contractTemplateService.register({ did: props.item.did, updated_at: props.item.updated_at })
-      router.go(0)
+      router.back()
     }
   } catch (err) {
     console.error('Registration failed:', err)
