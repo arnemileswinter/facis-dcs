@@ -10,7 +10,6 @@ BDD_EXECUTOR_REPO ?= https://github.com/eclipse-xfsc/bdd-executor.git
 BDD_EXECUTOR_PATH ?= ../../bdd-executor
 BDD_EXECUTOR_FALLBACK_PATH ?= .tmp/bdd-executor
 FEATURES_PATH ?= features
-TAGS ?= @executable
 ARG_BDD ?=
 ARG_BDD_JUNIT ?= --junit --junit-directory $(REPORTS_ABS)/junit
 K8S_NAMESPACE ?= default
@@ -46,11 +45,11 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 
 help:
 	@echo "make setup_dev    # Create venv and install bdd-executor"
-	@echo "make run_bdd_dev  # Run tagged executable BDD scenarios"
+	@echo "make run_bdd_dev  # Run all BDD scenarios"
 	@echo "make run_bdd_all  # Run all BDD scenarios"
-	@echo "make run_bdd_helm_dev # Port-forward Helm service and run tagged scenarios"
+	@echo "make run_bdd_helm_dev # Port-forward Helm service and run all scenarios"
 	@echo "make run_bdd_helm_all # Port-forward Helm service and run all scenarios"
-	@echo "make run_bdd_kind_dev # Build ephemeral kind+Helm stack and run tagged scenarios"
+	@echo "make run_bdd_kind_dev # Build ephemeral kind+Helm stack and run all scenarios"
 	@echo "make run_bdd_kind_all # Build ephemeral kind+Helm stack and run all scenarios"
 	@echo "make ensure_kind     # Validate kind is available in PATH"
 	@echo "make ensure_k8s_tools # Validate kubectl and helm are available in PATH"
@@ -81,7 +80,7 @@ run_bdd_dev: setup_dev
 	source "$(VENV_PATH)/bin/activate" && \
 	mkdir -p "$(REPORTS_ABS)/junit" && \
 	cd "$(PROJECT_ROOT)" && \
-	"$(VENV_ABS)/bin/coverage" run --append -m behave $(ARG_BDD_JUNIT) -t "$(TAGS)" $(FEATURES_PATH) $(ARG_BDD)
+	"$(VENV_ABS)/bin/coverage" run --append -m behave $(ARG_BDD_JUNIT) $(FEATURES_PATH) $(ARG_BDD)
 
 run_bdd_all: setup_dev
 	@"$(VENV_PATH)/bin/python" -c 'import eu.xfsc.bdd.core' 2>/dev/null || \
@@ -109,7 +108,6 @@ run_bdd_helm_dev: setup_dev ensure_k8s_tools
 		BDD_KEYCLOAK_REALM="$(BDD_KEYCLOAK_REALM)" \
 		ENABLE_KEYCLOAK_PORT_FORWARD="$(ENABLE_KEYCLOAK_PORT_FORWARD)" \
 		BDD_RUN_MODE=dev \
-		TAGS="$(TAGS)" \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
 		ARG_BDD="$(ARG_BDD)" \
 		bash "$(BDD_RUNNER_SCRIPT)"

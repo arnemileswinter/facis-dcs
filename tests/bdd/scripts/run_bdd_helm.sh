@@ -104,7 +104,7 @@ if [[ "$BDD_RUN_MODE" == "all" ]]; then
   "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" "$FEATURES_PATH" "${EXTRA_ARGS[@]}"
 else
   cd "$PROJECT_ROOT"
-  "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" -t "${TAGS:?TAGS is required for dev mode}" "$FEATURES_PATH" "${EXTRA_ARGS[@]}"
+  "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" "$FEATURES_PATH" "${EXTRA_ARGS[@]}"
 fi
 
 JUNIT_COUNT=$(find .reports/junit -name "*.xml" 2>/dev/null | wc -l)

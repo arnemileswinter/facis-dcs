@@ -32,3 +32,7 @@ tests/bdd/.tmp
 tests/bdd/.reports
 tests/bdd/.coverage
 tests/bdd/.coverage.*
+
+# Root coverage artifacts
+.coverage
+.coverage.*
