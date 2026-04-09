@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import TemplateManagerActions from '@/components/lists/template/template-list/TemplateManagerActions.vue'
+import TemplateManagerActions from '@/components/lists/template/TemplateManagerActions.vue'
 import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
 import type { PartialContractTemplate } from '@/models/contract-template'
 import type { SelectedUserRole } from '@/models/user'
