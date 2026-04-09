@@ -1,11 +1,12 @@
 @UC-02-03
-@skip
 Feature: Generate Contract from Template
   Template Approvers generate contract instances
   by populating approved templates with data.
 
-  Scenario: Generate contract from approved template
+  Background:
     Given I am authenticated with role "Template Approver"
+
+  Scenario: Generate contract from approved template
     And template "Standard NDA" is in "Approved" status
     When I generate a contract from template "Standard NDA"
     Then a contract is created linked to the template

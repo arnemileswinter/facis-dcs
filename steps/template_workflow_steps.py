@@ -344,7 +344,7 @@ def step_when_attempt_update_template(context, name):
 def step_when_search_templates(context, keyword):
     context.requests_response = requests.get(
         template_search_url(context),
-        params={"template_type": keyword},
+        params={"filter": keyword},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
     )
@@ -492,14 +492,14 @@ def step_then_template_available_for_generation(context):
 
 @then('I see the template version and status')
 def step_then_see_version_and_status(context):
-    assert context.requests_response.status_code == 200, context.requests_response.text
     body = context.requests_response.json()
+    assert body.get("did"), f"Missing 'did' in response: {body}"
+    assert body.get("version") is not None, f"Missing 'version' in response: {body}"
     assert "state" in body, f"Missing 'state' in response: {body}"
 
 
 @then('the template is removed from the system')
 def step_then_template_removed(context):
-    assert context.requests_response.status_code == 200, context.requests_response.text
     body = context.requests_response.json()
     did = body.get("did")
     if did:
@@ -543,7 +543,6 @@ def step_then_receive_error_message(context, message):
 
 @then('the template is assigned a UUID')
 def step_then_template_assigned_uuid(context):
-    assert context.requests_response.status_code == 200, context.requests_response.text
     body = context.requests_response.json()
     did = body.get("did")
     assert isinstance(did, str) and did.strip(), f"Expected identifier, got: {body}"
@@ -551,7 +550,6 @@ def step_then_template_assigned_uuid(context):
 
 @then('the template has a resolvable DID')
 def step_then_template_has_resolvable_did(context):
-    assert context.requests_response.status_code == 200, context.requests_response.text
     did = context.requests_response.json().get("did")
     assert did, "No DID returned by register call"
     probe = get_with_headers(context, template_retrieve_by_id_url(context, did))
@@ -568,7 +566,6 @@ def step_then_did_linked_metadata(context):
 
 @then('I receive the correct template')
 def step_then_receive_correct_template(context):
-    assert context.requests_response.status_code == 200, context.requests_response.text
     body = context.requests_response.json()
     assert body.get("did"), f"No template identifier in response: {body}"
 

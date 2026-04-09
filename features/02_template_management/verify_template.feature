@@ -1,11 +1,12 @@
 @UC-02-07
-@skip
 Feature: Verify Template and Provenance
   Template Reviewers verify template correctness
   including metadata, semantics, and authenticity.
 
-  Scenario: Verify template with valid provenance
+  Background:
     Given I am authenticated with role "Template Reviewer"
+
+  Scenario: Verify template with valid provenance
     And template "Standard NDA" has provenance metadata
     When I verify template "Standard NDA"
     Then the JSON-LD context is validated

@@ -1,5 +1,4 @@
 @UC-12-06
-@skip
 Feature: Implemented Protected API Coverage
   Every currently implemented protected API endpoint must reject invalid credentials.
 

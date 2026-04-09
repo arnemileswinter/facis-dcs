@@ -1,5 +1,4 @@
 @UC-02-10
-@skip
 Feature: Template Approval Workflow
   Templates progress through submission, review, and approval
   before becoming available for contract generation.

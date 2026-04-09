@@ -14,11 +14,10 @@ from support.keycloak_client import user_token
 from support.template_utils import template_env_key
 
 
-@given('I am authenticated with role "{role}"')
-def step_given_authenticated_with_role(context, role):
+def _set_headers_for_role(context, role: str, username_prefix: str = "bdd"):
     client_id = os.getenv("BDD_KEYCLOAK_CLIENT_ID", "digital-contracting-service")
     role_safe = re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
-    username = f"bdd-{role_safe}"
+    username = f"{username_prefix}-{role_safe}"
     password = os.getenv("BDD_KEYCLOAK_TEST_USER_PASSWORD", "bdd-pass-123")
 
     admin_access_token = admin_token()
@@ -32,6 +31,16 @@ def step_given_authenticated_with_role(context, role):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+
+
+@given('I am authenticated with role "{role}"')
+def step_given_authenticated_with_role(context, role):
+    _set_headers_for_role(context, role)
+
+
+@given('a system service is authenticated via API with role "{role}"')
+def step_given_authenticated_service_with_role(context, role):
+    _set_headers_for_role(context, role, username_prefix="bdd-service")
 
 
 @given("a system service is authenticated via API")
@@ -56,7 +65,15 @@ def step_given_invalid_api_key(context):
 def step_given_template_available(context, template_name):
     env_key = template_env_key(template_name)
     template_did = os.getenv(env_key)
-    assert template_did, f"Missing template DID env var: {env_key}"
+    if not template_did:
+        from template_workflow_steps import (  # noqa: PLC0415
+            _create_approved_template,
+            _store_named,
+        )
+
+        did, updated_at = _create_approved_template(context)
+        template_did = did
+        _store_named(context, template_name, did, updated_at)
     if not hasattr(context, "template_dids"):
         context.template_dids = {}
     context.template_dids[template_name] = template_did
