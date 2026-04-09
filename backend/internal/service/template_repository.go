@@ -107,6 +107,7 @@ func (s *templateRepositorysrvc) Submit(ctx context.Context, req *templatereposi
 		Comments:    req.Comments,
 		Reviewer:    req.Reviewers,
 		Approver:    req.Approver,
+		UserRoles:   middleware.GetRoles(ctx),
 	}
 	handler := command.Submitter{
 		Ctx:    ctx,
@@ -471,14 +472,8 @@ func (s *templateRepositorysrvc) Reject(ctx context.Context, req *templatereposi
 // register new template into the repository.
 func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepository.ContractTemplateRegisterRequest) (res *templaterepository.ContractTemplateRegisterResponse, err error) {
 
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
-	}
-
 	cmd := command.RegisterCmd{
 		DID:          req.Did,
-		UpdatedAt:    updatedAt,
 		RegisteredBy: middleware.GetUsername(ctx),
 	}
 	handler := command.Registrar{
