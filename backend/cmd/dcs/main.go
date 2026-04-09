@@ -13,6 +13,7 @@ import (
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
@@ -107,6 +108,8 @@ func main() {
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
 	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{Ctx: ctx}
 	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
+	cweCronJob := contractworkflowengine2.CronJob{DB: db, Ctx: ctx}
+	cweCronJob.Start()
 
 	// Initialize the service.
 	var (

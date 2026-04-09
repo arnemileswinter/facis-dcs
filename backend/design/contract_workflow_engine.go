@@ -31,6 +31,8 @@ var ContractUpdateRequest = Type("ContractUpdateRequest", func() {
 
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
+	Attribute("expiration_date", String, "The timestamp when the contract expired")
+
 	Attribute("contract_version", Int, "The version of the contract")
 
 	Attribute("name", String, "The name of the contract")
@@ -363,9 +365,9 @@ var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("updated_at", String, "Updated at")
+	Attribute("reason", String, "Reason for terminating contract")
 
-	Required("did", "updated_at")
+	Required("did", "reason")
 })
 
 var ContractTerminateResponse = Type("ContractTerminateResponse", func() {

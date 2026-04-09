@@ -50,7 +50,7 @@ func (h *Approver) Handle(cmd ApproveCmd) error {
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 
-	if processData.State != contractstate.Reviewed.String() {
+	if processData.State != contractstate.Reviewed.String() || processData.State == contractstate.Terminated.String() {
 		return errors.New("invalid contract state")
 	}
 

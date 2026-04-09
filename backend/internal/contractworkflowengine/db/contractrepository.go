@@ -14,28 +14,31 @@ type Contract struct {
 	CreatedBy       string         `db:"created_by"`
 	CreatedAt       time.Time      `db:"created_at"`
 	UpdatedAt       time.Time      `db:"updated_at"`
+	ExpirationDate  *time.Time     `db:"expiration_date"`
 	Name            *string        `db:"name"`
 	Description     *string        `db:"description"`
 	ContractData    *datatype.JSON `db:"contract_data"`
 }
 
 type ContractMetadata struct {
-	DID             string    `db:"did"`
-	ContractVersion *int      `db:"contract_version"`
-	State           string    `db:"state"`
-	CreatedBy       string    `db:"created_by"`
-	CreatedAt       time.Time `db:"created_at"`
-	UpdatedAt       time.Time `db:"updated_at"`
-	Name            *string   `db:"name"`
-	Description     *string   `db:"description"`
+	DID             string     `db:"did"`
+	ContractVersion *int       `db:"contract_version"`
+	State           string     `db:"state"`
+	CreatedBy       string     `db:"created_by"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+	ExpirationDate  *time.Time `db:"expiration_date"`
+	Name            *string    `db:"name"`
+	Description     *string    `db:"description"`
 }
 
 type ContractProcessData struct {
-	DID             string    `db:"did"`
-	ContractVersion *int      `db:"contract_version"`
-	State           string    `db:"state"`
-	CreatedBy       string    `db:"created_by"`
-	UpdatedAt       time.Time `db:"updated_at"`
+	DID             string     `db:"did"`
+	ContractVersion *int       `db:"contract_version"`
+	State           string     `db:"state"`
+	CreatedBy       string     `db:"created_by"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+	ExpirationDate  *time.Time `db:"expiration_date"`
 }
 
 type ContractUpdateData struct {
@@ -45,6 +48,7 @@ type ContractUpdateData struct {
 	Name            *string        `db:"name"`
 	Description     *string        `db:"description"`
 	ContractData    *datatype.JSON `db:"contract_data"`
+	ExpirationDate  *time.Time     `db:"expiration_date"`
 }
 
 type SearchValues struct {
@@ -64,4 +68,5 @@ type ContractRepo interface {
 	ReadAllMetaDataByFilter(tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
 	UpdateState(tx *sqlx.Tx, did string, state string) error
 	Update(tx *sqlx.Tx, data ContractUpdateData) error
+	ExpireOutdatedContracts(tx *sqlx.Tx) (int64, error)
 }

@@ -41,6 +41,8 @@ type UpdateEvent struct {
 	OldContractData    *datatype.JSON `json:"old_contract_data,omitempty"`
 	NewContractData    *datatype.JSON `json:"new_contract_data,omitempty"`
 	OccurredAt         time.Time      `json:"occurred_at"`
+	OldExpirationDate  *time.Time     `json:"old_expiration_date,omitempty"`
+	NewExpirationDate  *time.Time     `json:"new_expiration_date,omitempty"`
 }
 
 // EventType implements the Event interface.
@@ -224,6 +226,7 @@ func (e RejectEvent) GetDID() string {
 type TerminateEvent struct {
 	DID             string    `json:"did"`
 	ContractVersion *int      `json:"contract_version,omitempty"`
+	Reason          string    `json:"reason"`
 	TerminatedBy    string    `json:"terminated_by"`
 	OccurredAt      time.Time `json:"occurred_at"`
 }

@@ -17,6 +17,11 @@ type PostgresContractRepo struct {
 	Ctx context.Context
 }
 
+func (r *PostgresContractRepo) ExpireOutdatedContracts(tx *sqlx.Tx) (int64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (r *PostgresContractRepo) Create(tx *sqlx.Tx, data db.Contract) (*time.Time, error) {
 	statement := `
         INSERT INTO contracts (
@@ -39,7 +44,7 @@ func (r *PostgresContractRepo) ReadDataByID(tx *sqlx.Tx, did string) (*db.Contra
 	query := `
         SELECT did, state, name, description,
                created_by, created_at, updated_at, contract_version
-        FROM contracts WHERE did = $1
+        FROM contracts_effective WHERE did = $1
     `
 	var ct db.Contract
 	err := tx.GetContext(r.Ctx, &ct, query, did)
@@ -55,7 +60,7 @@ func (r *PostgresContractRepo) ReadDataByID(tx *sqlx.Tx, did string) (*db.Contra
 func (r *PostgresContractRepo) ReadAllMetaData(tx *sqlx.Tx) ([]db.ContractMetadata, error) {
 	query := `
         SELECT did, state, name, description, created_by, created_at, updated_at, contract_version
-        FROM contracts
+        FROM contracts_effective
     `
 	var cts []db.ContractMetadata
 	err := tx.SelectContext(r.Ctx, &cts, query)
@@ -68,7 +73,7 @@ func (r *PostgresContractRepo) ReadAllMetaData(tx *sqlx.Tx) ([]db.ContractMetada
 func (r *PostgresContractRepo) ReadAllMetaDataByFilter(tx *sqlx.Tx, values db.SearchValues) ([]db.ContractMetadata, error) {
 	query := `
         SELECT did, state, name, description, created_by, created_at, updated_at, contract_version
-        FROM contracts
+        FROM contracts_effective
     `
 	conditions, params, err := createSearchConditions(values)
 	if err != nil {
@@ -89,7 +94,7 @@ func (r *PostgresContractRepo) ReadAllMetaDataByFilter(tx *sqlx.Tx, values db.Se
 func (r *PostgresContractRepo) ReadProcessData(tx *sqlx.Tx, did string) (*db.ContractProcessData, error) {
 	query := `
         SELECT did, state, updated_at, created_by, contract_version
-        FROM contracts WHERE did = $1
+        FROM contracts_effective WHERE did = $1
     `
 	var processData db.ContractProcessData
 	err := tx.GetContext(r.Ctx, &processData, query, did)

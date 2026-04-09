@@ -46,7 +46,7 @@ func (h *NegotiationRejector) Handle(cmd RejectNegotiationCmd) error {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
 
-	if processData.State != contractstate.Negotiation.String() {
+	if processData.State != contractstate.Negotiation.String() || processData.State == contractstate.Terminated.String() {
 		return errors.New("current contract state is invalid")
 	}
 

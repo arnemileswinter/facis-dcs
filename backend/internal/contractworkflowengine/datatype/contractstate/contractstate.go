@@ -17,6 +17,7 @@ const (
 	Reviewed    ContractState = "REVIEWED"
 	Approved    ContractState = "APPROVED"
 	Terminated  ContractState = "TERMINATED"
+	Expired     ContractState = "EXPIRED"
 )
 
 var validStates = map[ContractState]bool{
@@ -27,6 +28,7 @@ var validStates = map[ContractState]bool{
 	Reviewed:    true,
 	Approved:    true,
 	Terminated:  true,
+	Expired:     true,
 }
 
 func NewContractState(s string) (ContractState, error) {

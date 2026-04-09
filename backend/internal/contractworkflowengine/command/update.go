@@ -21,6 +21,7 @@ type UpdateCmd struct {
 	ContractVersion *int
 	UpdatedAt       time.Time
 	UpdatedBy       string
+	ExpirationDate  *time.Time
 	Name            *string
 	Description     *string
 	ContractData    *datatype.JSON
@@ -65,6 +66,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		ContractVersion: cmd.ContractVersion,
 		Name:            cmd.Name,
 		Description:     cmd.Description,
+		ExpirationDate:  cmd.ExpirationDate,
 		ContractData:    cmd.ContractData,
 	}
 	err = h.CRepo.Update(tx, newData)
@@ -82,6 +84,8 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		NewDescription:     cmd.Description,
 		OldContractData:    oldData.ContractData,
 		NewContractData:    cmd.ContractData,
+		OldExpirationDate:  cmd.ExpirationDate,
+		NewExpirationDate:  cmd.ExpirationDate,
 		UpdatedBy:          cmd.UpdatedBy,
 		OccurredAt:         time.Now(),
 	}
