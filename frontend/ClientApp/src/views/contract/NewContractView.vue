@@ -7,6 +7,8 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
+import { useSemanticValueVerification } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import type { VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
 import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
@@ -27,6 +29,7 @@ const templatesStore = useContractTemplatesStore()
 const templateDraftStore = useTemplateDraftStore()
 const contractContentValuesStore = useContractContentValuesStore()
 const contractEditorUiStore = useContractEditorUiStore()
+const { verifySemanticValue } = useSemanticValueVerification()
 const { approvedTemplates } = storeToRefs(templatesStore)
 const { activeTab, tabs } = storeToRefs(contractEditorUiStore)
 const { setActiveTab } = contractEditorUiStore
@@ -35,6 +38,7 @@ const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
 
@@ -101,10 +105,14 @@ onUnmounted(() => {
   templateDraftStore.reset()
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
+  verificationResult.value = null
 })
 
 const submitContract = async (result: SelectedUserRole[]) => {
   if (!contract.value) return
+  const isSemanticValueValid = verifySemanticValues()
+  if (!isSemanticValueValid) return
+
   const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
   const approver = result.find((user) => user.role === 'CONTRACT_APPROVER')?.user.username!
   const negotiators = result.filter((user) => user.role === 'CONTRACT_NEGOTIATOR').map((user) => user.user.username)
@@ -120,11 +128,28 @@ const submitContract = async (result: SelectedUserRole[]) => {
   }
 }
 
+const verifySemanticValues = (): boolean => {
+  const combinedConditions = [...templateDraftStore.semanticConditions]
+  templateDraftStore?.subTemplateSnapshots?.forEach((snapshot) => {
+    combinedConditions.push(...(snapshot?.template_data?.semanticConditions ?? []))
+  })
+  const result = verifySemanticValue(combinedConditions, contractContentValuesStore.semanticConditionValues)
+  verificationResult.value = result
+  if (result.isValid) {
+    return true
+  }
+  errorStore.add(`Semantic value verification failed: ${result.errors.length} issue(s).`, 'error')
+  // go to content tab and highlight semantic inconsistencies
+  setActiveTab('content')
+  return false
+}
+
 // Contract data includes the template data used to fill the contract template
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
     templateDraftStore.reset()
     contractContentValuesStore.reset()
+    verificationResult.value = null
     return
   }
   const cd = contractData as ContractData
@@ -136,6 +161,7 @@ function applyContractDataToDraft(contractData?: unknown) {
     templateDataVersion: cd.templateDataVersion ?? 1,
   })
   contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  verificationResult.value = null
 }
 </script>
 
@@ -177,6 +203,7 @@ function applyContractDataToDraft(contractData?: unknown) {
                       :document-blocks="templateDraftStore.documentBlocks"
                       :semantic-conditions="templateDraftStore.semanticConditions"
                       :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                      :verification-result="verificationResult"
                       :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
                       :set-semantic-condition-value="setSemanticConditionValue" />
                   </div>
