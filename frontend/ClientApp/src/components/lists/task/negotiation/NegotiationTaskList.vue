@@ -4,6 +4,7 @@ import { useContractNeogtiationTaskStateFilterStore } from '@/stores/contract-ne
 import { useContractsStore } from '@/stores/contracts-store'
 import { negotiationTaskStates } from '@/types/negotiation-task-state'
 import { toComparableValue } from '@/utils/comparison'
+import { toProperCase } from '@/utils/string'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../../ListSort.vue'
 import ListStateFilter from '../../ListStateFilter.vue'
@@ -86,7 +87,7 @@ onUnmounted(() => stateFilterStore.reset())
           <h2 class="card-title flex-wrap justify-between">
             <div>Negotiation Task for Contract: {{ getContractName(item) }}</div>
             <div class="flex-1"></div>
-            <!-- <div class="badge badge-accent">{{ toProperCase(item.type) }} Task</div> -->
+            <div class="badge badge-accent">{{ toProperCase(item.type) }} Task</div>
             <div class="badge badge-secondary">{{ item.state }}</div>
           </h2>
           <div class="flex justify-between">

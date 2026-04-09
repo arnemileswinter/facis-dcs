@@ -40,7 +40,7 @@ const hasContractRole = computed(() => {
 })
 
 const loadTasks = async () => {
-  if (!templatesStore.hasTemplates && hasTemplateRole.value) {
+  if (route.name !== ROUTES.TASKS.NEGOTIATIONS && !templatesStore.hasTemplates && hasTemplateRole.value) {
     await templatesStore.loadTemplates()
   }
   if (!contractsStore.hasContracts && hasContractRole.value) {
