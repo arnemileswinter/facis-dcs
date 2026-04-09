@@ -51,6 +51,14 @@ const submit = async () => {
       did.value = response.did
       errorStore.add('Contract created.', 'info')
     } else if (contract.value) {
+      const contractData: ContractData = {
+        documentOutline: contract.value.contract_data?.documentOutline ?? [],
+        documentBlocks: contract.value.contract_data?.documentBlocks ?? [],
+        semanticConditions: contract.value.contract_data?.semanticConditions ?? [],
+        subTemplateSnapshots: contract.value.contract_data?.subTemplateSnapshots ?? [],
+        templateDataVersion: contract.value.contract_data?.templateDataVersion ?? 1,
+        semanticConditionValues: contractContentValuesStore.semanticConditionValues,
+      }
       await contractWorkflowService.update({
         did: contract.value.did,
         updated_at: contract.value.updated_at,
@@ -58,6 +66,7 @@ const submit = async () => {
         contract_version: contract.value.contract_version,
         name: contract.value.name,
         description: contract.value.description,
+        contract_data: contractData,
       })
       router.push({ name: ROUTES.CONTRACTS.LIST })
     }
@@ -152,6 +161,7 @@ function applyContractDataToDraft(contractData?: unknown) {
                       :document-outline="templateDraftStore.documentOutline"
                       :document-blocks="templateDraftStore.documentBlocks"
                       :semantic-conditions="templateDraftStore.semanticConditions"
+                      :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                       :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
                       :set-semantic-condition-value="setSemanticConditionValue"
                     />

@@ -9,6 +9,7 @@
       :document-blocks="documentBlocks"
       :semantic-conditions="semanticConditions"
       :sub-template-snapshots="subTemplateSnapshots"
+      :semantic-condition-values="semanticConditionValues"
       :set-semantic-condition-value="setSemanticConditionValue"
     />
   </template>
@@ -26,6 +27,7 @@
             :document-blocks="documentBlocks"
             :semantic-conditions="semanticConditions"
             :sub-template-snapshots="subTemplateSnapshots"
+            :semantic-condition-values="semanticConditionValues"
             :set-semantic-condition-value="setSemanticConditionValue"
           />
         </template>
@@ -40,6 +42,7 @@
       :sub-block-id="subBlockId ? block.blockId : undefined"
       :text="block.text ?? ''"
       :semantic-conditions="semanticConditions"
+      :semantic-condition-values="semanticConditionValues"
       :set-semantic-condition-value="setSemanticConditionValue"
     />
     <!-- Approved template block -->
@@ -52,6 +55,7 @@
         :sub-template-snapshots="subTemplateSnapshots"
         :sub-block-id="block.blockId"
         :section-level="sectionLevel"
+        :semantic-condition-values="semanticConditionValues"
         :set-semantic-condition-value="setSemanticConditionValue"
       />
       <template v-for="childId in childrenIds" :key="childId">
@@ -63,17 +67,18 @@
           :document-blocks="documentBlocks"
           :semantic-conditions="semanticConditions"
           :sub-template-snapshots="subTemplateSnapshots"
+          :semantic-condition-values="semanticConditionValues"
           :set-semantic-condition-value="setSemanticConditionValue"
         />
       </template>
     </ConditionalWrapper>
-
   </template>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
+import type { SemanticConditionValue } from '@/models/contract-data'
 import type {
   DocumentBlock,
   DocumentOutline,
@@ -100,15 +105,17 @@ const props = withDefaults(
     documentBlocks: DocumentBlock[]
     semanticConditions: SemanticCondition[]
     subTemplateSnapshots?: SubTemplateSnapshot[]
+    semanticConditionValues?: SemanticConditionValue[]
     setSemanticConditionValue?: SemanticConditionValueSetter
   }>(),
-  { sectionLevel: 1, setSemanticConditionValue: null }
+  { sectionLevel: 1, semanticConditionValues: () => [], setSemanticConditionValue: null }
 )
 const hasBlockId = computed(() => props.blockId != null)
 
 const documentOutline = computed(() => props.documentOutline)
 const documentBlocks = computed(() => props.documentBlocks)
 const semanticConditions = computed(() => props.semanticConditions)
+const semanticConditionValues = computed(() => props.semanticConditionValues)
 const subBlockId = computed(() => props.subBlockId)
 const setSemanticConditionValue = computed(() => props.setSemanticConditionValue)
 
