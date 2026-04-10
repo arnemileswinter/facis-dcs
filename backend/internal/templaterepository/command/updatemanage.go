@@ -8,6 +8,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 	"errors"
@@ -98,8 +99,18 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 				return fmt.Errorf("could not delete approval tasks: %w", err)
 			}
 
-		} else if *cmd.State == contracttemplatestate.Rejected || *cmd.State == contracttemplatestate.Submitted || *cmd.State == contracttemplatestate.Reviewed {
+		} else if *cmd.State == contracttemplatestate.Rejected || *cmd.State == contracttemplatestate.Submitted {
 			err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+			if err != nil {
+				return err
+			}
+
+			err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+			if err != nil {
+				return err
+			}
+		} else if *cmd.State == contracttemplatestate.Reviewed {
+			err = h.RTRepo.UpdateStateForAllTasks(tx, cmd.DID, reviewtaskstate.Approved.String())
 			if err != nil {
 				return err
 			}
