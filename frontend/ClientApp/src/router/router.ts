@@ -132,7 +132,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Review Tasks',
       order: 3.1,
-      roles: ['TEMPLATE_REVIEWER'],
+      roles: ['TEMPLATE_REVIEWER', 'CONTRACT_REVIEWER'],
     },
   },
   {
@@ -145,7 +145,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Approval Tasks',
       order: 3.2,
-      roles: ['TEMPLATE_APPROVER'],
+      roles: ['TEMPLATE_APPROVER', 'CONTRACT_APPROVER'],
     },
   },
   {
