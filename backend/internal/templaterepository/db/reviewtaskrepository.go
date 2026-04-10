@@ -22,6 +22,7 @@ type ReviewTaskRepo interface {
 	ReadAll(tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
 	ReadAllByDID(tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
 	ReadAllByReviewer(tx *sqlx.Tx, reviewer string) ([]ReviewTaskData, error)
+	UpdateStateForAllTasks(tx *sqlx.Tx, did string, state string) error
 	UpdateState(tx *sqlx.Tx, did string, reviewer string, state string) error
 	AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error)
 	TaskExistsInState(tx *sqlx.Tx, did string, reviewer string, state string) (bool, error)

@@ -46,6 +46,15 @@ func (r *PostgresReviewTaskRepo) IsValidReviewer(tx *sqlx.Tx, did string, review
 	return count > 0, nil
 }
 
+func (r *PostgresReviewTaskRepo) UpdateStateForAllTasks(tx *sqlx.Tx, did string, state string) error {
+	statement := `
+        UPDATE contract_templates_review_task SET state = $2
+        WHERE did = $1
+    `
+	_, err := tx.ExecContext(r.Ctx, statement, did, state)
+	return err
+}
+
 func (r *PostgresReviewTaskRepo) ReopenTasks(tx *sqlx.Tx, did string) error {
 	statement := `
         UPDATE contract_templates_review_task SET state = 'OPEN'
