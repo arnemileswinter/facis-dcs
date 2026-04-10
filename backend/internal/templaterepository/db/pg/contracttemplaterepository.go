@@ -103,6 +103,15 @@ func (r *PostgresContractTemplateRepo) ReadProcessData(tx *sqlx.Tx, did string) 
 	return &processData, nil
 }
 
+func (r *PostgresContractTemplateRepo) UpdateStateForAllTasks(tx *sqlx.Tx, did string, state string) error {
+	statement := `
+        UPDATE contract_templates SET state = $2
+        WHERE did = $1
+    `
+	_, err := tx.ExecContext(r.Ctx, statement, did, state)
+	return err
+}
+
 func (r *PostgresContractTemplateRepo) UpdateState(tx *sqlx.Tx, did string, state string) error {
 	statement := `
         UPDATE contract_templates SET state = $2
