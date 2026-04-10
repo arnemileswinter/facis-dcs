@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { PartialContractTemplate } from '@/models/contract-template'
-import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
+import { useTemplateStateFilterStore } from '@/stores/state-filter-store'
 import { contractTemplateStates } from '@/types/contract-template-state'
 import { compareValues } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../ListSort.vue'
 import ListStateFilter from '../ListStateFilter.vue'
-import TemplateListSearch from './TemplateListSearch.vue'
 import TemplateListItem from './TemplateListItem.vue'
+import TemplateListSearch from './TemplateListSearch.vue'
 
 const props = defineProps<{
   items: PartialContractTemplate[]
@@ -26,7 +26,7 @@ const defaultSort = sorter.keys().next().value!
 const sortBy = ref(defaultSort)
 const sortOrder = ref(1)
 
-const stateFilterStore = useContractTemplateStateFilterStore()
+const stateFilterStore = useTemplateStateFilterStore()
 
 const searchedItems: Ref<PartialContractTemplate[]> = ref(props.items)
 

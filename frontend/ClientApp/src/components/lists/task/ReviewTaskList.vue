@@ -3,9 +3,9 @@ import type { ContractTemplateReviewTask } from '@/models/contract-template-revi
 import type { ContractReviewTask } from '@/models/contract/contract-review-task'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
-import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
+import { useReviewTaskStateFilterStore } from '@/stores/state-filter-store'
 import { TemplateState } from '@/types/contract-template-state'
 import { ReviewTaskState, reviewTaskStates } from '@/types/review-task-state'
 import { compareValues } from '@/utils/comparison'
@@ -24,7 +24,7 @@ const props = defineProps<{
 const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
 const authStore = useAuthStore()
-const stateFilterStore = useContractTemplateReviewTaskStateFilterStore()
+const stateFilterStore = useReviewTaskStateFilterStore()
 
 const sorter = new Map<keyof ReviewTask, string>([
   ['created_at', 'Creation date'],

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Contract } from '@/models/contract/contract'
-import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
+import { useContractStateFilterStore } from '@/stores/state-filter-store'
 import { contractStates } from '@/types/contract-state'
 import { compareValues } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'

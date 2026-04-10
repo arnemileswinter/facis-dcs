@@ -2,9 +2,9 @@
 import type { ContractTemplateApprovalTask } from '@/models/contract-template-approval-task'
 import type { ContractApprovalTask } from '@/models/contract/contract-approval-task'
 import { ROUTES } from '@/router/router'
-import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
+import { useApprovalTaskStateFilterStore } from '@/stores/state-filter-store'
 import { ApprovalTaskState, approvalTaskStates } from '@/types/approval-task-state'
 import { TemplateState } from '@/types/contract-template-state'
 import { compareValues } from '@/utils/comparison'
@@ -22,7 +22,7 @@ const props = defineProps<{
 
 const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
-const stateFilterStore = useContractTemplateApprovalTaskStateFilterStore()
+const stateFilterStore = useApprovalTaskStateFilterStore()
 
 const sorter = new Map<keyof ApprovalTask, string>([
   ['created_at', 'Creation date'],
@@ -133,6 +133,6 @@ onUnmounted(() => stateFilterStore.reset())
         </div>
       </li>
     </template>
-    <li v-else class="px-4">No review tasks found.</li>
+    <li v-else class="px-4">No approval tasks found.</li>
   </ul>
 </template>

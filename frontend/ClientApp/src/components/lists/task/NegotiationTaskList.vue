@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ContractNegotiationTask } from '@/models/contract/contract-negotiation-task'
-import { useContractNeogtiationTaskStateFilterStore } from '@/stores/contract-negotiation-task-state-filter-store'
 import { useContractsStore } from '@/stores/contracts-store'
+import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
 import { negotiationTaskStates } from '@/types/negotiation-task-state'
 import { compareValues } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
@@ -14,7 +14,7 @@ const props = defineProps<{
 }>()
 
 const contractsStore = useContractsStore()
-const stateFilterStore = useContractNeogtiationTaskStateFilterStore()
+const stateFilterStore = useNegotiationTaskStateFilterStore()
 
 const sorter = new Map<keyof ContractNegotiationTask, string>([
   ['created_at', 'Creation date'],
@@ -86,6 +86,6 @@ onUnmounted(() => stateFilterStore.reset())
         </div>
       </li>
     </template>
-    <li v-else class="px-4">No review tasks found.</li>
+    <li v-else class="px-4">No negotiation tasks found.</li>
   </ul>
 </template>

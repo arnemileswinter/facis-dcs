@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { FilterStore } from '@/models/stores/filter-store'
-import { useContractNeogtiationTaskStateFilterStore } from '@/stores/contract-negotiation-task-state-filter-store'
-import { useContractStateFilterStore } from '@/stores/contract-state-filter-store'
-import { useContractTemplateApprovalTaskStateFilterStore } from '@/stores/contract-template-approval-task-state-filter-store'
-import { useContractTemplateReviewTaskStateFilterStore } from '@/stores/contract-template-review-task-state-filter-store'
-import { useContractTemplateStateFilterStore } from '@/stores/contract-template-state-filter-store'
+import {
+  useApprovalTaskStateFilterStore,
+  useNegotiationTaskStateFilterStore,
+  useContractStateFilterStore,
+  useReviewTaskStateFilterStore,
+  useTemplateStateFilterStore,
+} from '@/stores/state-filter-store'
 import type { ApprovalTaskState } from '@/types/approval-task-state'
 import type { ContractState } from '@/types/contract-state'
 import type { ContractTemplateState } from '@/types/contract-template-state'
@@ -13,11 +15,11 @@ import type { ReviewTaskState } from '@/types/review-task-state'
 import { computed, ref } from 'vue'
 
 const storeMap = {
-  templates: useContractTemplateStateFilterStore,
+  templates: useTemplateStateFilterStore,
   contracts: useContractStateFilterStore,
-  reviewTasks: useContractTemplateReviewTaskStateFilterStore,
-  approvalTasks: useContractTemplateApprovalTaskStateFilterStore,
-  negotiationTasks: useContractNeogtiationTaskStateFilterStore,
+  reviewTasks: useReviewTaskStateFilterStore,
+  approvalTasks: useApprovalTaskStateFilterStore,
+  negotiationTasks: useNegotiationTaskStateFilterStore,
 } as const
 
 type StoreType = keyof typeof storeMap
