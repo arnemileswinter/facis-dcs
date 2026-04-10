@@ -16,6 +16,10 @@ const authStore = useAuthStore()
 
 const templatesStore = useContractTemplatesStore()
 const contractsStore = useContractsStore()
+
+const loading = computed(() => templatesStore.loading || contractsStore.loading)
+const error = computed(() => templatesStore.error || contractsStore.error)
+
 const reviewTasks = computed(() => {
   return route.name === ROUTES.TASKS.REVIEWS ? [...templatesStore.reviewTasks, ...contractsStore.reviewTasks] : []
 })
@@ -43,10 +47,10 @@ const hasContractRole = computed(() => {
 })
 
 const loadTasks = async () => {
-  if (route.name !== ROUTES.TASKS.NEGOTIATIONS && !templatesStore.hasTemplates && hasTemplateRole.value) {
+  if (route.name !== ROUTES.TASKS.NEGOTIATIONS && hasTemplateRole.value) {
     await templatesStore.loadTemplates()
   }
-  if (!contractsStore.hasContracts && hasContractRole.value) {
+  if (hasContractRole.value) {
     await contractsStore.loadContracts()
   }
 }
@@ -63,13 +67,17 @@ watch(
     {{ $route.meta.name }}
   </h2>
 
-  <template v-if="$route.name === ROUTES.TASKS.REVIEWS">
-    <ReviewTaskList :items="reviewTasks" />
-  </template>
-  <template v-else-if="$route.name === ROUTES.TASKS.APPROVALS">
-    <ApprovalTaskList :items="approvalTasks" />
-  </template>
-  <template v-else-if="$route.name === ROUTES.TASKS.NEGOTIATIONS">
-    <NegotiationTaskList :items="negotiationTasks" />
+  <div v-if="loading">Loading Tasks...</div>
+  <div v-else-if="error">{{ error }}</div>
+  <template v-else>
+    <template v-if="$route.name === ROUTES.TASKS.REVIEWS">
+      <ReviewTaskList :items="reviewTasks" />
+    </template>
+    <template v-else-if="$route.name === ROUTES.TASKS.APPROVALS">
+      <ApprovalTaskList :items="approvalTasks" />
+    </template>
+    <template v-else-if="$route.name === ROUTES.TASKS.NEGOTIATIONS">
+      <NegotiationTaskList :items="negotiationTasks" />
+    </template>
   </template>
 </template>

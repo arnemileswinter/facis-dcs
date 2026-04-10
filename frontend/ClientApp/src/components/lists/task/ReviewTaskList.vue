@@ -64,18 +64,15 @@ const getContractName = (item: ContractReviewTask) => {
 }
 
 const canEdit = (item: ReviewTask) => {
-  if (item.type === 'template') {
-    const template = templatesStore.contractTemplates.find((template) => template.did === item.did)
-    const state = template?.state
-    return (
-      (template?.created_by === authStore.user?.username &&
-        (state === TemplateState.draft || state === TemplateState.rejected)) ||
-      state === TemplateState.submitted
-    )
-  } else {
-    // TODO:
-    return false
-  }
+  if (item.type === 'contract') return false
+
+  const template = templatesStore.contractTemplates.find((template) => template.did === item.did)
+  const state = template?.state
+  return (
+    (template?.created_by === authStore.user?.username &&
+      (state === TemplateState.draft || state === TemplateState.rejected)) ||
+    state === TemplateState.submitted
+  )
 }
 
 const resolveViewRouteName = (item: ReviewTask) => {
@@ -85,7 +82,7 @@ const resolveViewRouteName = (item: ReviewTask) => {
     }
     return ROUTES.TEMPLATES.VIEW
   } else {
-    // TODO:
+    // TODO: contract view routes
   }
 }
 

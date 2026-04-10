@@ -46,7 +46,7 @@ const filteredItems = computed(() => {
   return sortedItems.value
 })
 
-function applySearchResult(searchResult: PartialContractTemplate[]) {
+const applySearchResult = (searchResult: PartialContractTemplate[]) => {
   searchedItems.value = searchResult
 }
 
