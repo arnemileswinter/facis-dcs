@@ -9,6 +9,7 @@ export interface ContractCreateRequest {
 export interface ContractUpdateRequest {
   did: string
   updated_at: string
+  expiration_date?: string
   contract_version?: number
   name?: string
   description?: string
@@ -33,10 +34,6 @@ export interface ContractRetrieveByIdRequest {
 }
 
 export interface ContractReviewRequest {
-  did: string
-}
-
-export interface ContractVerifyRequest {
   did: string
 }
 
@@ -82,7 +79,8 @@ export interface ContractStoreRequest {
 
 export interface ContractTerminateRequest {
   did: string
-  updated_at: string
+  /** Reason for terminating the contract */
+  reason: string
 }
 
 export interface ContractAuditRequest {

@@ -14,7 +14,6 @@ import type {
   ContractSubmitRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
-  ContractVerifyRequest,
 } from '@/models/requests/contract-requests'
 import type {
   ContractApproveResponse,
@@ -31,7 +30,6 @@ import type {
   ContractSubmitResponse,
   ContractTerminateResponse,
   ContractUpdateResponse,
-  ContractVerifyResponse,
 } from '@/models/responses/contract-response'
 import type { ContractWorkflowService } from '@/models/services/contract-workflow-service'
 
@@ -83,10 +81,6 @@ export const contractWorkflowService: ContractWorkflowService = {
         console.error('Retrieve ID Error:', err)
         return null
       })
-  },
-
-  async verify(request: ContractVerifyRequest) {
-    return http.get<ContractVerifyResponse>(`/contract/verify/${request.did}`).then((res) => res.data)
   },
 
   async search(request: ContractSearchRequest) {

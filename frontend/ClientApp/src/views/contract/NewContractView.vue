@@ -39,6 +39,8 @@ const submit = async () => {
       await contractWorkflowService.update({
         did: contract.value.did,
         updated_at: contract.value.updated_at,
+        expiration_date: contract.value.expiration_date,
+        contract_version: contract.value.contract_version,
         name: contract.value.name,
         description: contract.value.description,
       })

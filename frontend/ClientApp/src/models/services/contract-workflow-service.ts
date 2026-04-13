@@ -14,7 +14,6 @@ import type {
   ContractSubmitRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
-  ContractVerifyRequest,
 } from '@/models/requests/contract-requests'
 import type {
   ContractApproveResponse,
@@ -30,7 +29,6 @@ import type {
   ContractSubmitResponse,
   ContractTerminateResponse,
   ContractUpdateResponse,
-  ContractVerifyResponse,
 } from '@/models/responses/contract-response'
 
 export interface ContractWorkflowService {
@@ -42,7 +40,6 @@ export interface ContractWorkflowService {
   review: (request: ContractReviewRequest) => Promise<ContractReviewResponse>
   retrieve: (request?: ContractRetrieveRequest) => Promise<ContractRetrieveResponse>
   retrieveById: (request: ContractRetrieveByIdRequest) => Promise<Contract | null>
-  verify: (request: ContractVerifyRequest) => Promise<ContractVerifyResponse>
   search: (request: ContractSearchRequest) => Promise<ContractSearchResponse>
   approve: (request: ContractApproveRequest) => Promise<ContractApproveResponse>
   reject: (request: ContractRejectRequest) => Promise<ContractRejectResponse>

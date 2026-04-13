@@ -42,11 +42,6 @@ export interface ContractReviewResponse {
   did: string
 }
 
-export interface ContractVerifyResponse {
-  did: string
-  findings?: string[]
-}
-
 interface ContractSearchResponseItem {
   did: string
   contract_version?: number

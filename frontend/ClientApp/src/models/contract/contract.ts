@@ -9,6 +9,7 @@ export interface Contract {
   description?: string
   created_at: string
   updated_at: string
+  expiration_date?: string
   contract_data?: unknown
   negotiations?: ContractNegotiation[]
 }

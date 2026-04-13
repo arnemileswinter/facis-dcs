@@ -85,7 +85,6 @@ export interface ContractTemplateArchiveRequest {
 
 export interface ContractTemplateRegisterRequest {
   did: string
-  updated_at: string
 }
 
 export interface ContractTemplateAuditRequest {
