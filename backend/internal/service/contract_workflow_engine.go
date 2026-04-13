@@ -280,27 +280,6 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 	}, nil
 }
 
-func (s *contractWorkflowEnginesrvc) Verify(ctx context.Context, req *contractworkflowengine.ContractVerifyRequest) (res *contractworkflowengine.ContractVerifyResponse, err error) {
-
-	cmd := command.VerifyCmd{
-		VerifiedBy: middleware.GetUsername(ctx),
-	}
-	handler := command.Verifier{
-		Ctx:    ctx,
-		DB:     s.DB,
-		CRepo:  s.CRepo,
-		RTRepo: s.RTRepo,
-	}
-	err = handler.Handle(cmd)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	return &contractworkflowengine.ContractVerifyResponse{
-		Did: req.Did,
-	}, nil
-}
-
 func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contractworkflowengine.ContractNegotiationRequest) (res *contractworkflowengine.ContractNegotiationResponse, err error) {
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
@@ -542,20 +521,19 @@ func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractwor
 
 func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
 
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
 	cmd := command.TerminateCmd{
 		DID:          req.Did,
 		TerminatedBy: middleware.GetUsername(ctx),
-		UpdatedAt:    updatedAt,
+		Reason:       req.Reason,
 	}
 	handler := command.Terminator{
-		Ctx:   ctx,
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		Ctx:    ctx,
+		DB:     s.DB,
+		CRepo:  s.CRepo,
+		NRepo:  s.NRepo,
+		NTRepo: s.NTRepo,
+		RTRepo: s.RTRepo,
+		ATRepo: s.ATRepo,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {

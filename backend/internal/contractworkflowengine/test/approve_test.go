@@ -39,21 +39,6 @@ func TestApprove_ApproveContractInReviewedState(t *testing.T) {
 
 	createApprovalTasks(t, ctx, db, repo, *did, approvaltaskstate.Open, creator, approver)
 
-	verifyCmd := command.VerifyCmd{
-		DID:        *did,
-		VerifiedBy: approver,
-	}
-	verifyHandler := command.Verifier{
-		Ctx:    ctx,
-		DB:     db,
-		CRepo:  repo.CRepo,
-		RTRepo: repo.RTRepo,
-	}
-	err = verifyHandler.Handle(verifyCmd)
-	if err != nil {
-		t.Fatalf("Failed to submit contract : %v", err)
-	}
-
 	cmd := command.ApproveCmd{
 		DID:           *did,
 		UpdatedAt:     time.Now(),

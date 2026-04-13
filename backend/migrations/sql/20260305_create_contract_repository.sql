@@ -1,4 +1,4 @@
-CREATE TYPE contract_state AS ENUM ('DRAFT', 'NEGOTIATION', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'DELETED', 'TERMINATED');
+CREATE TYPE contract_state AS ENUM ('DRAFT', 'NEGOTIATION', 'SUBMITTED', 'REJECTED', 'REVIEWED', 'APPROVED', 'TERMINATED', 'EXPIRED');
 
 
 CREATE TABLE IF NOT EXISTS contracts (
@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     created_by      VARCHAR(255)   NOT NULL,
     created_at      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expiration_date TIMESTAMP,
 
     state           contract_state NOT NULL,
 
@@ -42,7 +43,19 @@ EXECUTE FUNCTION update_updated_at_column();
 
 ------------------------------------------------------------------------------------------------------------------------
 
-CREATE TYPE contract_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED', 'VERIFIED');
+CREATE OR REPLACE VIEW contracts_effective AS
+SELECT *,
+       CASE
+           WHEN expiration_date <= CURRENT_TIMESTAMP
+               AND state NOT IN ('TERMINATED', 'REJECTED', 'EXPIRED')
+               THEN 'EXPIRED'::contract_state
+           ELSE state
+           END AS effective_state
+FROM contracts;
+
+------------------------------------------------------------------------------------------------------------------------
+
+CREATE TYPE contract_review_task_state AS ENUM ('OPEN', 'APPROVED', 'REJECTED');
 
 CREATE TABLE IF NOT EXISTS contract_review_task
 (

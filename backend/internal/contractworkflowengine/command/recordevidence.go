@@ -5,6 +5,7 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"errors"
@@ -44,6 +45,10 @@ func (h *EvidenceRecorder) Handle(cmd RecordEvidenceCmd) error {
 
 	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
 		return errors.New("contract was updated elsewhere, please reload")
+	}
+
+	if processData.State == contractstate.Terminated.String() {
+		return errors.New("current contract state is invalid")
 	}
 
 	evt := contractevents.RecordEvidenceEvent{

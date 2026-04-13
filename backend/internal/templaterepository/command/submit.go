@@ -107,7 +107,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Rejected.String() {
 
-		if processData.CreatedBy != cmd.SubmittedBy {
+		if cmd.SubmittedBy != processData.CreatedBy {
 			return errors.New("invalid user")
 		}
 

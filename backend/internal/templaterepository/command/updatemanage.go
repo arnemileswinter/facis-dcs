@@ -8,6 +8,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 	"errors"
@@ -59,8 +60,7 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 		return errors.New("contract template was updated elsewhere, please reload")
 	}
 
-	if oldData.State == contracttemplatestate.Approved.String() ||
-		oldData.State == contracttemplatestate.Registered.String() ||
+	if oldData.State == contracttemplatestate.Registered.String() ||
 		oldData.State == contracttemplatestate.Deleted.String() ||
 		oldData.State == contracttemplatestate.Deprecated.String() {
 		return errors.New("invalid contract template state")
@@ -87,7 +87,7 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 
 	newState := oldData.State
 	if cmd.State != nil {
-		if *cmd.State == contracttemplatestate.Draft || *cmd.State == contracttemplatestate.Deleted {
+		if *cmd.State == contracttemplatestate.Draft || *cmd.State == contracttemplatestate.Deleted || *cmd.State == contracttemplatestate.Deprecated {
 
 			err = h.RTRepo.Delete(tx, cmd.DID)
 			if err != nil {
@@ -99,8 +99,18 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 				return fmt.Errorf("could not delete approval tasks: %w", err)
 			}
 
-		} else if *cmd.State == contracttemplatestate.Rejected || *cmd.State == contracttemplatestate.Submitted || *cmd.State == contracttemplatestate.Reviewed {
+		} else if *cmd.State == contracttemplatestate.Rejected || *cmd.State == contracttemplatestate.Submitted {
 			err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+			if err != nil {
+				return err
+			}
+
+			err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+			if err != nil {
+				return err
+			}
+		} else if *cmd.State == contracttemplatestate.Reviewed {
+			err = h.RTRepo.UpdateStateForAllTasks(tx, cmd.DID, reviewtaskstate.Approved.String())
 			if err != nil {
 				return err
 			}

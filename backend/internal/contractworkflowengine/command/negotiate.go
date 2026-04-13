@@ -52,7 +52,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		return errors.New("contract was updated elsewhere, please reload")
 	}
 
-	if processData.State != contractstate.Negotiation.String() {
+	if processData.State != contractstate.Negotiation.String() || processData.State == contractstate.Terminated.String() {
 		return errors.New("current contract state is invalid")
 	}
 
