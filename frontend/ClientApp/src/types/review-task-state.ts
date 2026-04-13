@@ -1,4 +1,5 @@
 export type ReviewTaskState = (typeof ReviewTaskState)[keyof typeof ReviewTaskState]
+export type ContractReviewTaskState = Exclude<ReviewTaskState, 'VERIFIED'>
 
 export const ReviewTaskState = {
   open: 'OPEN',
