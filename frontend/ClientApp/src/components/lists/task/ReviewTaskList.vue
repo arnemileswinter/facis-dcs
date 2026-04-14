@@ -83,6 +83,7 @@ const resolveViewRouteName = (item: ReviewTask) => {
     return ROUTES.TEMPLATES.VIEW
   } else {
     // TODO: contract view routes
+    return ROUTES.CONTRACTS.VIEW
   }
 }
 

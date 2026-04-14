@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContractNegotiationTask } from '@/models/contract/contract-negotiation-task'
+import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
 import { negotiationTaskStates } from '@/types/negotiation-task-state'
@@ -79,7 +80,9 @@ onUnmounted(() => stateFilterStore.reset())
             <div class="flex justify-between">
               <div>Creation date: {{ new Date(item.created_at).toLocaleDateString() }}</div>
               <div class="card-actions justify-end">
-                <RouterLink to="#" class="btn btn-sm btn-primary rounded-box"> View </RouterLink>
+                <RouterLink :to="{ name: ROUTES.CONTRACTS.VIEW }" class="btn btn-sm btn-primary rounded-box">
+                  View
+                </RouterLink>
               </div>
             </div>
           </div>
