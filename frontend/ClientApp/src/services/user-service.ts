@@ -58,9 +58,12 @@ export const userService: UserService = {
         const userRoles = await this.getRolesByUser({ userId: user.id })
         const isAuthorized = roles.some((role) => role && userRoles.includes(role))
         if (isAuthorized) {
-          user.roleIds = roles.filter((role): role is UserRole => !!role && userRoles.includes(role))
+          return {
+            ...user,
+            roleIds: roles.filter((role): role is UserRole => !!role && userRoles.includes(role)),
+          }
         }
-        return isAuthorized ? user : null
+        return null
       }),
     )
     return authorizedUsers.filter((user) => user !== null)

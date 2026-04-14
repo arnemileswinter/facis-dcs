@@ -6,9 +6,10 @@ import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
+import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import ContractListView from '@/views/contract/ContractListView.vue'
 import NewContractView from '@/views/contract/NewContractView.vue'
-import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
+import ViewContractView from '@/views/contract/ViewContractView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
 import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
 import {
@@ -46,6 +47,7 @@ const ROUTES = {
     LIST: 'contracts.list',
     NEW: 'contracts.new',
     EDIT: 'contracts.edit',
+    VIEW: 'contracts.view',
   },
 } as const
 
@@ -210,6 +212,12 @@ const routes: RouteRecordRaw[] = [
       title: 'DCS - Edit Contract',
       roles: ['CONTRACT_CREATOR'],
     },
+  },
+  {
+    path: '/contracts/view/:did',
+    name: ROUTES.CONTRACTS.VIEW,
+    component: ViewContractView,
+    meta: { name: 'View Contract', hideInSidebar: true, requiresAuth: true, title: 'DCS - View Contract' },
   },
   {
     path: '/auth/success',

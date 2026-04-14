@@ -35,7 +35,12 @@ const canEdit = computed(() => {
             {{ item.description }}
           </div>
           <div class="card-actions justify-end">
-            <RouterLink to="#" class="btn btn-sm btn-primary rounded-box btn-disabled">View</RouterLink>
+            <RouterLink
+              :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: item.did } }"
+              class="btn btn-sm btn-primary rounded-box"
+            >
+              View
+            </RouterLink>
             <RouterLink
               :to="
                 canEdit
