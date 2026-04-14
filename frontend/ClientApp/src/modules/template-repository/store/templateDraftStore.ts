@@ -21,6 +21,8 @@ const defaultState: Readonly<TemplateDraftState> = {
   document_number: null,
   version: null,
   updated_at: null,
+  // This field is used to distinguish between contract and template workflows.
+  workflow: 'template',
 }
 
 export const useTemplateDraftStore = defineStore(storeId, {

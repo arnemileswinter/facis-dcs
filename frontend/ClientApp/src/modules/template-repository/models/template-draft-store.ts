@@ -24,6 +24,7 @@ interface TemplateDraftState {
   document_number: string | null
   version: number | null
   updated_at: string | null
+  workflow: 'contract' | 'template'
 }
 
 /** Payload for adding a new block. */

@@ -17,9 +17,15 @@ import { useContractContentValuesStore } from '@/modules/contract-workflow-engin
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { storeToRefs } from 'pinia'
-import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { ContractData } from '@/models/contract-data'
+import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
+import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
+import AddBlockModal from '@template-repository/components/builder-editor/AddBlockModal.vue'
+import SemanticRulesEditor from '@template-repository/components/SemanticRulesEditor.vue'
+import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import BuilderPreviewDialog from '@template-repository/components/builder-editor/BuilderPreviewDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,9 +35,10 @@ const templatesStore = useContractTemplatesStore()
 const templateDraftStore = useTemplateDraftStore()
 const contractContentValuesStore = useContractContentValuesStore()
 const contractEditorUiStore = useContractEditorUiStore()
+const templateEditorUiStore = useTemplateEditorUiStore()
 const { verifySemanticValue } = useSemanticValueVerification()
 const { approvedTemplates } = storeToRefs(templatesStore)
-const { activeTab, tabs } = storeToRefs(contractEditorUiStore)
+const { activeTab } = storeToRefs(contractEditorUiStore)
 const { setActiveTab } = contractEditorUiStore
 
 const did = ref<string | null>(null)
@@ -48,6 +55,8 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number, subBlockId?: string) =>
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue, subBlockId })
 })
+
+const tabs = computed(()=> contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
 const submit = async () => {
   isSubmitting.value = true
@@ -90,6 +99,9 @@ watch(
         if (id && !Array.isArray(id)) {
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
+          const uneditableStates = [ContractState.approved, ContractState.terminated].map((s) => s.toLowerCase())
+          templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''))
+          
         }
       } catch (err: any) {
         console.error('Failed to load contract')
@@ -101,10 +113,15 @@ watch(
   { immediate: true },
 )
 
+onMounted(() => {
+  templateEditorUiStore.reset({ workflow: 'contract' })
+})
+
 onUnmounted(() => {
-  templateDraftStore.reset()
+  templateDraftStore.reset({ workflow: 'contract' })
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
+  templateEditorUiStore.reset({ workflow: 'contract' })
   verificationResult.value = null
 })
 
@@ -147,13 +164,14 @@ const verifySemanticValues = (): boolean => {
 // Contract data includes the template data used to fill the contract template
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
-    templateDraftStore.reset()
+    templateDraftStore.reset({workflow: 'contract'})
     contractContentValuesStore.reset()
     verificationResult.value = null
     return
   }
   const cd = contractData as ContractData
   templateDraftStore.reset({
+    workflow: 'contract',
     documentOutline: cd.documentOutline ?? [],
     documentBlocks: cd.documentBlocks ?? [],
     semanticConditions: cd.semanticConditions ?? [],
@@ -199,16 +217,47 @@ function applyContractDataToDraft(contractData?: unknown) {
               <div v-show="activeTab === 'content'">
                 <div class="card bg-base-100 border border-base-300 shadow-sm">
                   <div class="card-body gap-5">
-                    <TemplatePreview :document-outline="templateDraftStore.documentOutline"
+                    <TemplatePreview
+                      :document-outline="templateDraftStore.documentOutline"
                       :document-blocks="templateDraftStore.documentBlocks"
                       :semantic-conditions="templateDraftStore.semanticConditions"
                       :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                       :verification-result="verificationResult"
                       :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
-                      :set-semantic-condition-value="setSemanticConditionValue" />
+                      :set-semantic-condition-value="setSemanticConditionValue"
+                    />
                   </div>
                 </div>
               </div>
+              <!-- SEMANTIC RULES TAB -->
+              <div v-show="activeTab === 'semantic'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body gap-5">
+                    <SemanticRulesEditor />
+                  </div>
+                </div>
+              </div>
+
+              <!-- CLAUSES TAB -->
+              <div v-show="activeTab === 'clauses'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body gap-5">
+                    <ClausesEditor />
+                  </div>
+                </div>
+              </div>
+
+              <!-- BUILDER TAB -->
+              <div v-show="activeTab === 'builder'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body">
+                    <BuilderEditor />
+                  </div>
+                </div>
+                <AddBlockModal />
+                <BuilderPreviewDialog />
+              </div>
+
             </div>
           </div>
         </div>
