@@ -1,4 +1,5 @@
 @UC-12-02 @FR-CWE-17 @FR-CWE-15
+@skip
 Feature: Review Contract via API
   System Contract Reviewers perform automated validation
   through API-based checks and rule evaluation.

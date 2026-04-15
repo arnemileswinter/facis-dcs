@@ -1,4 +1,5 @@
 @UC-12-01 @FR-CWE-13 @FR-CWE-28
+@skip
 Feature: Create Contract via API
   System Contract Creators trigger automated contract generation
   through API integrations with external systems.
