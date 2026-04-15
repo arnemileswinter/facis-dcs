@@ -7,6 +7,21 @@ interface InfoResponse {
     dcsUrl?: string;
 }
 
+// All boolean fields that Node-RED won't auto-persist (checkboxes)
+const CHECKBOX_FIELDS = [
+    'depPostgresql', 'depPgPersist',
+    'depKeycloak',   'depKcRealmImport',
+    'depNats',
+    'depNeo4j',      'depNeo4jPersist',
+] as const;
+
+// Maps a toggle checkbox id to the config block it controls
+const DEP_TOGGLES: Record<string, string> = {
+    'node-input-depPostgresql': 'dep-config-postgresql',
+    'node-input-depKeycloak':   'dep-config-keycloak',
+    'node-input-depNeo4j':      'dep-config-neo4j',
+};
+
 (function () {
     function setupFile(fieldFile: string, fieldHidden: string): void {
         const inp = document.getElementById('node-input-' + fieldFile) as HTMLInputElement | null;
@@ -36,6 +51,19 @@ interface InfoResponse {
             certificateContent: { value: '' },
             oidcIssuerUrl:      { value: '' },
             clientId:           { value: 'digital-contracting-service' },
+            depPostgresql:      { value: false },
+            depPgUser:          { value: 'dcs' },
+            depPgPassword:      { value: 'dcs' },
+            depPgDatabase:      { value: 'dcs' },
+            depPgPersist:       { value: false },
+            depKeycloak:        { value: false },
+            depKcAdminUser:     { value: 'admin' },
+            depKcAdminPassword: { value: 'admin' },
+            depKcRealmImport:   { value: false },
+            depNats:            { value: false },
+            depNeo4j:           { value: false },
+            depNeo4jPassword:   { value: 'changeme' },
+            depNeo4jPersist:    { value: false },
         },
         inputs: 1,
         outputs: 1,
@@ -72,6 +100,30 @@ interface InfoResponse {
             setupFile('kubeconfig', 'kubeconfigContent');
             setupFile('privateKey', 'privateKeyContent');
             setupFile('certificate', 'certificateContent');
+
+            // Restore checkbox state and wire up dep-config show/hide
+            const node = this as unknown as Record<string, boolean>;
+            CHECKBOX_FIELDS.forEach(field => {
+                const el = document.getElementById('node-input-' + field) as HTMLInputElement | null;
+                if (!el) return;
+                el.checked = !!node[field];
+                const configId = DEP_TOGGLES['node-input-' + field];
+                if (configId) {
+                    const block = document.getElementById(configId);
+                    if (block) block.style.display = el.checked ? '' : 'none';
+                    el.addEventListener('change', () => {
+                        if (block) block.style.display = el.checked ? '' : 'none';
+                    });
+                }
+            });
+        },
+        oneditsave() {
+            // Persist checkbox state back to the node
+            const node = this as unknown as Record<string, boolean>;
+            CHECKBOX_FIELDS.forEach(field => {
+                const el = document.getElementById('node-input-' + field) as HTMLInputElement | null;
+                if (el) node[field] = el.checked;
+            });
         },
     });
 })();

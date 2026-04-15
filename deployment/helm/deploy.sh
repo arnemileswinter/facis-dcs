@@ -182,12 +182,40 @@ log "✅ Placeholders replaced in $TMP_VALUES"
 log "ℹ️ Running: helm dependency build"
 helm dependency build . --kubeconfig "$KUBECONFIG"
 
+DEP_SET_ARGS=()
+if [[ "${DEP_POSTGRESQL:-false}" == "true" ]]; then
+  DEP_SET_ARGS+=(
+    --set postgresql.enabled=true
+    --set "postgresql.auth.username=${DEP_PG_USER:-dcs}"
+    --set "postgresql.auth.password=${DEP_PG_PASSWORD:-dcs}"
+    --set "postgresql.auth.database=${DEP_PG_DATABASE:-dcs}"
+    --set "postgresql.persistence.enabled=${DEP_PG_PERSIST:-false}"
+  )
+fi
+if [[ "${DEP_KEYCLOAK:-false}" == "true" ]]; then
+  DEP_SET_ARGS+=(
+    --set keycloak.enabled=true
+    --set "keycloak.auth.adminUser=${DEP_KC_ADMIN_USER:-admin}"
+    --set "keycloak.auth.adminPassword=${DEP_KC_ADMIN_PASSWORD:-admin}"
+    --set "keycloak.realm.import=${DEP_KC_REALM_IMPORT:-false}"
+  )
+fi
+[[ "${DEP_NATS:-false}" == "true" ]] && DEP_SET_ARGS+=(--set nats.enabled=true)
+if [[ "${DEP_NEO4J:-false}" == "true" ]]; then
+  DEP_SET_ARGS+=(
+    --set neo4j.enabled=true
+    --set "neo4j.auth.password=${DEP_NEO4J_PASSWORD:-changeme}"
+    --set "neo4j.persistence.enabled=${DEP_NEO4J_PERSIST:-false}"
+  )
+fi
+
 log "ℹ️ Installing digital-contracting-service via Helm"
 helm install digital-contracting-service . \
   --namespace "$NAMESPACE" \
   --create-namespace \
   --kubeconfig "$KUBECONFIG" \
-  -f "$TMP_VALUES"
+  -f "$TMP_VALUES" \
+  "${DEP_SET_ARGS[@]}"
 log "✅ digital-contracting-service Helm release deployed"
 
 # Create TLS secret

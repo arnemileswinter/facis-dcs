@@ -21,6 +21,13 @@
   </div>
 {% endmacro %}
 
+{% macro field_checkbox(name, label) %}
+  <div class="form-row">
+      <label for="node-input-{{ name }}">{{ label }}</label>
+      <input type="checkbox" id="node-input-{{ name }}" style="width:auto;">
+  </div>
+{% endmacro %}
+
 {# Usage: {% call tab("tab1", active=true) %} ... fields ... {% endcall %} #}
 {% macro tab(id, active=false) %}
   <div id="{{ id }}" class="tab-content"{% if not active %} style="display: none;"{% endif %}>

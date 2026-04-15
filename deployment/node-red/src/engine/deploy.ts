@@ -62,10 +62,27 @@ export function deploy(node: DeployNode, config: DeployConfig, msg: NodeMessage)
     ];
     const cmd = `bash ${JSON.stringify(path.join(SCRIPTS_DIR, 'deploy.sh'))} ` + args.map(a => JSON.stringify(a)).join(' ');
 
+    const env = {
+        ...process.env,
+        DEP_POSTGRESQL:          config.depPostgresql    ? 'true' : 'false',
+        DEP_PG_USER:             config.depPgUser        || 'dcs',
+        DEP_PG_PASSWORD:         config.depPgPassword    || 'dcs',
+        DEP_PG_DATABASE:         config.depPgDatabase    || 'dcs',
+        DEP_PG_PERSIST:          config.depPgPersist     ? 'true' : 'false',
+        DEP_KEYCLOAK:            config.depKeycloak      ? 'true' : 'false',
+        DEP_KC_ADMIN_USER:       config.depKcAdminUser       || 'admin',
+        DEP_KC_ADMIN_PASSWORD:   config.depKcAdminPassword   || 'admin',
+        DEP_KC_REALM_IMPORT:     config.depKcRealmImport ? 'true' : 'false',
+        DEP_NATS:                config.depNats          ? 'true' : 'false',
+        DEP_NEO4J:               config.depNeo4j         ? 'true' : 'false',
+        DEP_NEO4J_PASSWORD:      config.depNeo4jPassword     || 'changeme',
+        DEP_NEO4J_PERSIST:       config.depNeo4jPersist  ? 'true' : 'false',
+    };
+
     node.log(`Executing: ${cmd}`);
     node.status({ fill: 'blue', shape: 'dot', text: 'deploying' });
 
-    exec(cmd, { cwd: SCRIPTS_DIR }, (err, stdout, stderr) => {
+    exec(cmd, { cwd: SCRIPTS_DIR, env }, (err, stdout, stderr) => {
         try { kubeTmp.removeCallback(); keyTmp.removeCallback(); crtTmp.removeCallback(); } catch (_) { /* ignore */ }
 
         if (err) {
