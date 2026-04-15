@@ -178,11 +178,11 @@ kind_deploy: kind_load_image
 		--set postgresql.enabled=true \
 		--set keycloak.enabled=true \
 		--set "keycloak.extraEnv[0].name=KC_HOSTNAME" \
-		--set "keycloak.extraEnv[0].value=$(HELM_RELEASE)-keycloak" \
+		--set-string "keycloak.extraEnv[0].value=$(HELM_RELEASE)-keycloak" \
 		--set "keycloak.extraEnv[1].name=KC_HOSTNAME_PORT" \
-		--set "keycloak.extraEnv[1].value=8080" \
+		--set-string "keycloak.extraEnv[1].value=8080" \
 		--set "keycloak.extraEnv[2].name=KC_HOSTNAME_STRICT" \
-		--set "keycloak.extraEnv[2].value=false" \
+		--set-string "keycloak.extraEnv[2].value=false" \
 		--set nats.enabled=true \
 		--set oidc.issuerURL="http://$(HELM_RELEASE)-keycloak:8080/realms/master" \
 		--set oidc.clientID="digital-contracting-service" \
