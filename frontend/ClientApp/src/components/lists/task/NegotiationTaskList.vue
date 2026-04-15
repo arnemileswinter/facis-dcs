@@ -3,7 +3,7 @@ import type { ContractNegotiationTask } from '@/models/contract/contract-negotia
 import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useNegotiationTaskStateFilterStore } from '@/stores/state-filter-store'
-import { negotiationTaskStates } from '@/types/negotiation-task-state'
+import { NegotiationTaskState, negotiationTaskStates } from '@/types/negotiation-task-state'
 import { compareValues } from '@/utils/comparison'
 import { computed, onUnmounted, ref, type Ref } from 'vue'
 import ListSort from '../ListSort.vue'
@@ -55,6 +55,13 @@ const applySearchResult = (searchResult: ContractNegotiationTask[]) => {
   searchedItems.value = searchResult
 }
 
+const resolveViewRouteName = (item: ContractNegotiationTask) => {
+  if (item.state === NegotiationTaskState.open) {
+    return ROUTES.CONTRACTS.NEGOTIATION
+  }
+  return ROUTES.CONTRACTS.VIEW
+}
+
 onUnmounted(() => stateFilterStore.reset())
 </script>
 
@@ -81,7 +88,7 @@ onUnmounted(() => stateFilterStore.reset())
               <div>Creation date: {{ new Date(item.created_at).toLocaleDateString() }}</div>
               <div class="card-actions justify-end">
                 <RouterLink
-                  :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: item.did } }"
+                  :to="{ name: resolveViewRouteName(item), params: { did: item.did } }"
                   class="btn btn-sm btn-primary rounded-box"
                 >
                   View

@@ -8,6 +8,7 @@ import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import ContractTemplateListView from '@/views/contract-template-list/ContractTemplateListView.vue'
 import ContractListView from '@/views/contract/ContractListView.vue'
+import NegotiationContractView from '@/views/contract/NegotiationContractView.vue'
 import NewContractView from '@/views/contract/NewContractView.vue'
 import ViewContractView from '@/views/contract/ViewContractView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
@@ -48,6 +49,7 @@ const ROUTES = {
     NEW: 'contracts.new',
     EDIT: 'contracts.edit',
     VIEW: 'contracts.view',
+    NEGOTIATION: 'contracts.negotiation',
   },
 } as const
 
@@ -218,6 +220,18 @@ const routes: RouteRecordRaw[] = [
     name: ROUTES.CONTRACTS.VIEW,
     component: ViewContractView,
     meta: { name: 'View Contract', hideInSidebar: true, requiresAuth: true, title: 'DCS - View Contract' },
+  },
+  {
+    path: '/contracts/negotiation/:did',
+    name: ROUTES.CONTRACTS.NEGOTIATION,
+    component: NegotiationContractView,
+    meta: {
+      name: 'Negotiate Contract',
+      hideInSidebar: true,
+      requiresAuth: true,
+      title: 'DCS - Negotiate Contract',
+      roles: ['CONTRACT_NEGOTIATOR'],
+    },
   },
   {
     path: '/auth/success',

@@ -6,7 +6,7 @@
     <!-- Pinned Footer -->
     <div v-if="hasDid" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <!-- Comments container -->
-      <ConfirmationModal ref="comment-dialog" show-editor />
+      <ConfirmationModal ref="comment-dialog" />
       <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
         <button class="btn btn-ghost md:w-32" @click="router.back()">Cancel</button>
         <!-- Return to draft / request changes -->
@@ -106,7 +106,10 @@ const forwardToApproval = async () => {
   }
   isSubmitting.value = true
   try {
-    const commentResult = await commentDialog.value?.reveal({ message: 'Add comment?' })
+    const commentResult = await commentDialog.value?.reveal({
+      message: 'Add comment?',
+      editor: { requiredText: false }
+    })
     if (commentResult?.isCanceled) {
       return
     } else if (commentResult?.data) {
@@ -140,7 +143,10 @@ const returnToDraft = async () => {
   }
   isSubmitting.value = true
   try {
-    const commentResult = await commentDialog.value?.reveal({ message: 'Add comment?' })
+    const commentResult = await commentDialog.value?.reveal({
+      message: 'Add comment?',
+      editor: { requiredText: false }
+    })
     if (commentResult?.isCanceled) {
       return
     } else if (commentResult?.data) {
