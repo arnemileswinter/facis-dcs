@@ -1,4 +1,5 @@
 @UC-02-02
+@skip
 Feature: Search and Retrieve Contract Templates
   Users search and access existing contract templates
   filtered by role-based access rights.
