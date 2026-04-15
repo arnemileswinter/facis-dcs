@@ -13,7 +13,9 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationactionflag"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
+	contracttemplatequery "digital-contracting-service/internal/contractworkflowengine/query/contracttemplate"
 	"digital-contracting-service/internal/middleware"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"fmt"
 	"maps"
 	"slices"
@@ -23,18 +25,20 @@ import (
 )
 
 type contractWorkflowEnginesrvc struct {
-	DB     *sqlx.DB
-	CRepo  db.ContractRepo
-	RTRepo db.ReviewTaskRepo
-	ATRepo db.ApprovalTaskRepo
-	NTRepo db.NegotiationTaskRepo
-	NRepo  db.NegotiationRepo
+	DB       *sqlx.DB
+	CRepo    db.ContractRepo
+	RTRepo   db.ReviewTaskRepo
+	ATRepo   db.ApprovalTaskRepo
+	NTRepo   db.NegotiationTaskRepo
+	NRepo    db.NegotiationRepo
+	CTRepo   db.ContractTemplateRepo
+	FCClient *fcclient.FederatedCatalogueClient
 	auth.JWTAuthenticator
 }
 
 func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	cRepo db.ContractRepo, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo,
-	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo) contractworkflowengine.Service {
+	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, fcClient *fcclient.FederatedCatalogueClient) contractworkflowengine.Service {
 
 	return &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -44,6 +48,8 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ATRepo:           atRepo,
 		NTRepo:           ntRepo,
 		NRepo:            nRepo,
+		CTRepo:           ctRepo,
+		FCClient:         fcClient,
 	}
 }
 
@@ -54,10 +60,25 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
+	queryHandler := contracttemplatequery.GetTemplateDataByDIDHandler{
+		Ctx:      ctx,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		FCClient: s.FCClient,
+	}
+	contractData, err := queryHandler.Handle(contracttemplatequery.GetTemplateDataByDIDQry{
+		Token: *req.Token,
+		DID:   req.Did,
+	})
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
 	cmd := command.CreateCmd{
-		DID:         *did,
-		TemplateDID: req.Did,
-		CreatedBy:   middleware.GetUsername(ctx),
+		DID:          *did,
+		TemplateDID:  req.Did,
+		CreatedBy:    middleware.GetUsername(ctx),
+		ContractData: contractData,
 	}
 	createHandler := command.Creator{
 		Ctx:   ctx,
