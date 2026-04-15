@@ -30,6 +30,7 @@ trap cleanup EXIT
 : "${PROJECT_ROOT:?PROJECT_ROOT is required}"
 
 mkdir -p .tmp .reports/junit
+REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 printf "%s localhost\n" "$KEYCLOAK_SERVICE" > .tmp/hostaliases
 rm -f .tmp/port-forward.log .tmp/port-forward.pid .tmp/keycloak-port-forward.log .tmp/keycloak-port-forward.pid
 
@@ -108,5 +109,5 @@ else
   "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" "$FEATURES_PATH" "${EXTRA_ARGS[@]}"
 fi
 
-JUNIT_COUNT=$(find .reports/junit -name "*.xml" 2>/dev/null | wc -l)
-echo "Generated $JUNIT_COUNT junit XML files in .reports/junit/"
+JUNIT_COUNT=$(find "$REPORTS_JUNIT_DIR" -name "*.xml" 2>/dev/null | wc -l || true)
+echo "Generated $JUNIT_COUNT junit XML files in $REPORTS_JUNIT_DIR/"
