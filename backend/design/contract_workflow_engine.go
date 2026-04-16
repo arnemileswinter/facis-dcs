@@ -151,6 +151,12 @@ var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {
 })
 
 var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", func() {
+	Scope("Contract Creator")
+	Scope("Sys. Contract Creator")
+	Scope("Contract Reviewer")
+	Scope("Sys. Contract Reviewer")
+	Scope("Contract Approver")
+	Scope("Sys. Contract Approver")
 	Attribute("negotiator", String, "Negotiator who has to decide this negotiation decision")
 	Attribute("decision", String, "Decision that was taken")
 	Attribute("rejection_reason", String, "Reason why it was rejected")
@@ -440,12 +446,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:requirements", "DCS-IR-CWE-01", "DCS-IR-CWE-03", "DCS-IR-CWE-06", "DCS-IR-CWE-09")
 		Meta("dcs:cwe:components", "")
 		Meta("dcs:downstream:sm:component", "Signer Authorization & PoA application")
-		Meta("dcs:ui", "Contract Creation", "Contract Negotiation", "Contract Review", "Contract Approval")
+		Meta("dcs:ui", "Contract Creation", "Contract Review", "Contract Approval")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
 			Scope("Sys. Contract Creator")
-			Scope("Contract Negotiator")
 			Scope("Contract Reviewer")
 			Scope("Sys. Contract Reviewer")
 			Scope("Contract Approver")
@@ -473,7 +478,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:ui", "Contract Negotiation")
 
 		Security(JWTAuth, func() {
-			Scope("Contract Negotiator")
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
 		})
 
 		Payload(ContractNegotiationRequest)
@@ -494,10 +501,10 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Description("provide feedback/findings. respond to counterpart changes.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-IR-CWE-05", "DCS-IR-CWE-06")
 		Meta("dcs:cwe:components", "Contract Versioning")
-		Meta("dcs:ui", "Contract Negotiation", "Contract Review")
+		Meta("dcs:ui", "Contract Creator", "Contract Review")
 
 		Security(JWTAuth, func() {
-			Scope("Contract Negotiator")
+			Scope("Contract Creator")
 			Scope("Contract Reviewer")
 			Scope("Sys. Contract Reviewer")
 		})
@@ -523,7 +530,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:ui", "Contract Negotiation", "Contract Review")
 
 		Security(JWTAuth, func() {
-			Scope("Contract Negotiator")
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
 		})
 
 		Payload(ContractReviewRequest)
@@ -550,8 +559,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
 			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
 			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
 			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
 		})
 
 		Payload(ContractRetrieveRequest)

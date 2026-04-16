@@ -175,7 +175,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return fmt.Errorf("could not update negotiation task: %w", err)
 		}
 
-		existOpenTasks, err := h.NTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String())
+		existOpenTasks, err := h.NTRepo.AnyTasksInState(tx, processData.DID, negotiationtaskstate.Open.String())
 		if err != nil {
 			return fmt.Errorf("could not check if review task exists: %w", err)
 		}
