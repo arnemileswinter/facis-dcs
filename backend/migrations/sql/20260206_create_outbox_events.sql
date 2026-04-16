@@ -1,11 +1,7 @@
-CREATE TYPE delivery_type AS ENUM ('LOCAL', 'EXTERNAL');
-
-
 CREATE TABLE IF NOT EXISTS outbox_events (
     id BIGSERIAL PRIMARY KEY,
 
     component VARCHAR(64) NOT NULL,
-    delivery_type delivery_type NOT NULL DEFAULT 'LOCAL',
 
     event_type VARCHAR(64) NOT NULL,
     event_data JSONB NOT NULL,
