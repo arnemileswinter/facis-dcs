@@ -328,6 +328,7 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 
 		cmd := command.AcceptNegotiationCmd{
 			ID:         req.ID,
+			DID:        req.Did,
 			AcceptedBy: middleware.GetUsername(ctx),
 		}
 		handler := command.NegotiationAcceptor{
@@ -346,6 +347,7 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 
 		cmd := command.RejectNegotiationCmd{
 			ID:              req.ID,
+			DID:             req.Did,
 			RejectedBy:      middleware.GetUsername(ctx),
 			RejectionReason: req.RejectionReason,
 		}
