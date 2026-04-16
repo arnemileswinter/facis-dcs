@@ -68,6 +68,9 @@ export DATABASE_URL="user=username password=password dbname=postgres sslmode=dis
 # API routing
 export API_PATH_PREFIX="/api"
 
+# Federated Catalogue
+export FEDERATED_CATALOGUE_API_URL="http://localhost:8081"
+
 # OIDC/Keycloak Authentication
 export OIDC_ISSUER_URL="https://keycloak.example.com/realms/yourrealm"
 export OIDC_CLIENT_ID="digital-contracting-service"
@@ -79,6 +82,19 @@ export OIDC_LOGOUT_REDIRECT_URI="http://localhost:8991/api/auth/logout-complete"
 ```bash
 go run ./cmd/dcs
 ```
+
+### Development with Live Reload
+To enable live reloading during development, install and use [air](https://github.com/cosmtrek/air):
+
+```bash
+# Install air (one-time)
+go install github.com/cosmtrek/air@latest
+
+# Run backend with live reload
+air
+```
+
+Air watches for file changes in the backend and automatically rebuilds and restarts the service. Configuration is defined in `.air.toml`.
 
 #### Example Request
 ```bash

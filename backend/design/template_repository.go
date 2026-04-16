@@ -630,7 +630,7 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/register
 	Method("register", func() {
-		Description("register new template into the repository.")
+		Description("register new template into the repository and the XFSC Catalogue.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
 		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
 		Meta("dcs:ui", "Template Management Dashboard")

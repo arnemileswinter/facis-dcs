@@ -7,6 +7,7 @@ import (
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/middleware"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
@@ -21,22 +22,24 @@ import (
 // TemplateRepository service example implementation.
 // The example methods log the requests and return zero values.
 type templateRepositorysrvc struct {
-	DB     *sqlx.DB
-	CTRepo db.ContractTemplateRepo
-	RTRepo db.ReviewTaskRepo
-	ATRepo db.ApprovalTaskRepo
+	DB       *sqlx.DB
+	CTRepo   db.ContractTemplateRepo
+	RTRepo   db.ReviewTaskRepo
+	ATRepo   db.ApprovalTaskRepo
+	FCClient *fcclient.FederatedCatalogueClient
 	auth.JWTAuthenticator
 }
 
 // NewTemplateRepository returns the TemplateRepository service implementation.
 func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db.ContractTemplateRepo,
-	RTRepo db.ReviewTaskRepo, ATRepo db.ApprovalTaskRepo) templaterepository.Service {
+	RTRepo db.ReviewTaskRepo, ATRepo db.ApprovalTaskRepo, fcClient *fcclient.FederatedCatalogueClient) templaterepository.Service {
 	return &templateRepositorysrvc{
 		DB:               db,
 		JWTAuthenticator: jwtAuth,
 		CTRepo:           CTRepo,
 		RTRepo:           RTRepo,
 		ATRepo:           ATRepo,
+		FCClient:         fcClient,
 	}
 }
 
@@ -389,14 +392,17 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templaterepository.ContractTemplateVerifyRequest) (res *templaterepository.ContractTemplateVerifyResponse, err error) {
 
 	cmd := command.VerifyCmd{
-		DID:        req.Did,
-		VerifiedBy: middleware.GetUsername(ctx),
+		DID:           req.Did,
+		VerifiedBy:    middleware.GetUsername(ctx),
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
 	}
 	handler := command.Verifier{
-		Ctx:    ctx,
-		DB:     s.DB,
-		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
+		Ctx:      ctx,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		RTRepo:   s.RTRepo,
+		FCClient: s.FCClient,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {
@@ -473,15 +479,18 @@ func (s *templateRepositorysrvc) Reject(ctx context.Context, req *templatereposi
 func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepository.ContractTemplateRegisterRequest) (res *templaterepository.ContractTemplateRegisterResponse, err error) {
 
 	cmd := command.RegisterCmd{
-		DID:          req.Did,
-		RegisteredBy: middleware.GetUsername(ctx),
+		DID:           req.Did,
+		RegisteredBy:  middleware.GetUsername(ctx),
+		ParticipantID: middleware.GetParticipantID(ctx),
+		Token:         *req.Token,
 	}
 	handler := command.Registrar{
-		Ctx:    ctx,
-		DB:     s.DB,
-		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
-		ATRepo: s.ATRepo,
+		Ctx:      ctx,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		RTRepo:   s.RTRepo,
+		ATRepo:   s.ATRepo,
+		FCClient: s.FCClient,
 	}
 	err = handler.Handle(cmd)
 	if err != nil {

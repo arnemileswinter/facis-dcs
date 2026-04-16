@@ -17,6 +17,7 @@ import (
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/migrations"
 	"flag"
@@ -34,6 +35,11 @@ import (
 )
 
 func main() {
+	if err := loadDotenvIfPresent(); err != nil {
+		fmt.Fprintf(os.Stderr, "startup configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Define command line flags, add any other flag required to configure the
 	// service.
 	var (
@@ -108,8 +114,13 @@ func main() {
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
 	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{Ctx: ctx}
 	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
+	cweCTRepo := cwerepo.PostgresContractTemplateRepo{Ctx: ctx}
 	cweCronJob := contractworkflowengine2.CronJob{DB: db, Ctx: ctx}
 	cweCronJob.Start()
+
+	// Initialize the Federated Catalogue client.
+	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
+	templateCatalogueClient := fcclient.NewFederatedCatalogueClient(fcURL)
 
 	// Initialize the service.
 	var (
@@ -127,14 +138,14 @@ func main() {
 	{
 		authSvc = service.NewAuth()
 		contractStorageArchiveSvc = service.NewContractStorageArchive(jwtAuth)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, templateCatalogueClient)
 		dcsToDcsSvc = service.NewDcsToDcs(jwtAuth)
 		externalTargetSystemAPISvc = service.NewExternalTargetSystemAPI(jwtAuth)
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(jwtAuth)
 		signatureManagementSvc = service.NewSignatureManagement(jwtAuth)
-		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth)
-		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo)
+		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(jwtAuth, templateCatalogueClient)
+		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient)
 	}
 
 	// Wrap the service in endpoints that can be invoked from other service
