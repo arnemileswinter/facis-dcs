@@ -145,10 +145,18 @@ ensure_k8s_tools:
 	@command -v "$(HELM_BIN)" >/dev/null 2>&1 || (echo "helm not found in PATH" && exit 1)
 
 kind_create: ensure_kind ensure_k8s_tools
-	@if ! "$(KIND_BIN)" get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then \
+	@cluster_healthy=false; \
+	if "$(KIND_BIN)" get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then \
+		if docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then \
+			echo "kind cluster $(KIND_CLUSTER_NAME) already exists"; \
+			cluster_healthy=true; \
+		else \
+			echo "kind cluster $(KIND_CLUSTER_NAME) exists but control-plane container is not running, recreating..."; \
+			"$(KIND_BIN)" delete cluster --name "$(KIND_CLUSTER_NAME)"; \
+		fi; \
+	fi; \
+	if [[ "$$cluster_healthy" == "false" ]]; then \
 		"$(KIND_BIN)" create cluster --name "$(KIND_CLUSTER_NAME)" --wait "$(KIND_WAIT)"; \
-	else \
-		echo "kind cluster $(KIND_CLUSTER_NAME) already exists"; \
 	fi
 
 kind_delete: ensure_kind
