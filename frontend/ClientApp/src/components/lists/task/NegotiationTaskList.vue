@@ -57,7 +57,7 @@ const applySearchResult = (searchResult: ContractNegotiationTask[]) => {
 
 const resolveViewRouteName = (item: ContractNegotiationTask) => {
   if (item.state === NegotiationTaskState.open) {
-    return ROUTES.CONTRACTS.NEGOTIATION
+    return ROUTES.CONTRACTS.NEGOTIATE
   }
   return ROUTES.CONTRACTS.VIEW
 }

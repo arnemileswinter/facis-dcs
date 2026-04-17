@@ -20,7 +20,7 @@ const hasNegotiationTask = computed(() => useContractsStore().hasNegotiationTask
 
 const resolveViewRouteName = computed(() => {
   if (props.item.state === ContractState.negotiation && hasNegotiationTask.value) {
-    return ROUTES.CONTRACTS.NEGOTIATION
+    return ROUTES.CONTRACTS.NEGOTIATE
   }
   return ROUTES.CONTRACTS.VIEW
 })
