@@ -197,6 +197,288 @@
           "Compliance Officer"
         ]
       }
+    },
+    {
+      "username": "johndoe",
+      "enabled": true,
+      "email": "johndoe@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "John",
+      "lastName": "Doe",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
+    },
+    {
+      "username": "janesmith",
+      "enabled": true,
+      "email": "janesmith@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
+    },
+    {
+      "username": "bobjohnson",
+      "enabled": true,
+      "email": "bobjohnson@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Johnson",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
+    },
+    {
+      "username": "alicewilliams",
+      "enabled": true,
+      "email": "alicewilliams@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "Allice",
+      "lastName": "Williams",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
+    },
+    {
+      "username": "charliebrown",
+      "enabled": true,
+      "email": "charliebrown@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "Charlie",
+      "lastName": "Brown",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
+    },
+    {
+      "username": "saoirseconrad",
+      "enabled": true,
+      "email": "saoirseconrad@gaia-x.local",
+      "emailVerified": true,
+      "firstName": "Saoirse",
+      "lastName": "Conrad",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-gaia-x"
+      ],
+      "clientRoles": {
+        "federated-catalogue": [
+          "Ro-MU-CA",
+          "Ro-SD-A",
+          "Ro-PA-A",
+          "Ro-MU-A"
+        ],
+        "dcs-client": [
+          "Template Creator",
+          "Template Reviewer",
+          "Template Approver",
+          "Template Manager",
+          "Contract Creator",
+          "Contract Negotiator",
+          "Contract Reviewer",
+          "Contract Approver",
+          "Contract Manager",
+          "Contract Signer",
+          "Contract Observer",
+          "Sys. Contract Creator",
+          "Sys. Contract Reviewer",
+          "Sys. Contract Approver",
+          "Sys. Contract Manager",
+          "Sys. Contract Signer",
+          "Archive Manager",
+          "Auditor",
+          "Compliance Officer"
+        ]
+      }
     }
   ],
   "clients": [

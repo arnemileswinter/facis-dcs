@@ -151,12 +151,7 @@ var ContractRetrieveByIDRequest = Type("ContractRetrieveByIDRequest", func() {
 })
 
 var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", func() {
-	Scope("Contract Creator")
-	Scope("Sys. Contract Creator")
-	Scope("Contract Reviewer")
-	Scope("Sys. Contract Reviewer")
-	Scope("Contract Approver")
-	Scope("Sys. Contract Approver")
+
 	Attribute("negotiator", String, "Negotiator who has to decide this negotiation decision")
 	Attribute("decision", String, "Decision that was taken")
 	Attribute("rejection_reason", String, "Reason why it was rejected")
