@@ -67,11 +67,11 @@ const submit = async () => {
       errorStore.add('Contract created.', 'info')
     } else if (contract.value) {
       const contractData: ContractData = {
-        documentOutline: contract.value.contract_data?.documentOutline ?? [],
-        documentBlocks: contract.value.contract_data?.documentBlocks ?? [],
-        semanticConditions: contract.value.contract_data?.semanticConditions ?? [],
-        subTemplateSnapshots: contract.value.contract_data?.subTemplateSnapshots ?? [],
-        templateDataVersion: contract.value.contract_data?.templateDataVersion ?? 1,
+        documentOutline: templateDraftStore.documentOutline,
+        documentBlocks: templateDraftStore.documentBlocks,
+        semanticConditions: templateDraftStore.semanticConditions,
+        subTemplateSnapshots: templateDraftStore.subTemplateSnapshots,
+        templateDataVersion: templateDraftStore.templateDataVersion,
         semanticConditionValues: contractContentValuesStore.semanticConditionValues,
       }
       await contractWorkflowService.update({
