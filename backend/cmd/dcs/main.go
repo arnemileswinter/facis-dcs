@@ -15,8 +15,11 @@ import (
 	"digital-contracting-service/internal/auth"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/service"
+	"digital-contracting-service/internal/templaterepository/db/pg"
+	"digital-contracting-service/migrations"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/migrations"
@@ -89,6 +92,18 @@ func main() {
 	if natsConn != nil {
 		defer natsConn.Close()
 	}
+
+	outboxProcessor := event.OutboxProcessor{
+		DB:       db,
+		Ctx:      ctx,
+		NatsConn: natsConn,
+	}
+	outboxProcessor.Start()
+
+	natsDebugConsumer := event.NatsDebugConsumer{
+		NatsConn: natsConn,
+	}
+	natsDebugConsumer.Start()
 
 	// Initialize OIDC validator and JWT authenticator.
 	oidcIssuerURL := os.Getenv("OIDC_ISSUER_URL")
