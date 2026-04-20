@@ -22,12 +22,12 @@ func (c CloudEventPubClient) Close() error {
 	return c.client.Close()
 }
 
-func (c CloudEventPubClient) Publish(subject string, payload []byte) interface{} {
+func (c CloudEventPubClient) Publish(eventSource string, eventType string, payload []byte) interface{} {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Fatal(err)
 	}
-	event, err := cloudeventprovider.NewEvent("event", "test", data)
+	event, err := cloudeventprovider.NewEvent(eventSource, eventType, data)
 	if err != nil {
 		log.Fatal(err)
 	}

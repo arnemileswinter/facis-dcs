@@ -69,8 +69,7 @@ func startProcessingJob(db *sqlx.DB, ctx context.Context, pubClient *CloudEventP
 		}
 
 		for _, event := range events {
-			subject := fmt.Sprintf("%s.%s", event.Component, event.EventType)
-			if err := pubClient.Publish(subject, event.EventData); err != nil {
+			if err := pubClient.Publish(event.Component, event.EventType, event.EventData); err != nil {
 				return fmt.Errorf("could not publish event %d: %w", event.ID, err)
 			}
 

@@ -9,3 +9,7 @@ func TransactionTimeout() time.Duration {
 func OutboxProcessorTimeOut() time.Duration {
 	return 1 * time.Second
 }
+
+func EventBusTopic() string {
+	return "digital-contracting-service"
+}

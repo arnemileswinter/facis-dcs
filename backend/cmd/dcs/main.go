@@ -13,6 +13,7 @@ import (
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/event"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
@@ -29,7 +30,6 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/nats-io/nats.go"
 	"goa.design/clue/debug"
@@ -85,7 +85,7 @@ func main() {
 		natsURL = nats.DefaultURL
 	}
 
-	cepPubClient, err := event.NewNatsPubClient("events", natsURL)
+	cepPubClient, err := event.NewNatsPubClient(conf.EventBusTopic(), natsURL)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events publisher")
 	}
@@ -98,7 +98,7 @@ func main() {
 	}
 	outboxProcessor.Start()
 
-	cepSubClient, err := event.NewNatsSubClient("events", natsURL)
+	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events publisher")
 	}
@@ -108,10 +108,6 @@ func main() {
 		SubClient: cepSubClient,
 	}
 	eventDebugConsumer.Start()
-
-	time.Sleep(time.Second * 2)
-	eventDebugConsumer.Stop()
-	time.Sleep(time.Second * 50)
 
 	// Initialize OIDC validator and JWT authenticator.
 	oidcIssuerURL := os.Getenv("OIDC_ISSUER_URL")
