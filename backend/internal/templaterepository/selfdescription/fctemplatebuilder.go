@@ -23,7 +23,7 @@ type TemplateResourceInput struct {
 }
 
 func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[string]interface{} {
-	now := time.Now().UTC()
+	//now := time.Now().UTC()
 	templateID := buildTemplateResourceID(input.ParticipantID, input.DID, input.DocumentNumber, input.Version)
 	templateDataJSONString := "{}"
 	if input.TemplateData != nil {
@@ -91,7 +91,7 @@ func BuildTemplateResourceSelfDescription(input TemplateResourceInput) map[strin
 			"dcs-template:templateDataJSON": templateDataJSONString,
 		},
 		"expirationDate": "2034-01-23T11:29:40Z",
-		"issuanceDate":   now.Format(time.RFC3339),
+		"issuanceDate":   "2019-01-23T11:29:40Z",
 		"issuer":         input.ParticipantID,
 		"type": []string{
 			"VerifiableCredential",
