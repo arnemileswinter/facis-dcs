@@ -9,10 +9,9 @@ import (
 )
 
 type PostgresContractTemplateRepo struct {
-	Ctx context.Context
 }
 
-func (r *PostgresContractTemplateRepo) ReadTemplateDataByID(tx *sqlx.Tx, did string) (*datatype.JSON, error) {
+func (r *PostgresContractTemplateRepo) ReadTemplateDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*datatype.JSON, error) {
 	statement := `
         SELECT template_data
         FROM contract_templates ct
@@ -27,7 +26,7 @@ func (r *PostgresContractTemplateRepo) ReadTemplateDataByID(tx *sqlx.Tx, did str
 		`
 
 	var templateData datatype.JSON
-	if err := tx.GetContext(r.Ctx, &templateData, statement, did); err != nil {
+	if err := tx.GetContext(ctx, &templateData, statement, did); err != nil {
 		return nil, err
 	}
 	if !templateData.IsNotNullValue() {

@@ -25,11 +25,10 @@ func TestReview_CreateReviewTasks(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -52,13 +51,13 @@ func TestReview_CreateReviewTasks(t *testing.T) {
 			State:     reviewtaskstate.Open.String(),
 			CreatedBy: creator,
 		}
-		_, err = repo.RTRepo.Create(tx, reviewTask)
+		_, err = repo.RTRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			t.Fatalf("Failed to create review task: %v", err)
 		}
 	}
 
-	exists, err := repo.RTRepo.AnyTasksInState(tx, *did, reviewtaskstate.Open.String())
+	exists, err := repo.RTRepo.AnyTasksInState(ctx, tx, *did, reviewtaskstate.Open.String())
 	if err != nil {
 		t.Fatalf("Failed to check if review task exists: %v", err)
 	}
@@ -84,11 +83,10 @@ func TestReview_CreateReviewTasksAndApproveThem(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -111,20 +109,20 @@ func TestReview_CreateReviewTasksAndApproveThem(t *testing.T) {
 			State:     reviewtaskstate.Open.String(),
 			CreatedBy: creator,
 		}
-		_, err = repo.RTRepo.Create(tx, reviewTask)
+		_, err = repo.RTRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			t.Fatalf("Failed to create review task: %v", err)
 		}
 	}
 
 	for _, assignee := range assignees {
-		err := repo.RTRepo.UpdateState(tx, *did, assignee, contracttemplatestate.Approved.String())
+		err := repo.RTRepo.UpdateState(ctx, tx, *did, assignee, contracttemplatestate.Approved.String())
 		if err != nil {
 			t.Fatalf("Failed to approve review task: %v", err)
 		}
 	}
 
-	exists, err := repo.RTRepo.AnyTasksInState(tx, *did, reviewtaskstate.Open.String())
+	exists, err := repo.RTRepo.AnyTasksInState(ctx, tx, *did, reviewtaskstate.Open.String())
 	if err != nil {
 		t.Fatalf("Failed to check if review task exists: %v", err)
 	}

@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -33,17 +32,13 @@ type UpdateManageCmd struct {
 }
 
 type UpdateManager struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -51,7 +46,7 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 	}
 	defer tx.Rollback()
 
-	oldData, err := h.CTRepo.ReadDataByID(tx, cmd.DID)
+	oldData, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
@@ -62,19 +57,20 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 
 	if oldData.State == contracttemplatestate.Registered.String() ||
 		oldData.State == contracttemplatestate.Deleted.String() ||
-		oldData.State == contracttemplatestate.Deprecated.String() {
+		oldData.State == contracttemplatestate.Deprecated.String() ||
+		oldData.State == contracttemplatestate.Approved.String() {
 		return errors.New("invalid contract template state")
 	}
 
 	if cmd.State != nil {
 		isValidState := *cmd.State == contracttemplatestate.Draft || *cmd.State == contracttemplatestate.Deleted
 		if oldData.State == contracttemplatestate.Draft.String() && !isValidState {
-			reviewTasksExist, err := h.RTRepo.TaskExist(tx, cmd.DID)
+			reviewTasksExist, err := h.RTRepo.TaskExist(ctx, tx, cmd.DID)
 			if err != nil {
 				return fmt.Errorf("could not check existing review tasks: %w", err)
 			}
 
-			approvalTaskExists, err := h.ATRepo.TaskExists(tx, cmd.DID)
+			approvalTaskExists, err := h.ATRepo.TaskExists(ctx, tx, cmd.DID)
 			if err != nil {
 				return fmt.Errorf("could not check existing approval tasks: %w", err)
 			}
@@ -89,33 +85,33 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 	if cmd.State != nil {
 		if *cmd.State == contracttemplatestate.Draft || *cmd.State == contracttemplatestate.Deleted || *cmd.State == contracttemplatestate.Deprecated {
 
-			err = h.RTRepo.Delete(tx, cmd.DID)
+			err = h.RTRepo.Delete(ctx, tx, cmd.DID)
 			if err != nil {
 				return fmt.Errorf("could not delete review tasks: %w", err)
 			}
 
-			err = h.ATRepo.Delete(tx, cmd.DID)
+			err = h.ATRepo.Delete(ctx, tx, cmd.DID)
 			if err != nil {
 				return fmt.Errorf("could not delete approval tasks: %w", err)
 			}
 
 		} else if *cmd.State == contracttemplatestate.Rejected || *cmd.State == contracttemplatestate.Submitted {
-			err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+			err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 			if err != nil {
 				return err
 			}
 
-			err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+			err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 			if err != nil {
 				return err
 			}
 		} else if *cmd.State == contracttemplatestate.Reviewed {
-			err = h.RTRepo.UpdateStateForAllTasks(tx, cmd.DID, reviewtaskstate.Approved.String())
+			err = h.RTRepo.UpdateStateForAllTasks(ctx, tx, cmd.DID, reviewtaskstate.Approved.String())
 			if err != nil {
 				return err
 			}
 
-			err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+			err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 			if err != nil {
 				return err
 			}
@@ -146,7 +142,7 @@ func (h *UpdateManager) Handle(cmd UpdateManageCmd) error {
 		Description:    cmd.Description,
 		TemplateData:   cmd.TemplateData,
 	}
-	err = h.CTRepo.Update(tx, newData)
+	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {
 		return fmt.Errorf("could not update template data: %w", err)
 	}

@@ -30,7 +30,7 @@ type UpdateResult struct {
 	ID string
 }
 
-func (h *Updater) Handle(cmd UpdateCmd) (*UpdateResult, error) {
+func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) (*UpdateResult, error) {
 	if h.FCClient == nil {
 		return nil, fmt.Errorf("federated catalogue client is nil")
 	}

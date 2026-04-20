@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -30,17 +29,13 @@ type UpdateCmd struct {
 }
 
 type Updater struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *Updater) Handle(cmd UpdateCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -48,7 +43,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 	}
 	defer tx.Rollback()
 
-	oldData, err := h.CTRepo.ReadDataByID(tx, cmd.DID)
+	oldData, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
@@ -68,7 +63,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		oldData.CreatedBy == cmd.UpdatedBy {
 		isValidUser = true
 	} else if oldData.State == contracttemplatestate.Submitted.String() {
-		valid, err := h.RTRepo.IsValidReviewer(tx, cmd.DID, cmd.UpdatedBy)
+		valid, err := h.RTRepo.IsValidReviewer(ctx, tx, cmd.DID, cmd.UpdatedBy)
 		if err != nil {
 			return err
 		}
@@ -79,12 +74,12 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		return fmt.Errorf("invalid user")
 	}
 
-	err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+	err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 	if err != nil {
 		return err
 	}
 
-	err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+	err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 	if err != nil {
 		return err
 	}
@@ -103,7 +98,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		Description:    cmd.Description,
 		TemplateData:   cmd.TemplateData,
 	}
-	err = h.CTRepo.Update(tx, newData)
+	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {
 		return fmt.Errorf("could not update template data: %w", err)
 	}

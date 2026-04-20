@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -16,13 +17,13 @@ type ApprovalTaskData struct {
 }
 
 type ApprovalTaskRepo interface {
-	Create(tx *sqlx.Tx, data ApprovalTaskData) (*time.Time, error)
-	ReopenTasks(tx *sqlx.Tx, did string) error
-	ReadAll(dtx *sqlx.Tx, did string) ([]ApprovalTaskData, error)
-	ReadAllByApprover(tx *sqlx.Tx, approver string) ([]ApprovalTaskData, error)
-	UpdateState(tx *sqlx.Tx, did string, approver string, state string) error
-	IsValidApprover(tx *sqlx.Tx, did string, approver string) (bool, error)
-	TaskExistsInState(tx *sqlx.Tx, did string, approver string, state string) (bool, error)
-	TaskExists(tx *sqlx.Tx, did string) (bool, error)
-	Delete(tx *sqlx.Tx, did string) error
+	Create(ctx context.Context, tx *sqlx.Tx, data ApprovalTaskData) (*time.Time, error)
+	ReopenTasks(ctx context.Context, tx *sqlx.Tx, did string) error
+	ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]ApprovalTaskData, error)
+	ReadAllByApprover(ctx context.Context, tx *sqlx.Tx, approver string) ([]ApprovalTaskData, error)
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, approver string, state string) error
+	IsValidApprover(ctx context.Context, tx *sqlx.Tx, did string, approver string) (bool, error)
+	TaskExistsInState(ctx context.Context, tx *sqlx.Tx, did string, approver string, state string) (bool, error)
+	TaskExists(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
+	Delete(ctx context.Context, tx *sqlx.Tx, did string) error
 }

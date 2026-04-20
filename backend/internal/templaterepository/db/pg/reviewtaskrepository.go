@@ -12,10 +12,9 @@ import (
 )
 
 type PostgresReviewTaskRepo struct {
-	Ctx context.Context
 }
 
-func (r *PostgresReviewTaskRepo) Create(tx *sqlx.Tx, data db.ReviewTaskData) (*time.Time, error) {
+func (r *PostgresReviewTaskRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.ReviewTaskData) (*time.Time, error) {
 	statement := `
         INSERT INTO contract_templates_review_task (
             did, state, reviewer, created_by
@@ -23,7 +22,7 @@ func (r *PostgresReviewTaskRepo) Create(tx *sqlx.Tx, data db.ReviewTaskData) (*t
         RETURNING created_at
     `
 	var createdAt time.Time
-	err := tx.GetContext(r.Ctx, &createdAt, statement,
+	err := tx.GetContext(ctx, &createdAt, statement,
 		data.DID,
 		data.State, data.Reviewer, data.CreatedBy,
 	)
@@ -33,85 +32,85 @@ func (r *PostgresReviewTaskRepo) Create(tx *sqlx.Tx, data db.ReviewTaskData) (*t
 	return &createdAt, nil
 }
 
-func (r *PostgresReviewTaskRepo) IsValidReviewer(tx *sqlx.Tx, did string, reviewer string) (bool, error) {
+func (r *PostgresReviewTaskRepo) IsValidReviewer(ctx context.Context, tx *sqlx.Tx, did string, reviewer string) (bool, error) {
 	query := `
         SELECT COUNT(*) FROM contract_templates_review_task
         WHERE did = $1 AND reviewer = $2
     `
 	var count int
-	err := tx.GetContext(r.Ctx, &count, query, did, reviewer)
+	err := tx.GetContext(ctx, &count, query, did, reviewer)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (r *PostgresReviewTaskRepo) UpdateStateForAllTasks(tx *sqlx.Tx, did string, state string) error {
+func (r *PostgresReviewTaskRepo) UpdateStateForAllTasks(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
 	statement := `
         UPDATE contract_templates_review_task SET state = $2
         WHERE did = $1
     `
-	_, err := tx.ExecContext(r.Ctx, statement, did, state)
+	_, err := tx.ExecContext(ctx, statement, did, state)
 	return err
 }
 
-func (r *PostgresReviewTaskRepo) ReopenTasks(tx *sqlx.Tx, did string) error {
+func (r *PostgresReviewTaskRepo) ReopenTasks(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         UPDATE contract_templates_review_task SET state = 'OPEN'
         WHERE did = $1
     `
-	_, err := tx.ExecContext(r.Ctx, statement, did)
+	_, err := tx.ExecContext(ctx, statement, did)
 	return err
 }
 
-func (r *PostgresReviewTaskRepo) ReadAll(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
+func (r *PostgresReviewTaskRepo) ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
 	query := `
         SELECT id, did, state, reviewer,
                created_by, created_at
         FROM contract_templates_review_task WHERE did = $1
     `
 	var reviewTasks []db.ReviewTaskData
-	err := tx.SelectContext(r.Ctx, &reviewTasks, query, did)
+	err := tx.SelectContext(ctx, &reviewTasks, query, did)
 	if err != nil {
 		return nil, err
 	}
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) ReadAllByDID(tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
+func (r *PostgresReviewTaskRepo) ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ReviewTaskData, error) {
 	query := `
         SELECT id, did, state, reviewer,
                created_by, created_at
         FROM contract_templates_review_task WHERE did = $1
     `
 	var reviewTasks []db.ReviewTaskData
-	err := tx.SelectContext(r.Ctx, &reviewTasks, query, did)
+	err := tx.SelectContext(ctx, &reviewTasks, query, did)
 	if err != nil {
 		return nil, err
 	}
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) ReadAllByReviewer(tx *sqlx.Tx, reviewer string) ([]db.ReviewTaskData, error) {
+func (r *PostgresReviewTaskRepo) ReadAllByReviewer(ctx context.Context, tx *sqlx.Tx, reviewer string) ([]db.ReviewTaskData, error) {
 	query := `
         SELECT id, did, state, reviewer,
                created_by, created_at
         FROM contract_templates_review_task WHERE reviewer = $1
     `
 	var reviewTasks []db.ReviewTaskData
-	err := tx.SelectContext(r.Ctx, &reviewTasks, query, reviewer)
+	err := tx.SelectContext(ctx, &reviewTasks, query, reviewer)
 	if err != nil {
 		return nil, err
 	}
 	return reviewTasks, nil
 }
 
-func (r *PostgresReviewTaskRepo) UpdateState(tx *sqlx.Tx, did string, reviewer string, state string) error {
+func (r *PostgresReviewTaskRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, reviewer string, state string) error {
 	statement := `
         UPDATE contract_templates_review_task SET state = $3
         WHERE did = $1 AND reviewer = $2
     `
-	result, err := tx.ExecContext(r.Ctx, statement, did, reviewer, state)
+	result, err := tx.ExecContext(ctx, statement, did, reviewer, state)
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,7 @@ func (r *PostgresReviewTaskRepo) UpdateState(tx *sqlx.Tx, did string, reviewer s
 	return nil
 }
 
-func (r *PostgresReviewTaskRepo) AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error) {
+func (r *PostgresReviewTaskRepo) AnyTasksInState(ctx context.Context, tx *sqlx.Tx, did string, states ...string) (bool, error) {
 	placeholders := make([]string, len(states))
 	args := []interface{}{did}
 
@@ -141,46 +140,46 @@ func (r *PostgresReviewTaskRepo) AnyTasksInState(tx *sqlx.Tx, did string, states
     `, strings.Join(placeholders, ", "))
 
 	var count int
-	err := tx.GetContext(r.Ctx, &count, query, args...)
+	err := tx.GetContext(ctx, &count, query, args...)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (r *PostgresReviewTaskRepo) TaskExistsInState(tx *sqlx.Tx, did string, reviewer string, state string) (bool, error) {
+func (r *PostgresReviewTaskRepo) TaskExistsInState(ctx context.Context, tx *sqlx.Tx, did string, reviewer string, state string) (bool, error) {
 	query := `
         SELECT COUNT(*) 
         FROM contract_templates_review_task 
         WHERE did = $1 AND reviewer = $2 AND state = $3
     `
 	var count int
-	err := tx.GetContext(r.Ctx, &count, query, did, reviewer, state)
+	err := tx.GetContext(ctx, &count, query, did, reviewer, state)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (r *PostgresReviewTaskRepo) TaskExist(tx *sqlx.Tx, did string) (bool, error) {
+func (r *PostgresReviewTaskRepo) TaskExist(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
 	query := `
         SELECT COUNT(*) 
         FROM contract_templates_review_task 
         WHERE did = $1
     `
 	var count int
-	err := tx.GetContext(r.Ctx, &count, query, did)
+	err := tx.GetContext(ctx, &count, query, did)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (r *PostgresReviewTaskRepo) Delete(tx *sqlx.Tx, did string) error {
+func (r *PostgresReviewTaskRepo) Delete(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         DELETE FROM contract_templates_review_task
         WHERE did = $1
     `
-	_, err := tx.ExecContext(r.Ctx, statement, did)
+	_, err := tx.ExecContext(ctx, statement, did)
 	return err
 }

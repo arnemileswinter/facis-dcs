@@ -10,10 +10,9 @@ import (
 )
 
 type PostgresNegotiationRepo struct {
-	Ctx context.Context
 }
 
-func (r PostgresNegotiationRepo) Create(tx *sqlx.Tx, data db.NegotiationCreateData, negotiators []string) (*time.Time, error) {
+func (r PostgresNegotiationRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.NegotiationCreateData, negotiators []string) (*time.Time, error) {
 	statement := `
         INSERT INTO contract_negotiations (
             did, contract_version, change_request, created_by
@@ -25,7 +24,7 @@ func (r PostgresNegotiationRepo) Create(tx *sqlx.Tx, data db.NegotiationCreateDa
 		ID        string    `db:"id"`
 		CreatedAt time.Time `db:"created_at"`
 	}
-	err := tx.GetContext(r.Ctx, &result, statement,
+	err := tx.GetContext(ctx, &result, statement,
 		data.DID, data.ContractVersion, data.ChangeRequest, data.CreatedBy)
 	if err != nil {
 		return nil, err
@@ -37,7 +36,7 @@ func (r PostgresNegotiationRepo) Create(tx *sqlx.Tx, data db.NegotiationCreateDa
                 negotiation_id, negotiator
             ) VALUES ($1, $2)
         `
-		_, err = tx.ExecContext(r.Ctx, decisionStatement, result.ID, negotiator)
+		_, err = tx.ExecContext(ctx, decisionStatement, result.ID, negotiator)
 		if err != nil {
 			return nil, err
 		}
@@ -46,7 +45,7 @@ func (r PostgresNegotiationRepo) Create(tx *sqlx.Tx, data db.NegotiationCreateDa
 	return &result.CreatedAt, nil
 }
 
-func (r PostgresNegotiationRepo) Accept(tx *sqlx.Tx, id string, acceptedBy string) error {
+func (r PostgresNegotiationRepo) Accept(ctx context.Context, tx *sqlx.Tx, id string, acceptedBy string) error {
 	statement := `
         UPDATE contract_negotiation_decisions cnd
         SET decision = 'ACCEPTED'
@@ -57,7 +56,7 @@ func (r PostgresNegotiationRepo) Accept(tx *sqlx.Tx, id string, acceptedBy strin
             decision IS NULL AND
             negotiator = $2
     `
-	result, err := tx.ExecContext(r.Ctx, statement, id, acceptedBy)
+	result, err := tx.ExecContext(ctx, statement, id, acceptedBy)
 	if err != nil {
 		return err
 	}
@@ -74,7 +73,7 @@ func (r PostgresNegotiationRepo) Accept(tx *sqlx.Tx, id string, acceptedBy strin
 	return nil
 }
 
-func (r PostgresNegotiationRepo) Reject(tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error {
+func (r PostgresNegotiationRepo) Reject(ctx context.Context, tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error {
 	statement := `
         UPDATE contract_negotiation_decisions cnd
         SET
@@ -90,7 +89,7 @@ func (r PostgresNegotiationRepo) Reject(tx *sqlx.Tx, id string, rejectedBy strin
           AND cn.id = $1
           AND cnd.decision IS NULL
     `
-	result, err := tx.ExecContext(r.Ctx, statement, id, rejectedBy, rejectionReason)
+	result, err := tx.ExecContext(ctx, statement, id, rejectedBy, rejectionReason)
 	if err != nil {
 		return err
 	}
@@ -107,7 +106,7 @@ func (r PostgresNegotiationRepo) Reject(tx *sqlx.Tx, id string, rejectedBy strin
 	return nil
 }
 
-func (r PostgresNegotiationRepo) ReadAllByContractDID(tx *sqlx.Tx, did string) ([]db.NegotiationData, error) {
+func (r PostgresNegotiationRepo) ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.NegotiationData, error) {
 	query := `
         SELECT cn.id, did, contract_version, change_request, negotiator, decision,
                rejection_reason, created_by, created_at
@@ -116,14 +115,14 @@ func (r PostgresNegotiationRepo) ReadAllByContractDID(tx *sqlx.Tx, did string) (
             WHERE cn.did = $1
     `
 	var negotiations []db.NegotiationData
-	err := tx.SelectContext(r.Ctx, &negotiations, query, did)
+	err := tx.SelectContext(ctx, &negotiations, query, did)
 	if err != nil {
 		return nil, err
 	}
 	return negotiations, nil
 }
 
-func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(tx *sqlx.Tx, did string, contractVersion *int) ([]db.NegotiationChangeData, error) {
+func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion *int) ([]db.NegotiationChangeData, error) {
 	query := `
         SELECT cn.id, change_request
 		FROM contract_negotiations cn
@@ -134,14 +133,14 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(tx *sqlx
 		HAVING COUNT(*) = COUNT(CASE WHEN cnd.decision = 'ACCEPTED' THEN 1 END)
     `
 	var negotiations []db.NegotiationChangeData
-	err := tx.SelectContext(r.Ctx, &negotiations, query, did, contractVersion)
+	err := tx.SelectContext(ctx, &negotiations, query, did, contractVersion)
 	if err != nil {
 		return nil, err
 	}
 	return negotiations, nil
 }
 
-func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(tx *sqlx.Tx, did string, contractVersion *int) (bool, error) {
+func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion *int) (bool, error) {
 	query := `
         SELECT EXISTS (
             SELECT 1
@@ -153,18 +152,18 @@ func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(tx *sqlx.Tx, did st
         )
     `
 	var exists bool
-	err := tx.GetContext(r.Ctx, &exists, query, did, contractVersion)
+	err := tx.GetContext(ctx, &exists, query, did, contractVersion)
 	if err != nil {
 		return false, err
 	}
 	return exists, nil
 }
 
-func (r PostgresNegotiationRepo) Delete(tx *sqlx.Tx, did string) error {
+func (r PostgresNegotiationRepo) Delete(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         DELETE FROM contract_review_task
         WHERE did = $1
     `
-	_, err := tx.ExecContext(r.Ctx, statement, did)
+	_, err := tx.ExecContext(ctx, statement, did)
 	return err
 }

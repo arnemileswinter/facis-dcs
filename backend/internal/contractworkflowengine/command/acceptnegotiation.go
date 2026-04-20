@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -22,17 +21,13 @@ type AcceptNegotiationCmd struct {
 }
 
 type NegotiationAcceptor struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	NRepo  db.NegotiationRepo
 	NTRepo db.NegotiationTaskRepo
 }
 
-func (h *NegotiationAcceptor) Handle(cmd AcceptNegotiationCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *NegotiationAcceptor) Handle(ctx context.Context, cmd AcceptNegotiationCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -40,7 +35,7 @@ func (h *NegotiationAcceptor) Handle(cmd AcceptNegotiationCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
@@ -49,7 +44,7 @@ func (h *NegotiationAcceptor) Handle(cmd AcceptNegotiationCmd) error {
 		return errors.New("current contract state is invalid")
 	}
 
-	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.AcceptedBy)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.AcceptedBy)
 	if err != nil {
 		return fmt.Errorf("could not validate negotiator: %w", err)
 	}
@@ -58,7 +53,7 @@ func (h *NegotiationAcceptor) Handle(cmd AcceptNegotiationCmd) error {
 		return errors.New("invalid user")
 	}
 
-	err = h.NRepo.Accept(tx, cmd.ID, cmd.AcceptedBy)
+	err = h.NRepo.Accept(ctx, tx, cmd.ID, cmd.AcceptedBy)
 	if err != nil {
 		return fmt.Errorf("could not accept negotiation: %w", err)
 	}

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"digital-contracting-service/internal/base/datatype"
 	"time"
 
@@ -61,12 +62,12 @@ type SearchValues struct {
 }
 
 type ContractRepo interface {
-	Create(tx *sqlx.Tx, data Contract) (*time.Time, error)
-	ReadDataByID(tx *sqlx.Tx, did string) (*Contract, error)
-	ReadProcessData(tx *sqlx.Tx, did string) (*ContractProcessData, error)
-	ReadAllMetaData(tx *sqlx.Tx) ([]ContractMetadata, error)
-	ReadAllMetaDataByFilter(tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
-	UpdateState(tx *sqlx.Tx, did string, state string) error
-	Update(tx *sqlx.Tx, data ContractUpdateData) error
-	ExpireOutdatedContracts(tx *sqlx.Tx) (int64, error)
+	Create(ctx context.Context, tx *sqlx.Tx, data Contract) (*time.Time, error)
+	ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
+	ReadProcessData(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
+	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
+	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
+	ExpireOutdatedContracts(ctx context.Context, tx *sqlx.Tx) (int64, error)
 }

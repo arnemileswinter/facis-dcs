@@ -9,8 +9,8 @@ import (
 
 	"digital-contracting-service/internal/templatecatalogueintegration/client"
 	serviceofferingquery "digital-contracting-service/internal/templatecatalogueintegration/query/serviceoffering"
-	serviceofferingid "digital-contracting-service/internal/templatecatalogueintegration/serviceoffering"
 	"digital-contracting-service/internal/templatecatalogueintegration/selfdescription"
+	serviceofferingid "digital-contracting-service/internal/templatecatalogueintegration/serviceoffering"
 )
 
 type CreateCmd struct {
@@ -35,7 +35,7 @@ type CreateResult struct {
 	ID string
 }
 
-func (h *Creator) Handle(cmd CreateCmd) (*CreateResult, error) {
+func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) (*CreateResult, error) {
 	if h.FCClient == nil {
 		return nil, fmt.Errorf("federated catalogue client is nil")
 	}

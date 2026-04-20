@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	aopprovaltaskstate "digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/db"
 	"fmt"
@@ -27,15 +26,11 @@ type GetAllApprovalTasksForDIDResult struct {
 }
 
 type GetAllApprovalTasksForDIDHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *GetAllApprovalTasksForDIDHandler) Handle(query GetAllApprovalTasksForDIDQry) ([]GetAllApprovalTasksForDIDResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetAllApprovalTasksForDIDHandler) Handle(ctx context.Context, query GetAllApprovalTasksForDIDQry) ([]GetAllApprovalTasksForDIDResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -43,7 +38,7 @@ func (h *GetAllApprovalTasksForDIDHandler) Handle(query GetAllApprovalTasksForDI
 	}
 	defer tx.Rollback()
 
-	reviewTasks, err := h.ATRepo.ReadAll(tx, query.DID)
+	reviewTasks, err := h.ATRepo.ReadAll(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}

@@ -40,11 +40,11 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 	return database
 }
 
-func NewTestRepo(ctx context.Context) *TestRepo {
+func NewTestRepo() *TestRepo {
 	return &TestRepo{
-		CTRepo: &pg.PostgresContractTemplateRepo{Ctx: ctx},
-		RTRepo: &pg.PostgresReviewTaskRepo{Ctx: ctx},
-		ATRepo: &pg.PostgresApprovalTaskRepo{Ctx: ctx},
+		CTRepo: &pg.PostgresContractTemplateRepo{},
+		RTRepo: &pg.PostgresReviewTaskRepo{},
+		ATRepo: &pg.PostgresApprovalTaskRepo{},
 	}
 }
 
@@ -100,11 +100,10 @@ func createContractTemplate(t *testing.T, db *sqlx.DB, repo *TestRepo, did *stri
 		TemplateData: &jsonTemplateData,
 	}
 	createHandler := command.Creator{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract template: %v", err)
 	}
@@ -137,11 +136,10 @@ func createTestContractTemplateWithData(t *testing.T, db *sqlx.DB, repo *TestRep
 		TemplateData: &jsonTemplateData,
 	}
 	createHandler := command.Creator{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract template: %v", err)
 	}
@@ -171,7 +169,7 @@ func createReviewTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo *Tes
 			State:     state.String(),
 			CreatedBy: submittedBy,
 		}
-		_, err = repo.RTRepo.Create(tx, reviewTask)
+		_, err = repo.RTRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			t.Fatalf("Failed to create review task: %v", err)
 		}
@@ -196,7 +194,7 @@ func createApprovalTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo *T
 		State:     state.String(),
 		CreatedBy: submittedBy,
 	}
-	_, err = repo.ATRepo.Create(tx, approvalTask)
+	_, err = repo.ATRepo.Create(ctx, tx, approvalTask)
 	if err != nil {
 		t.Fatalf("Failed to create review task: %v", err)
 	}

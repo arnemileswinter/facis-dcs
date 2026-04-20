@@ -111,7 +111,7 @@ func (s *templateCatalogueIntegrationsrvc) CreateParticipant(ctx context.Context
 			TermsAndConditions:        req.TermsAndConditions,
 		},
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		if errors.Is(err, participantcmd.ErrParticipantAlreadyExists) {
 			return nil, templatecatalogueintegration.MakeBadRequest(err)
@@ -139,7 +139,7 @@ func (s *templateCatalogueIntegrationsrvc) CreateServiceOffering(ctx context.Con
 		EndPointURL:        req.EndPointURL,
 		TermsAndConditions: req.TermsAndConditions,
 	}
-	result, err := createHandler.Handle(cmd)
+	result, err := createHandler.Handle(ctx, cmd)
 	if err != nil {
 		if errors.Is(err, serviceofferingcmd.ErrServiceOfferingAlreadyExists) {
 			return nil, templatecatalogueintegration.MakeBadRequest(err)
@@ -297,7 +297,7 @@ func (s *templateCatalogueIntegrationsrvc) UpdateParticipant(ctx context.Context
 			TermsAndConditions:        req.TermsAndConditions,
 		},
 	}
-	err = updateHandler.Handle(cmd)
+	err = updateHandler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
@@ -322,7 +322,7 @@ func (s *templateCatalogueIntegrationsrvc) UpdateServiceOffering(ctx context.Con
 		EndPointURL:        req.EndPointURL,
 		TermsAndConditions: req.TermsAndConditions,
 	}
-	result, err := updateHandler.Handle(cmd)
+	result, err := updateHandler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
@@ -344,7 +344,7 @@ func (s *templateCatalogueIntegrationsrvc) DeleteParticipant(ctx context.Context
 		ID:    middleware.GetParticipantID(ctx),
 		Token: *req.Token,
 	}
-	err = deleteHandler.Handle(cmd)
+	err = deleteHandler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}
@@ -365,7 +365,7 @@ func (s *templateCatalogueIntegrationsrvc) DeleteServiceOffering(ctx context.Con
 		Token:         *req.Token,
 		ParticipantID: middleware.GetParticipantID(ctx),
 	}
-	result, err := deleteHandler.Handle(cmd)
+	result, err := deleteHandler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, templatecatalogueintegration.MakeInternalError(err)
 	}

@@ -66,7 +66,6 @@ type GetAllMetadataResult struct {
 }
 
 type GetAllMetadataHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
@@ -74,9 +73,9 @@ type GetAllMetadataHandler struct {
 	NTRepo db.NegotiationTaskRepo
 }
 
-func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadataResult, error) {
+func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadataQry) (*GetAllMetadataResult, error) {
 
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -85,22 +84,22 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 	}
 	defer tx.Rollback()
 
-	contractsMetadata, err := h.CRepo.ReadAllMetaData(tx)
+	contractsMetadata, err := h.CRepo.ReadAllMetaData(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all contracts: %w", err)
 	}
 
-	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(tx, query.RetrievedBy)
+	negotiationTasks, err := h.NTRepo.ReadAllByNegotiator(ctx, tx, query.RetrievedBy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all negotiation tasks: %w", err)
 	}
 
-	reviewerTasks, err := h.RTRepo.ReadAllByReviewer(tx, query.RetrievedBy)
+	reviewerTasks, err := h.RTRepo.ReadAllByReviewer(ctx, tx, query.RetrievedBy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}
 
-	approvalTasks, err := h.ATRepo.ReadAllByApprover(tx, query.RetrievedBy)
+	approvalTasks, err := h.ATRepo.ReadAllByApprover(ctx, tx, query.RetrievedBy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}
@@ -109,7 +108,7 @@ func (h *GetAllMetadataHandler) Handle(query GetAllMetadataQry) (*GetAllMetadata
 		RetrievedBy: query.RetrievedBy,
 		OccurredAt:  time.Now(),
 	}
-	err = event.Create(h.Ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
 	}

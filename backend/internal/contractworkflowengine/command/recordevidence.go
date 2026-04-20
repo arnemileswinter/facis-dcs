@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -22,15 +21,11 @@ type RecordEvidenceCmd struct {
 }
 
 type EvidenceRecorder struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *EvidenceRecorder) Handle(cmd RecordEvidenceCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *EvidenceRecorder) Handle(ctx context.Context, cmd RecordEvidenceCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -38,7 +33,7 @@ func (h *EvidenceRecorder) Handle(cmd RecordEvidenceCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}

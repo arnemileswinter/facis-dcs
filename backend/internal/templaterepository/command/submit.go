@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
@@ -28,14 +27,13 @@ type SubmitCmd struct {
 }
 
 type Submitter struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 }
 
-func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, cmd SubmitCmd) error {
+func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, cmd SubmitCmd) error {
 	for _, reviewer := range cmd.Reviewer {
 		reviewTask := db.ReviewTaskData{
 			DID:       cmd.DID,
@@ -43,7 +41,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 			State:     reviewtaskstate.Open.String(),
 			CreatedBy: cmd.SubmittedBy,
 		}
-		_, err := rtRepo.Create(tx, reviewTask)
+		_, err := rtRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			return fmt.Errorf("could not create review tasks: %w", err)
 		}
@@ -55,7 +53,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 		Approver:  *cmd.Approver,
 		State:     reviewtaskstate.Open.String(),
 	}
-	_, err := atRepo.Create(tx, data)
+	_, err := atRepo.Create(ctx, tx, data)
 	if err != nil {
 		return fmt.Errorf("could not create approval task: %w", err)
 	}
@@ -63,10 +61,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 	return nil
 }
 
-func (h *Submitter) Handle(cmd SubmitCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -74,7 +69,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CTRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
@@ -98,7 +93,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("no approver provided")
 		}
 
-		err := createTasks(tx, h.RTRepo, h.ATRepo, cmd)
+		err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd)
 		if err != nil {
 			return err
 		}
@@ -111,12 +106,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("invalid user")
 		}
 
-		err := h.RTRepo.ReopenTasks(tx, cmd.DID)
+		err := h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen review tasks")
 		}
 
-		err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+		err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen approval tasks")
 		}
@@ -125,7 +120,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Submitted.String() {
 
-		isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
+		isValid, err := h.RTRepo.IsValidReviewer(ctx, tx, processData.DID, cmd.SubmittedBy)
 		if err != nil {
 			return err
 		}
@@ -137,7 +132,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		if cmd.ActionFlag != nil {
 			if *cmd.ActionFlag == actionflag.Approval {
 
-				exist, err := h.RTRepo.TaskExistsInState(tx, processData.DID, cmd.SubmittedBy, reviewtaskstate.Open.String())
+				exist, err := h.RTRepo.TaskExistsInState(ctx, tx, processData.DID, cmd.SubmittedBy, reviewtaskstate.Open.String())
 				if err != nil {
 					return err
 				}
@@ -146,12 +141,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 					return errors.New("contract template needs to be verified before")
 				}
 
-				err = h.RTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, contracttemplatestate.Approved.String())
+				err = h.RTRepo.UpdateState(ctx, tx, processData.DID, cmd.SubmittedBy, contracttemplatestate.Approved.String())
 				if err != nil {
 					return fmt.Errorf("could not update review task: %w", err)
 				}
 
-				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String(), reviewtaskstate.Verified.String())
+				existOpenTasks, err := h.RTRepo.AnyTasksInState(ctx, tx, processData.DID, reviewtaskstate.Open.String(), reviewtaskstate.Verified.String())
 				if err != nil {
 					return fmt.Errorf("could not check if review task exists: %w", err)
 				}
@@ -162,12 +157,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 			} else if *cmd.ActionFlag == actionflag.Draft {
 
-				err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+				err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
 					return err
 				}
 
-				err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+				err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
 					return err
 				}
@@ -180,7 +175,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contracttemplatestate.Reviewed.String() {
 
-		isValid, err := h.ATRepo.IsValidApprover(tx, processData.DID, cmd.SubmittedBy)
+		isValid, err := h.ATRepo.IsValidApprover(ctx, tx, processData.DID, cmd.SubmittedBy)
 		if err != nil {
 			return err
 		}
@@ -189,12 +184,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("invalid user")
 		}
 
-		err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+		err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return err
 		}
 
-		err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+		err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return err
 		}
@@ -206,7 +201,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 	}
 
 	if len(nextTemplateState) > 0 && processData.State != nextTemplateState.String() {
-		err = h.CTRepo.UpdateState(tx, cmd.DID, nextTemplateState.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, nextTemplateState.String())
 		if err != nil {
 			return fmt.Errorf("could not update contract template state: %w", err)
 		}

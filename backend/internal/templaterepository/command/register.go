@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
@@ -28,7 +27,6 @@ type RegisterCmd struct {
 }
 
 type Registrar struct {
-	Ctx      context.Context
 	DB       *sqlx.DB
 	CTRepo   db.ContractTemplateRepo
 	RTRepo   db.ReviewTaskRepo
@@ -36,10 +34,7 @@ type Registrar struct {
 	FCClient *fcclient.FederatedCatalogueClient
 }
 
-func (h *Registrar) Handle(cmd RegisterCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -47,7 +42,7 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CTRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -60,18 +55,18 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	fullTemplate, err := h.CTRepo.ReadDataByID(tx, cmd.DID)
+	fullTemplate, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
 
 	if h.FCClient != nil {
-		if err := h.publishTemplateResourceToFC(cmd, processData, fullTemplate); err != nil {
+		if err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate); err != nil {
 			return fmt.Errorf("could not publish template to Federated Catalogue: %w", err)
 		}
 	}
 
-	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Registered.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Registered.String())
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}
@@ -88,12 +83,12 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 		return fmt.Errorf("could not create event: %w", err)
 	}
 
-	err = h.RTRepo.Delete(tx, cmd.DID)
+	err = h.RTRepo.Delete(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not delete review tasks: %w", err)
 	}
 
-	err = h.ATRepo.Delete(tx, cmd.DID)
+	err = h.ATRepo.Delete(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not delete approval tasks: %w", err)
 	}
@@ -101,7 +96,7 @@ func (h *Registrar) Handle(cmd RegisterCmd) error {
 	return tx.Commit()
 }
 
-func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
+func (h *Registrar) publishTemplateResourceToFC(ctx context.Context, cmd RegisterCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}
@@ -148,7 +143,7 @@ func (h *Registrar) publishTemplateResourceToFC(cmd RegisterCmd, processData *db
 		return fmt.Errorf("marshal template resource self-description failed: %w", err)
 	}
 
-	resp, err := h.FCClient.Post(h.Ctx, fcclient.SelfDescriptionsEndpointPath, cmd.Token, nil, body)
+	resp, err := h.FCClient.Post(ctx, fcclient.SelfDescriptionsEndpointPath, cmd.Token, nil, body)
 	if err != nil {
 		return fmt.Errorf("publish template resource failed: %w", err)
 	}

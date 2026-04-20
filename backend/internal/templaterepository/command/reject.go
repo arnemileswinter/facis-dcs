@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
@@ -24,17 +23,13 @@ type RejectCmd struct {
 }
 
 type Rejecter struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 	RTRepo db.ReviewTaskRepo
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *Rejecter) Handle(cmd RejectCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -42,7 +37,7 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CTRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -55,7 +50,7 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	exist, err := h.ATRepo.IsValidApprover(tx, cmd.DID, cmd.RejectedBy)
+	exist, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.RejectedBy)
 	if err != nil {
 		return err
 	}
@@ -64,12 +59,12 @@ func (h *Rejecter) Handle(cmd RejectCmd) error {
 		return errors.New("invalid user")
 	}
 
-	err = h.ATRepo.UpdateState(tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())
+	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Rejected.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Rejected.String())
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}

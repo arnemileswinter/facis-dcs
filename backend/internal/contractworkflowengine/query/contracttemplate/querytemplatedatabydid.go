@@ -3,7 +3,6 @@ package contracttemplate
 import (
 	"context"
 	"database/sql"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
@@ -43,16 +42,16 @@ RETURN {
 LIMIT 1
 `
 
-func (h *GetTemplateDataByDIDHandler) Handle(qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	templateData, err := h.getTemplateData(qry)
+func (h *GetTemplateDataByDIDHandler) Handle(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
+	templateData, err := h.getTemplateData(ctx, qry)
 	if err != nil {
 		return nil, err
 	}
 	return convertTemplateDataToContractData(templateData)
 }
 
-func (h *GetTemplateDataByDIDHandler) getTemplateData(qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
-	templateData, err := h.getTemplateDataFromDB(qry.DID)
+func (h *GetTemplateDataByDIDHandler) getTemplateData(ctx context.Context, qry GetTemplateDataByDIDQry) (*datatype.JSON, error) {
+	templateData, err := h.getTemplateDataFromDB(ctx, qry.DID)
 	if err == nil && templateData != nil {
 		return templateData, nil
 	}
@@ -71,9 +70,7 @@ func (h *GetTemplateDataByDIDHandler) getTemplateData(qry GetTemplateDataByDIDQr
 	return templateData, nil
 }
 
-func (h *GetTemplateDataByDIDHandler) getTemplateDataFromDB(templateDID string) (*datatype.JSON, error) {
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetTemplateDataByDIDHandler) getTemplateDataFromDB(ctx context.Context, templateDID string) (*datatype.JSON, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -85,7 +82,7 @@ func (h *GetTemplateDataByDIDHandler) getTemplateDataFromDB(templateDID string) 
 		return nil, fmt.Errorf("contract template repository is nil")
 	}
 
-	templateData, err := h.CTRepo.ReadTemplateDataByID(tx, templateDID)
+	templateData, err := h.CTRepo.ReadTemplateDataByID(ctx, tx, templateDID)
 	if err == nil && templateData != nil {
 		err = tx.Commit()
 		if err != nil {

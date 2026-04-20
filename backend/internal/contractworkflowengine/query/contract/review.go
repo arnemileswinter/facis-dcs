@@ -18,14 +18,13 @@ type ReviewCmd struct {
 }
 
 type Reviewer struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *Reviewer) Handle(cmd ReviewCmd) error {
+func (h *Reviewer) Handle(ctx context.Context, cmd ReviewCmd) error {
 
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	tx, err := h.DB.BeginTxx(ctx, nil)

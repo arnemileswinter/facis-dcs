@@ -22,11 +22,10 @@ func TestSearch_SearchContractTemplatesWithoutSearchValue(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	templateData := map[string]interface{}{}
 
@@ -49,11 +48,10 @@ func TestSearch_SearchContractTemplatesWithoutSearchValue(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -83,11 +81,10 @@ func TestSearch_SearchContractTemplatesByDID(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	cmd := command.CreateCmd{
 		DID:          *did,
@@ -98,11 +95,10 @@ func TestSearch_SearchContractTemplatesByDID(t *testing.T) {
 		TemplateData: &jsonMetaData,
 	}
 	createHandler := command.Creator{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract template: %v", err)
 	}
@@ -112,11 +108,10 @@ func TestSearch_SearchContractTemplatesByDID(t *testing.T) {
 		DID:         did,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -132,11 +127,10 @@ func TestSearch_SearchContractTemplatesByName(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	templateData := map[string]interface{}{}
 
@@ -170,11 +164,10 @@ func TestSearch_SearchContractTemplatesByName(t *testing.T) {
 		Name:        &searchName,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -190,11 +183,10 @@ func TestSearch_SearchContractTemplatesByDescript(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	templateData := map[string]interface{}{}
 
@@ -222,11 +214,10 @@ func TestSearch_SearchContractTemplatesByDescript(t *testing.T) {
 		Description: &searchDescription,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -242,11 +233,10 @@ func TestSearch_SearchContractTemplatesByTemplateData(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	templateData := map[string]interface{}{
 		"name":        "-- test1 --",
@@ -296,11 +286,10 @@ func TestSearch_SearchContractTemplatesByTemplateData(t *testing.T) {
 		Filter:      &filter,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}

@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
@@ -24,16 +23,12 @@ type ApproveCmd struct {
 }
 
 type Approver struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *Approver) Handle(cmd ApproveCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -41,7 +36,7 @@ func (h *Approver) Handle(cmd ApproveCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CTRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -54,7 +49,7 @@ func (h *Approver) Handle(cmd ApproveCmd) error {
 		return errors.New("invalid contract template state")
 	}
 
-	valid, err := h.ATRepo.IsValidApprover(tx, cmd.DID, cmd.ApprovedBy)
+	valid, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.ApprovedBy)
 	if err != nil {
 		return err
 	}
@@ -63,12 +58,12 @@ func (h *Approver) Handle(cmd ApproveCmd) error {
 		return errors.New("invalid user")
 	}
 
-	err = h.ATRepo.UpdateState(tx, cmd.DID, cmd.ApprovedBy, approvaltaskstate.Approved.String())
+	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.ApprovedBy, approvaltaskstate.Approved.String())
 	if err != nil {
 		return fmt.Errorf("could not update approval task state: %w", err)
 	}
 
-	err = h.CTRepo.UpdateState(tx, cmd.DID, contracttemplatestate.Approved.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Approved.String())
 	if err != nil {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}
