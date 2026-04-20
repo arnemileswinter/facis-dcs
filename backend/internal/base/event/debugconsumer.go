@@ -11,9 +11,15 @@ type EventDebugConsumer struct {
 }
 
 func (j EventDebugConsumer) Start() {
-	j.SubClient.Subscribe(func(evt event.Event) {
-		data := evt.Data()
-		evt.ID()
-		log.Printf("Subject: %s | Data: %s", evt.ID(), string(data))
-	})
+	go func() {
+		j.SubClient.Subscribe(func(evt event.Event) {
+			data := evt.Data()
+			evt.ID()
+			log.Printf("Subject: %s | Data: %s", evt.ID(), string(data))
+		})
+	}()
+}
+
+func (j EventDebugConsumer) Stop() {
+	j.SubClient.cancel()
 }

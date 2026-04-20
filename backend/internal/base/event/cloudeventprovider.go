@@ -12,11 +12,13 @@ import (
 
 type CloudEventPubClient struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	topic  string
 	client *cloudeventprovider.CloudEventProviderClient
 }
 
 func (c CloudEventPubClient) Close() error {
+	c.cancel()
 	return c.client.Close()
 }
 
@@ -33,7 +35,7 @@ func (c CloudEventPubClient) Publish(subject string, payload []byte) interface{}
 	return c.client.PubCtx(c.ctx, event)
 }
 
-func NewNatsPubClient(ctx context.Context, topic string, natsURL string) (*CloudEventPubClient, error) {
+func NewNatsPubClient(topic string, natsURL string) (*CloudEventPubClient, error) {
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{
 		Protocol: cloudeventprovider.ProtocolTypeNats,
 		Settings: cloudeventprovider.NatsConfig{
@@ -43,16 +45,21 @@ func NewNatsPubClient(ctx context.Context, topic string, natsURL string) (*Cloud
 	if err != nil {
 		return nil, errors.New("Could not create cloud event provider client")
 	}
-	return &CloudEventPubClient{ctx, topic, client}, nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &CloudEventPubClient{ctx, cancel, topic, client}, nil
 }
 
 type CloudEventSubClient struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	topic  string
 	client *cloudeventprovider.CloudEventProviderClient
 }
 
 func (c CloudEventSubClient) Close() error {
+	c.cancel()
 	return c.client.Close()
 }
 
@@ -60,15 +67,18 @@ func (c CloudEventSubClient) Subscribe(f func(evt event.Event)) error {
 	return c.client.SubCtx(c.ctx, f)
 }
 
-func NewNatsSubClient(ctx context.Context, topic string, natsURL string) (*CloudEventSubClient, error) {
+func NewNatsSubClient(topic string, natsURL string) (*CloudEventSubClient, error) {
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{
 		Protocol: cloudeventprovider.ProtocolTypeNats,
 		Settings: cloudeventprovider.NatsConfig{
 			Url: natsURL,
 		},
 	}, cloudeventprovider.ConnectionTypeSub, topic)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	if err != nil {
 		return nil, errors.New("Could not create cloud event provider client")
 	}
-	return &CloudEventSubClient{ctx, topic, client}, nil
+	return &CloudEventSubClient{ctx, cancel, topic, client}, nil
 }

@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"goa.design/clue/debug"
@@ -84,7 +85,7 @@ func main() {
 		natsURL = nats.DefaultURL
 	}
 
-	cepPubClient, err := event.NewNatsPubClient(ctx, "events", natsURL)
+	cepPubClient, err := event.NewNatsPubClient("events", natsURL)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events publisher")
 	}
@@ -97,7 +98,7 @@ func main() {
 	}
 	outboxProcessor.Start()
 
-	cepSubClient, err := event.NewNatsSubClient(ctx, "events", natsURL)
+	cepSubClient, err := event.NewNatsSubClient("events", natsURL)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events publisher")
 	}
@@ -107,6 +108,10 @@ func main() {
 		SubClient: cepSubClient,
 	}
 	eventDebugConsumer.Start()
+
+	time.Sleep(time.Second * 2)
+	eventDebugConsumer.Stop()
+	time.Sleep(time.Second * 50)
 
 	// Initialize OIDC validator and JWT authenticator.
 	oidcIssuerURL := os.Getenv("OIDC_ISSUER_URL")
