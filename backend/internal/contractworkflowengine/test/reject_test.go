@@ -27,11 +27,10 @@ func TestCreate_RejectContractInReviewedState(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Reviewed, creator)
 
@@ -46,13 +45,13 @@ func TestCreate_RejectContractInReviewedState(t *testing.T) {
 		Reason:     "Test Reason",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract : %v", err)
 	}
@@ -69,7 +68,7 @@ func TestCreate_RejectContractInReviewedState(t *testing.T) {
 		CRepo: repo.CRepo,
 		NRepo: repo.NRepo,
 	}
-	contract, err := queryHandler.Handle(qry)
+	contract, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract : %v", err)
 	}
@@ -90,11 +89,10 @@ func TestCreate_RejectContractInReviewedStateWithInvalidUser(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Reviewed, creator)
 
@@ -107,13 +105,13 @@ func TestCreate_RejectContractInReviewedStateWithInvalidUser(t *testing.T) {
 		Reason:     "Test Reason",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -129,11 +127,10 @@ func TestCreate_RejectNonExistingContract(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	cmd := command.RejectCmd{
 		DID:        *did,
@@ -141,13 +138,13 @@ func TestCreate_RejectNonExistingContract(t *testing.T) {
 		RejectedBy: "Test User 1",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -163,11 +160,10 @@ func TestCreate_RejectContractInDraftState(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Draft, "Test User")
 
@@ -180,13 +176,13 @@ func TestCreate_RejectContractInDraftState(t *testing.T) {
 		Reason:     "Test Reason",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -202,11 +198,10 @@ func TestCreate_RejectContractInApprovedState(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Approved, "Test User")
 
@@ -219,13 +214,13 @@ func TestCreate_RejectContractInApprovedState(t *testing.T) {
 		Reason:     "Test Reason",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -241,11 +236,10 @@ func TestCreate_RejectContractAfterUpdate(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Reviewed, "Test User")
 
@@ -258,13 +252,13 @@ func TestCreate_RejectContractAfterUpdate(t *testing.T) {
 		Reason:     "Test Reason",
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }

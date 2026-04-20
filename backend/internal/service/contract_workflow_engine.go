@@ -6,6 +6,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
@@ -55,6 +56,9 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 
 func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractworkflowengine.ContractCreateRequest) (res *contractworkflowengine.ContractCreateResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	did, err := base.GetDID()
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -66,7 +70,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 		CTRepo:   s.CTRepo,
 		FCClient: s.FCClient,
 	}
-	contractData, err := queryHandler.Handle(contracttemplatequery.GetTemplateDataByDIDQry{
+	contractData, err := queryHandler.Handle(ctx, contracttemplatequery.GetTemplateDataByDIDQry{
 		Token: *req.Token,
 		DID:   req.Did,
 	})
@@ -81,11 +85,10 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 		ContractData: contractData,
 	}
 	createHandler := command.Creator{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -96,6 +99,9 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractworkflowengine.ContractUpdateRequest) (res *contractworkflowengine.ContractUpdateResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
@@ -117,11 +123,10 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 		ContractData:    &metaData,
 	}
 	handler := command.Updater{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -132,6 +137,9 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractworkflowengine.ContractSubmitRequest) (res *contractworkflowengine.ContractSubmitResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
@@ -158,7 +166,6 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		Negotiators: req.Negotiators,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		RTRepo: s.RTRepo,
@@ -166,7 +173,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		NRepo:  s.NRepo,
 		NTRepo: s.NTRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -178,18 +185,20 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 
 func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contractworkflowengine.ContractRetrieveRequest) (res *contractworkflowengine.ContractRetrieveResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	qry := contract.GetAllMetadataQry{
 		RetrievedBy: middleware.GetUsername(ctx),
 	}
 	queryHandler := contract.GetAllMetadataHandler{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		RTRepo: s.RTRepo,
 		ATRepo: s.ATRepo,
 		NTRepo: s.NTRepo,
 	}
-	result, err := queryHandler.Handle(qry)
+	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -251,6 +260,9 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 
 func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	qry := contract.GetByIDQry{
 		DID:         req.Did,
 		RetrievedBy: middleware.GetUsername(ctx),
@@ -261,7 +273,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		CRepo: s.CRepo,
 		NRepo: s.NRepo,
 	}
-	contractResult, err := queryHandler.Handle(qry)
+	contractResult, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
@@ -304,6 +316,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 
 func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contractworkflowengine.ContractNegotiationRequest) (res *contractworkflowengine.ContractNegotiationResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -321,14 +336,13 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 		ChangeRequest: &changeRequest,
 	}
 	handler := command.Negotiator{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		NRepo:  s.NRepo,
 		RTRepo: s.RTRepo,
 		NTRepo: s.NTRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -339,6 +353,9 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 }
 
 func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractworkflowengine.ContractNegotiationRespondRequest) (res *contractworkflowengine.ContractNegotiationRespondResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	actionFlag, err := negotiationactionflag.NewNegotiationActionFlag(req.ActionFlag)
 	if err != nil {
@@ -353,13 +370,12 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			AcceptedBy: middleware.GetUsername(ctx),
 		}
 		handler := command.NegotiationAcceptor{
-			Ctx:    ctx,
 			DB:     s.DB,
 			CRepo:  s.CRepo,
 			NRepo:  s.NRepo,
 			NTRepo: s.NTRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
@@ -373,13 +389,12 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 			RejectionReason: req.RejectionReason,
 		}
 		handler := command.NegotiationRejector{
-			Ctx:    ctx,
 			DB:     s.DB,
 			CRepo:  s.CRepo,
 			NRepo:  s.NRepo,
 			NTRepo: s.NTRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
@@ -392,16 +407,18 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 
 func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractworkflowengine.ContractReviewRequest) (res *contractworkflowengine.ContractReviewResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	cmd := contract.ReviewCmd{
 		DID:        req.Did,
 		ReviewedBy: middleware.GetUsername(ctx),
 	}
 	handler := contract.Reviewer{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -412,6 +429,9 @@ func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	var state *contractstate.ContractState
 	if req.State != nil {
@@ -433,11 +453,10 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		Filter:          req.Filter,
 	}
 	queryHandler := contract.GetAllMetaDataByFilterHandler{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	result, err := queryHandler.Handle(qry)
+	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -460,6 +479,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 
 func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractworkflowengine.ContractApproveRequest) (res *contractworkflowengine.ContractApproveResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -471,12 +493,11 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 		ApprovedBy: middleware.GetUsername(ctx),
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		ATRepo: s.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -487,6 +508,9 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractworkflowengine.ContractRejectRequest) (res *contractworkflowengine.ContractRejectResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
@@ -500,13 +524,12 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 		Reason:     req.Reason,
 	}
 	handler := command.Rejecter{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		RTRepo: s.RTRepo,
 		ATRepo: s.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -517,6 +540,9 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
@@ -529,11 +555,10 @@ func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractwor
 		UpdatedAt:  updatedAt,
 	}
 	handler := command.EvidenceRecorder{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -545,13 +570,15 @@ func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractwor
 
 func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
 
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
 	cmd := command.TerminateCmd{
 		DID:          req.Did,
 		TerminatedBy: middleware.GetUsername(ctx),
 		Reason:       req.Reason,
 	}
 	handler := command.Terminator{
-		Ctx:    ctx,
 		DB:     s.DB,
 		CRepo:  s.CRepo,
 		NRepo:  s.NRepo,
@@ -559,7 +586,7 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 		RTRepo: s.RTRepo,
 		ATRepo: s.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -570,6 +597,9 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 }
 
 func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractworkflowengine.ContractAuditRequest) (res *contractworkflowengine.ContractAuditResponse, err error) {
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
@@ -582,11 +612,10 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 		UpdatedAt: updatedAt,
 	}
 	handler := contract.Auditor{
-		Ctx:   ctx,
 		DB:    s.DB,
 		CRepo: s.CRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}

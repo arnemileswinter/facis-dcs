@@ -25,7 +25,7 @@ type Creator struct {
 // ErrParticipantAlreadyExists indicates that a participant with the same participantID
 var ErrParticipantAlreadyExists = errors.New("participant already exists")
 
-func (h *Creator) Handle(cmd CreateCmd) error {
+func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}

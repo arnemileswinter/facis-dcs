@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -28,15 +27,11 @@ type UpdateCmd struct {
 }
 
 type Updater struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *Updater) Handle(cmd UpdateCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -44,7 +39,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 	}
 	defer tx.Rollback()
 
-	oldData, err := h.CRepo.ReadDataByID(tx, cmd.DID)
+	oldData, err := h.CRepo.ReadDataByID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read contract data: %w", err)
 	}
@@ -69,7 +64,7 @@ func (h *Updater) Handle(cmd UpdateCmd) error {
 		ExpirationDate:  cmd.ExpirationDate,
 		ContractData:    cmd.ContractData,
 	}
-	err = h.CRepo.Update(tx, newData)
+	err = h.CRepo.Update(ctx, tx, newData)
 	if err != nil {
 		return fmt.Errorf("could not update contract data: %w", err)
 	}

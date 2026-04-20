@@ -33,11 +33,10 @@ func TestCreate_CreateNewContractTemplate(t *testing.T) {
 		t.Fatalf("Failed to create JSON template data: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 	creator := "Test User"
 
 	cmd := command.CreateCmd{
@@ -49,11 +48,10 @@ func TestCreate_CreateNewContractTemplate(t *testing.T) {
 		TemplateData: &jsonMetaData,
 	}
 	createHandler := command.Creator{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract template: %v", err)
 	}
@@ -63,11 +61,10 @@ func TestCreate_CreateNewContractTemplate(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}

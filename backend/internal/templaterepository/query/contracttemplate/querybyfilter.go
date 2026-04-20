@@ -2,7 +2,6 @@ package contracttemplate
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -42,15 +41,11 @@ type GetAllMetadataByFilterResult struct {
 }
 
 type GetAllMetaDataByFilterHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 }
 
-func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) ([]GetAllMetadataByFilterResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAllMetadataByFilterQry) ([]GetAllMetadataByFilterResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -79,7 +74,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) 
 		Filter:         query.Filter,
 	}
 
-	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(tx, searchValues)
+	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all contract templates: %w", err)
 	}
@@ -88,7 +83,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) 
 		RetrievedBy: query.RetrievedBy,
 		OccurredAt:  time.Now(),
 	}
-	err = event.Create(h.Ctx, tx, evt, componenttype.ContractTemplateRepo)
+	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
 	}

@@ -2,7 +2,6 @@ package contracttemplate
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -36,15 +35,11 @@ type GetByIDResult struct {
 }
 
 type GetByIDHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
 }
 
-func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByIDResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -52,7 +47,7 @@ func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
 	}
 	defer tx.Rollback()
 
-	data, err := h.CTRepo.ReadDataByID(tx, query.DID)
+	data, err := h.CTRepo.ReadDataByID(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get contract template data: %w", err)
 	}
@@ -64,7 +59,7 @@ func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
 		RetrievedBy:    query.RetrievedBy,
 		OccurredAt:     time.Now(),
 	}
-	err = event.Create(h.Ctx, tx, evt, componenttype.ContractTemplateRepo)
+	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
 	}

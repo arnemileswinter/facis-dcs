@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"fmt"
@@ -26,15 +25,11 @@ type GetAllReviewTasksForDIDResult struct {
 }
 
 type GetAllReviewTasksForDIDHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	RTRepo db.ReviewTaskRepo
 }
 
-func (h *GetAllReviewTasksForDIDHandler) Handle(query GetAllReviewTasksForDIDQry) ([]GetAllReviewTasksForDIDResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetAllReviewTasksForDIDHandler) Handle(ctx context.Context, query GetAllReviewTasksForDIDQry) ([]GetAllReviewTasksForDIDResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -42,7 +37,7 @@ func (h *GetAllReviewTasksForDIDHandler) Handle(query GetAllReviewTasksForDIDQry
 	}
 	defer tx.Rollback()
 
-	reviewTasks, err := h.RTRepo.ReadAll(tx, query.DID)
+	reviewTasks, err := h.RTRepo.ReadAll(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}

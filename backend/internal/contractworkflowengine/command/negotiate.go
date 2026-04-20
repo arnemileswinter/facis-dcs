@@ -24,7 +24,6 @@ type NegotiationCmd struct {
 }
 
 type Negotiator struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
@@ -32,9 +31,9 @@ type Negotiator struct {
 	NTRepo db.NegotiationTaskRepo
 }
 
-func (h *Negotiator) Handle(cmd NegotiationCmd) error {
+func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -43,7 +42,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not process core data: %w", err)
 	}
@@ -56,7 +55,7 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		return errors.New("current contract state is invalid")
 	}
 
-	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.NegotiatedBy)
+	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.NegotiatedBy)
 	if err != nil {
 		return fmt.Errorf("could not validate negotiator: %w", err)
 	}
@@ -65,14 +64,14 @@ func (h *Negotiator) Handle(cmd NegotiationCmd) error {
 		return errors.New("invalid user")
 	}
 
-	negotiators, err := h.NTRepo.ReadNegotiatorsForDID(tx, cmd.DID)
+	negotiators, err := h.NTRepo.ReadNegotiatorsForDID(ctx, tx, cmd.DID)
 	data := db.NegotiationCreateData{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
 		ChangeRequest:   cmd.ChangeRequest,
 		CreatedBy:       cmd.NegotiatedBy,
 	}
-	_, err = h.NRepo.Create(tx, data, negotiators)
+	_, err = h.NRepo.Create(ctx, tx, data, negotiators)
 	if err != nil {
 		return fmt.Errorf("could not create negotiation: %w", err)
 	}

@@ -27,14 +27,13 @@ type GetAllApprovalTasksForDIDResult struct {
 }
 
 type GetAllApprovalTasksForDIDHandler struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	ATRepo db.ApprovalTaskRepo
 }
 
-func (h *GetAllApprovalTasksForDIDHandler) Handle(query GetAllApprovalTasksForDIDQry) ([]GetAllApprovalTasksForDIDResult, error) {
+func (h *GetAllApprovalTasksForDIDHandler) Handle(ctx context.Context, query GetAllApprovalTasksForDIDQry) ([]GetAllApprovalTasksForDIDResult, error) {
 
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -43,7 +42,7 @@ func (h *GetAllApprovalTasksForDIDHandler) Handle(query GetAllApprovalTasksForDI
 	}
 	defer tx.Rollback()
 
-	reviewTasks, err := h.ATRepo.ReadAll(tx, query.DID)
+	reviewTasks, err := h.ATRepo.ReadAll(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all review tasks: %w", err)
 	}

@@ -22,7 +22,7 @@ type Updater struct {
 	FCClient *client.FederatedCatalogueClient
 }
 
-func (h *Updater) Handle(cmd UpdateCmd) error {
+func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}

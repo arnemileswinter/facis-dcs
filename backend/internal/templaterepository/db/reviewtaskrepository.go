@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -16,16 +17,16 @@ type ReviewTaskData struct {
 }
 
 type ReviewTaskRepo interface {
-	Create(tx *sqlx.Tx, data ReviewTaskData) (*time.Time, error)
-	IsValidReviewer(tx *sqlx.Tx, did string, reviewer string) (bool, error)
-	ReopenTasks(tx *sqlx.Tx, did string) error
-	ReadAll(tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
-	ReadAllByDID(tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
-	ReadAllByReviewer(tx *sqlx.Tx, reviewer string) ([]ReviewTaskData, error)
-	UpdateStateForAllTasks(tx *sqlx.Tx, did string, state string) error
-	UpdateState(tx *sqlx.Tx, did string, reviewer string, state string) error
-	AnyTasksInState(tx *sqlx.Tx, did string, states ...string) (bool, error)
-	TaskExistsInState(tx *sqlx.Tx, did string, reviewer string, state string) (bool, error)
-	TaskExist(tx *sqlx.Tx, did string) (bool, error)
-	Delete(tx *sqlx.Tx, did string) error
+	Create(ctx context.Context, tx *sqlx.Tx, data ReviewTaskData) (*time.Time, error)
+	IsValidReviewer(ctx context.Context, tx *sqlx.Tx, did string, reviewer string) (bool, error)
+	ReopenTasks(ctx context.Context, tx *sqlx.Tx, did string) error
+	ReadAll(ctx context.Context, tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
+	ReadAllByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]ReviewTaskData, error)
+	ReadAllByReviewer(ctx context.Context, tx *sqlx.Tx, reviewer string) ([]ReviewTaskData, error)
+	UpdateStateForAllTasks(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, reviewer string, state string) error
+	AnyTasksInState(ctx context.Context, tx *sqlx.Tx, did string, states ...string) (bool, error)
+	TaskExistsInState(ctx context.Context, tx *sqlx.Tx, did string, reviewer string, state string) (bool, error)
+	TaskExist(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
+	Delete(ctx context.Context, tx *sqlx.Tx, did string) error
 }

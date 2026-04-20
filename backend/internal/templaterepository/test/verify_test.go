@@ -25,11 +25,10 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -41,12 +40,12 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 		VerifiedBy: reviewers[0],
 	}
 	handler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to verify contract template: %v", err)
 	}
@@ -57,7 +56,7 @@ func TestVerify_VerifyContractTemplateAsReviewer(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	exists, err := repo.RTRepo.AnyTasksInState(tx, *did, reviewtaskstate.Verified.String())
+	exists, err := repo.RTRepo.AnyTasksInState(ctx, tx, *did, reviewtaskstate.Verified.String())
 	if err != nil {
 		t.Fatalf("Failed to check existence of review tasks: %v", err)
 	}
@@ -81,23 +80,22 @@ func TestVerify_VerifyNonExistingContractTemplate(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	cmd := command.VerifyCmd{
 		DID:        *did,
 		VerifiedBy: "Test User 1",
 	}
 	handler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }

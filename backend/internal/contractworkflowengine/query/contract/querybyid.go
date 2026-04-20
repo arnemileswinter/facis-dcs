@@ -2,7 +2,6 @@ package contract
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -40,10 +39,7 @@ type GetByIDHandler struct {
 	NRepo db.NegotiationRepo
 }
 
-func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByIDResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -51,12 +47,12 @@ func (h *GetByIDHandler) Handle(query GetByIDQry) (*GetByIDResult, error) {
 	}
 	defer tx.Rollback()
 
-	data, err := h.CRepo.ReadDataByID(tx, query.DID)
+	data, err := h.CRepo.ReadDataByID(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get contract data: %w", err)
 	}
 
-	negotiations, err := h.NRepo.ReadAllByContractDID(tx, query.DID)
+	negotiations, err := h.NRepo.ReadAllByContractDID(ctx, tx, query.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not get negotiations: %w", err)
 	}

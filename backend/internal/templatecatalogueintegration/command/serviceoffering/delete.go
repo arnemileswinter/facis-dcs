@@ -26,7 +26,7 @@ type DeleteResult struct {
 	ID string
 }
 
-func (h *Deleter) Handle(cmd DeleteCmd) (*DeleteResult, error) {
+func (h *Deleter) Handle(ctx context.Context, cmd DeleteCmd) (*DeleteResult, error) {
 	if h.FCClient == nil {
 		return nil, fmt.Errorf("federated catalogue client is nil")
 	}

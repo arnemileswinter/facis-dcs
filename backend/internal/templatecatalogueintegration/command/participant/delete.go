@@ -20,7 +20,7 @@ type Deleter struct {
 	FCClient *fcclient.FederatedCatalogueClient
 }
 
-func (h *Deleter) Handle(cmd DeleteCmd) error {
+func (h *Deleter) Handle(ctx context.Context, cmd DeleteCmd) error {
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}

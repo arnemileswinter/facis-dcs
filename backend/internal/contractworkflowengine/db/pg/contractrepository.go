@@ -14,15 +14,14 @@ import (
 )
 
 type PostgresContractRepo struct {
-	Ctx context.Context
 }
 
-func (r *PostgresContractRepo) ExpireOutdatedContracts(tx *sqlx.Tx) (int64, error) {
+func (r *PostgresContractRepo) ExpireOutdatedContracts(ctx context.Context, tx *sqlx.Tx) (int64, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (r *PostgresContractRepo) Create(tx *sqlx.Tx, data db.Contract) (*time.Time, error) {
+func (r *PostgresContractRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.Contract) (*time.Time, error) {
 	statement := `
         INSERT INTO contracts (
             did, created_by, state, name,
@@ -31,7 +30,7 @@ func (r *PostgresContractRepo) Create(tx *sqlx.Tx, data db.Contract) (*time.Time
         RETURNING created_at
     `
 	var createdAt time.Time
-	err := tx.GetContext(r.Ctx, &createdAt, statement,
+	err := tx.GetContext(ctx, &createdAt, statement,
 		data.DID, data.CreatedBy, data.State, data.Name,
 		data.Description, data.ContractData)
 	if err != nil {
@@ -40,14 +39,14 @@ func (r *PostgresContractRepo) Create(tx *sqlx.Tx, data db.Contract) (*time.Time
 	return &createdAt, nil
 }
 
-func (r *PostgresContractRepo) ReadDataByID(tx *sqlx.Tx, did string) (*db.Contract, error) {
+func (r *PostgresContractRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.Contract, error) {
 	query := `
         SELECT did, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data
         FROM contracts_effective WHERE did = $1
     `
 	var ct db.Contract
-	err := tx.GetContext(r.Ctx, &ct, query, did)
+	err := tx.GetContext(ctx, &ct, query, did)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("contract with DID %s not found", did)
@@ -57,20 +56,20 @@ func (r *PostgresContractRepo) ReadDataByID(tx *sqlx.Tx, did string) (*db.Contra
 	return &ct, nil
 }
 
-func (r *PostgresContractRepo) ReadAllMetaData(tx *sqlx.Tx) ([]db.ContractMetadata, error) {
+func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
 	query := `
         SELECT did, state, name, description, created_by, created_at, updated_at, contract_version
         FROM contracts_effective
     `
 	var cts []db.ContractMetadata
-	err := tx.SelectContext(r.Ctx, &cts, query)
+	err := tx.SelectContext(ctx, &cts, query)
 	if err != nil {
 		return []db.ContractMetadata{}, err
 	}
 	return cts, nil
 }
 
-func (r *PostgresContractRepo) ReadAllMetaDataByFilter(tx *sqlx.Tx, values db.SearchValues) ([]db.ContractMetadata, error) {
+func (r *PostgresContractRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues) ([]db.ContractMetadata, error) {
 	query := `
         SELECT did, state, name, description, created_by, created_at, updated_at, contract_version
         FROM contracts_effective
@@ -84,20 +83,20 @@ func (r *PostgresContractRepo) ReadAllMetaDataByFilter(tx *sqlx.Tx, values db.Se
 	}
 
 	var cts []db.ContractMetadata
-	err = tx.SelectContext(r.Ctx, &cts, query, params...)
+	err = tx.SelectContext(ctx, &cts, query, params...)
 	if err != nil {
 		return []db.ContractMetadata{}, err
 	}
 	return cts, nil
 }
 
-func (r *PostgresContractRepo) ReadProcessData(tx *sqlx.Tx, did string) (*db.ContractProcessData, error) {
+func (r *PostgresContractRepo) ReadProcessData(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractProcessData, error) {
 	query := `
         SELECT did, state, updated_at, created_by, contract_version
         FROM contracts_effective WHERE did = $1
     `
 	var processData db.ContractProcessData
-	err := tx.GetContext(r.Ctx, &processData, query, did)
+	err := tx.GetContext(ctx, &processData, query, did)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("contract with DID %s", did)
@@ -107,21 +106,21 @@ func (r *PostgresContractRepo) ReadProcessData(tx *sqlx.Tx, did string) (*db.Con
 	return &processData, nil
 }
 
-func (r *PostgresContractRepo) UpdateState(tx *sqlx.Tx, did string, state string) error {
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
 	statement := `
         UPDATE contracts SET state = $2
         WHERE did = $1
     `
-	_, err := tx.ExecContext(r.Ctx, statement, did, state)
+	_, err := tx.ExecContext(ctx, statement, did, state)
 	return err
 }
 
-func (r *PostgresContractRepo) Update(tx *sqlx.Tx, data db.ContractUpdateData) error {
+func (r *PostgresContractRepo) Update(ctx context.Context, tx *sqlx.Tx, data db.ContractUpdateData) error {
 	query, params, err := createQuery(data)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(r.Ctx, *query, params...)
+	_, err = tx.ExecContext(ctx, *query, params...)
 	return err
 }
 

@@ -2,7 +2,6 @@ package contract
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -21,15 +20,11 @@ type AuditCmd struct {
 }
 
 type Auditor struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *Auditor) Handle(cmd AuditCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Auditor) Handle(ctx context.Context, cmd AuditCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -37,7 +32,7 @@ func (h *Auditor) Handle(cmd AuditCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}

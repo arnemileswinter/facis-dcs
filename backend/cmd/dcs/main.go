@@ -118,17 +118,17 @@ func main() {
 	}
 	jwtAuth := auth.NewJWTAuthenticator(oidcValidator)
 
-	ctRepo := tplrepo.PostgresContractTemplateRepo{Ctx: ctx}
-	ctRTRepo := tplrepo.PostgresReviewTaskRepo{Ctx: ctx}
-	ctATRepo := tplrepo.PostgresApprovalTaskRepo{Ctx: ctx}
+	ctRepo := tplrepo.PostgresContractTemplateRepo{}
+	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
+	ctATRepo := tplrepo.PostgresApprovalTaskRepo{}
 
-	cweRepo := cwerepo.PostgresContractRepo{Ctx: ctx}
-	cweRTRepo := cwerepo.PostgresReviewTaskRepo{Ctx: ctx}
-	cweATRepo := cwerepo.PostgresApprovalTaskRepo{Ctx: ctx}
-	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{Ctx: ctx}
-	cweNRepo := cwerepo.PostgresNegotiationRepo{Ctx: ctx}
-	cweCTRepo := cwerepo.PostgresContractTemplateRepo{Ctx: ctx}
-	cweCronJob := contractworkflowengine2.CronJob{DB: db, Ctx: ctx}
+	cweRepo := cwerepo.PostgresContractRepo{}
+	cweRTRepo := cwerepo.PostgresReviewTaskRepo{}
+	cweATRepo := cwerepo.PostgresApprovalTaskRepo{}
+	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{}
+	cweNRepo := cwerepo.PostgresNegotiationRepo{}
+	cweCTRepo := cwerepo.PostgresContractTemplateRepo{}
+	cweCronJob := contractworkflowengine2.CronJob{DB: db}
 	cweCronJob.Start()
 
 	// Initialize the Federated Catalogue client.

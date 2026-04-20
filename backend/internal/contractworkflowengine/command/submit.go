@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine"
@@ -31,7 +30,6 @@ type SubmitCmd struct {
 }
 
 type Submitter struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
@@ -40,7 +38,7 @@ type Submitter struct {
 	NTRepo db.NegotiationTaskRepo
 }
 
-func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, ntRepo db.NegotiationTaskRepo, cmd SubmitCmd) error {
+func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, ntRepo db.NegotiationTaskRepo, cmd SubmitCmd) error {
 	for _, reviewer := range cmd.Reviewers {
 		reviewTask := db.ReviewTaskData{
 			DID:       cmd.DID,
@@ -48,7 +46,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 			State:     reviewtaskstate.Open.String(),
 			CreatedBy: cmd.SubmittedBy,
 		}
-		_, err := rtRepo.Create(tx, reviewTask)
+		_, err := rtRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			return fmt.Errorf("could not create review task: %w", err)
 		}
@@ -61,7 +59,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 			State:      reviewtaskstate.Open.String(),
 			CreatedBy:  cmd.SubmittedBy,
 		}
-		_, err := ntRepo.Create(tx, negotiationTask)
+		_, err := ntRepo.Create(ctx, tx, negotiationTask)
 		if err != nil {
 			return fmt.Errorf("could not create negotiation task: %w", err)
 		}
@@ -73,7 +71,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 		Approver:  *cmd.Approver,
 		State:     reviewtaskstate.Open.String(),
 	}
-	_, err := atRepo.Create(tx, data)
+	_, err := atRepo.Create(ctx, tx, data)
 	if err != nil {
 		return fmt.Errorf("could not create approval task: %w", err)
 	}
@@ -81,10 +79,7 @@ func createTasks(tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRe
 	return nil
 }
 
-func (h *Submitter) Handle(cmd SubmitCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -92,7 +87,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -120,7 +115,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("no approver provided")
 		}
 
-		err := createTasks(tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd)
+		err := createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd)
 		if err != nil {
 			return err
 		}
@@ -133,17 +128,17 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("invalid user")
 		}
 
-		err := h.RTRepo.ReopenTasks(tx, cmd.DID)
+		err := h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen review tasks")
 		}
 
-		err = h.NTRepo.ReopenTasks(tx, cmd.DID)
+		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen negotiation tasks")
 		}
 
-		err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+		err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 		if err != nil {
 			return errors.New("could not reopen approval tasks")
 		}
@@ -152,7 +147,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(tx, cmd.DID, cmd.SubmittedBy)
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.SubmittedBy)
 		if err != nil {
 			return fmt.Errorf("could not validate negotiator: %w", err)
 		}
@@ -161,7 +156,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("invalid user")
 		}
 
-		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(tx, cmd.DID, processData.ContractVersion)
+		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(ctx, tx, cmd.DID, processData.ContractVersion)
 		if err != nil {
 			return fmt.Errorf("could not check open negotiations: %w", err)
 		}
@@ -170,12 +165,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 			return errors.New("not all negotiations are processed")
 		}
 
-		err = h.NTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, negotiationtaskstate.Accepted.String())
+		err = h.NTRepo.UpdateState(ctx, tx, processData.DID, cmd.SubmittedBy, negotiationtaskstate.Accepted.String())
 		if err != nil {
 			return fmt.Errorf("could not update negotiation task: %w", err)
 		}
 
-		existOpenTasks, err := h.NTRepo.AnyTasksInState(tx, processData.DID, negotiationtaskstate.Open.String())
+		existOpenTasks, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, negotiationtaskstate.Open.String())
 		if err != nil {
 			return fmt.Errorf("could not check if review task exists: %w", err)
 		}
@@ -192,7 +187,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 				newVersion = *processData.ContractVersion + 1
 			}
 
-			err = h.CRepo.Update(tx, db.ContractUpdateData{
+			err = h.CRepo.Update(ctx, tx, db.ContractUpdateData{
 				DID:             cmd.DID,
 				ContractVersion: &newVersion,
 			})
@@ -217,7 +212,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Submitted.String() {
 
-		isValid, err := h.RTRepo.IsValidReviewer(tx, processData.DID, cmd.SubmittedBy)
+		isValid, err := h.RTRepo.IsValidReviewer(ctx, tx, processData.DID, cmd.SubmittedBy)
 		if err != nil {
 			return err
 		}
@@ -229,12 +224,12 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 		if cmd.ActionFlag != nil {
 			if *cmd.ActionFlag == actionflag.Approval {
 
-				err = h.RTRepo.UpdateState(tx, processData.DID, cmd.SubmittedBy, contractstate.Approved.String())
+				err = h.RTRepo.UpdateState(ctx, tx, processData.DID, cmd.SubmittedBy, contractstate.Approved.String())
 				if err != nil {
 					return fmt.Errorf("could not update approval task: %w", err)
 				}
 
-				existOpenTasks, err := h.RTRepo.AnyTasksInState(tx, processData.DID, reviewtaskstate.Open.String())
+				existOpenTasks, err := h.RTRepo.AnyTasksInState(ctx, tx, processData.DID, reviewtaskstate.Open.String())
 				if err != nil {
 					return fmt.Errorf("could not check if review task exists: %w", err)
 				}
@@ -245,17 +240,17 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 
 			} else if *cmd.ActionFlag == actionflag.Reject {
 
-				err = h.RTRepo.ReopenTasks(tx, cmd.DID)
+				err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
 					return err
 				}
 
-				err = h.NTRepo.ReopenTasks(tx, cmd.DID)
+				err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
 					return err
 				}
 
-				err = h.ATRepo.ReopenTasks(tx, cmd.DID)
+				err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
 					return err
 				}
@@ -272,7 +267,7 @@ func (h *Submitter) Handle(cmd SubmitCmd) error {
 	}
 
 	if len(nextState) > 0 && processData.State != nextState.String() {
-		err = h.CRepo.UpdateState(tx, cmd.DID, nextState.String())
+		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, nextState.String())
 		if err != nil {
 			return fmt.Errorf("could not update contract state: %w", err)
 		}

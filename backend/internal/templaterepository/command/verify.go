@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
@@ -28,17 +27,13 @@ type VerifyCmd struct {
 }
 
 type Verifier struct {
-	Ctx      context.Context
 	DB       *sqlx.DB
 	CTRepo   db.ContractTemplateRepo
 	RTRepo   db.ReviewTaskRepo
 	FCClient *fcclient.FederatedCatalogueClient
 }
 
-func (h *Verifier) Handle(cmd VerifyCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Verifier) Handle(ctx context.Context, cmd VerifyCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -46,29 +41,29 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CTRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CTRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
 
-	fullTemplate, err := h.CTRepo.ReadDataByID(tx, cmd.DID)
+	fullTemplate, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read template data: %w", err)
 	}
 
 	if h.FCClient != nil {
-		if err := h.verifyTemplateResourceSelfDescription(cmd, processData, fullTemplate); err != nil {
+		if err := h.verifyTemplateResourceSelfDescription(ctx, cmd, processData, fullTemplate); err != nil {
 			return err
 		}
 	}
 
-	hasTask, err := h.RTRepo.TaskExistsInState(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
+	hasTask, err := h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
 	if err != nil {
 		return err
 	}
 
 	if hasTask {
-		err := h.RTRepo.UpdateState(tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String())
+		err := h.RTRepo.UpdateState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String())
 		if err != nil {
 			return err
 		}
@@ -89,7 +84,7 @@ func (h *Verifier) Handle(cmd VerifyCmd) error {
 	return tx.Commit()
 }
 
-func (h *Verifier) verifyTemplateResourceSelfDescription(cmd VerifyCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
+func (h *Verifier) verifyTemplateResourceSelfDescription(ctx context.Context, cmd VerifyCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
 	if h.FCClient == nil {
 		return fmt.Errorf("federated catalogue client is nil")
 	}
@@ -149,7 +144,7 @@ func (h *Verifier) verifyTemplateResourceSelfDescription(cmd VerifyCmd, processD
 	query.Set("verifyVPSignature", "false")
 	query.Set("verifyVCSignature", "false")
 
-	resp, err := h.FCClient.Post(h.Ctx, fcclient.VerificationEndpointPath, cmd.Token, query, body)
+	resp, err := h.FCClient.Post(ctx, fcclient.VerificationEndpointPath, cmd.Token, query, body)
 	if err != nil {
 		return fmt.Errorf("verify template resource self-description failed: %w", err)
 	}

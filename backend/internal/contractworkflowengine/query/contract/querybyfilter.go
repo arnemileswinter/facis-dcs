@@ -2,7 +2,6 @@ package contract
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -37,15 +36,11 @@ type GetAllMetadataByFilterResult struct {
 }
 
 type GetAllMetaDataByFilterHandler struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) ([]GetAllMetadataByFilterResult, error) {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAllMetadataByFilterQry) ([]GetAllMetadataByFilterResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -67,7 +62,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) 
 		Filter:          query.Filter,
 	}
 
-	contracts, err := h.CRepo.ReadAllMetaDataByFilter(tx, searchValues)
+	contracts, err := h.CRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues)
 	if err != nil {
 		return nil, fmt.Errorf("could not read all contract: %w", err)
 	}
@@ -76,7 +71,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(query GetAllMetadataByFilterQry) 
 		RetrievedBy: query.RetrievedBy,
 		OccurredAt:  time.Now(),
 	}
-	err = event.Create(h.Ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)
 	}

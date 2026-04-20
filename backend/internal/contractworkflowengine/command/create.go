@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
@@ -24,15 +23,11 @@ type CreateCmd struct {
 }
 
 type Creator struct {
-	Ctx   context.Context
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
 }
 
-func (h *Creator) Handle(cmd CreateCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -48,7 +43,7 @@ func (h *Creator) Handle(cmd CreateCmd) error {
 		Description:  cmd.Description,
 		ContractData: cmd.ContractData,
 	}
-	createdAt, err := h.CRepo.Create(tx, data)
+	createdAt, err := h.CRepo.Create(ctx, tx, data)
 	if err != nil {
 		return fmt.Errorf("could not create contract: %w", err)
 	}

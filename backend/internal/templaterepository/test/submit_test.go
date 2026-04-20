@@ -31,11 +31,10 @@ func TestSubmit_SubmitContractTemplateInDraftState(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, creator)
 
@@ -54,13 +53,12 @@ func TestSubmit_SubmitContractTemplateInDraftState(t *testing.T) {
 		Approver: &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -70,11 +68,11 @@ func TestSubmit_SubmitContractTemplateInDraftState(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -86,11 +84,11 @@ func TestSubmit_SubmitContractTemplateInDraftState(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerReviewTasks := query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err := handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err := handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -117,11 +115,10 @@ func TestSubmit_SubmitContractTemplateInDraftStateWithInvalidUser(t *testing.T) 
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, creator)
 
@@ -142,13 +139,13 @@ func TestSubmit_SubmitContractTemplateInDraftStateWithInvalidUser(t *testing.T) 
 		Approver:    &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -166,11 +163,10 @@ func TestSubmit_OneReviewerApprovedContractTemplateInSubmittedState(t *testing.T
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -200,12 +196,12 @@ func TestSubmit_OneReviewerApprovedContractTemplateInSubmittedState(t *testing.T
 		VerifiedBy: reviewers[0],
 	}
 	verifyHandler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = verifyHandler.Handle(verifyCmd)
+	err = verifyHandler.Handle(ctx, verifyCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -220,13 +216,13 @@ func TestSubmit_OneReviewerApprovedContractTemplateInSubmittedState(t *testing.T
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -236,11 +232,11 @@ func TestSubmit_OneReviewerApprovedContractTemplateInSubmittedState(t *testing.T
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -261,11 +257,10 @@ func TestSubmit_ApproveContractTemplateInSubmittedStateWithInvalidUser(t *testin
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -298,13 +293,13 @@ func TestSubmit_ApproveContractTemplateInSubmittedStateWithInvalidUser(t *testin
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -322,11 +317,10 @@ func TestSubmit_ApproveContractTemplateInSubmittedStateWithoutVerifying(t *testi
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -359,13 +353,13 @@ func TestSubmit_ApproveContractTemplateInSubmittedStateWithoutVerifying(t *testi
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -383,11 +377,10 @@ func TestSubmit_RejectContractTemplateInSubmittedStateWithInvalidUser(t *testing
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -409,13 +402,13 @@ func TestSubmit_RejectContractTemplateInSubmittedStateWithInvalidUser(t *testing
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -433,11 +426,10 @@ func TestSubmit_AllReviewersApprovedContractTemplateInSubmittedState(t *testing.
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -460,12 +452,12 @@ func TestSubmit_AllReviewersApprovedContractTemplateInSubmittedState(t *testing.
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -482,13 +474,13 @@ func TestSubmit_AllReviewersApprovedContractTemplateInSubmittedState(t *testing.
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -499,11 +491,11 @@ func TestSubmit_AllReviewersApprovedContractTemplateInSubmittedState(t *testing.
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -524,11 +516,10 @@ func TestSubmit_OneReviewerDeclinesContractTemplateInSubmittedState(t *testing.T
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -552,13 +543,13 @@ func TestSubmit_OneReviewerDeclinesContractTemplateInSubmittedState(t *testing.T
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -570,11 +561,11 @@ func TestSubmit_OneReviewerDeclinesContractTemplateInSubmittedState(t *testing.T
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -593,11 +584,10 @@ func TestSubmit_SubmitNonExistingContractTemplate(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	cmd := command.SubmitCmd{
 		DID:         *did,
@@ -605,13 +595,13 @@ func TestSubmit_SubmitNonExistingContractTemplate(t *testing.T) {
 		SubmittedBy: "Test User 1",
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -629,11 +619,10 @@ func TestSubmit_SubmitContractTemplateInSubmittedStateWithoutActionFlag(t *testi
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Submitted, creator)
 
@@ -645,13 +634,13 @@ func TestSubmit_SubmitContractTemplateInSubmittedStateWithoutActionFlag(t *testi
 		Comments:    []string{},
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -667,11 +656,10 @@ func TestSubmit_SubmitContractTemplateInReviewedStateWithInvalidUser(t *testing.
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	creator := "Test User"
 
@@ -687,13 +675,13 @@ func TestSubmit_SubmitContractTemplateInReviewedStateWithInvalidUser(t *testing.
 		SubmittedBy: "Test User 2",
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.Error(t, err)
 }
@@ -709,11 +697,10 @@ func TestSubmit_SubmitContractTemplateInSubmittedStateWithApproverUser(t *testin
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	creator := "Test User"
 
@@ -739,13 +726,13 @@ func TestSubmit_SubmitContractTemplateInSubmittedStateWithApproverUser(t *testin
 		ActionFlag:  &aFlag,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.Error(t, err)
 }
@@ -763,11 +750,10 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	/**
 	Create and Submit the Draft
@@ -791,13 +777,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Approver:    &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -807,11 +793,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -823,11 +809,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerReviewTasks := query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err := handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err := handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -847,11 +833,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerApprovalTasks := query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err := handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err := handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -867,12 +853,12 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		VerifiedBy: reviewers[0],
 	}
 	verifyHandler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = verifyHandler.Handle(verifyCmd)
+	err = verifyHandler.Handle(ctx, verifyCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -890,13 +876,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -906,11 +892,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -922,11 +908,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerReviewTasks = query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err = handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err = handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -938,11 +924,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerApprovalTasks = query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err = handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err = handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -962,13 +948,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -978,11 +964,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1002,13 +988,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Reviewer:    reviewers,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1018,11 +1004,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1038,12 +1024,12 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1063,13 +1049,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1080,11 +1066,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1103,13 +1089,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Reviewer:    nil,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1120,11 +1106,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1140,12 +1126,12 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1165,13 +1151,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1182,11 +1168,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1205,13 +1191,13 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		Reviewer:    nil,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1221,11 +1207,11 @@ func TestSubmit_SubmitContractTemplateWithResubmission(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1246,11 +1232,10 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	/**
 	Create and Submit the Draft
@@ -1275,13 +1260,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		Approver:    &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1292,11 +1277,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1308,11 +1293,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerReviewTasks := query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err := handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err := handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1332,11 +1317,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerApprovalTasks := query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err := handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err := handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1352,12 +1337,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		VerifiedBy: reviewers[0],
 	}
 	verifyHandler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = verifyHandler.Handle(verifyCmd)
+	err = verifyHandler.Handle(ctx, verifyCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1375,13 +1360,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1392,11 +1377,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1408,11 +1393,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerReviewTasks = query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err = handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err = handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1424,11 +1409,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	handlerApprovalTasks = query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err = handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err = handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1448,13 +1433,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1464,11 +1449,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1488,13 +1473,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		Reviewer:    reviewers,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1504,11 +1489,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1524,12 +1509,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1549,13 +1534,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1566,11 +1551,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1589,13 +1574,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		Reviewer:    nil,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1605,11 +1590,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1625,12 +1610,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1650,13 +1635,13 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -1667,11 +1652,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1686,12 +1671,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		VerifiedBy: approver,
 	}
 	verifyHandler = command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = verifyHandler.Handle(verifyCmd)
+	err = verifyHandler.Handle(ctx, verifyCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1706,12 +1691,12 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		DecisionNotes: []string{"Test"},
 	}
 	approveHandler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = approveHandler.Handle(approveCmd)
+	err = approveHandler.Handle(ctx, approveCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1721,11 +1706,11 @@ func TestSubmit_SubmitContractTemplateWithApproving(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1744,11 +1729,10 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	/**
 	Create and Submit the Draft
@@ -1773,13 +1757,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Approver:    &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1791,11 +1775,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1807,11 +1791,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	handlerReviewTasks := query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err := handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err := handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1832,11 +1816,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	handlerApprovalTasks := query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err := handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err := handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1852,12 +1836,12 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		VerifiedBy: reviewers[0],
 	}
 	verifyHandler := command.Verifier{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 	}
-	err = verifyHandler.Handle(verifyCmd)
+	err = verifyHandler.Handle(ctx, verifyCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1875,13 +1859,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1893,11 +1877,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -1909,11 +1893,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	handlerReviewTasks = query.GetAllReviewTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		RTRepo: repo.RTRepo,
 	}
-	reviewTasks, err = handlerReviewTasks.Handle(queryReviewTasks)
+	reviewTasks, err = handlerReviewTasks.Handle(ctx, queryReviewTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1926,11 +1910,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	handlerApprovalTasks = query.GetAllApprovalTasksForDIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		ATRepo: repo.ATRepo,
 	}
-	approvalTasks, err = handlerApprovalTasks.Handle(queryApprovalTasks)
+	approvalTasks, err = handlerApprovalTasks.Handle(ctx, queryApprovalTasks)
 	if err != nil {
 		t.Fatalf("Failed to query template review tasks: %v", err)
 	}
@@ -1951,13 +1935,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Comments:    []string{},
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -1970,11 +1954,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2003,13 +1987,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Reviewer:    reviewers,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -2021,11 +2005,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2041,12 +2025,12 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -2066,13 +2050,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -2085,11 +2069,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2108,13 +2092,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Reviewer:    nil,
 	}
 	handler = command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -2126,11 +2110,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2146,12 +2130,12 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 			VerifiedBy: reviewer,
 		}
 		verifyHandler := command.Verifier{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 		}
-		err = verifyHandler.Handle(verifyCmd)
+		err = verifyHandler.Handle(ctx, verifyCmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -2171,13 +2155,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 			Comments:    []string{},
 		}
 		handler := command.Submitter{
-			Ctx:    ctx,
+
 			DB:     db,
 			CTRepo: repo.CTRepo,
 			RTRepo: repo.RTRepo,
 			ATRepo: repo.ATRepo,
 		}
-		err = handler.Handle(cmd)
+		err = handler.Handle(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Failed to submit contract template: %v", err)
 		}
@@ -2191,11 +2175,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2212,13 +2196,13 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		Reason:     "Test",
 	}
 	rejectHandler := command.Rejecter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = rejectHandler.Handle(rejectCmd)
+	err = rejectHandler.Handle(ctx, rejectCmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract template: %v", err)
 	}
@@ -2230,11 +2214,11 @@ func TestSubmit_SubmitContractTemplateWithRejecting(t *testing.T) {
 		RetrievedBy: retrievedBy,
 	}
 	queryHandler = contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err = queryHandler.Handle(qry)
+	contractTemplate, err = queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -2253,11 +2237,10 @@ func TestSubmit_SubmitContractTemplateAfterUpdate(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, "Test User")
 
@@ -2277,13 +2260,13 @@ func TestSubmit_SubmitContractTemplateAfterUpdate(t *testing.T) {
 		Approver: &approver,
 	}
 	handler := command.Submitter{
-		Ctx:    ctx,
+
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		RTRepo: repo.RTRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }

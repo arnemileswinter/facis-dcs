@@ -43,13 +43,13 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 	return database
 }
 
-func NewTestRepo(ctx context.Context) *TestRepo {
+func NewTestRepo() *TestRepo {
 	return &TestRepo{
-		CRepo:  &pg.PostgresContractRepo{Ctx: ctx},
-		RTRepo: &pg.PostgresReviewTaskRepo{Ctx: ctx},
-		ATRepo: &pg.PostgresApprovalTaskRepo{Ctx: ctx},
-		NTRepo: &pg.PostgresNegotiationTaskRepo{Ctx: ctx},
-		NRepo:  &pg.PostgresNegotiationRepo{Ctx: ctx},
+		CRepo:  &pg.PostgresContractRepo{},
+		RTRepo: &pg.PostgresReviewTaskRepo{},
+		ATRepo: &pg.PostgresApprovalTaskRepo{},
+		NTRepo: &pg.PostgresNegotiationTaskRepo{},
+		NRepo:  &pg.PostgresNegotiationRepo{},
 	}
 }
 
@@ -122,11 +122,10 @@ func createContract(t *testing.T, db *sqlx.DB, repo *TestRepo, did *string, stat
 		ContractData: &jsonContractData,
 	}
 	createHandler := command.Creator{
-		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract: %v", err)
 	}
@@ -158,11 +157,10 @@ func createTestContractWithData(t *testing.T, db *sqlx.DB, repo *TestRepo, did *
 		ContractData: &jsonContractData,
 	}
 	createHandler := command.Creator{
-		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract: %v", err)
 	}
@@ -192,7 +190,7 @@ func createNegotiationTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo
 			State:      state.String(),
 			CreatedBy:  submittedBy,
 		}
-		_, err = repo.NTRepo.Create(tx, negotiationTask)
+		_, err = repo.NTRepo.Create(ctx, tx, negotiationTask)
 		if err != nil {
 			t.Fatalf("Failed to create negotiation task: %v", err)
 		}
@@ -218,7 +216,7 @@ func createReviewTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo *Tes
 			State:     state.String(),
 			CreatedBy: submittedBy,
 		}
-		_, err = repo.RTRepo.Create(tx, reviewTask)
+		_, err = repo.RTRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			t.Fatalf("Failed to create review task: %v", err)
 		}
@@ -243,7 +241,7 @@ func createApprovalTasks(t *testing.T, ctx context.Context, db *sqlx.DB, repo *T
 		State:     state.String(),
 		CreatedBy: submittedBy,
 	}
-	_, err = repo.ATRepo.Create(tx, approvalTask)
+	_, err = repo.ATRepo.Create(ctx, tx, approvalTask)
 	if err != nil {
 		t.Fatalf("Failed to create review task: %v", err)
 	}

@@ -28,11 +28,10 @@ func TestRetrieve_RetrieveContractTemplateById(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, creator)
 
@@ -41,11 +40,10 @@ func TestRetrieve_RetrieveContractTemplateById(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	contractTemplate, err := queryHandler.Handle(qry)
+	contractTemplate, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}
@@ -67,11 +65,10 @@ func TestRetrieve_RetrieveNonExistingContractTemplateById(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContractTemplate(t, db, repo, did, contracttemplatestate.Draft, creator)
 
@@ -85,11 +82,10 @@ func TestRetrieve_RetrieveNonExistingContractTemplateById(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetByIDHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 	}
-	_, err = queryHandler.Handle(qry)
+	_, err = queryHandler.Handle(ctx, qry)
 
 	assert.NotNil(t, err)
 }
@@ -102,11 +98,10 @@ func TestRetrieve_RetrieveAllContractTemplates(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	dids := make([]string, 0, 10)
 	for i := 0; i < 10; i++ {
@@ -132,13 +127,12 @@ func TestRetrieve_RetrieveAllContractTemplates(t *testing.T) {
 		RetrievedBy: creator,
 	}
 	queryHandler := contracttemplate.GetAllMetadataHandler{
-		Ctx:    ctx,
 		DB:     db,
 		CTRepo: repo.CTRepo,
 		ATRepo: repo.ATRepo,
 		RTRepo: repo.RTRepo,
 	}
-	result, err := queryHandler.Handle(qry)
+	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract template: %v", err)
 	}

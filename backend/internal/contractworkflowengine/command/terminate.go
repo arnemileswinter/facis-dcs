@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -22,7 +21,6 @@ type TerminateCmd struct {
 }
 
 type Terminator struct {
-	Ctx    context.Context
 	DB     *sqlx.DB
 	CRepo  db.ContractRepo
 	RTRepo db.ReviewTaskRepo
@@ -31,10 +29,7 @@ type Terminator struct {
 	NTRepo db.NegotiationTaskRepo
 }
 
-func (h *Terminator) Handle(cmd TerminateCmd) error {
-
-	ctx, cancel := context.WithTimeout(h.Ctx, conf.TransactionTimeout())
-	defer cancel()
+func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -42,7 +37,7 @@ func (h *Terminator) Handle(cmd TerminateCmd) error {
 	}
 	defer tx.Rollback()
 
-	processData, err := h.CRepo.ReadProcessData(tx, cmd.DID)
+	processData, err := h.CRepo.ReadProcessData(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not read process data: %w", err)
 	}
@@ -51,22 +46,22 @@ func (h *Terminator) Handle(cmd TerminateCmd) error {
 		return errors.New("contract is already terminated")
 	}
 
-	err = h.CRepo.UpdateState(tx, cmd.DID, contractstate.Terminated.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Terminated.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 
-	err = h.NTRepo.Delete(tx, cmd.DID)
+	err = h.NTRepo.Delete(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not delete notification task: %w", err)
 	}
 
-	err = h.RTRepo.Delete(tx, cmd.DID)
+	err = h.RTRepo.Delete(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not delete receive task: %w", err)
 	}
 
-	err = h.ATRepo.Delete(tx, cmd.DID)
+	err = h.ATRepo.Delete(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not delete approval task: %w", err)
 	}

@@ -27,11 +27,10 @@ func TestApprove_ApproveContractInReviewedState(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Reviewed, creator)
 
@@ -46,12 +45,12 @@ func TestApprove_ApproveContractInReviewedState(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to submit contract : %v", err)
 	}
@@ -66,7 +65,7 @@ func TestApprove_ApproveContractInReviewedState(t *testing.T) {
 		CRepo: repo.CRepo,
 		NRepo: repo.NRepo,
 	}
-	contract, err := queryHandler.Handle(qry)
+	contract, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract : %v", err)
 	}
@@ -85,11 +84,10 @@ func TestApprove_ApproveNonExistingContract(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	cmd := command.ApproveCmd{
 		DID:           *did,
@@ -98,12 +96,12 @@ func TestApprove_ApproveNonExistingContract(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -119,11 +117,10 @@ func TestApprove_ApproveContractInReviewedStateWithInvalidUser(t *testing.T) {
 		t.Fatalf("Failed to get new DID: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	creator := "Test User"
 
@@ -138,12 +135,12 @@ func TestApprove_ApproveContractInReviewedStateWithInvalidUser(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.Error(t, err)
 }
@@ -161,11 +158,10 @@ func TestApprove_ApproveContractInDraftState(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Draft, creator)
 
@@ -176,12 +172,12 @@ func TestApprove_ApproveContractInDraftState(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -199,11 +195,10 @@ func TestApprove_ApproveContractInApprovedState(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Approved, creator)
 
@@ -214,12 +209,12 @@ func TestApprove_ApproveContractInApprovedState(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }
@@ -237,11 +232,10 @@ func TestApprove_ApproveContractAfterUpdate(t *testing.T) {
 
 	creator := "Test User"
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 
 	createContract(t, db, repo, did, contractstate.Reviewed, creator)
 
@@ -252,12 +246,12 @@ func TestApprove_ApproveContractAfterUpdate(t *testing.T) {
 		DecisionNotes: []string{},
 	}
 	handler := command.Approver{
-		Ctx:    ctx,
+
 		DB:     db,
 		CRepo:  repo.CRepo,
 		ATRepo: repo.ATRepo,
 	}
-	err = handler.Handle(cmd)
+	err = handler.Handle(ctx, cmd)
 
 	assert.NotNil(t, err)
 }

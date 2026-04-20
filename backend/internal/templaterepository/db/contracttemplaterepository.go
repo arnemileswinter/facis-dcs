@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"digital-contracting-service/internal/base/datatype"
 	"time"
 
@@ -66,11 +67,11 @@ type SearchValues struct {
 }
 
 type ContractTemplateRepo interface {
-	Create(tx *sqlx.Tx, data ContractTemplate) (*time.Time, error)
-	ReadDataByID(tx *sqlx.Tx, did string) (*ContractTemplate, error)
-	ReadAllMetaData(tx *sqlx.Tx) ([]ContractTemplateMetadata, error)
-	ReadAllMetaDataByFilter(tx *sqlx.Tx, values SearchValues) ([]ContractTemplateMetadata, error)
-	ReadProcessData(tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
-	UpdateState(tx *sqlx.Tx, did string, state string) error
-	Update(tx *sqlx.Tx, data ContractTemplateUpdateData) error
+	Create(ctx context.Context, tx *sqlx.Tx, data ContractTemplate) (*time.Time, error)
+	ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplate, error)
+	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx) ([]ContractTemplateMetadata, error)
+	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractTemplateMetadata, error)
+	ReadProcessData(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	Update(ctx context.Context, tx *sqlx.Tx, data ContractTemplateUpdateData) error
 }

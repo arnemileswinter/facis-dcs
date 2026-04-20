@@ -32,11 +32,10 @@ func TestCreate_CreateNewContract(t *testing.T) {
 		t.Fatalf("Failed to create JSON data: %v", err)
 	}
 
-	tmpCtx := context.Background()
-	ctx, cancel := context.WithTimeout(tmpCtx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
 	defer cancel()
 
-	repo := NewTestRepo(ctx)
+	repo := NewTestRepo()
 	creator := "Test User"
 
 	cmd := command.CreateCmd{
@@ -47,11 +46,10 @@ func TestCreate_CreateNewContract(t *testing.T) {
 		ContractData: &jsonMetaData,
 	}
 	createHandler := command.Creator{
-		Ctx:   ctx,
 		DB:    db,
 		CRepo: repo.CRepo,
 	}
-	err = createHandler.Handle(cmd)
+	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
 		t.Fatalf("Failed to create contract: %v", err)
 	}
@@ -66,7 +64,7 @@ func TestCreate_CreateNewContract(t *testing.T) {
 		CRepo: repo.CRepo,
 		NRepo: repo.NRepo,
 	}
-	result, err := queryHandler.Handle(qry)
+	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
 		t.Fatalf("Failed to query contract: %v", err)
 	}
