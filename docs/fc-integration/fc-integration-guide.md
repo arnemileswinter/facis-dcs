@@ -135,9 +135,9 @@ services:
       FEDERATED_CATALOGUE_VERIFICATION_VP_SIGNATURE: "false"
       FEDERATED_CATALOGUE_VERIFICATION_VC_SIGNATURE: "false"
 
-      # Keycloak and JWT issuer configuration
-      KEYCLOAK_AUTH_SERVER_URL: "http://keycloak:8080"
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "http://keycloak:8080/realms/<your-realm>"
+      # OIDC provider and JWT issuer configuration
+      KEYCLOAK_AUTH_SERVER_URL: "http://hydra:4444"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "http://hydra:4444"
 
       # This FC instance (self)
       FEDERATED_CATALOGUE_QUERY_SELF: "http://host.docker.internal:8081"

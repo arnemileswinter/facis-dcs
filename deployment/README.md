@@ -23,11 +23,15 @@ Key components:
 
 ## Helm Chart
 
-The parent chart bundles `postgresql`, `keycloak`, `nats`, `neo4j`, and `federated-catalogue` as optional sub-charts, each toggled via `<subchart>.enabled`.
+The parent chart bundles `postgresql`, `hydra`, `nats`, `neo4j`, and `federated-catalogue` as optional sub-charts, each toggled via `<subchart>.enabled`.
+
+For DCS itself, authentication is now treated as generic OIDC. Per the SRS, the recommended production direction is Hydra as the OIDC server, with the login/consent experience backed by OCM-W's OpenID4VC wallet flow so users authenticate with wallet-held credentials and role claims.
+
+Hydra requires explicit login and consent URLs. In this repository, those are expected to be provided by your Node-RED consent bridge flow and injected via Helm values (`hydra.config.loginURL`, `hydra.config.consentURL`) or via the Node-RED deploy node dependency settings.
 
 When sub-charts are disabled, point DCS to external services via:
 - `serviceDiscovery.postgresqlHost`
-- `serviceDiscovery.keycloakHost`
+- `serviceDiscovery.hydraHost`
 - `serviceDiscovery.natsHost`
 
 Routing is configured with `route.basePath` (e.g. `/tenant-a/dcs`) or explicit `paths.api` / `paths.ui` overrides.
@@ -67,13 +71,13 @@ This starts all dependencies as NodePort services forwarded to `localhost`:
 | Service              | Address                          |
 |----------------------|----------------------------------|
 | PostgreSQL           | `localhost:30432`                |
-| Keycloak             | `http://localhost:30080`         |
+| Hydra Public         | `http://localhost:30080`         |
+| Hydra Admin          | `http://localhost:30085`         |
 | NATS                 | `nats://localhost:30422`         |
 | Neo4j HTTP           | `http://localhost:30474`         |
 | Neo4j Bolt           | `bolt://localhost:30687`         |
-| Federated Catalogue  | `http://localhost:30081`         |
 
-The Keycloak `gaia-x` realm is imported automatically on first start.
+Hydra login and consent URLs must point to your Node-RED consent bridge flow.
 
 > To upgrade after chart changes: `helm upgrade dcs ./deployment/helm -f ./deployment/helm/values.dev.yml`
 
@@ -102,6 +106,8 @@ The Vite dev server starts at `http://localhost:5173` and proxies `/api` request
 
 BDD scenarios live in `features/` at the project root. Tests are run against a full stack in an ephemeral [kind](https://kind.sigs.k8s.io/) cluster.
 
+The BDD profile (`deployment/helm/values.bdd.yml`) seeds Hydra with a deterministic RSA JWK so tokens minted during test runs are signed by a stable key and validate consistently against the Hydra issuer JWKS.
+
 ### Prerequisites
 - `kind` — `go install sigs.k8s.io/kind@v0.23.0` or see [kind releases](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - `kubectl` and `helm`
@@ -120,7 +126,7 @@ This single command:
 2. Creates a kind cluster named `dcs-bdd`
 3. Loads the image into the cluster
 4. Deploys the full stack via `deployment/helm` with `values.bdd.yml`
-5. Port-forwards DCS and Keycloak into the cluster network
+5. Port-forwards DCS into the cluster network
 6. Runs all `features/**/*.feature` scenarios with behave
 
 Tear down the cluster afterwards:
@@ -152,12 +158,13 @@ JUnit reports are published as check annotations and uploaded as workflow artifa
 
 ## Production Deployment
 
-### Keycloak
-- Use a properly secured external Keycloak instance (not the bundled sub-chart)
+### OIDC Provider
+- Use a properly secured external OIDC provider
+- For wallet-backed role authentication, use Hydra together with an OCM-W-backed login/consent service so wallet presentation drives the OIDC login flow
 - Configure valid redirect URIs in your client settings:
   - **Valid Redirect URIs**: `https://<domain>/<path>/api/auth/callback`
   - **Valid Post Logout Redirect URIs**: `https://<domain>/<path>/api/auth/logout-complete`
-- Enable **Client authentication**, **Standard flow enabled**
+- Enable the authorization code flow for the DCS client
 
 ### TLS
 - Use certificates from a trusted Certificate Authority
@@ -168,7 +175,7 @@ Override the following at minimum:
 
 ```yaml
 oidc:
-  issuerURL: "https://keycloak.example.com/realms/gaia-x"
+  issuerURL: "https://hydra.example.com/"
   clientID: "dcs-client"
   redirectURI: "https://example.com/dcs/ui/"
   logoutRedirectURI: "https://example.com/dcs/ui/"

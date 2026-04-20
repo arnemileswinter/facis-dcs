@@ -1,0 +1,64 @@
+replicaCount: 1
+
+image:
+  repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa
+  name: signer
+  tag: "v2.1.0"
+  pullPolicy: IfNotPresent
+
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 150m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+
+log:
+  level: "debug"
+  encoding: json
+
+signer:
+  version: 0.26.0
+  http:
+    host: ""
+    port: 8080
+    timeout:
+      idle: 120s
+      read: 10s
+      write: 10s
+  nats:
+    enabled: true
+    # nats://{{ .Release.Name }}-nats:4222 – set per environment
+    natsHost: ""
+    topic: sign
+  sdjwt:
+    # http://{{ .Release.Name }}-sd-jwt-service:8080/v1/sign – set per environment
+    url: ""
+  engine:
+    image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/crypto-provider-hashicorp-vault-plugin:v2.0.3
+    pullPolicy: IfNotPresent
+    # gRPC address the signer main process connects to (localhost sidecar)
+    address: 0.0.0.0:50051
+    clusterAdress: 127.0.0.1:50051  # note: upstream typo preserved
+    env:
+      # http://{{ .Release.Name }}-vault:8200 – set per environment
+      # note: upstream uses VAULT_ADRESS (typo) – both vars set for compatibility
+      VAULT_ADRESS: ""
+    secretEnv:
+      VAULT_TOKEN:
+        name: vault
+        key: token
+
+# Kubernetes secret containing the vault token (name: vault, key: token)
+# Create before install: kubectl create secret generic vault --from-literal=token=root
+secretEnv:
+  VAULT_TOKEN:
+    name: vault
+    key: token

@@ -1,0 +1,67 @@
+{{- $issuer := .Values.config.selfIssuerURL | default (printf "http://%s-hydra:%d" .Release.Name (.Values.service.publicPort | int)) -}}
+{{- $login := .Values.config.loginURL -}}
+{{- $consent := .Values.config.consentURL -}}
+{{- $systemSecret := .Values.secrets.system | default (printf "%s-hydra-system-secret-change-me" .Release.Name) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-hydra
+  labels:
+    app.kubernetes.io/name: hydra
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hydra
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hydra
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: hydra
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-ec"]
+          args:
+            - |
+              set -e
+              hydra migrate sql --yes "$DSN"
+              exec hydra serve all
+          env:
+            - name: DSN
+              value: {{ .Values.config.dsn | quote }}
+            - name: SECRETS_SYSTEM
+              value: {{ $systemSecret | quote }}
+            - name: URLS_SELF_ISSUER
+              value: {{ $issuer | quote }}
+            - name: URLS_LOGIN
+              value: {{ $login | quote }}
+            - name: URLS_CONSENT
+              value: {{ $consent | quote }}
+            - name: SERVE_PUBLIC_PORT
+              value: {{ .Values.service.publicPort | quote }}
+            - name: SERVE_ADMIN_PORT
+              value: {{ .Values.service.adminPort | quote }}
+            - name: SERVE_PUBLIC_TLS_ENABLED
+              value: {{ .Values.config.publicTLS | quote }}
+            - name: SERVE_ADMIN_TLS_ENABLED
+              value: {{ .Values.config.adminTLS | quote }}
+          ports:
+            - name: public
+              containerPort: {{ .Values.service.publicPort }}
+            - name: admin
+              containerPort: {{ .Values.service.adminPort }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: admin
+          livenessProbe:
+            httpGet:
+              path: /health/alive
+              port: admin
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

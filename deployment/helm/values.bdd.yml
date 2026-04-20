@@ -1,29 +1,47 @@
 # BDD test values: used by tests/bdd/Makefile kind_deploy target (kind cluster).
-# Uses Keycloak's built-in master realm, no realm import needed.
 # Assumes release name "dcs" (HELM_RELEASE default in the Makefile).
 
 postgresql:
   enabled: true
 
-keycloak:
+hydra:
   enabled: true
-  realm:
-    import: true
-  extraEnv:
-    - name: KC_HOSTNAME
-      value: "dcs-keycloak"
-    - name: KC_HOSTNAME_PORT
-      value: "8080"
-    - name: KC_HOSTNAME_STRICT
-      value: "false"
+  route:
+    path: "/hydra"
+  config:
+    dsn: "memory"
+    selfIssuerURL: "http://dcs-hydra:4444"
+    loginURL: "http://consent-bridge.bdd.local/login"
+    consentURL: "http://consent-bridge.bdd.local/consent"
+  secrets:
+    system: "bdd-hydra-system-secret-change-me"
+  keys:
+    seed:
+      enabled: true
+      sets:
+        - hydra.jwt.access-token
+        - hydra.openid.id-token
+      jwk:
+        kty: RSA
+        kid: bdd-static-rs256
+        use: sig
+        alg: RS256
+        n: m87qsP5QbTsryM0OexZY6us6jcZK3T_7gbdy_WZ7lvqpOZ85LBcLOANygWon3-gqCCdVTYFeOtlzHCKZj94687FPS-3YaLesA4DxS3weK9mgm8NVw_LNGH9ikxvkDuBerMzBfIOs-dPdq95OS-R1am3_nquypcrRZu4e7SgLvg4flsyhW1ak2O49zl1adsyLEpDf3HhJAVmMLrOG-UGwzJsgFfG7uG0NOwZ8GvQj0tZRt_EmfL9yGcivVMrUP3Tyzt6OfffzNGpCEt1z3LMhfqbQuFSKAa4LRR8zIsLrqGYLStjO6WkMp4GoJsiOP0z5XH6Oegx6Fxx4fCkMRCXTIQ
+        e: AQAB
+        d: Z5dCGN1tMcK2kLItX47zHXW6H4roOYQRvyPuMyZRI4eSvbnsNDE6B0rbdcnTqx3b3EHyiC5sLSpoSxuCB9JUVbPcqfn_-Ves6UNwqqRiFvuBui48NqSW0iPXsUFI9s8cgz07o4KUniHL7zpFylWh71olKySzCWH4qbvGGh2W-Qu3M1htmzfzYWzHgQpj_NeOzxUElMDfNnKPnISAERX-d3ez5p05SL77vriPXbVj9MLteB3HpHuz_bRyqMpfkNMvcEHy-kCkzFDlvMQwZc1mJ_MbN94KSkvXXnBqERhZQVh74niDKI0Q14wCr20HlZ5yLfdwQdk8PW341sgYofrrJQ
+        p: ws0uMxEkH_dcLRCJ5Sz_TDAxT5kV2oQvnPQagBfupE8BgFriKzUS62d_be-GbrCLBt_Qb63uT0z3afetpe2um8ekzx-8O34feqLD4AA0pOr2QYEZTWvYwueyTQp8dCsAOlXj0cJMnBKQ-ApAJHuad-e5AwwqW4jMbiVyAnlriys
+        q: zMG5i45ntaeiYZjXnh0Zm45OXOjSUC1JM7Kvp5rBzgXWzNsyiMaQEcbn5U5aJqdVMNKfC0SnXElW9v45NZwA5ABBXEOabO7LsTzMUVkmPEtYyfND_WJBBiZaQPssR2i08So7H5A9ldg2SkAmZavnDf0LEgdAnxPs14sQOil2ROM
+        dp: KvdEhGD4fdB6VTo7n_-_w5cxmSPjzRGwysaQfcZJjZYbd6sUDYGkTaXDVoUpOorX70k4WRmc4YLRY18Mvvdgtt1e_Yw7YUfdO5hg6axB8EoezK3j3c62va6LBjEU6C5_214MZLydVyNFNGBWa3WTyXSjuwdY5F2U8Ypyzhbn4Ic
+        dq: Xr20kLJPomnyZJ5IBk0IsEVkVPEVfyu1F0qypCajTiS9gwRZmZfmyZLzcdKTPBdo_7I1DQ2zMqxspNR0vC127AiCNaLCLW1Aqr2q_Gj3nCZw6uC4sOFpnOLaF_8gOdpk_sG_oZcoJ9FnLWwJWDn2Ky7OlITujay2hfU-iOruYmk
+        qi: b0uetwFdBvCpthwpQxrZrwgbZP-mQkJmAnuKL9yPW8FIhAu1Lcy_XT4up64byuB9JqFTK75s6Wq75Dg7JZFCfIKxqti8jEdGvy8oGOXD2pmtwJahsWTDwkIFTbQhendHamLzDKlsQuJlLSbLAvf7zT_syFzwJDfP8mH2m2k-rHA
 
 nats:
   enabled: true
 
 oidc:
-  issuerURL: "http://dcs-keycloak:8080/realms/gaia-x"
+  issuerURL: "http://dcs-hydra:4444"
   clientID: "dcs-client"
-  keycloakScheme: "http"
+  scheme: "http"
 
 route:
   basePath: "/digital-contracting-service"

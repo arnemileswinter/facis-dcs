@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "signer.fullname" . }}
+  labels:
+    {{- include "signer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "signer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "signer.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        # ---- Main signer process ------------------------------------------
+        - name: signer
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.signer.http.port }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.log.level | default "info" | quote }}
+            - name: LOG_ENCODING
+              value: {{ .Values.log.encoding | default "json" | quote }}
+            - name: HTTP_HOST
+              value: {{ .Values.signer.http.host | quote }}
+            - name: HTTP_PORT
+              value: {{ .Values.signer.http.port | quote }}
+            - name: HTTP_IDLE_TIMEOUT
+              value: {{ .Values.signer.http.timeout.idle | quote }}
+            - name: HTTP_READ_TIMEOUT
+              value: {{ .Values.signer.http.timeout.read | quote }}
+            - name: HTTP_WRITE_TIMEOUT
+              value: {{ .Values.signer.http.timeout.write | quote }}
+            - name: SDJWT_SERVICE_URL
+              value: {{ .Values.signer.sdjwt.url | quote }}
+            {{- if .Values.signer.nats.enabled }}
+            - name: CLOUDEVENTPROVIDER_MESSAGING_NATS_URL
+              value: {{ .Values.signer.nats.natsHost | quote }}
+            - name: NATS_HOST
+              value: {{ .Values.signer.nats.natsHost | quote }}
+            - name: CLOUDEVENTPROVIDER_MESSAGING_PROTOCOL
+              value: "nats"
+            - name: NATS_TOPIC
+              value: {{ .Values.signer.nats.topic | quote }}
+            - name: CRYPTO_GRPC_ADDR
+              value: {{ .Values.signer.engine.clusterAdress | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.secretEnv }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $value.name | quote }}
+                  key: {{ $value.key | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: {{ .Values.signer.http.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        # ---- Crypto engine sidecar (HashiCorp Vault gRPC plugin) ----------
+        - name: crypto-engine
+          image: {{ .Values.signer.engine.image }}
+          imagePullPolicy: {{ .Values.signer.engine.pullPolicy | default "IfNotPresent" }}
+          env:
+            - name: CRYPTO_GRPC_ADDR
+              value: {{ .Values.signer.engine.address | quote }}
+            {{- range $key, $value := .Values.signer.engine.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}
+            # VAULT_ADDR (canonical) alongside upstream VAULT_ADRESS typo
+            - name: VAULT_ADDR
+              value: {{ index .Values.signer.engine.env "VAULT_ADRESS" | quote }}
+            {{- range $key, $value := .Values.signer.engine.secretEnv }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $value.name | quote }}
+                  key: {{ $value.key | quote }}
+            {{- end }}

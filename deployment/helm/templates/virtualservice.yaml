@@ -17,17 +17,16 @@ spec:
     - {{ . | quote }}
     {{- end }}
   http:
-    {{- /* Keycloak route when enabled with route.path */}}
-    {{- if and .Values.keycloak.enabled .Values.keycloak.route.path }}
-    - name: keycloak
+    {{- if and .Values.hydra.enabled .Values.hydra.route.path }}
+    - name: hydra
       match:
         - uri:
-            prefix: {{ include "digital-contracting-service.keycloakRoutePath" . }}
+            prefix: {{ include "digital-contracting-service.hydraRoutePath" . }}
       route:
         - destination:
-            host: {{ .Release.Name }}-keycloak
+            host: {{ .Release.Name }}-hydra
             port:
-              number: {{ .Values.keycloak.service.port | int }}
+              number: {{ .Values.hydra.service.publicPort | int }}
     {{- end }}
     {{- /* Federated Catalogue Portal route when enabled with route.path */}}
     {{- if and .Values.federatedCatalogue.enabled .Values.federatedCatalogue.portal.enabled .Values.federatedCatalogue.portal.route.path }}

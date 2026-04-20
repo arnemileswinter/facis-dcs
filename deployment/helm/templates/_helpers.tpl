@@ -83,13 +83,13 @@ Resolve PostgreSQL host (explicit override or in-chart default).
 {{- end }}
 
 {{/*
-Resolve Keycloak host (explicit override or in-chart default).
+Resolve Hydra host (explicit override or in-chart default).
 */}}
-{{- define "digital-contracting-service.keycloakHost" -}}
-{{- if .Values.serviceDiscovery.keycloakHost -}}
-{{- .Values.serviceDiscovery.keycloakHost -}}
-{{- else if .Values.keycloak.enabled -}}
-{{- printf "%s-keycloak" .Release.Name -}}
+{{- define "digital-contracting-service.hydraHost" -}}
+{{- if .Values.serviceDiscovery.hydraHost -}}
+{{- .Values.serviceDiscovery.hydraHost -}}
+{{- else if .Values.hydra.enabled -}}
+{{- printf "%s-hydra" .Release.Name -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}
@@ -109,14 +109,14 @@ Resolve NATS host (explicit override or in-chart default).
 {{- end }}
 
 {{/*
-Resolve Keycloak port from explicit override, in-chart service, or scheme defaults.
+Resolve Hydra public port from explicit override or in-chart service.
 */}}
-{{- define "digital-contracting-service.keycloakPort" -}}
-{{- if .Values.serviceDiscovery.keycloakPort -}}
-{{- .Values.serviceDiscovery.keycloakPort -}}
-{{- else if .Values.keycloak.enabled -}}
-{{- default 8080 .Values.keycloak.service.port -}}
-{{- else if eq (default "http" .Values.oidc.keycloakScheme) "https" -}}
+{{- define "digital-contracting-service.hydraPublicPort" -}}
+{{- if .Values.serviceDiscovery.hydraPublicPort -}}
+{{- .Values.serviceDiscovery.hydraPublicPort -}}
+{{- else if .Values.hydra.enabled -}}
+{{- default 4444 .Values.hydra.service.publicPort -}}
+{{- else if eq (default "http" .Values.oidc.scheme) "https" -}}
 443
 {{- else -}}
 80
@@ -158,16 +158,15 @@ NATS_URL override or derived from nats settings.
 {{- end }}
 
 {{/*
-OIDC issuer override or derived from keycloak settings.
+OIDC issuer override or derived from Hydra settings.
 Uses external URL (istio/ingress host) for browser-based OIDC flows.
 */}}
 {{- define "digital-contracting-service.oidcIssuerURL" -}}
 {{- if .Values.oidc.issuerURL -}}
 {{- .Values.oidc.issuerURL -}}
-{{- else if and .Values.keycloak.enabled .Values.keycloak.route.path -}}
-{{- $scheme := default "https" .Values.oidc.keycloakScheme -}}
-{{- $realm := default "gaia-x" .Values.oidc.realm -}}
-{{- $basePath := printf "/%s" (trimAll "/" .Values.keycloak.route.path) -}}
+{{- else if and .Values.hydra.enabled .Values.hydra.route.path -}}
+{{- $scheme := default "https" .Values.oidc.scheme -}}
+{{- $basePath := printf "/%s" (trimAll "/" .Values.hydra.route.path) -}}
 {{- $host := "" -}}
 {{- if and .Values.istio.enabled (gt (len .Values.istio.hosts) 0) -}}
 {{- $host = index .Values.istio.hosts 0 -}}
@@ -175,8 +174,10 @@ Uses external URL (istio/ingress host) for browser-based OIDC flows.
 {{- $host = (index .Values.ingress.hosts 0).host -}}
 {{- end -}}
 {{- if $host -}}
-{{- printf "%s://%s%s/realms/%s" $scheme $host $basePath $realm -}}
+{{- printf "%s://%s%s" $scheme $host $basePath -}}
 {{- end -}}
+{{- else if .Values.hydra.enabled -}}
+{{- printf "http://%s:%v" (include "digital-contracting-service.hydraHost" .) (include "digital-contracting-service.hydraPublicPort" .) -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}
@@ -205,10 +206,23 @@ UI path override or derived default.
 {{- end }}
 
 {{/*
-Normalize Keycloak route path (leading slash, no trailing slash).
+OCM_W_ISSUER_URL: explicit override or auto-wired to co-deployed issuer service.
 */}}
-{{- define "digital-contracting-service.keycloakRoutePath" -}}
-{{- if .Values.keycloak.route.path -}}
-{{- printf "/%s" (trimAll "/" (.Values.keycloak.route.path | toString)) -}}
+{{- define "digital-contracting-service.ocmWIssuerURL" -}}
+{{- if .Values.ocmW.issuerURL -}}
+{{- .Values.ocmW.issuerURL -}}
+{{- else if .Values.ocmW.enabled -}}
+{{- printf "http://%s-issuance-service:8080" .Release.Name -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Normalize Hydra route path (leading slash, no trailing slash).
+*/}}
+{{- define "digital-contracting-service.hydraRoutePath" -}}
+{{- if .Values.hydra.route.path -}}
+{{- printf "/%s" (trimAll "/" (.Values.hydra.route.path | toString)) -}}
 {{- end -}}
 {{- end }}

@@ -7,7 +7,7 @@ log() {
 
 usage() {
   echo "Usage: $0 <kubeconfig> <private_key_path> <crt_path> <domain> <path> <oidc_issuer_url> <oidc_client_id>"
-  echo "Example: $0 ~/.kube/config ./certs/dev.key ./certs/dev.crt xfsc.local dcs https://keycloak.xfsc.local/realms/dcs digital-contracting-service"
+  echo "Example: $0 ~/.kube/config ./certs/dev.key ./certs/dev.crt xfsc.local dcs https://hydra.xfsc.local/ digital-contracting-service"
   echo ""
   echo "Optional environment variables:"
   echo "  OIDC_REDIRECT_URI - Redirect URI for OIDC flow (default: http://localhost:8991)"
@@ -54,12 +54,12 @@ CUSTOM_CA_ENABLED="${CUSTOM_CA_ENABLED:-false}"
 CUSTOM_CA_CONFIGMAP="${CUSTOM_CA_CONFIGMAP:-dev-ca-cert}"
 CUSTOM_CA_CERT_FILE="${CUSTOM_CA_CERT_FILE:-}"
 
-# Host Aliases Configuration for local Keycloak access
-# Extract hostname from OIDC_ISSUER_URL if it uses HTTPS
-KEYCLOAK_HOSTNAME=""
+# Host aliases configuration for local OIDC issuer access.
+# Extract hostname from OIDC_ISSUER_URL if it uses HTTPS.
+OIDC_HOSTNAME=""
 if [[ "${OIDC_ISSUER_URL:-}" =~ ^https://([^/]+) ]]; then
-  KEYCLOAK_HOSTNAME="${BASH_REMATCH[1]}"
-  log "ℹ️ Detected HTTPS OIDC issuer, will configure host alias for: $KEYCLOAK_HOSTNAME"
+  OIDC_HOSTNAME="${BASH_REMATCH[1]}"
+  log "ℹ️ Detected HTTPS OIDC issuer, will configure host alias for: $OIDC_HOSTNAME"
   
   # Get Traefik ClusterIP for in-cluster resolution
   TRAEFIK_CLUSTER_IP=$(kubectl get svc -n kube-system traefik -o jsonpath='{.spec.clusterIP}' --kubeconfig "$KUBECONFIG" 2>/dev/null || echo "")
@@ -168,14 +168,14 @@ sed -i \
 
 # Add hostAliases if HTTPS OIDC is configured
 if [[ "$HOST_ALIAS_ENABLED" == "true" ]]; then
-  log "ℹ️ Adding hostAlias: $KEYCLOAK_HOSTNAME -> $TRAEFIK_CLUSTER_IP"
+  log "ℹ️ Adding hostAlias: $OIDC_HOSTNAME -> $TRAEFIK_CLUSTER_IP"
   cat >> "$TMP_VALUES" <<EOF
 
 # Auto-configured host alias for in-cluster OIDC access
 hostAliases:
   - ip: "${TRAEFIK_CLUSTER_IP}"
     hostnames:
-      - "${KEYCLOAK_HOSTNAME}"
+      - "${OIDC_HOSTNAME}"
 EOF
 fi
 
@@ -205,13 +205,26 @@ if [[ "${DEP_POSTGRESQL:-false}" == "true" ]]; then
     --set "postgresql.persistence.enabled=${DEP_PG_PERSIST:-false}"
   )
 fi
-if [[ "${DEP_KEYCLOAK:-false}" == "true" ]]; then
+if [[ "${DEP_HYDRA:-false}" == "true" ]]; then
+  if [[ -z "${DEP_HYDRA_LOGIN_URL:-}" || -z "${DEP_HYDRA_CONSENT_URL:-}" ]]; then
+    log "❌ DEP_HYDRA is enabled but DEP_HYDRA_LOGIN_URL or DEP_HYDRA_CONSENT_URL is missing"
+    log "   These should point to your Node-RED consent bridge flow endpoints"
+    exit 1
+  fi
   DEP_SET_ARGS+=(
-    --set keycloak.enabled=true
-    --set "keycloak.auth.adminUser=${DEP_KC_ADMIN_USER:-admin}"
-    --set "keycloak.auth.adminPassword=${DEP_KC_ADMIN_PASSWORD:-admin}"
-    --set "keycloak.realm.import=${DEP_KC_REALM_IMPORT:-false}"
+    --set hydra.enabled=true
+    --set "hydra.config.dsn=${DEP_HYDRA_DSN:-memory}"
+    --set "hydra.config.selfIssuerURL=${OIDC_ISSUER_URL}"
   )
+  if [[ -n "${DEP_HYDRA_SYSTEM_SECRET:-}" ]]; then
+    DEP_SET_ARGS+=(--set "hydra.secrets.system=${DEP_HYDRA_SYSTEM_SECRET}")
+  fi
+  if [[ -n "${DEP_HYDRA_LOGIN_URL:-}" ]]; then
+    DEP_SET_ARGS+=(--set "hydra.config.loginURL=${DEP_HYDRA_LOGIN_URL}")
+  fi
+  if [[ -n "${DEP_HYDRA_CONSENT_URL:-}" ]]; then
+    DEP_SET_ARGS+=(--set "hydra.config.consentURL=${DEP_HYDRA_CONSENT_URL}")
+  fi
 fi
 [[ "${DEP_NATS:-false}" == "true" ]] && DEP_SET_ARGS+=(--set nats.enabled=true)
 if [[ "${DEP_NEO4J:-false}" == "true" ]]; then
@@ -267,11 +280,11 @@ log "🎉 All operations completed successfully!"
 echo
 echo "🔹 DCS URL: https://${DOMAIN}/${URL_PATH}"
 echo ""
-log "ℹ️ Before accessing the service, ensure Keycloak is configured:"
+log "ℹ️ Before accessing the service, ensure your OIDC provider is configured:"
 log "   1. OIDC Issuer: ${OIDC_ISSUER_URL}"
 log "   2. Client ID: ${OIDC_CLIENT_ID}"
 log "   3. Valid Redirect URI: ${OIDC_REDIRECT_URI}"
 log "   4. Valid post logout redirect URI: ${OIDC_LOGOUT_REDIRECT_URI}"
-log "   5. Create users and assign roles in Keycloak admin console"
+log "   5. Provision users, claims, and role mappings in the issuer or its login/consent bridge"
 log ""
-log "ℹ️ See README.md for detailed Keycloak setup instructions"
+log "ℹ️ See README.md for detailed OIDC setup instructions"

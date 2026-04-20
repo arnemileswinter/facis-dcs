@@ -14,11 +14,12 @@
   <hr style="border:none; border-top:1px solid #eee; margin:8px 0;">
 
   <div class="dep-section">
-    {{ field_checkbox("depKeycloak", "Keycloak") }}
-    <div class="dep-config" id="dep-config-keycloak" style="display:none; padding-left:20px;">
-      {{ field_text    ("depKcAdminUser",     "Admin User",     "admin") }}
-      {{ field_password("depKcAdminPassword", "Admin Password", "admin") }}
-      {{ field_checkbox("depKcRealmImport",   "Import gaia-x realm") }}
+    {{ field_checkbox("depHydra", "Ory Hydra") }}
+    <div class="dep-config" id="dep-config-hydra" style="display:none; padding-left:20px;">
+      {{ field_text("depHydraDsn", "DSN", "memory") }}
+      {{ field_password("depHydraSystemSecret", "System Secret", "") }}
+      {{ field_text("depHydraLoginUrl", "Login URL", "") }}
+      {{ field_text("depHydraConsentUrl", "Consent URL", "") }}
     </div>
   </div>
 

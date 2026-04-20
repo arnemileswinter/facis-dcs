@@ -22,27 +22,12 @@ from support.api_client import (
     template_submit_url,
     template_verify_url,
 )
-from support.keycloak_client import (
-    admin_token,
-    assign_client_role,
-    ensure_client,
-    ensure_client_role,
-    ensure_user,
-    user_token,
-)
+from support.oidc_provider_client import token_for_role
 
 
 def _headers_for_role(context, role: str) -> dict:
-    client_id = os.getenv("BDD_KEYCLOAK_CLIENT_ID", "digital-contracting-service")
-    role_safe = re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
-    username = f"bdd-{role_safe}"
-    password = os.getenv("BDD_KEYCLOAK_TEST_USER_PASSWORD", "bdd-pass-123")
-    adm = admin_token()
-    client_uuid = ensure_client(adm, client_id)
-    role_repr = ensure_client_role(adm, client_uuid, role)
-    user_id = ensure_user(adm, username, password)
-    assign_client_role(adm, user_id, client_uuid, role_repr)
-    token = user_token(client_id, username, password)
+    client_id = os.getenv("BDD_OIDC_CLIENT_ID", "digital-contracting-service")
+    token = token_for_role(role=role, client_id=client_id, username_prefix="bdd")
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 

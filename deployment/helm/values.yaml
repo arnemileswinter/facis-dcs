@@ -76,14 +76,14 @@ paths:
   ui: ""
 
 # OIDC / authentication
-# issuerURL is derived from keycloak.route.path + istio/ingress host when not set explicitly
+# Set issuerURL explicitly for external providers such as Hydra.
+# It can be auto-derived from the Hydra route when the bundled Hydra chart is enabled.
 oidc:
   issuerURL: ""
   clientID: "[oidc-client-id]"
   redirectURI: "[oidc-redirect-uri]"
   logoutRedirectURI: "[oidc-logout-redirect-uri]"
-  realm: "gaia-x"
-  keycloakScheme: "https"
+  scheme: "https"
   issuerURLSecretRef:
     name: ""
     key: "OIDC_ISSUER_URL"
@@ -111,9 +111,9 @@ messaging:
 # Service discovery overrides – all auto-wired when the sub-charts below are enabled
 serviceDiscovery:
   postgresqlHost: ""
-  keycloakHost: ""
+  hydraHost: ""
   natsHost: ""
-  keycloakPort: ""
+  hydraPublicPort: ""
 
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
@@ -128,12 +128,22 @@ postgresql:
     password: dcs
     database: dcs
 
-keycloak:
+hydra:
   enabled: false
   service:
-    port: 8080
+    publicPort: 4444
+    adminPort: 4445
   route:
     path: ""
+  config:
+    # Set these when deploying Hydra for browser-based flows.
+    # loginURL and consentURL should point to your Node-RED consent bridge flow endpoints.
+    dsn: "memory"
+    selfIssuerURL: ""
+    loginURL: ""
+    consentURL: ""
+  secrets:
+    system: ""
 
 nats:
   enabled: false
@@ -141,7 +151,21 @@ nats:
 neo4j:
   enabled: false
 
-# XFSC Federated Catalogue (requires neo4j, keycloak, postgresql with "fc" database)
+# XFSC Organisation Credential Manager W-Stack (OID4VC-based, non-Indy)
+# Provides the wallet-facing OpenID4VC services used for issuance and presentation.
+# In the target architecture, these services back the Hydra login/consent flow so
+# wallet authentication can be translated into a standard OIDC session for DCS.
+# See charts/ocm-w/values.yaml for all configurable fields.
+ocmW:
+  enabled: false
+  # URL the DCS backend uses to reach the OCM-W issuer API.
+  # Auto-derived from the sub-chart when enabled, or set explicitly here.
+  issuerURL: ""
+  secretRef:
+    name: ""
+    key: "OCM_W_ISSUER_URL"
+
+# XFSC Federated Catalogue (requires neo4j, an OIDC-compatible issuer, postgresql with "fc" database)
 # See charts/federated-catalogue/values.yaml for all configurable fields.
 federatedCatalogue:
   enabled: false

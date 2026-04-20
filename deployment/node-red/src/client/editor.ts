@@ -10,7 +10,7 @@ interface InfoResponse {
 // All boolean fields that Node-RED won't auto-persist (checkboxes)
 const CHECKBOX_FIELDS = [
     'depPostgresql', 'depPgPersist',
-    'depKeycloak',   'depKcRealmImport',
+    'depHydra',
     'depNats',
     'depNeo4j',      'depNeo4jPersist',
 ] as const;
@@ -18,7 +18,7 @@ const CHECKBOX_FIELDS = [
 // Maps a toggle checkbox id to the config block it controls
 const DEP_TOGGLES: Record<string, string> = {
     'node-input-depPostgresql': 'dep-config-postgresql',
-    'node-input-depKeycloak':   'dep-config-keycloak',
+    'node-input-depHydra':      'dep-config-hydra',
     'node-input-depNeo4j':      'dep-config-neo4j',
 };
 
@@ -56,10 +56,11 @@ const DEP_TOGGLES: Record<string, string> = {
             depPgPassword:      { value: 'dcs' },
             depPgDatabase:      { value: 'dcs' },
             depPgPersist:       { value: false },
-            depKeycloak:        { value: false },
-            depKcAdminUser:     { value: 'admin' },
-            depKcAdminPassword: { value: 'admin' },
-            depKcRealmImport:   { value: false },
+            depHydra:           { value: false },
+            depHydraDsn:        { value: 'memory' },
+            depHydraSystemSecret: { value: '' },
+            depHydraLoginUrl:   { value: '' },
+            depHydraConsentUrl: { value: '' },
             depNats:            { value: false },
             depNeo4j:           { value: false },
             depNeo4jPassword:   { value: 'changeme' },

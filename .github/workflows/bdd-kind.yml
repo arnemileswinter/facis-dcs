@@ -47,7 +47,7 @@ jobs:
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
           kubectl logs deployment/dcs-digital-contracting-service -n dcs-bdd --tail=200 || true
-          kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
+          kubectl logs deployment/dcs-hydra -n dcs-bdd --tail=200 || true
 
       - name: Generate coverage XML and summary
         if: always()

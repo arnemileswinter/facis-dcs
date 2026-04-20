@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 
 onMounted(async () => {
-  // Keycloak kann je nach Konfiguration auch auf '/' zurückleiten.
+  // Some OIDC providers may redirect to '/'.
   // In dem Fall direkt zu auth.success forwarden, ohne beforeEach zu involvieren.
   if (route.query.session_state && route.query.code && route.query.iss) {
     router.replace({ name: ROUTES.AUTH.SUCCESS, query: route.query })

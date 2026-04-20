@@ -1,0 +1,142 @@
+{{- if .Values.vault.enabled }}
+{{/*
+Vault init job – runs after every install/upgrade.
+  1. Waits for Vault to be ready.
+  2. Enables KV v2 at secret/ if not already mounted.
+  3. Generates a signing key on first run; subsequent runs re-use the stored value.
+  4. Writes the key to the `signing` Kubernetes secret via the k8s API.
+
+This replaces the static Helm-generated signing secret when Vault is enabled.
+*/}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-vault-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-vault-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-vault-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-vault-init
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-vault-init
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-vault-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      serviceAccountName: {{ .Release.Name }}-vault-init
+      restartPolicy: OnFailure
+      containers:
+        - name: vault-init
+          image: alpine:3.19
+          env:
+            - name: VAULT_ADDR
+              value: http://{{ .Release.Name }}-vault:8200
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault
+                  key: token
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache curl jq >/dev/null 2>&1
+
+              K8S=https://kubernetes.default.svc
+              K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              K8S_CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+              # ---- Wait for Vault ----------------------------------------
+              echo "Waiting for Vault at $VAULT_ADDR..."
+              until curl -sf $VAULT_ADDR/v1/sys/health >/dev/null; do sleep 2; done
+              echo "Vault ready."
+
+              # ---- Enable KV v2 (idempotent) -----------------------------
+              curl -sf -X POST \
+                -H "X-Vault-Token: $VAULT_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"type":"kv","options":{"version":"2"}}' \
+                $VAULT_ADDR/v1/sys/mounts/secret >/dev/null 2>&1 || true
+
+              # ---- Get or generate signing key ---------------------------
+              EXISTING=$(curl -sf \
+                -H "X-Vault-Token: $VAULT_TOKEN" \
+                $VAULT_ADDR/v1/secret/data/signing-key \
+                | jq -r '.data.data.value // empty' 2>/dev/null || true)
+
+              if [ -z "$EXISTING" ]; then
+                echo "No signing key in Vault - generating..."
+                SIGNING_KEY=$(cat /dev/urandom | tr -dc 'a-f0-9' | head -c 64)
+                curl -sf -X POST \
+                  -H "X-Vault-Token: $VAULT_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"data\":{\"value\":\"$SIGNING_KEY\"}}" \
+                  $VAULT_ADDR/v1/secret/data/signing-key >/dev/null
+                echo "Signing key stored in Vault at secret/signing-key."
+              else
+                SIGNING_KEY=$EXISTING
+                echo "Signing key retrieved from Vault."
+              fi
+
+              # ---- Sync to Kubernetes secret -----------------------------
+              B64=$(printf '%s' "$SIGNING_KEY" | base64 | tr -d '\n')
+              BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"signing\",\"namespace\":\"$NS\"},\"type\":\"Opaque\",\"data\":{\"signing-key\":\"$B64\"}}"
+
+              # Try PUT (update) first, fall back to POST (create)
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+                -H "Authorization: Bearer $K8S_TOKEN" \
+                -H "Content-Type: application/json" \
+                --cacert $K8S_CA \
+                $K8S/api/v1/namespaces/$NS/secrets/signing \
+                -d "$BODY")
+
+              if [ "$STATUS" = "404" ]; then
+                curl -sf -X POST \
+                  -H "Authorization: Bearer $K8S_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  --cacert $K8S_CA \
+                  $K8S/api/v1/namespaces/$NS/secrets \
+                  -d "$BODY" >/dev/null
+              fi
+
+              echo "Kubernetes secret 'signing' is up to date."
+{{- end }}

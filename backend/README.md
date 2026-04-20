@@ -71,8 +71,8 @@ export API_PATH_PREFIX="/api"
 # Federated Catalogue
 export FEDERATED_CATALOGUE_API_URL="http://localhost:8081"
 
-# OIDC/Keycloak Authentication
-export OIDC_ISSUER_URL="https://keycloak.example.com/realms/yourrealm"
+# OIDC Authentication
+export OIDC_ISSUER_URL="https://hydra.example.com/"
 export OIDC_CLIENT_ID="digital-contracting-service"
 export OIDC_REDIRECT_URI="http://localhost:5173/api/auth/callback"
 export OIDC_LOGOUT_REDIRECT_URI="http://localhost:8991/api/auth/logout-complete"

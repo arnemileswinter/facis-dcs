@@ -1,0 +1,22 @@
+image:
+  repository: cassandra
+  tag: "4.1"
+  pullPolicy: IfNotPresent
+
+service:
+  port: 9042
+
+dbUser:
+  user: cassandra
+  password: cassandra
+
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 2Gi

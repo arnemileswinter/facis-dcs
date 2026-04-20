@@ -13,10 +13,11 @@ export interface DeployConfig extends NodeDef {
     depPgPassword: string;
     depPgDatabase: string;
     depPgPersist: boolean;
-    depKeycloak: boolean;
-    depKcAdminUser: string;
-    depKcAdminPassword: string;
-    depKcRealmImport: boolean;
+    depHydra: boolean;
+    depHydraDsn: string;
+    depHydraSystemSecret: string;
+    depHydraLoginUrl: string;
+    depHydraConsentUrl: string;
     depNats: boolean;
     depNeo4j: boolean;
     depNeo4jPassword: string;

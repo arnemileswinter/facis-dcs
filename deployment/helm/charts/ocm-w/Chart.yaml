@@ -1,0 +1,50 @@
+apiVersion: v2
+name: ocm-w
+description: XFSC Organisation Credential Manager W-Stack (OID4VC/W3C DID-based)
+type: application
+version: 0.1.0
+dependencies:
+  # ---- Core OID4VC services (ocm-wstack registry) -----------------------
+  - name: issuance-service
+    version: "1.0.0"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack"
+  - name: well-known-service
+    version: "1.0.3"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack"
+    condition: well-known-service.enabled
+  - name: credential-verification-service
+    version: "1.0.2"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack"
+    condition: credential-verification-service.enabled
+  - name: status-list-service
+    version: "1.0.3-main"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack"
+    condition: status-list-service.enabled
+  - name: pre-authorization-bridge
+    version: "2.0.1"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack"
+    condition: pre-authorization-bridge.enabled
+  # ---- SD-JWT service (common-services registry) ------------------------
+  - name: sd-jwt-service
+    version: "1.0.0"
+    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services"
+    condition: sd-jwt-service.enabled
+  # ---- Signer / Crypto Provider (local chart – no OCI distribution) -----
+  - name: signer
+    version: "3.0.0"
+    repository: "file://charts/signer"
+    condition: signer.enabled
+  # ---- Vault (key storage backend for signer) ---------------------------
+  - name: vault
+    version: "0.27.0"
+    repository: "https://helm.releases.hashicorp.com"
+    condition: vault.enabled
+  # ---- Infrastructure required by OCM-W services ------------------------
+  - name: redis
+    version: "0.1.0"
+    repository: "file://charts/redis"
+    condition: redis.enabled
+  - name: cassandra
+    version: "0.1.0"
+    repository: "file://charts/cassandra"
+    condition: cassandra.enabled

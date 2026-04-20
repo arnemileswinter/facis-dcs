@@ -91,6 +91,15 @@ spec:
               {{- else }}
               value: {{ .Values.federatedCatalogue.apiURL | quote }}
               {{- end }}
+            - name: OCM_W_ISSUER_URL
+              {{- if .Values.ocmW.secretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ocmW.secretRef.name | quote }}
+                  key: {{ .Values.ocmW.secretRef.key | quote }}
+              {{- else }}
+              value: {{ include "digital-contracting-service.ocmWIssuerURL" . | quote }}
+              {{- end }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
             - name: DCS_UI_PATH

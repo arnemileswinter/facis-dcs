@@ -1,0 +1,236 @@
+# ---- Secret generation ---------------------------------------------------
+# All required Kubernetes secrets are generated from these values on first
+# install and preserved on upgrade (via Helm lookup). No manual secret
+# creation needed for a self-contained deployment.
+secrets:
+  postgresql:
+    username: dcs
+    password: dcs
+  # signingKey: leave empty to auto-generate a random value on first install.
+  # In production, set this to a real private key or source it from Vault.
+  signingKey: ""
+  redis:
+    password: ""  # empty = no auth (matches redis.auth.enabled: false)
+
+# Values for OCM-W OCI chart dependencies.
+# All service DNS references follow the pattern {release}-{service}.
+# Override per-environment in your values file (e.g. values.dev.yml).
+
+# ---- Issuance service (OID4VCI) ------------------------------------------
+issuance-service:
+  image:
+    pullPolicy: IfNotPresent
+    tag: "v1.4.3"
+  ingress:
+    enabled: false
+  config:
+    didResolver: ""   # point to universal-resolver when available
+    jwksUrl: ""       # e.g. http://{release}-well-known-service:8080/.../.well-known/jwks.json
+    audience: ""
+    nats:
+      url: ""         # nats://{release}-nats:4222
+      timeoutInSec: 10
+    logLevel: info
+    servingPort: 8080
+
+# ---- Well-known service (OID metadata / JWKS) ----------------------------
+well-known-service:
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+    tag: "v1.2.1"
+  ingress:
+    enabled: false
+  config:
+    loglevel: DEBUG
+    isdev: false
+    postgres:
+      host: ""        # {release}-postgresql
+      port: 5432
+      database: wellknown
+      user: dcs
+      # kubectl create secret generic wellknown-db-secret --from-literal=postgresql-password=dcs
+      password:
+        name: wellknown-db-secret
+        key: postgresql-password
+      params: sslmode:disable
+    nats:
+      url: ""         # {release}-nats:4222  (no protocol prefix)
+      queuegroup: wellknown
+    issuer: ""        # external hostname / NodePort URL of the issuance service
+    credential:
+      configexpiration: 120
+
+# ---- Credential verification service (OID4VP) ----------------------------
+# Requires Cassandra and Signer.
+# This is the wallet presentation side that can be used by a Hydra login/
+# consent service to authenticate users based on presented credentials.
+credential-verification-service:
+  enabled: false
+  image:
+    pullPolicy: IfNotPresent
+    tag: "main"
+  ingress:
+    enabled: false
+  config:
+    serverMode: production
+    disableTLS: false
+    cassandra:
+      cassandraHosts: ""  # {release}-cassandra
+      cassandraUser: cassandra
+    signing:
+      Name: signing
+      Key: signing-key
+    servingPort: 8080
+    didResolver: ""   # http://{release}-universal-resolver:8080
+    signerService:
+      presentationVerifyUrl: ""   # http://{release}-signer:8080/v1/presentation/verify
+      presentationSignUrl: ""     # http://{release}-signer:8080/v1/presentation/proof
+      signerTopic: signer-topic
+    topics:
+      authorization: presentation.authorisation
+      authorizationReply: presentation.authorisation.reply
+      proofNotify: presentation.proof.notify
+      presentationRequest: request
+      storageRequest: storage
+    messaging:
+      protocol: nats
+      nats:
+        url: ""         # {release}-nats:4222  (no protocol prefix)
+        queueGroup: credential-verification-service
+        timeoutInSec: 10
+
+# ---- Status list service (revocation) ------------------------------------
+status-list-service:
+  enabled: false
+  image:
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  ingress:
+    enabled: false
+  config:
+    messaging:
+      protocol: nats
+      nats:
+        url: ""         # nats://{release}-nats:4222
+        timeoutInSec: 10s
+        queueGroup: statuslistservice
+    servingPort: 8080
+    database:
+      # kubectl create secret generic statuslist-db-secret \
+      #   --from-literal=postgresql-username=dcs \
+      #   --from-literal=postgresql-password=dcs
+      secretName: statuslist-db-secret
+      userkey: postgresql-username
+      passwordKey: postgresql-password
+      host: ""          # {release}-postgresql
+      port: 5432
+      db: status
+      params: "sslmode:disable"
+    creationTopic: status
+    listSizeInBytes: 125000
+    signerTopic: signer
+
+# ---- Pre-authorization bridge (OID4VCI pre-auth flow) --------------------
+pre-authorization-bridge:
+  enabled: false
+  image:
+    pullPolicy: IfNotPresent
+    tag: "v2.2.1"
+  ingress:
+    enabled: false
+  config:
+    nats:
+      url: ""           # {release}-nats:4222  (no protocol prefix)
+      queuegroup: preauth
+      timeoutInSec: 10s
+    logLevel: debug
+    servingPort: 8080
+    database:
+      username: default
+      password: pass
+      hosts: ""         # {release}-redis-master:6379
+      port: 6379
+      db: 0
+      IsCluster: false
+    oAuth:
+      signerTopic: sign
+      signerJwksUrl: ""         # http://{release}-signer:8080/v1/jwks
+      credentialEndpoint: ""    # http://{release}-signer:8080/v1/credential
+      key: signerkey
+      namespace: default
+      issuerKid: ""             # did:web:{domain}#signerkey
+    wellKnown:
+      issuer: ""                # https://{domain}
+      token_endpoint: ""        # https://{domain}/token
+      jwks_uri: ""              # https://{domain}/.well-known/jwks.json
+      grant_types_supported:
+        - urn:ietf:params:oauth:grant-type:pre-authorized_code
+
+# ---- SD-JWT service (used by signer for SD-JWT creation) -----------------
+sd-jwt-service:
+  enabled: false
+  image:
+    name: sd-jwt-service
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  config:
+    signUrl: ""         # http://{release}-signer:8080/v1/sign
+    resolverUrl: ""     # http://{release}-universal-resolver:8080/1.0/identifiers/
+
+# ---- Signer / Crypto Provider (local chart) ------------------------------
+signer:
+  enabled: false
+  # See charts/signer/values.yaml for all options.
+  # Prerequisites:
+  #   kubectl create secret generic vault --from-literal=token=root
+  nats:
+    natsHost: ""        # nats://{release}-nats:4222
+  sdjwt:
+    url: ""             # http://{release}-sd-jwt-service:8080/v1/sign
+  engine:
+    env:
+      VAULT_ADRESS: "" # http://{release}-vault:8200
+
+# ---- Vault (HashiCorp) ---------------------------------------------------
+vault:
+  enabled: false
+  global:
+    enabled: true
+  server:
+    enabled: true
+    dev:
+      enabled: true
+      devRootToken: root
+    ha:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ---- Redis (for pre-authorization bridge) --------------------------------
+redis:
+  enabled: false
+  auth:
+    enabled: false
+
+# ---- Cassandra (for credential-verification-service) ---------------------
+cassandra:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  persistence:
+    enabled: false
+  dbUser:
+    user: cassandra
+    password: cassandra

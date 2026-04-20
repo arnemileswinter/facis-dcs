@@ -45,7 +45,7 @@ export const authenticationService: AuthenticationService = {
     const authTokenStore = useAuthTokenStore()
     authTokenStore.remove()
 
-    // Call backend logout endpoint to get Keycloak logout URL (mirrors login flow)
+    // Call backend logout endpoint to get the provider logout URL.
     authHttp
       .get<LogoutResponse>('/auth/logout')
       .then((res) => {

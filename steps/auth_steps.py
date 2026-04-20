@@ -1,32 +1,16 @@
 """Authentication and scenario setup steps for executable BDD scenarios."""
 
 import os
-import re
 
 from behave import given
 
-from support.keycloak_client import admin_token
-from support.keycloak_client import assign_client_role
-from support.keycloak_client import ensure_client
-from support.keycloak_client import ensure_client_role
-from support.keycloak_client import ensure_user
-from support.keycloak_client import user_token
+from support.oidc_provider_client import token_for_role
 from support.template_utils import template_env_key
 
 
 def _set_headers_for_role(context, role: str, username_prefix: str = "bdd"):
-    client_id = os.getenv("BDD_KEYCLOAK_CLIENT_ID", "digital-contracting-service")
-    role_safe = re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
-    username = f"{username_prefix}-{role_safe}"
-    password = os.getenv("BDD_KEYCLOAK_TEST_USER_PASSWORD", "bdd-pass-123")
-
-    admin_access_token = admin_token()
-    client_uuid = ensure_client(admin_access_token, client_id)
-    role_repr = ensure_client_role(admin_access_token, client_uuid, role)
-    user_id = ensure_user(admin_access_token, username, password)
-    assign_client_role(admin_access_token, user_id, client_uuid, role_repr)
-
-    token = user_token(client_id, username, password)
+    client_id = os.getenv("BDD_OIDC_CLIENT_ID", "digital-contracting-service")
+    token = token_for_role(role=role, client_id=client_id, username_prefix=username_prefix)
     context.headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",

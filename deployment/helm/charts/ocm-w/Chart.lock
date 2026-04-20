@@ -1,0 +1,33 @@
+dependencies:
+- name: issuance-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.0
+- name: well-known-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.3
+- name: credential-verification-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.2
+- name: status-list-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.3-main
+- name: pre-authorization-bridge
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 2.0.1
+- name: sd-jwt-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
+  version: 1.0.0
+- name: signer
+  repository: file://charts/signer
+  version: 3.0.0
+- name: vault
+  repository: https://helm.releases.hashicorp.com
+  version: 0.27.0
+- name: redis
+  repository: file://charts/redis
+  version: 0.1.0
+- name: cassandra
+  repository: file://charts/cassandra
+  version: 0.1.0
+digest: sha256:f463891ce97f5a5616e059c82cc003ce86c22a37de1d74f606799bd9c0b69bea
+generated: "2026-04-20T15:52:59.157525557+02:00"

@@ -10,9 +10,9 @@ import (
 
 // holds OIDC provider configuration
 type OIDCConfig struct {
-	// Example: https://keycloak.example.com/auth/realms/dcs
+	// Example: https://hydra.example.com/ or https://issuer.example.com/realms/dcs
 	IssuerURL string
-	// Example: "dcs-service". "aud" claim in JWT must match this value.
+	// Example: "dcs-service". The token must identify this client via azp or aud.
 	ClientID string
 }
 
@@ -30,8 +30,8 @@ func NewOIDCValidator(ctx context.Context, config OIDCConfig) (*OIDCValidator, e
 		return nil, fmt.Errorf("failed to discover OIDC provider: %w", err)
 	}
 
-	// Skip audience check — Keycloak places the client ID in the "azp" claim,
-	// not in "aud". The token signature and issuer are still fully validated.
+	// Defer client binding checks to ValidateToken so both Keycloak-style azp
+	// claims and standard aud claims work.
 	verifier := provider.Verifier(&oidc.Config{
 		ClientID:          config.ClientID,
 		SkipClientIDCheck: true,
@@ -64,18 +64,15 @@ func (v *OIDCValidator) ValidateToken(ctx context.Context, token string) (*Token
 		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
-	// Validate that the authorized party matches our client ID.
-	azp, _ := claims["azp"].(string)
-	if azp != v.config.ClientID {
-		return nil, fmt.Errorf("azp claim %q does not match expected client ID %q", azp, v.config.ClientID)
+	if !matchesClientID(claims, v.config.ClientID) {
+		return nil, fmt.Errorf("token is not bound to client ID %q", v.config.ClientID)
 	}
 
 	username, _ := claims["preferred_username"].(string)
 	if username == "" {
 		username, _ = claims["sub"].(string)
 	}
-	// This value is set by the Keycloak -> Clients -> <client_id>
-	// -> <client_id>-dedicated -> Configure a new mapper / Add mapper (by configuration) -> Hardcoded claim
+	// This claim is optional and provider-specific.
 	participantID, _ := claims["participant-id"].(string)
 
 	return &TokenInfo{
@@ -85,9 +82,24 @@ func (v *OIDCValidator) ValidateToken(ctx context.Context, token string) (*Token
 	}, nil
 }
 
-// extractRoles extracts client-scoped roles from the
-// resource_access.<azp>.roles JWT claim.
+// extractRoles supports both Keycloak-style and plain OIDC custom role claims.
 func extractRoles(claims map[string]interface{}) []string {
+	if roles := extractResourceAccessRoles(claims); len(roles) > 0 {
+		return roles
+	}
+	if roles := extractRealmRoles(claims); len(roles) > 0 {
+		return roles
+	}
+	if roles := toStringSlice(claims["roles"]); len(roles) > 0 {
+		return roles
+	}
+	if scope, ok := claims["scope"].(string); ok && scope != "" {
+		return strings.Fields(scope)
+	}
+	return []string{}
+}
+
+func extractResourceAccessRoles(claims map[string]interface{}) []string {
 	ra, ok := claims["resource_access"].(map[string]interface{})
 	if !ok {
 		return []string{}
@@ -104,6 +116,31 @@ func extractRoles(claims map[string]interface{}) []string {
 		return roles
 	}
 	return []string{}
+}
+
+func extractRealmRoles(claims map[string]interface{}) []string {
+	realmAccess, ok := claims["realm_access"].(map[string]interface{})
+	if !ok {
+		return []string{}
+	}
+	return toStringSlice(realmAccess["roles"])
+}
+
+func matchesClientID(claims map[string]interface{}, clientID string) bool {
+	if azp, _ := claims["azp"].(string); azp != "" {
+		return azp == clientID
+	}
+	switch aud := claims["aud"].(type) {
+	case string:
+		return aud == clientID
+	case []interface{}:
+		for _, item := range aud {
+			if audience, ok := item.(string); ok && audience == clientID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func toStringSlice(v interface{}) []string {

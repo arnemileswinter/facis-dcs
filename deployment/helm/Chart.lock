@@ -2,8 +2,8 @@ dependencies:
 - name: postgresql
   repository: file://charts/postgresql
   version: 0.1.0
-- name: keycloak
-  repository: file://charts/keycloak
+- name: hydra
+  repository: file://charts/hydra
   version: 0.1.0
 - name: nats
   repository: file://charts/nats
@@ -14,5 +14,8 @@ dependencies:
 - name: federated-catalogue
   repository: file://charts/federated-catalogue
   version: 0.1.0
-digest: sha256:be19e2048b3eb531035c887599d76e4040265fc970dd52a508038edc11954db4
-generated: "2026-04-15T14:30:10.508704702+02:00"
+- name: ocm-w
+  repository: file://charts/ocm-w
+  version: 0.1.0
+digest: sha256:96f95a92ca51f4445af9ce76a44b8aa3ce6a64864f0c5f32e1c7690e30f6523b
+generated: "2026-04-20T17:52:16.432059835+02:00"

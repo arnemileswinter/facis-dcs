@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-cassandra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cassandra
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cassandra
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: cassandra
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: cql
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: CASSANDRA_USER
+              value: {{ .Values.dbUser.user | quote }}
+            - name: CASSANDRA_PASSWORD
+              value: {{ .Values.dbUser.password | quote }}
+            - name: CASSANDRA_AUTHENTICATOR
+              value: PasswordAuthenticator
+            - name: CASSANDRA_AUTHORIZER
+              value: CassandraAuthorizer
+            - name: MAX_HEAP_SIZE
+              value: "512M"
+            - name: HEAP_NEWSIZE
+              value: "128M"
+          readinessProbe:
+            exec:
+              command: ["cqlsh", "-u", {{ .Values.dbUser.user | quote }}, "-p", {{ .Values.dbUser.password | quote }}, "-e", "describe keyspaces"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

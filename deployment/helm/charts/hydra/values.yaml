@@ -1,0 +1,46 @@
+image:
+  repository: oryd/hydra
+  tag: "v2.2.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  publicPort: 4444
+  adminPort: 4445
+  publicNodePort: null
+  adminNodePort: null
+
+route:
+  path: ""
+
+config:
+  # For production, use a persistent DSN (for example PostgreSQL).
+  dsn: "memory"
+  selfIssuerURL: ""
+  loginURL: ""
+  consentURL: ""
+  publicTLS: false
+  adminTLS: false
+
+secrets:
+  # Required for non-dev deployments. Leave empty for generated fallback.
+  system: ""
+
+keys:
+  seed:
+    enabled: false
+    # JWK set names to upsert through Hydra's admin API.
+    # hydra.jwt.access-token is used for JWT access token signatures.
+    # hydra.openid.id-token is used for OIDC ID token signatures.
+    sets:
+      - hydra.jwt.access-token
+      - hydra.openid.id-token
+    image:
+      repository: curlimages/curl
+      tag: "8.7.1"
+      pullPolicy: IfNotPresent
+    # Private JWK used for deterministic test signing.
+    # Provide a full private key (kty, n, e, d, p, q, dp, dq, qi for RSA).
+    jwk: {}
+
+resources: {}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cassandra
+description: Cassandra for OCM-W credential verification service
+type: application
+version: 0.1.0
+appVersion: "4.1"

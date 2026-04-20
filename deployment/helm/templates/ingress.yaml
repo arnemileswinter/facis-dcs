@@ -50,15 +50,14 @@ spec:
                 port:
                   number: {{ $.Values.service.port | int }}
           {{- end }}
-          {{- /* Keycloak route on same host when enabled with route.path */}}
-          {{- if and $.Values.keycloak.enabled $.Values.keycloak.route.path }}
-          - path: {{ include "digital-contracting-service.keycloakRoutePath" $ }}
+          {{- if and $.Values.hydra.enabled $.Values.hydra.route.path }}
+          - path: {{ include "digital-contracting-service.hydraRoutePath" $ }}
             pathType: {{ default "Prefix" $.Values.ingress.pathType }}
             backend:
               service:
-                name: {{ $.Release.Name }}-keycloak
+                name: {{ $.Release.Name }}-hydra
                 port:
-                  number: {{ $.Values.keycloak.service.port | int }}
+                  number: {{ $.Values.hydra.service.publicPort | int }}
           {{- end }}
     {{- end }}
 {{- end }}

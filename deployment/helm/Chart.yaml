@@ -10,10 +10,10 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/postgresql"
     condition: postgresql.enabled
-  - name: keycloak
+  - name: hydra
     version: "0.1.0"
-    repository: "file://charts/keycloak"
-    condition: keycloak.enabled
+    repository: "file://charts/hydra"
+    condition: hydra.enabled
   - name: nats
     version: "0.1.0"
     repository: "file://charts/nats"
@@ -27,3 +27,8 @@ dependencies:
     repository: "file://charts/federated-catalogue"
     condition: federatedCatalogue.enabled
     alias: federatedCatalogue
+  - name: ocm-w
+    version: "0.1.0"
+    repository: "file://charts/ocm-w"
+    condition: ocmW.enabled
+    alias: ocmW
