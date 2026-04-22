@@ -82,15 +82,21 @@ func (v *OIDCValidator) ValidateToken(ctx context.Context, token string) (*Token
 	}, nil
 }
 
-// extractRoles supports both Keycloak-style and plain OIDC custom role claims.
+// extractRoles extracts DCS roles from OIDC token claims.
 func extractRoles(claims map[string]interface{}) []string {
+	if roles := toStringSlice(claims["roles"]); len(roles) > 0 {
+		return roles
+	}
+	// Hydra session.access_token claims land under `ext`.
+	if ext, ok := claims["ext"].(map[string]interface{}); ok {
+		if roles := toStringSlice(ext["roles"]); len(roles) > 0 {
+			return roles
+		}
+	}
 	if roles := extractResourceAccessRoles(claims); len(roles) > 0 {
 		return roles
 	}
 	if roles := extractRealmRoles(claims); len(roles) > 0 {
-		return roles
-	}
-	if roles := toStringSlice(claims["roles"]); len(roles) > 0 {
 		return roles
 	}
 	if scope, ok := claims["scope"].(string); ok && scope != "" {
@@ -129,6 +135,11 @@ func extractRealmRoles(claims map[string]interface{}) []string {
 func matchesClientID(claims map[string]interface{}, clientID string) bool {
 	if azp, _ := claims["azp"].(string); azp != "" {
 		return azp == clientID
+	}
+	// Ory Hydra access tokens carry the OAuth2 client in `client_id`
+	// rather than the OIDC `azp` claim.
+	if cid, _ := claims["client_id"].(string); cid != "" {
+		return cid == clientID
 	}
 	switch aud := claims["aud"].(type) {
 	case string:

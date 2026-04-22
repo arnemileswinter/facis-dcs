@@ -1,4 +1,4 @@
-{{- if .Values.ingress.enabled -}}
+{{- if and .Values.app.enabled .Values.ingress.enabled -}}
 {{- if eq (len .Values.ingress.hosts) 0 -}}
 {{- fail "ingress.enabled=true requires at least one entry in ingress.hosts" -}}
 {{- end -}}

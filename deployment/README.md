@@ -27,7 +27,7 @@ The parent chart bundles `postgresql`, `hydra`, `nats`, `neo4j`, and `federated-
 
 For DCS itself, authentication is now treated as generic OIDC. Per the SRS, the recommended production direction is Hydra as the OIDC server, with the login/consent experience backed by OCM-W's OpenID4VC wallet flow so users authenticate with wallet-held credentials and role claims.
 
-Hydra requires explicit login and consent URLs. In this repository, those are expected to be provided by your Node-RED consent bridge flow and injected via Helm values (`hydra.config.loginURL`, `hydra.config.consentURL`) or via the Node-RED deploy node dependency settings.
+Hydra requires explicit login and consent URLs. In this repository, the intended setup is that DCS acts as the auth app and serves those routes via the frontend gateway. In local development, `values.dev.yml` points Hydra at `http://localhost:5173/hydra/login` and `http://localhost:5173/hydra/consent`, which Vite proxies to the local DCS backend.
 
 When sub-charts are disabled, point DCS to external services via:
 - `serviceDiscovery.postgresqlHost`
@@ -66,7 +66,8 @@ helm dependency build ./deployment/helm
 helm install dcs ./deployment/helm -f ./deployment/helm/values.dev.yml
 ```
 
-This starts all dependencies as NodePort services forwarded to `localhost`:
+This starts all dependencies as NodePort services forwarded to `localhost`.
+With `values.dev.yml`, the parent DCS Kubernetes workload is disabled (`app.enabled: false`) because the backend is expected to run locally:
 
 | Service              | Address                          |
 |----------------------|----------------------------------|
@@ -77,9 +78,16 @@ This starts all dependencies as NodePort services forwarded to `localhost`:
 | Neo4j HTTP           | `http://localhost:30474`         |
 | Neo4j Bolt           | `bolt://localhost:30687`         |
 
-Hydra login and consent URLs must point to your Node-RED consent bridge flow.
+Hydra public OIDC endpoints, login, and consent are handled through the Vite gateway:
+- `http://localhost:5173/.well-known/openid-configuration`
+- `http://localhost:5173/oauth2/auth`
+- `http://localhost:5173/hydra/login`
+- `http://localhost:5173/hydra/consent`
 
-> To upgrade after chart changes: `helm upgrade dcs ./deployment/helm -f ./deployment/helm/values.dev.yml`
+To upgrade after chart changes:
+```bash
+helm upgrade dcs ./deployment/helm -f ./deployment/helm/values.dev.yml --server-side=false --force-replace
+```
 
 ### 2. Run the backend
 
@@ -98,7 +106,7 @@ npm install
 npm run dev
 ```
 
-The Vite dev server starts at `http://localhost:5173` and proxies `/api` requests to the backend automatically.
+The Vite dev server starts at `http://localhost:5173` and proxies `/api` and `/hydra` requests to the backend automatically.
 
 ---
 
@@ -183,6 +191,61 @@ oidc:
 route:
   basePath: "/dcs"
 ```
+
+---
+
+## Known issues / post-install patches
+
+### Wallet presentation flow (`credential-verification-service`)
+
+The vendored upstream chart `credential-verification-service-1.0.2` from the
+ocm-wstack OCI registry has a few quirks that affect the OID4VP presentation
+flow used for wallet-based login. None of these are fixable from `values.yaml`
+alone; apply them after `helm install` / `helm upgrade`.
+
+1. **`clientUrlSchema` env var name mismatch (chart bug).**
+   The chart template renders `config.externalPresentation.clientUrlSchema`
+   into the env var `CREDENTIALVERIFICATION_CLIENTURLSCHEMA`, but the CV
+   service binary actually reads it from
+   `CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA` (nested under
+   the `ExternalPresentation` envconfig group). The chart-rendered value is
+   therefore silently ignored and the service falls back to the default
+   `https`, which makes CV crash on startup in local dev.
+
+   The umbrella chart works around this with a post-install/post-upgrade
+   hook (`templates/cv-env-patch-job.yaml`) that patches the deployment
+   with the correct env var. Configurable under `cvEnvPatch:` in
+   [values.yaml](helm/values.yaml); set `cvEnvPatch.enabled: false` to opt
+   out, or override `cvEnvPatch.clientUrlSchema` for non-dev deployments.
+
+2. **`response_uri` host comes from the incoming `Host` header.**
+   CV builds the JWT `response_uri` claim as
+   `<clientUrlSchema>://<incoming Host>/<publicBasePath>/<id>`. The DCS
+   backend therefore overrides the outgoing `Host` header on its CV
+   `/presentation/request` call so the wallet sees the public gateway host
+   instead of the CV NodePort. Configure via `PRESENTATION_PUBLIC_HOST` in
+   the backend env (see [backend/.env.dev](../backend/.env.dev)). For local
+   dev this is `localhost:5173`; the Vite dev server proxies
+   `/api/presentation/proof/...` to the CV NodePort.
+
+   The `publicBasePath` advertised in `response_uri` defaults to
+   `/api/presentation/proof`, but the **actual** CV proof-receive handler
+   is mounted at `/v1/tenants/{tenantId}/presentation/proof/{id}`. The
+   chart does not expose `publicBasePath` as a value, so the dev gateway
+   must rewrite the path on its way to CV. The Vite dev proxy in
+   `frontend/ClientApp/vite.config.ts` does this rewrite. Production
+   ingress configurations need an equivalent rewrite rule.
+
+3. **`client_id` claim is taken verbatim from the `x-did` header.**
+   CV does not derive a verifier DID itself. The DCS backend sends the value
+   of `OCM_W_PRESENTATION_DID` as `x-did`, which CV puts into the JWT
+   `client_id` claim. If the env var is empty the wallet will reject the
+   request with `missing client_id`.
+
+4. **`enbaled` typo in chart values.**
+   The chart's `externalPresentation.enbaled` key is misspelled in the
+   upstream template. Keep the same misspelling in `values.dev.yml` so the
+   rendered env value stays a string (see the inline comment there).
 
 ---
 

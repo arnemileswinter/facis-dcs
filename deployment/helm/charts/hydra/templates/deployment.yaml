@@ -1,6 +1,7 @@
 {{- $issuer := .Values.config.selfIssuerURL | default (printf "http://%s-hydra:%d" .Release.Name (.Values.service.publicPort | int)) -}}
 {{- $login := .Values.config.loginURL -}}
 {{- $consent := .Values.config.consentURL -}}
+{{- $logout := .Values.config.logoutURL -}}
 {{- $systemSecret := .Values.secrets.system | default (printf "%s-hydra-system-secret-change-me" .Release.Name) -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -30,7 +31,7 @@ spec:
             - |
               set -e
               hydra migrate sql --yes "$DSN"
-              exec hydra serve all
+              exec hydra serve all {{- if .Values.config.dev }} --dev{{- end }}
           env:
             - name: DSN
               value: {{ .Values.config.dsn | quote }}
@@ -42,6 +43,10 @@ spec:
               value: {{ $login | quote }}
             - name: URLS_CONSENT
               value: {{ $consent | quote }}
+            {{- if $logout }}
+            - name: URLS_LOGOUT
+              value: {{ $logout | quote }}
+            {{- end }}
             - name: SERVE_PUBLIC_PORT
               value: {{ .Values.service.publicPort | quote }}
             - name: SERVE_ADMIN_PORT
@@ -50,6 +55,10 @@ spec:
               value: {{ .Values.config.publicTLS | quote }}
             - name: SERVE_ADMIN_TLS_ENABLED
               value: {{ .Values.config.adminTLS | quote }}
+            # Issue JWT access tokens (default is opaque "ory_at_..." reference tokens).
+            # DCS validates access tokens against Hydra's JWKS, which requires JWTs.
+            - name: STRATEGIES_ACCESS_TOKEN
+              value: "jwt"
           ports:
             - name: public
               containerPort: {{ .Values.service.publicPort }}

@@ -18,6 +18,9 @@ docker run -d \
   -e DATABASE_URL="host=host.docker.internal port=5432 user=dcs password=dcs dbname=dcs sslmode=disable" \
   -e NATS_URL=nats://host.docker.internal:4222 \
   -e OIDC_ISSUER_URL=https://keycloak.xfsc.local/realms/dcs \
+  -e OCM_W_PUBLIC_ISSUER_URL=http://host.docker.internal:31795 \
+  -e OCM_W_TENANT_ID=tenant_space \
+  -e OCM_W_CREDENTIAL_CONFIGURATION_ID=DCSRoleCredential \
   -e DCS_API_PATH=${DCS_API_PATH} \
   -e DCS_UI_PATH=${DCS_UI_PATH} \
   --add-host host.docker.internal:host-gateway \

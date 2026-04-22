@@ -5,11 +5,13 @@ import (
 	genauth "digital-contracting-service/gen/auth"
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
+	credentialissuance "digital-contracting-service/gen/credential_issuance"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 	externaltargetsystemapi "digital-contracting-service/gen/external_target_system_api"
 	authsvr "digital-contracting-service/gen/http/auth/server"
 	contractstoragearchivesvr "digital-contracting-service/gen/http/contract_storage_archive/server"
 	contractworkflowenginesvr "digital-contracting-service/gen/http/contract_workflow_engine/server"
+	credentialissuancesvr "digital-contracting-service/gen/http/credential_issuance/server"
 	dcstodcssvr "digital-contracting-service/gen/http/dcs_to_dcs/server"
 	externaltargetsystemapisvr "digital-contracting-service/gen/http/external_target_system_api/server"
 	orchestrationwebhookssvr "digital-contracting-service/gen/http/orchestration_webhooks/server"
@@ -22,11 +24,14 @@ import (
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	templaterepository "digital-contracting-service/gen/template_repository"
+	"digital-contracting-service/internal/ocmw"
 	"digital-contracting-service/internal/service"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"errors"
 
@@ -38,7 +43,7 @@ import (
 
 // handleHTTPServer starts configures and starts a HTTP server on the given
 // URL. It shuts down the server if any error is received in the error channel.
-func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.Endpoints, contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints, dcsToDcsEndpoints *dcstodcs.Endpoints, externalTargetSystemAPIEndpoints *externaltargetsystemapi.Endpoints, orchestrationWebhooksEndpoints *orchestrationwebhooks.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints, signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints, templateRepositoryEndpoints *templaterepository.Endpoints, wg *sync.WaitGroup, errc chan error, dbg bool) {
+func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.Endpoints, contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints, credentialIssuanceEndpoints *credentialissuance.Endpoints, dcsToDcsEndpoints *dcstodcs.Endpoints, externalTargetSystemAPIEndpoints *externaltargetsystemapi.Endpoints, orchestrationWebhooksEndpoints *orchestrationwebhooks.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints, signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints, templateRepositoryEndpoints *templaterepository.Endpoints, issuanceClient *ocmw.IssuanceClient, db *sqlx.DB, wg *sync.WaitGroup, errc chan error, dbg bool) {
 
 	// Provide the transport specific request decoder and response encoder.
 	// The goa http package has built-in support for JSON, XML and gob.
@@ -72,6 +77,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		authServer                         *authsvr.Server
 		contractStorageArchiveServer       *contractstoragearchivesvr.Server
 		contractWorkflowEngineServer       *contractworkflowenginesvr.Server
+		credentialIssuanceServer           *credentialissuancesvr.Server
 		dcsToDcsServer                     *dcstodcssvr.Server
 		externalTargetSystemAPIServer      *externaltargetsystemapisvr.Server
 		orchestrationWebhooksServer        *orchestrationwebhookssvr.Server
@@ -86,6 +92,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		authServer = authsvr.New(authEndpoints, apiMux, dec, enc, eh, ef)
 		contractStorageArchiveServer = contractstoragearchivesvr.New(contractStorageArchiveEndpoints, apiMux, dec, enc, eh, ef)
 		contractWorkflowEngineServer = contractworkflowenginesvr.New(contractWorkflowEngineEndpoints, apiMux, dec, enc, eh, ef)
+		credentialIssuanceServer = credentialissuancesvr.New(credentialIssuanceEndpoints, apiMux, dec, enc, eh, ef)
 		dcsToDcsServer = dcstodcssvr.New(dcsToDcsEndpoints, apiMux, dec, enc, eh, ef)
 		externalTargetSystemAPIServer = externaltargetsystemapisvr.New(externalTargetSystemAPIEndpoints, apiMux, dec, enc, eh, ef)
 		orchestrationWebhooksServer = orchestrationwebhookssvr.New(orchestrationWebhooksEndpoints, apiMux, dec, enc, eh, ef)
@@ -93,12 +100,16 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		signatureManagementServer = signaturemanagementsvr.New(signatureManagementEndpoints, apiMux, dec, enc, eh, ef)
 		templateCatalogueIntegrationServer = templatecatalogueintegrationsvr.New(templateCatalogueIntegrationEndpoints, apiMux, dec, enc, eh, ef)
 		templateRepositoryServer = templaterepositorysvr.New(templateRepositoryEndpoints, apiMux, dec, enc, eh, ef)
+		// Replace the generated PresentationCallback handler with one that reads
+		// the direct_post form body (application/x-www-form-urlencoded) per OpenID4VP spec.
+		authServer.PresentationCallback = newPresentationCallbackDirectPostHandler(authEndpoints.PresentationCallback, enc, eh)
 	}
 
 	// Configure the mux.
 	authsvr.Mount(apiMux, authServer)
 	contractstoragearchivesvr.Mount(apiMux, contractStorageArchiveServer)
 	contractworkflowenginesvr.Mount(apiMux, contractWorkflowEngineServer)
+	credentialissuancesvr.Mount(apiMux, credentialIssuanceServer)
 	dcstodcssvr.Mount(apiMux, dcsToDcsServer)
 	externaltargetsystemapisvr.Mount(apiMux, externalTargetSystemAPIServer)
 	orchestrationwebhookssvr.Mount(apiMux, orchestrationWebhooksServer)
@@ -106,6 +117,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	signaturemanagementsvr.Mount(apiMux, signatureManagementServer)
 	templatecatalogueintegrationsvr.Mount(apiMux, templateCatalogueIntegrationServer)
 	templaterepositorysvr.Mount(apiMux, templateRepositoryServer)
+	mountBootstrapEndpoint(ctx, apiMux, issuanceClient, db)
 
 	// Mount Swagger UI on /swagger and OpenAPI spec on /openapi3.json.
 	mountSwaggerUI(apiMux)
@@ -131,6 +143,9 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
 	}
 	for _, m := range contractWorkflowEngineServer.Mounts {
+		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
+	}
+	for _, m := range credentialIssuanceServer.Mounts {
 		log.Printf(ctx, "HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
 	}
 	for _, m := range dcsToDcsServer.Mounts {
@@ -177,6 +192,68 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 			log.Printf(ctx, "failed to shutdown: %v", err)
 		}
 	}()
+}
+
+// newPresentationCallbackDirectPostHandler returns an http.Handler that decodes
+// OpenID4VP direct_post submissions (application/x-www-form-urlencoded body)
+// and calls the presentationCallback service endpoint.
+// It replaces the Goa-generated handler which incorrectly reads from the URL
+// query string instead of the form body.
+func newPresentationCallbackDirectPostHandler(
+	endpoint goa.Endpoint,
+	encoder func(context.Context, http.ResponseWriter) goahttp.Encoder,
+	errhandler func(context.Context, http.ResponseWriter, error),
+) http.Handler {
+	encodeError := goahttp.ErrorEncoder(encoder, errorFormatter)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), goahttp.AcceptTypeKey, r.Header.Get("Accept"))
+		ctx = context.WithValue(ctx, goa.MethodKey, "presentationCallback")
+		ctx = context.WithValue(ctx, goa.ServiceKey, "Auth")
+
+		if err := r.ParseForm(); err != nil {
+			if encErr := encodeError(ctx, w, goa.PermanentError("bad_request", "failed to parse form body: %v", err)); encErr != nil && errhandler != nil {
+				errhandler(ctx, w, encErr)
+			}
+			return
+		}
+
+		vpToken := r.FormValue("vp_token")
+		if vpToken == "" {
+			if encErr := encodeError(ctx, w, goa.PermanentError("missing_field", `"vp_token" is missing from request`)); encErr != nil && errhandler != nil {
+				errhandler(ctx, w, encErr)
+			}
+			return
+		}
+
+		var presentationSubmission *string
+		if v := r.FormValue("presentation_submission"); v != "" {
+			presentationSubmission = &v
+		}
+		var state *string
+		if v := r.FormValue("state"); v != "" {
+			state = &v
+		}
+		var requestID *string
+		if v := r.FormValue("request_id"); v != "" {
+			requestID = &v
+		}
+
+		payload := authsvr.NewPresentationCallbackPayload(vpToken, presentationSubmission, state, requestID)
+
+		res, err := endpoint(ctx, payload)
+		if err != nil {
+			if encErr := encodeError(ctx, w, err); encErr != nil && errhandler != nil {
+				errhandler(ctx, w, encErr)
+			}
+			return
+		}
+
+		result, _ := res.(*genauth.PresentationCallbackResult)
+		if result != nil {
+			w.Header().Set("Location", result.Location)
+		}
+		w.WriteHeader(http.StatusFound)
+	})
 }
 
 // errorHandler returns a function that writes and logs the given error.

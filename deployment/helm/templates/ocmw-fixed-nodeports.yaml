@@ -1,0 +1,48 @@
+{{- /*
+Sibling NodePort services for ocm-w subcharts whose templates ignore
+.Values.service.nodePort. The upstream well-known-service and issuance-service
+charts render `type: NodePort` but never emit a nodePort field, so Kubernetes
+allocates a random port and the local Vite proxy targets (which assume fixed
+ports) break.
+
+These services select the same pods by app label and pin the nodePort.
+Gated by .Values.ocmwFixedNodePorts.enabled.
+*/ -}}
+{{- if .Values.ocmwFixedNodePorts.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: well-known-service-fixed
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  selector:
+    app: well-known-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: {{ .Values.ocmwFixedNodePorts.wellKnown }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: issuance-service-fixed
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  selector:
+    app: issuance-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: {{ .Values.ocmwFixedNodePorts.issuance }}
+{{- end }}

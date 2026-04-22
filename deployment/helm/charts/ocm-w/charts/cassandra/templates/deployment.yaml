@@ -39,6 +39,10 @@ spec:
               command: ["cqlsh", "-u", {{ .Values.dbUser.user | quote }}, "-p", {{ .Values.dbUser.password | quote }}, "-e", "describe keyspaces"]
             initialDelaySeconds: 30
             periodSeconds: 10
+            # cqlsh is a Python CLI; cold-start regularly exceeds the k8s
+            # default 1s timeout on shared dev clusters, so the probe never
+            # passes. Give it room to actually run.
+            timeoutSeconds: 10
             failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

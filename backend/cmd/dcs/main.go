@@ -5,6 +5,7 @@ import (
 	genauth "digital-contracting-service/gen/auth"
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
+	credentialissuance "digital-contracting-service/gen/credential_issuance"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 	externaltargetsystemapi "digital-contracting-service/gen/external_target_system_api"
 	orchestrationwebhooks "digital-contracting-service/gen/orchestration_webhooks"
@@ -18,6 +19,7 @@ import (
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/ocmw"
 	"digital-contracting-service/internal/service"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
@@ -141,11 +143,36 @@ func main() {
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
 	templateCatalogueClient := fcclient.NewFederatedCatalogueClient(fcURL)
 
+	// Initialize the OCM-W issuance client.
+	ocmWIssuerURL := os.Getenv("OCM_W_ISSUER_URL")
+	ocmWPublicIssuerURL := os.Getenv("OCM_W_PUBLIC_ISSUER_URL")
+	if ocmWPublicIssuerURL == "" {
+		ocmWPublicIssuerURL = ocmWIssuerURL
+	}
+	ocmWTenantID := os.Getenv("OCM_W_TENANT_ID")
+	ocmWCredentialConfigurationID := os.Getenv("OCM_W_CREDENTIAL_CONFIGURATION_ID")
+	issuanceClient := ocmw.NewIssuanceClient(ocmw.Config{
+		NATSURL:                   natsURL,
+		PublicIssuerURL:           ocmWPublicIssuerURL,
+		TenantID:                  ocmWTenantID,
+		CredentialConfigurationID: ocmWCredentialConfigurationID,
+	})
+
+	if err := ocmw.StartIssueResponder(ctx, ocmw.Config{
+		NATSURL:                   natsURL,
+		PublicIssuerURL:           ocmWPublicIssuerURL,
+		TenantID:                  ocmWTenantID,
+		CredentialConfigurationID: ocmWCredentialConfigurationID,
+	}); err != nil {
+		log.Fatalf(ctx, err, "failed to start OCM-W issue responder")
+	}
+
 	// Initialize the service.
 	var (
 		authSvc                         genauth.Service
 		contractStorageArchiveSvc       contractstoragearchive.Service
 		contractWorkflowEngineSvc       contractworkflowengine.Service
+		credentialIssuanceSvc           credentialissuance.Service
 		dcsToDcsSvc                     dcstodcs.Service
 		externalTargetSystemAPISvc      externaltargetsystemapi.Service
 		orchestrationWebhooksSvc        orchestrationwebhooks.Service
@@ -158,6 +185,7 @@ func main() {
 		authSvc = service.NewAuth()
 		contractStorageArchiveSvc = service.NewContractStorageArchive(jwtAuth)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, templateCatalogueClient)
+		credentialIssuanceSvc = service.NewCredentialIssuance(jwtAuth, issuanceClient)
 		dcsToDcsSvc = service.NewDcsToDcs(jwtAuth)
 		externalTargetSystemAPISvc = service.NewExternalTargetSystemAPI(jwtAuth)
 		orchestrationWebhooksSvc = service.NewOrchestrationWebhooks(jwtAuth)
@@ -167,12 +195,25 @@ func main() {
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient)
 	}
 
+	// Subscribe to CV's verified presentation stream (published on the
+	// storage-service topic) so the auth service can finish the OAuth
+	// flow and mark presentation requests completed without depending on
+	// the wallet's direct_post landing on our HTTP edge.
+	if err := ocmw.StartPresentationStorageListener(ctx, natsURL, func(ctx context.Context, requestID string, vp []byte) {
+		if err := service.CompletePresentationFromVP(ctx, authSvc, requestID, vp); err != nil {
+			log.Errorf(ctx, err, "presentation-storage: completion failed for request %q", requestID)
+		}
+	}); err != nil {
+		log.Errorf(ctx, err, "failed to start presentation storage listener")
+	}
+
 	// Wrap the service in endpoints that can be invoked from other service
 	// potentially running in different processes.
 	var (
 		authEndpoints                         *genauth.Endpoints
 		contractStorageArchiveEndpoints       *contractstoragearchive.Endpoints
 		contractWorkflowEngineEndpoints       *contractworkflowengine.Endpoints
+		credentialIssuanceEndpoints           *credentialissuance.Endpoints
 		dcsToDcsEndpoints                     *dcstodcs.Endpoints
 		externalTargetSystemAPIEndpoints      *externaltargetsystemapi.Endpoints
 		orchestrationWebhooksEndpoints        *orchestrationwebhooks.Endpoints
@@ -191,6 +232,9 @@ func main() {
 		contractWorkflowEngineEndpoints = contractworkflowengine.NewEndpoints(contractWorkflowEngineSvc)
 		contractWorkflowEngineEndpoints.Use(debug.LogPayloads())
 		contractWorkflowEngineEndpoints.Use(log.Endpoint)
+		credentialIssuanceEndpoints = credentialissuance.NewEndpoints(credentialIssuanceSvc)
+		credentialIssuanceEndpoints.Use(debug.LogPayloads())
+		credentialIssuanceEndpoints.Use(log.Endpoint)
 		dcsToDcsEndpoints = dcstodcs.NewEndpoints(dcsToDcsSvc)
 		dcsToDcsEndpoints.Use(debug.LogPayloads())
 		dcsToDcsEndpoints.Use(log.Endpoint)
@@ -253,7 +297,7 @@ func main() {
 			} else if u.Port() == "" {
 				u.Host = net.JoinHostPort(u.Host, "80")
 			}
-			handleHTTPServer(ctx, u, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, externalTargetSystemAPIEndpoints, orchestrationWebhooksEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, &wg, errc, *dbgF)
+			handleHTTPServer(ctx, u, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, credentialIssuanceEndpoints, dcsToDcsEndpoints, externalTargetSystemAPIEndpoints, orchestrationWebhooksEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, issuanceClient, db, &wg, errc, *dbgF)
 		}
 
 	default:

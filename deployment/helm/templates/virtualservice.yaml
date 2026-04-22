@@ -53,6 +53,7 @@ spec:
               number: {{ .Values.federatedCatalogue.service.port | int }}
     {{- end }}
     {{- /* DCS application route */}}
+    {{- if .Values.app.enabled }}
     - name: dcs
       match:
         - uri:
@@ -62,4 +63,5 @@ spec:
             host: {{ include "digital-contracting-service.fullname" . }}
             port:
               number: {{ .Values.service.port | int }}
+    {{- end }}
 {{- end }}

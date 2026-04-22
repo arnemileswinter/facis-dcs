@@ -1,3 +1,6 @@
+app:
+  enabled: true
+
 replicaCount: 1
 
 image:
@@ -81,12 +84,16 @@ paths:
 oidc:
   issuerURL: ""
   clientID: "[oidc-client-id]"
+  clientSecret: ""
   redirectURI: "[oidc-redirect-uri]"
   logoutRedirectURI: "[oidc-logout-redirect-uri]"
   scheme: "https"
   issuerURLSecretRef:
     name: ""
     key: "OIDC_ISSUER_URL"
+  clientSecretRef:
+    name: ""
+    key: "OIDC_CLIENT_SECRET"
 
 # Database connection – derived from the postgresql sub-chart when not set explicitly
 database:
@@ -114,6 +121,8 @@ serviceDiscovery:
   hydraHost: ""
   natsHost: ""
   hydraPublicPort: ""
+  ocmWIssuerHost: ""
+  ocmWIssuerPort: ""
 
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
@@ -137,7 +146,8 @@ hydra:
     path: ""
   config:
     # Set these when deploying Hydra for browser-based flows.
-    # loginURL and consentURL should point to your Node-RED consent bridge flow endpoints.
+    # loginURL and consentURL should point to the auth app that completes
+    # Hydra login/consent, e.g. DCS routes exposed through your gateway.
     dsn: "memory"
     selfIssuerURL: ""
     loginURL: ""
@@ -161,6 +171,11 @@ ocmW:
   # URL the DCS backend uses to reach the OCM-W issuer API.
   # Auto-derived from the sub-chart when enabled, or set explicitly here.
   issuerURL: ""
+  # Publicly reachable base URL of the OCM-W issuer stack used in published
+  # credential issuer metadata, e.g. https://issuer.example.com.
+  publicIssuerURL: ""
+  tenantID: "tenant_space"
+  credentialConfigurationID: "DCSRoleCredential"
   secretRef:
     name: ""
     key: "OCM_W_ISSUER_URL"
@@ -174,3 +189,26 @@ federatedCatalogue:
   secretRef:
     name: ""
     key: "FEDERATED_CATALOGUE_API_URL"
+
+credentialVerification:
+  # URL the DCS backend uses to reach the Credential Verification Service
+  url: ""
+
+# Post-install/upgrade hook that injects the missing
+# CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA env var into the
+# credential-verification-service deployment. The upstream chart 1.0.2 sets
+# CREDENTIALVERIFICATION_CLIENTURLSCHEMA, which the binary ignores, so CV
+# crashes on startup until this var is present.
+cvEnvPatch:
+  enabled: true
+  deployment: credential-verification-service
+  clientUrlSchema: http
+
+# Fixed NodePort sibling Services for ocm-w subcharts whose templates ignore
+# .Values.service.nodePort (well-known-service-1.0.3, issuance-service-1.0.0).
+# These pin the NodePort so the Vite proxy's hardcoded ports stay valid.
+ocmwFixedNodePorts:
+  enabled: true
+  wellKnown: 30182
+  issuance: 30180
+

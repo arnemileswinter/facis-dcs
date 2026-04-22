@@ -208,11 +208,37 @@ UI path override or derived default.
 {{/*
 OCM_W_ISSUER_URL: explicit override or auto-wired to co-deployed issuer service.
 */}}
+{{- define "digital-contracting-service.ocmWIssuerHost" -}}
+{{- if .Values.serviceDiscovery.ocmWIssuerHost -}}
+{{- .Values.serviceDiscovery.ocmWIssuerHost -}}
+{{- else if .Values.ocmW.enabled -}}
+issuance-service-service
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve OCM-W issuer service port from explicit override or dependency default.
+*/}}
+{{- define "digital-contracting-service.ocmWIssuerPort" -}}
+{{- if .Values.serviceDiscovery.ocmWIssuerPort -}}
+{{- .Values.serviceDiscovery.ocmWIssuerPort -}}
+{{- else if .Values.ocmW.enabled -}}
+8080
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+OCM_W_ISSUER_URL: explicit override or auto-wired to co-deployed issuer service.
+*/}}
 {{- define "digital-contracting-service.ocmWIssuerURL" -}}
 {{- if .Values.ocmW.issuerURL -}}
 {{- .Values.ocmW.issuerURL -}}
-{{- else if .Values.ocmW.enabled -}}
-{{- printf "http://%s-issuance-service:8080" .Release.Name -}}
+{{- else if include "digital-contracting-service.ocmWIssuerHost" . -}}
+{{- printf "http://%s:%v" (include "digital-contracting-service.ocmWIssuerHost" .) (include "digital-contracting-service.ocmWIssuerPort" .) -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}

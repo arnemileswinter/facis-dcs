@@ -1,3 +1,4 @@
+{{- if .Values.app.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,6 +61,15 @@ spec:
               {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.oidc.clientID | quote }}
+            - name: OIDC_CLIENT_SECRET
+              {{- if .Values.oidc.clientSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.clientSecretRef.name | quote }}
+                  key: {{ .Values.oidc.clientSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.oidc.clientSecret | quote }}
+              {{- end }}
             - name: OIDC_REDIRECT_URI
               value: {{ .Values.oidc.redirectURI | quote }}
             - name: OIDC_LOGOUT_REDIRECT_URI
@@ -100,6 +110,14 @@ spec:
               {{- else }}
               value: {{ include "digital-contracting-service.ocmWIssuerURL" . | quote }}
               {{- end }}
+            - name: OCM_W_PUBLIC_ISSUER_URL
+              value: {{ default (include "digital-contracting-service.ocmWIssuerURL" .) .Values.ocmW.publicIssuerURL | quote }}
+            - name: OCM_W_TENANT_ID
+              value: {{ .Values.ocmW.tenantID | quote }}
+            - name: OCM_W_CREDENTIAL_CONFIGURATION_ID
+              value: {{ .Values.ocmW.credentialConfigurationID | quote }}
+            - name: CREDENTIAL_VERIFICATION_URL
+              value: {{ .Values.credentialVerification.url | quote }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
             - name: DCS_UI_PATH
@@ -153,6 +171,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}

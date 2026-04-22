@@ -41,6 +41,7 @@ nats:
 oidc:
   issuerURL: "http://dcs-hydra:4444"
   clientID: "dcs-client"
+  clientSecret: "dcs-secret"
   scheme: "http"
 
 route:

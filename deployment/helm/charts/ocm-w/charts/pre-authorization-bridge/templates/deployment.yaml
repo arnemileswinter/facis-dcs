@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .Chart.Name }}"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: "{{ .Chart.Name }}"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: "{{ .Chart.Name }}"
+  template:
+    metadata:
+      labels:
+        app: "{{ .Chart.Name }}"
+{{- if .Values.podAnnotations }}
+      annotations:
+        {{ toYaml .Values.podAnnotations | indent 8 }}
+{{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccountName }}
+{{- if .Values.image.pullSecrets }}
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecrets }}
+{{- end }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+        env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel }}
+            - name: PREAUTHBRIDGE_LISTEN_ADDR
+              value: {{ .Values.server.http.host }}
+            - name: PREAUTHBRIDGE_LISTEN_PORT
+              value: "{{ .Values.server.http.port }}"
+            - name: PREAUTHBRIDGE_REDIS_HOSTS
+              value: {{ .Values.config.database.hosts }}
+            - name: PREAUTHBRIDGE_NATS_URL
+              value: {{ .Values.config.nats.url }}
+            - name: PREAUTHBRIDGE_OAUTH_SIGNER_TOPIC
+              value: {{ .Values.config.oAuth.signerTopic }}
+            - name: PREAUTHBRIDGE_OAUTH_SIGNER_JWKS_URL
+              value: {{ .Values.config.oAuth.signerJwksUrl }}
+            - name: PREAUTHBRIDGE_OAUTH_CREDENTIALENDPOINT
+              value: {{ .Values.config.oAuth.credentialEndpoint }}
+            - name: PREAUTHBRIDGE_OAUTH_KEY
+              value: {{ .Values.config.oAuth.key }}
+            - name: PREAUTHBRIDGE_OAUTH_NAMESPACE
+              value: {{ .Values.config.oAuth.namespace }}
+            - name: PREAUTHBRIDGE_OAUTH_GROUPID
+              value: {{ .Values.config.oAuth.groupid }}
+            - name: PREAUTHBRIDGE_OAUTH_ISSUER_KID
+              value: {{ .Values.config.oAuth.issuerKid }}
+            - name: PREAUTHBRIDGE_WELLKNOWN_JWKS
+              value:  {{ .Values.config.wellKnown.jwks }}
+            - name: PREAUTHBRIDGE_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{- .Release.Name  }}-redis"
+                  key: redis-password
+      {{- if .Values.resources }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
+      {{- end }}
+        ports:
+          - containerPort: {{ .Values.config.servingPort }}
+        volumeMounts:
+          - mountPath: /app
+            name: config-volume
+      volumes:
+        - name: config-volume
+          configMap:
+            name: "{{ .Release.Name }}-configmap"

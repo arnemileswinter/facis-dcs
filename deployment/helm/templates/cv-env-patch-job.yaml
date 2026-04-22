@@ -1,0 +1,109 @@
+{{/*
+Post-install/upgrade hook: patch credential-verification-service with the env
+var name it actually reads.
+
+The CV chart (credential-verification-service-1.0.2) sets
+CREDENTIALVERIFICATION_CLIENTURLSCHEMA from values, but the running binary
+expects CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA. Without
+the latter, CV crashes on startup. Until the upstream chart is fixed, this
+hook injects the missing env var via `kubectl set env`.
+*/}}
+{{- if .Values.cvEnvPatch.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-cv-env-patch
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-cv-env-patch
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-cv-env-patch
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-cv-env-patch
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-cv-env-patch
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-cv-env-patch
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: {{ .Release.Name }}-cv-env-patch
+      restartPolicy: OnFailure
+      containers:
+        - name: patch
+          image: alpine:3.19
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache curl jq >/dev/null
+              K8S=https://kubernetes.default.svc
+              K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              K8S_CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              DEPLOY={{ .Values.cvEnvPatch.deployment }}
+              VAR_NAME=CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA
+              VAR_VALUE={{ .Values.cvEnvPatch.clientUrlSchema | quote }}
+
+              GET=$(curl -sf -H "Authorization: Bearer $K8S_TOKEN" --cacert $K8S_CA \
+                $K8S/apis/apps/v1/namespaces/$NS/deployments/$DEPLOY)
+              CUR=$(echo "$GET" | jq -r --arg n "$VAR_NAME" \
+                '.spec.template.spec.containers[0].env[]? | select(.name==$n) | .value // empty')
+              if [ "$CUR" = "$VAR_VALUE" ]; then
+                echo "$DEPLOY already has $VAR_NAME=$VAR_VALUE"
+                exit 0
+              fi
+
+              ENV=$(echo "$GET" | jq -c --arg n "$VAR_NAME" --arg v "$VAR_VALUE" \
+                '(.spec.template.spec.containers[0].env // []) | map(select(.name != $n)) + [{"name":$n,"value":$v}]')
+              PATCH=$(jq -nc --argjson env "$ENV" \
+                '{spec:{template:{spec:{containers:[{name:"credential-verification-service",env:$env}]}}}}')
+
+              STATUS=$(curl -s -o /tmp/resp -w "%{http_code}" -X PATCH \
+                -H "Authorization: Bearer $K8S_TOKEN" \
+                -H "Content-Type: application/strategic-merge-patch+json" \
+                --cacert $K8S_CA \
+                $K8S/apis/apps/v1/namespaces/$NS/deployments/$DEPLOY \
+                -d "$PATCH")
+              echo "PATCH status: $STATUS"
+              if [ "$STATUS" != "200" ]; then
+                cat /tmp/resp
+                exit 1
+              fi
+              echo "patched $DEPLOY with $VAR_NAME=$VAR_VALUE"
+{{- end }}

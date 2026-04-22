@@ -1,0 +1,72 @@
+{{- if and .Values.cassandra.enabled (index .Values "credential-verification-service" "enabled") }}
+{{/*
+Initialize Cassandra schema required by credential-verification-service.
+This ensures first-time installs have tenant_space.presentations available.
+*/}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-cv-cassandra-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: cv-cassandra-init
+          image: cassandra:4.1
+          env:
+            - name: CASSANDRA_HOST
+              value: dcs-cassandra
+            - name: CASSANDRA_USER
+              value: cassandra
+            - name: CASSANDRA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cassandra
+                  key: cassandra-password
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+
+              echo "Waiting for Cassandra at ${CASSANDRA_HOST}:9042..."
+              until cqlsh "$CASSANDRA_HOST" -u "$CASSANDRA_USER" -p "$CASSANDRA_PASSWORD" -e "DESCRIBE KEYSPACES" >/dev/null 2>&1; do
+                sleep 3
+              done
+
+              cqlsh "$CASSANDRA_HOST" -u "$CASSANDRA_USER" -p "$CASSANDRA_PASSWORD" <<'CQL'
+              CREATE KEYSPACE IF NOT EXISTS tenant_space
+              WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+              CREATE TABLE IF NOT EXISTS tenant_space.presentations (
+                region text,
+                country text,
+                id text,
+                requestid text,
+                presentationdefinition text,
+                presentation text,
+                redirecturi text,
+                state text,
+                last_update_timestamp timestamp,
+                nonce text,
+                responseuri text,
+                responsemode text,
+                responsetype text,
+                clientid text,
+                groupid text,
+                PRIMARY KEY ((region, country), id)
+              );
+
+              CREATE INDEX IF NOT EXISTS presentations_requestid_idx ON tenant_space.presentations (requestid);
+              CREATE INDEX IF NOT EXISTS presentations_groupid_idx ON tenant_space.presentations (groupid);
+              CQL
+
+              echo "Cassandra schema for CV initialized."
+{{- end }}

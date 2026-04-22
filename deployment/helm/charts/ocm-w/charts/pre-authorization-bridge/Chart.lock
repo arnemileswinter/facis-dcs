@@ -1,0 +1,6 @@
+dependencies:
+- name: library
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/dev-ops
+  version: 1.1.1
+digest: sha256:c842b0cee842fd4339adea454bc56d34b19d64e76d7f238d88c939e746aeeee0
+generated: "2025-11-27T23:06:43.660615517Z"

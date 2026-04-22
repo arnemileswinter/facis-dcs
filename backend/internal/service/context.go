@@ -6,6 +6,12 @@ import (
 	"net/http"
 )
 
+const (
+	refreshTokenCookieName = "refresh_token"
+	oauthStateCookieName   = "oidc_state"
+	idTokenCookieName      = "id_token"
+)
+
 const apiPathPrefixEnv = "DCS_API_PATH"
 const defaultAPIPathPrefix = ""
 
@@ -50,14 +56,13 @@ func SetRefreshTokenInContext(ctx context.Context, refreshToken string) {
 	if !ok || refreshToken == "" {
 		return
 	}
-	cookiePath := pathutil.JoinPaths(apiPathPrefixEnv, defaultAPIPathPrefix, "/auth/refresh")
 	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
+		Name:     refreshTokenCookieName,
 		Value:    refreshToken,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		Path:     cookiePath,
+		Path:     refreshTokenCookiePath(),
 		MaxAge:   7 * 24 * 60 * 60, // 7 days
 	})
 }
@@ -68,14 +73,120 @@ func ClearRefreshTokenCookie(ctx context.Context) {
 	if !ok {
 		return
 	}
-	cookiePath := pathutil.JoinPaths(apiPathPrefixEnv, defaultAPIPathPrefix, "/auth/refresh")
 	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
+		Name:     refreshTokenCookieName,
 		Value:    "",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		Path:     cookiePath,
-		MaxAge:   -1, // Delete the cookie
+		Path:     refreshTokenCookiePath(),
+		MaxAge:   -1,
+	})
+}
+
+// SetOAuthStateCookie stores the transient OIDC state value used by the callback.
+func SetOAuthStateCookie(ctx context.Context, state string) {
+	w, ok := ResponseWriterFromContext(ctx)
+	if !ok || state == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    state,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		Path:     oauthStateCookiePath(),
+		MaxAge:   10 * 60,
+	})
+}
+
+// ReadOAuthStateCookie extracts the transient OIDC state cookie from the request.
+func ReadOAuthStateCookie(ctx context.Context) (string, error) {
+	r, ok := HTTPRequestFromContext(ctx)
+	if !ok {
+		return "", http.ErrNoCookie
+	}
+	cookie, err := r.Cookie(oauthStateCookieName)
+	if err != nil {
+		return "", err
+	}
+	return cookie.Value, nil
+}
+
+// ClearOAuthStateCookie clears the transient OIDC state cookie.
+func ClearOAuthStateCookie(ctx context.Context) {
+	w, ok := ResponseWriterFromContext(ctx)
+	if !ok {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    "",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		Path:     oauthStateCookiePath(),
+		MaxAge:   -1,
+	})
+}
+
+func refreshTokenCookiePath() string {
+	return pathutil.JoinPaths(apiPathPrefixEnv, defaultAPIPathPrefix, "/auth/refresh")
+}
+
+func oauthStateCookiePath() string {
+	return pathutil.JoinPaths(apiPathPrefixEnv, defaultAPIPathPrefix, "/auth/callback")
+}
+
+func idTokenCookiePath() string {
+	return pathutil.JoinPaths(apiPathPrefixEnv, defaultAPIPathPrefix, "/auth/logout")
+}
+
+// SetIDTokenCookie persists the OIDC id_token so /auth/logout can pass
+// it to the provider as id_token_hint.
+func SetIDTokenCookie(ctx context.Context, idToken string) {
+	w, ok := ResponseWriterFromContext(ctx)
+	if !ok || idToken == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     idTokenCookieName,
+		Value:    idToken,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		Path:     idTokenCookiePath(),
+		MaxAge:   7 * 24 * 60 * 60,
+	})
+}
+
+// ReadIDTokenCookie retrieves the stored id_token if present.
+func ReadIDTokenCookie(ctx context.Context) string {
+	r, ok := HTTPRequestFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	cookie, err := r.Cookie(idTokenCookieName)
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+// ClearIDTokenCookie expires the id_token cookie.
+func ClearIDTokenCookie(ctx context.Context) {
+	w, ok := ResponseWriterFromContext(ctx)
+	if !ok {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     idTokenCookieName,
+		Value:    "",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		Path:     idTokenCookiePath(),
+		MaxAge:   -1,
 	})
 }

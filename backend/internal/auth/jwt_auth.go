@@ -28,7 +28,8 @@ func NewJWTAuthenticator(v *middleware.OIDCValidator) JWTAuthenticator {
 }
 
 // JWTAuth validates a JWT token via the OIDC provider and checks that the
-// caller possesses at least one of the required scopes (Keycloak realm roles).
+// caller possesses at least one of the required scopes (DCS roles from the
+// "roles" claim injected by the consent bridge).
 // It returns an enriched context with the caller's roles on success.
 func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *security.JWTScheme) (context.Context, error) {
 	if token == "" {

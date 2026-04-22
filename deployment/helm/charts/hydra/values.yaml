@@ -21,6 +21,9 @@ config:
   consentURL: ""
   publicTLS: false
   adminTLS: false
+  # Enable Hydra dev mode (required when selfIssuerURL uses http://).
+  # Never set to true in production.
+  dev: false
 
 secrets:
   # Required for non-dev deployments. Leave empty for generated fallback.

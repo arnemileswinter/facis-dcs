@@ -5,9 +5,9 @@ import (
 	cors "goa.design/plugins/v3/cors/dsl" // Kein Punkt, sondern Alias 'cors'
 )
 
-// JWTAuth defines the JWT-based security scheme backed by Keycloak OIDC.
+// JWTAuth defines the JWT-based security scheme backed by Hydra OIDC.
 var JWTAuth = JWTSecurity("jwt", func() {
-	Description("Keycloak OIDC JWT Bearer token. Scopes correspond to Keycloak client roles.")
+	Description("Hydra OIDC JWT Bearer token. Scopes correspond to DCS roles carried in the 'roles' claim of the ID token (injected by the Node-RED consent bridge after OID4VP authentication).")
 	Scope("Archive Manager", "Manage archived contracts and evidence")
 	Scope("Contract Observer", "Read-only access to archived contracts")
 	Scope("Contract Creator", "Create new contract drafts")
