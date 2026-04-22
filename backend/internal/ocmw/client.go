@@ -29,6 +29,13 @@ type Config struct {
 	PublicIssuerURL           string
 	TenantID                  string
 	CredentialConfigurationID string
+
+	// Signer configuration used by the issue responder to produce signed
+	// JWT verifiable credentials via the TSA signer service.
+	SignerURL       string
+	SignerNamespace string
+	SignerGroup     string
+	SignerKey       string
 }
 
 // IssuanceClient publishes issuer metadata and requests credential offers over

@@ -41,6 +41,13 @@ func StartIssueResponder(ctx context.Context, cfg Config) error {
 
 	subject := strings.ToLower("digital-contracting-service."+tenantID+"."+configurationID) + ".issue"
 
+	signerCfg := SignerConfig{
+		URL:       strings.TrimSpace(cfg.SignerURL),
+		Namespace: strings.TrimSpace(cfg.SignerNamespace),
+		Group:     strings.TrimSpace(cfg.SignerGroup),
+		Key:       strings.TrimSpace(cfg.SignerKey),
+	}
+
 	client, err := cloudeventprovider.New(
 		cloudeventprovider.Config{
 			Protocol: cloudeventprovider.ProtocolTypeNats,
@@ -60,14 +67,14 @@ func StartIssueResponder(ctx context.Context, cfg Config) error {
 
 	go func() {
 		_ = client.ReplyCtx(ctx, func(replyCtx context.Context, event cev2.Event) (*cev2.Event, error) {
-			return buildIssueResponse(event, publicIssuerURL, tenantID, configurationID)
+			return buildIssueResponse(replyCtx, event, publicIssuerURL, tenantID, configurationID, signerCfg)
 		})
 	}()
 
 	return nil
 }
 
-func buildIssueResponse(event cev2.Event, publicIssuerURL, tenantID, configurationID string) (*cev2.Event, error) {
+func buildIssueResponse(ctx context.Context, event cev2.Event, publicIssuerURL, tenantID, configurationID string, signerCfg SignerConfig) (*cev2.Event, error) {
 	var req issuermessaging.IssuanceModuleReq
 	if err := json.Unmarshal(event.Data(), &req); err != nil {
 		payload := issuermessaging.IssuanceModuleRep{
@@ -91,8 +98,10 @@ func buildIssueResponse(event cev2.Event, publicIssuerURL, tenantID, configurati
 		subjectID = req.Subject
 	}
 
+	issuer := publicIssuerURL + "/v1/tenants/" + tenantID
+
 	credential := map[string]interface{}{
-		"iss": publicIssuerURL + "/v1/tenants/" + tenantID,
+		"iss": issuer,
 		"sub": subjectID,
 		"iat": issuedAt,
 		"nbf": notBefore,
@@ -116,14 +125,14 @@ func buildIssueResponse(event cev2.Event, publicIssuerURL, tenantID, configurati
 		},
 	}
 
-	credentialJWT, err := buildUnsignedJWT(credential)
+	credentialJWT, err := signCredentialJWT(ctx, signerCfg, issuer, credential)
 	if err != nil {
 		payload := issuermessaging.IssuanceModuleRep{
 			Reply: common.Reply{
 				TenantId:  req.TenantId,
 				RequestId: req.RequestId,
 				GroupId:   req.GroupId,
-				Error:     &common.Error{Status: 500, Msg: "failed to build credential"},
+				Error:     &common.Error{Status: 500, Msg: "failed to sign credential: " + err.Error()},
 			},
 		}
 		return marshalIssueReply(payload)

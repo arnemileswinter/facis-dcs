@@ -179,6 +179,12 @@ ocmW:
   secretRef:
     name: ""
     key: "OCM_W_ISSUER_URL"
+  # TSA signer used by the DCS-side issue responder to produce signed JWT VCs.
+  signer:
+    url: "http://dcs-signer:8080"
+    namespace: "tenant_space"
+    group: ""
+    key: "signerkey"
 
 # XFSC Federated Catalogue (requires neo4j, an OIDC-compatible issuer, postgresql with "fc" database)
 # See charts/federated-catalogue/values.yaml for all configurable fields.

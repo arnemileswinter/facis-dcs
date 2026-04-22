@@ -63,7 +63,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setUser(userId: string) {
     const userProfile = users.value.find((user) => user.id === userId)
-    debugger
     if (userProfile) {
       user.value = {
         id: userProfile.id,

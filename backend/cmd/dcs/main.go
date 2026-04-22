@@ -151,6 +151,10 @@ func main() {
 	}
 	ocmWTenantID := os.Getenv("OCM_W_TENANT_ID")
 	ocmWCredentialConfigurationID := os.Getenv("OCM_W_CREDENTIAL_CONFIGURATION_ID")
+	ocmWSignerURL := os.Getenv("OCM_W_SIGNER_URL")
+	ocmWSignerNamespace := os.Getenv("OCM_W_SIGNER_NAMESPACE")
+	ocmWSignerGroup := os.Getenv("OCM_W_SIGNER_GROUP")
+	ocmWSignerKey := os.Getenv("OCM_W_SIGNER_KEY")
 	issuanceClient := ocmw.NewIssuanceClient(ocmw.Config{
 		NATSURL:                   natsURL,
 		PublicIssuerURL:           ocmWPublicIssuerURL,
@@ -163,6 +167,10 @@ func main() {
 		PublicIssuerURL:           ocmWPublicIssuerURL,
 		TenantID:                  ocmWTenantID,
 		CredentialConfigurationID: ocmWCredentialConfigurationID,
+		SignerURL:                 ocmWSignerURL,
+		SignerNamespace:           ocmWSignerNamespace,
+		SignerGroup:               ocmWSignerGroup,
+		SignerKey:                 ocmWSignerKey,
 	}); err != nil {
 		log.Fatalf(ctx, err, "failed to start OCM-W issue responder")
 	}

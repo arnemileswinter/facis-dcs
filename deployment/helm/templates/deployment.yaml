@@ -116,6 +116,14 @@ spec:
               value: {{ .Values.ocmW.tenantID | quote }}
             - name: OCM_W_CREDENTIAL_CONFIGURATION_ID
               value: {{ .Values.ocmW.credentialConfigurationID | quote }}
+            - name: OCM_W_SIGNER_URL
+              value: {{ .Values.ocmW.signer.url | quote }}
+            - name: OCM_W_SIGNER_NAMESPACE
+              value: {{ .Values.ocmW.signer.namespace | quote }}
+            - name: OCM_W_SIGNER_GROUP
+              value: {{ .Values.ocmW.signer.group | quote }}
+            - name: OCM_W_SIGNER_KEY
+              value: {{ .Values.ocmW.signer.key | quote }}
             - name: CREDENTIAL_VERIFICATION_URL
               value: {{ .Values.credentialVerification.url | quote }}
             - name: DCS_API_PATH
