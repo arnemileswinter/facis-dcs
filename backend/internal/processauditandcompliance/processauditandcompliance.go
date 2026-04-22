@@ -16,7 +16,7 @@ type AuditLogEntry struct {
 }
 
 type LogEntry struct {
-	ID           string   `json:"id"`
+	EventID      string   `json:"event_id"`
 	Source       string   `json:"source"`
 	EventType    string   `json:"event_type"`
 	Payload      string   `json:"payload"`
@@ -30,19 +30,19 @@ type PACSubscriber struct {
 func (j PACSubscriber) Start() {
 	go func() {
 		var previousChecksum [32]byte
-		j.SubClient.Subscribe(func(evt event.Event) {
+		err := j.SubClient.Subscribe(func(evt event.Event) {
 
 			raw := string(evt.Data())
-
 			raw = strings.Trim(raw, `"`)
 
 			payload, err := base64.StdEncoding.DecodeString(raw)
 			if err != nil {
 				log.Println(err)
+				return
 			}
 
-			entry := LogEntry{
-				ID:           evt.ID(),
+			logEntry := LogEntry{
+				EventID:      evt.ID(),
 				Source:       evt.Source(),
 				EventType:    evt.Type(),
 				Payload:      string(payload),
@@ -50,13 +50,16 @@ func (j PACSubscriber) Start() {
 			}
 			checksum := sha256.Sum256(payload)
 			auditLogEntry := AuditLogEntry{
-				LogEntry: entry,
+				LogEntry: logEntry,
 				Checksum: checksum,
 			}
 			log.Println(auditLogEntry)
 
 			previousChecksum = checksum
 		})
+		if err != nil {
+			log.Fatalf("failed to subscribe to events: %s", err)
+		}
 	}()
 }
 

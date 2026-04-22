@@ -3,7 +3,9 @@ module digital-contracting-service
 go 1.25.7
 
 require (
+	github.com/cloudevents/sdk-go/v2 v2.15.0
 	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/eclipse-xfsc/cloud-event-provider v0.1.5
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.11.1
@@ -24,13 +26,11 @@ require (
 	github.com/cloudevents/sdk-go/protocol/mqtt_paho/v2 v2.0.0-20240212142714-4cc6c2d62d63 // indirect
 	github.com/cloudevents/sdk-go/protocol/nats/v2 v2.14.0 // indirect
 	github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.14.0 // indirect
-	github.com/cloudevents/sdk-go/v2 v2.15.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dimfeld/httppath v0.0.0-20170720192232-ee938bf73598 // indirect
 	github.com/eapache/go-resiliency v1.5.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/eclipse-xfsc/cloud-event-provider v0.1.5 // indirect
 	github.com/eclipse/paho.golang v0.12.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-chi/chi/v5 v5.2.4 // indirect
