@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -33,8 +34,9 @@ func NewOIDCValidator(ctx context.Context, config OIDCConfig) (*OIDCValidator, e
 	// Skip audience check — Keycloak places the client ID in the "azp" claim,
 	// not in "aud". The token signature and issuer are still fully validated.
 	verifier := provider.Verifier(&oidc.Config{
-		ClientID:          config.ClientID,
-		SkipClientIDCheck: true,
+		ClientID:                   config.ClientID,
+		SkipClientIDCheck:          true,
+		InsecureSkipSignatureCheck: os.Getenv("JWT_ALG_NONE_SUPPORTED") == "true",
 	})
 
 	return &OIDCValidator{

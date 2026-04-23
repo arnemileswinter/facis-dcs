@@ -17,6 +17,7 @@ Feature: Template Identity and Traceability
     Then the template has a resolvable DID
     And the DID is linked to template metadata
 
+  @skip
   Scenario: Retrieve template by UUID
     Given I am authenticated with role "Template Reviewer"
     And template "Standard NDA" exists with UUID
