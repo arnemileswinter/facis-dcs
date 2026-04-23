@@ -93,10 +93,12 @@ func main() {
 	}
 	defer cepPubClient.Close()
 
+	ipfsAPIClient := ipfs.NewClient("http://localhost:8000/v1/tenants/tenant_space", "http://localhost:5001")
 	outboxProcessor := event.OutboxProcessor{
-		DB:        db,
-		Ctx:       ctx,
-		PubClient: cepPubClient,
+		DB:         db,
+		Ctx:        ctx,
+		PubClient:  cepPubClient,
+		IPFSClient: ipfsAPIClient,
 	}
 	outboxProcessor.Start()
 
@@ -106,10 +108,8 @@ func main() {
 	}
 	defer cepPubClient.Close()
 
-	ipfsAPIClient := ipfs.NewClient("http://localhost:8000/v1/tenants/tenant_space", "http://localhost:5001")
 	pac := event2.PACSubscriber{
-		SubClient:  cepSubClient,
-		IPFSClient: ipfsAPIClient,
+		SubClient: cepSubClient,
 	}
 	pac.Start()
 
