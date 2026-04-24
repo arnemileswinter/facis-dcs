@@ -81,15 +81,5 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 		return fmt.Errorf("could not create event: %w", err)
 	}
 
-	err = h.RTRepo.Delete(ctx, tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not delete review tasks: %w", err)
-	}
-
-	err = h.ATRepo.Delete(ctx, tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not delete approval tasks: %w", err)
-	}
-
 	return tx.Commit()
 }
