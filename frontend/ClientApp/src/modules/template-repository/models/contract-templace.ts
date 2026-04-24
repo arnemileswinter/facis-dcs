@@ -66,13 +66,14 @@ export const DocumentBlockType = {
     Text: 'TEXT',
     Clause: 'CLAUSE',
     ApprovedTemplate: 'APPROVED_TEMPLATE',
+    MergedApprovedTemplate: 'MERGED_APPROVED_TEMPLATE',
 } as const
 
 // ---- DocumentBlock ----
 
 export type DocumentBlockType = (typeof DocumentBlockType)[keyof typeof DocumentBlockType]
 
-export type DocumentBlock = SectionBlock | TextBlock | ClauseBlock | ApprovedTemplateBlock
+export type DocumentBlock = SectionBlock | TextBlock | ClauseBlock | ApprovedTemplateBlock | MergedApprovedTemplateBlock
 
 interface BaseBlock {
     blockId: string
@@ -104,6 +105,13 @@ export interface ApprovedTemplateBlock extends BaseBlock {
     document_number: string
 }
 
+export interface MergedApprovedTemplateBlock extends BaseBlock {
+    type: (typeof DocumentBlockType)['MergedApprovedTemplate']
+    templateId: string
+    version: number
+    document_number: string
+}
+
 export function isSectionBlock(block: DocumentBlock): block is SectionBlock {
     return block.type === DocumentBlockType.Section
 }
@@ -118,6 +126,10 @@ export function isClauseBlock(block: DocumentBlock): block is ClauseBlock {
 
 export function isApprovedTemplateBlock(block: DocumentBlock): block is ApprovedTemplateBlock {
     return block.type === DocumentBlockType.ApprovedTemplate
+}
+
+export function isMergedApprovedTemplateBlock(block: DocumentBlock): block is MergedApprovedTemplateBlock {
+    return block.type === DocumentBlockType.MergedApprovedTemplate
 }
 
 // ---- MetaData ----

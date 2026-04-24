@@ -262,6 +262,34 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("action flags is missing")
 		}
 
+	} else if processData.State == contractstate.Reviewed.String() {
+
+		isValid, err := h.ATRepo.IsValidApprover(ctx, tx, processData.DID, cmd.SubmittedBy)
+		if err != nil {
+			return err
+		}
+
+		if !isValid {
+			return errors.New("invalid user")
+		}
+
+		err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
+		if err != nil {
+			return err
+		}
+
+		err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
+		if err != nil {
+			return err
+		}
+
+		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
+		if err != nil {
+			return err
+		}
+
+		nextState = contractstate.Submitted
+
 	} else {
 		return errors.New("current contract state is invalid")
 	}

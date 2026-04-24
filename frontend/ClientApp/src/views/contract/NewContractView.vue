@@ -4,10 +4,26 @@ import type { Contract } from '@/models/contract/contract'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
+import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
+import { useSemanticValueVerification, type VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
 import { useErrorStore } from '@/stores/error-store'
+import { ContractState } from '@/types/contract-state'
+import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
+import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
+import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { ContractData } from '@/models/contract-data'
+import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
+import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
+import AddBlockModal from '@template-repository/components/builder-editor/AddBlockModal.vue'
+import SemanticRulesEditor from '@template-repository/components/SemanticRulesEditor.vue'
+import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import BuilderPreviewDialog from '@template-repository/components/builder-editor/BuilderPreviewDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,15 +31,32 @@ const router = useRouter()
 const errorStore = useErrorStore()
 const templatesStore = useContractTemplatesStore()
 const { approvedTemplates, hasApprovedTemplates } = storeToRefs(templatesStore)
+const templateDraftStore = useTemplateDraftStore()
+const contractContentValuesStore = useContractContentValuesStore()
+const contractEditorUiStore = useContractEditorUiStore()
+const templateEditorUiStore = useTemplateEditorUiStore()
+const { hasConditionParameterForValue } = useSemanticValueVerification()
+const { preprocessContractData } = useContractDataPreprocess()
+const { activeTab } = storeToRefs(contractEditorUiStore)
+const { setActiveTab } = contractEditorUiStore
+const { togglePreviewDialog } = templateEditorUiStore
 
 const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
 
 const canSubmit = computed(() => isEditMode.value || hasApprovedTemplates.value && selectedTemplate.value !== null)
+const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
+  if (!isEditMode.value) return null
+  return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number) =>
+    contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
+})
+
+const tabs = computed(()=> contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
 const submit = async () => {
   isSubmitting.value = true
@@ -33,6 +66,14 @@ const submit = async () => {
       did.value = response.did
       errorStore.add('Contract created.', 'info')
     } else if (contract.value) {
+      const contractData: ContractData = {
+        documentOutline: templateDraftStore.documentOutline,
+        documentBlocks: templateDraftStore.documentBlocks,
+        semanticConditions: templateDraftStore.semanticConditions,
+        subTemplateSnapshots: templateDraftStore.subTemplateSnapshots,
+        templateDataVersion: templateDraftStore.templateDataVersion,
+        semanticConditionValues: contractContentValuesStore.semanticConditionValues,
+      }
       await contractWorkflowService.update({
         did: contract.value.did,
         updated_at: contract.value.updated_at,
@@ -40,6 +81,7 @@ const submit = async () => {
         contract_version: contract.value.contract_version,
         name: contract.value.name,
         description: contract.value.description,
+        contract_data: contractData,
       })
       router.push({ name: ROUTES.CONTRACTS.LIST })
     }
@@ -58,6 +100,10 @@ watch(
         const id = did.value || route.params.did
         if (id && !Array.isArray(id)) {
           contract.value = await contractWorkflowService.retrieveById({ did: id })
+          applyContractDataToDraft(contract.value?.contract_data)
+          const uneditableStates = [ContractState.approved, ContractState.terminated].map((s) => s.toLowerCase())
+          templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''))
+          
         }
       } catch (err: any) {
         console.error('Failed to load contract', err)
@@ -68,6 +114,59 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => [
+    templateDraftStore.documentBlocks,
+    templateDraftStore.semanticConditions,
+    templateDraftStore.subTemplateSnapshots,
+  ],
+  () => {
+    const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
+      (conditionValue) => !hasConditionParameterForValue(
+        conditionValue,
+        templateDraftStore.documentBlocks,
+        templateDraftStore.semanticConditions,
+        templateDraftStore.subTemplateSnapshots,
+      ),
+    )
+    contractContentValuesStore.removeSemanticConditionValues(invalidValues)
+  },
+  { deep: true },
+)
+
+onMounted(() => {
+  templateEditorUiStore.reset({ workflow: 'contract' })
+})
+
+onUnmounted(() => {
+  templateDraftStore.reset({ workflow: 'contract' })
+  contractContentValuesStore.reset()
+  contractEditorUiStore.reset()
+  templateEditorUiStore.reset({ workflow: 'contract' })
+  verificationResult.value = null
+})
+
+// Contract data includes the template data used to fill the contract template
+function applyContractDataToDraft(contractData?: unknown) {
+  if (contractData == null) {
+    templateDraftStore.reset({workflow: 'contract'})
+    contractContentValuesStore.reset()
+    verificationResult.value = null
+    return
+  }
+  const cd = preprocessContractData(contractData as ContractData)
+  templateDraftStore.reset({
+    workflow: 'contract',
+    documentOutline: cd.documentOutline ?? [],
+    documentBlocks: cd.documentBlocks ?? [],
+    semanticConditions: cd.semanticConditions ?? [],
+    subTemplateSnapshots: cd.subTemplateSnapshots ?? [],
+    templateDataVersion: cd.templateDataVersion,
+  })
+  contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  verificationResult.value = null
+}
 </script>
 
 <template>
@@ -78,23 +177,92 @@ watch(
         <option v-for="template in approvedTemplates" :key="template.did" :value="template">{{ template.name }}</option>
       </select>
     </div>
-    <div v-else-if="!!contract" class="max-w-4xl mx-auto px-6 py-12">
-      <fieldset class="fieldset p-0 border-none">
-        <legend class="fieldset-legend">Global Name</legend>
-        <input v-model="contract.name" class="input input-bordered w-full" type="text" required />
-      </fieldset>
+    <div v-else-if="!!contract">
+      <div class="flex-1 flex flex-col">
+        <!-- Tabs -->
+        <div class="sticky top-0 z-10 shrink-0 bg-base-200 border-b border-base-300">
+          <div class="max-w-4xl mx-auto px-6 pt-3">
+            <p class="text-xs font-black uppercase tracking-widest text-base-content/40 mb-2">
+              {{ isEditMode ? 'Update Contract' : 'Create Contract' }}
+            </p>
+            <div role="tablist" class="tabs tabs-lift tabs-lg">
+              <a v-for="tab in tabs" :key="tab.id" role="tab" class="tab"
+                :class="{ 'tab-active': activeTab === tab.id }" @click="setActiveTab(tab.id)">
+                {{ tab.label }}
+              </a>
+            </div>
+          </div>
+        </div>
+        <!-- Tab content -->
+        <div class="grow mt-5">
+          <div class="max-w-4xl mx-auto p-6">
+            <div class="grid grid-cols-1 gap-4">
+              <div v-show="activeTab === 'details'">
+                <ContractDetailsEditor :contract="contract" />
+              </div>
+              <div v-show="activeTab === 'content'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body gap-5">
+                    <div>
+                      <TemplatePreview
+                        :document-outline="templateDraftStore.documentOutline"
+                        :document-blocks="templateDraftStore.documentBlocks"
+                        :semantic-conditions="templateDraftStore.semanticConditions"
+                        :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                        :verification-result="verificationResult"
+                        :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
+                        :set-semantic-condition-value="setSemanticConditionValue"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- SEMANTIC RULES TAB -->
+              <div v-show="activeTab === 'semantic'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body gap-5">
+                    <SemanticRulesEditor />
+                  </div>
+                </div>
+              </div>
 
-      <fieldset class="fieldset p-0 border-none">
-        <legend class="fieldset-legend">Base Description</legend>
-        <textarea v-model="contract.description" class="textarea textarea-bordered w-full h-24" required></textarea>
-      </fieldset>
+              <!-- CLAUSES TAB -->
+              <div v-show="activeTab === 'clauses'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body gap-5">
+                    <ClausesEditor />
+                  </div>
+                </div>
+              </div>
+
+              <!-- BUILDER TAB -->
+              <div v-show="activeTab === 'builder'">
+                <div class="card bg-base-100 border border-base-300 shadow-sm">
+                  <div class="card-body">
+                    <div class="flex items-center justify-between mb-2">
+                      <h2 class="card-title text-sm">Builder</h2>
+                      <button type="button" class="btn btn-sm btn-secondary" @click="togglePreviewDialog">
+                        Preview
+                      </button>
+                    </div>
+                    <BuilderEditor />
+                  </div>
+                </div>
+                <AddBlockModal />
+                <BuilderPreviewDialog />
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
         <button class="btn btn-ghost md:w-32" @click="$router.back()">Cancel</button>
         <button @click="submit" class="btn btn-primary flex-1" :disabled="isSubmitting || !canSubmit">
           <span v-if="isSubmitting" class="loading loading-spinner loading-sm"></span>
-          {{ isEditMode ? 'Update Template' : 'Create' }}
+          {{ isEditMode ? 'Update Contract' : 'Create' }}
         </button>
       </div>
     </div>

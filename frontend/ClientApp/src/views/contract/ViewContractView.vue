@@ -2,6 +2,10 @@
 import SubmitSelectionDialog from '@/components/SubmitSelectionDialog.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { SelectedUserRole } from '@/models/user'
+import { useSemanticValueVerification, type VerificationResult } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
+import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
+import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
@@ -13,9 +17,14 @@ const route = useRoute()
 const router = useRouter()
 
 const authStore = useAuthStore()
+const templateDraftStore = useTemplateDraftStore()
+const contractEditorUiStore = useContractEditorUiStore()
+const contractContentValuesStore = useContractContentValuesStore()
+const { verifySemanticValue } = useSemanticValueVerification()
+const { setActiveTab } = contractEditorUiStore
 
 const contract: Ref<Contract | null> = ref(null)
-
+  const verificationResult: Ref<VerificationResult | null> = ref(null)
 const isCreator = computed(() => {
   return contract.value?.created_by === authStore.user?.username
 })
@@ -39,19 +48,51 @@ watch(
 
 const submitContract = async (result: SelectedUserRole[]) => {
   if (!contract.value) return
-  const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
-  const approver = result.find((user) => user.role === 'CONTRACT_APPROVER')?.user.username!
-  const negotiators = result.filter((user) => user.role === 'CONTRACT_NEGOTIATOR').map((user) => user.user.username)
-  const response = await contractWorkflowService.submit({
-    did: contract.value?.did,
-    updated_at: contract.value?.updated_at,
-    reviewers,
-    approver,
-    negotiators,
-  })
-  if (response.did) {
-    router.push({ name: ROUTES.CONTRACTS.LIST })
+  const isSemanticValueValid = verifySemanticValues()
+  if (!isSemanticValueValid) return
+  try {
+    const reviewers = result.filter((user) => user.role === 'CONTRACT_REVIEWER').map((user) => user.user.username)
+    const approver = result.find((user) => user.role === 'CONTRACT_APPROVER')?.user.username!
+    const negotiators = result
+      .filter((user) => user.role === 'CONTRACT_NEGOTIATOR')
+      .map((user) => user.user.username)
+    const response = await contractWorkflowService.submit({
+      did: contract.value?.did,
+      updated_at: contract.value?.updated_at,
+      reviewers,
+      approver,
+      negotiators,
+    })
+    if (response.did) {
+      router.push({ name: ROUTES.CONTRACTS.LIST })
+    }
+  } catch (error) {
+    console.error('Contract Submission failed', error)
   }
+}
+
+const verifySemanticValues = (): boolean => {
+  const subTemplateSemanticConditions = templateDraftStore?.subTemplateSnapshots?.map((subTemplate)=>{
+    return  {
+      templateId: subTemplate.did,
+      version: subTemplate.version,
+      document_number: subTemplate.document_number,
+      semanticConditions: subTemplate.template_data?.semanticConditions ?? []
+    }
+  })
+  const result = verifySemanticValue(
+    templateDraftStore.semanticConditions, 
+    subTemplateSemanticConditions,
+    contractContentValuesStore.semanticConditionValues,
+    templateDraftStore.documentBlocks
+  )
+  verificationResult.value = result
+  if (result.isValid) {
+    return true
+  }
+  // go to content tab and highlight semantic inconsistencies
+  setActiveTab('content')
+  return false
 }
 </script>
 
@@ -65,7 +106,12 @@ const submitContract = async (result: SelectedUserRole[]) => {
 
       <fieldset class="fieldset p-0 border-none">
         <legend class="fieldset-legend">Base Description</legend>
-        <textarea v-model="contract.description" class="textarea textarea-bordered w-full h-24" required disabled></textarea>
+        <textarea
+          v-model="contract.description"
+          class="textarea textarea-bordered w-full h-24"
+          required
+          disabled
+        ></textarea>
       </fieldset>
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">

@@ -22,7 +22,8 @@ const defaultState: Readonly<TemplateEditorUiState> = {
   selectedBlockId: null,
   clausePlaceholderHighlight: null,
   isPreviewDialogOpen: false,
-  isTemplateEditable: false
+  isTemplateEditable: false,
+  workflow: 'template',
 }
 
 export const useTemplateEditorUiStore = defineStore(storeId, {

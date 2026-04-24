@@ -19,12 +19,6 @@ DCS_DEPLOYMENT ?= $(DCS_SERVICE)
 LOCAL_FORWARD_PORT ?= 18991
 SERVICE_PORT ?= 8991
 DCS_API_BASE_PATH ?= /digital-contracting-service/api
-ENABLE_KEYCLOAK_PORT_FORWARD ?= false
-KEYCLOAK_SERVICE ?= $(HELM_RELEASE)-keycloak
-KEYCLOAK_DEPLOYMENT ?= $(KEYCLOAK_SERVICE)
-KEYCLOAK_SERVICE_PORT ?= 8080
-KEYCLOAK_LOCAL_FORWARD_PORT ?= 18080
-BDD_KEYCLOAK_REALM ?= gaia-x
 HELM_CHART_PATH ?= ../../deployment/helm
 HELM_TIMEOUT ?= 20m
 
@@ -101,12 +95,6 @@ run_bdd_helm_dev: setup_dev ensure_k8s_tools
 		LOCAL_FORWARD_PORT="$(LOCAL_FORWARD_PORT)" \
 		SERVICE_PORT="$(SERVICE_PORT)" \
 		DCS_API_BASE_PATH="$(DCS_API_BASE_PATH)" \
-		KEYCLOAK_SERVICE="$(KEYCLOAK_SERVICE)" \
-		KEYCLOAK_DEPLOYMENT="$(KEYCLOAK_DEPLOYMENT)" \
-		KEYCLOAK_LOCAL_FORWARD_PORT="$(KEYCLOAK_LOCAL_FORWARD_PORT)" \
-		KEYCLOAK_SERVICE_PORT="$(KEYCLOAK_SERVICE_PORT)" \
-		BDD_KEYCLOAK_REALM="$(BDD_KEYCLOAK_REALM)" \
-		ENABLE_KEYCLOAK_PORT_FORWARD="$(ENABLE_KEYCLOAK_PORT_FORWARD)" \
 		BDD_RUN_MODE=dev \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
 		ARG_BDD="$(ARG_BDD)" \
@@ -123,12 +111,6 @@ run_bdd_helm_all: setup_dev ensure_k8s_tools
 		LOCAL_FORWARD_PORT="$(LOCAL_FORWARD_PORT)" \
 		SERVICE_PORT="$(SERVICE_PORT)" \
 		DCS_API_BASE_PATH="$(DCS_API_BASE_PATH)" \
-		KEYCLOAK_SERVICE="$(KEYCLOAK_SERVICE)" \
-		KEYCLOAK_DEPLOYMENT="$(KEYCLOAK_DEPLOYMENT)" \
-		KEYCLOAK_LOCAL_FORWARD_PORT="$(KEYCLOAK_LOCAL_FORWARD_PORT)" \
-		KEYCLOAK_SERVICE_PORT="$(KEYCLOAK_SERVICE_PORT)" \
-		BDD_KEYCLOAK_REALM="$(BDD_KEYCLOAK_REALM)" \
-		ENABLE_KEYCLOAK_PORT_FORWARD="$(ENABLE_KEYCLOAK_PORT_FORWARD)" \
 		BDD_RUN_MODE=all \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
 		ARG_BDD="$(ARG_BDD)" \
@@ -145,10 +127,18 @@ ensure_k8s_tools:
 	@command -v "$(HELM_BIN)" >/dev/null 2>&1 || (echo "helm not found in PATH" && exit 1)
 
 kind_create: ensure_kind ensure_k8s_tools
-	@if ! "$(KIND_BIN)" get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then \
+	@cluster_healthy=false; \
+	if "$(KIND_BIN)" get clusters | grep -qx "$(KIND_CLUSTER_NAME)"; then \
+		if docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then \
+			echo "kind cluster $(KIND_CLUSTER_NAME) already exists"; \
+			cluster_healthy=true; \
+		else \
+			echo "kind cluster $(KIND_CLUSTER_NAME) exists but control-plane container is not running, recreating..."; \
+			"$(KIND_BIN)" delete cluster --name "$(KIND_CLUSTER_NAME)"; \
+		fi; \
+	fi; \
+	if [[ "$$cluster_healthy" == "false" ]]; then \
 		"$(KIND_BIN)" create cluster --name "$(KIND_CLUSTER_NAME)" --wait "$(KIND_WAIT)"; \
-	else \
-		echo "kind cluster $(KIND_CLUSTER_NAME) already exists"; \
 	fi
 
 kind_delete: ensure_kind
@@ -186,8 +176,6 @@ kind_deploy: kind_load_image
 		"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
 		echo "=== DCS LOGS ==="; \
 		"$(KUBECTL_BIN)" logs deployment/$(DCS_DEPLOYMENT) -n "$(KIND_NAMESPACE)" --tail=200 || true; \
-		echo "=== KEYCLOAK LOGS ==="; \
-		"$(KUBECTL_BIN)" logs deployment/$(HELM_RELEASE)-keycloak -n "$(KIND_NAMESPACE)" --tail=200 || true; \
 		exit 1; \
 	fi
 
@@ -197,14 +185,12 @@ kind_uninstall:
 run_bdd_kind_dev: kind_deploy
 	@$(MAKE) run_bdd_helm_dev \
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
-		HELM_RELEASE="$(HELM_RELEASE)" \
-		ENABLE_KEYCLOAK_PORT_FORWARD=true
+		HELM_RELEASE="$(HELM_RELEASE)"
 
 run_bdd_kind_all: kind_deploy
 	@$(MAKE) run_bdd_helm_all \
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
-		HELM_RELEASE="$(HELM_RELEASE)" \
-		ENABLE_KEYCLOAK_PORT_FORWARD=true
+		HELM_RELEASE="$(HELM_RELEASE)"
 
 run_bdd_kind_ci: build_dcs_image run_bdd_kind_dev
 

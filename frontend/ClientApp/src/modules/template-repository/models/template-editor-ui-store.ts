@@ -41,6 +41,7 @@ interface TemplateEditorUiState {
   isPreviewDialogOpen: boolean
   /** Whether the current template is in an editable state */
   isTemplateEditable: boolean
+  workflow: 'contract' | 'template'
 }
 
 export type { TemplateEditorUiState }

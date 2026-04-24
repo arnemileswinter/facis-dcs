@@ -6,7 +6,7 @@
         class="bg-base-100 rounded-2xl shadow-xl w-full max-w-2xl mx-4 flex flex-col gap-4 p-6 max-h-[85vh] overflow-y-auto"
         @click.stop>
         <h2 id="add-block-title" class="text-lg font-bold">Add block</h2>
-        <template v-if="isFrameContract">
+        <template v-if="!isContractWorkflow && isFrameContract">
           <ApprovedSubTemplatePicker :templates="subTemplateSnapshots" @select="handleAddApprovedTemplate"
             :reference-count-by-did="referenceCountByDid" />
         </template>
@@ -59,6 +59,7 @@ const uiStore = useTemplateEditorUiStore()
 const { addBlockModalContext } = storeToRefs(uiStore)
 const { documentBlocks, semanticConditions, subTemplateSnapshots } = storeToRefs(draftStore)
 
+const isContractWorkflow = computed(() => uiStore.workflow === 'contract')
 const paletteBlockTypes = [
   { blockType: DocumentBlockType.Section, label: 'Section' },
   { blockType: DocumentBlockType.Text, label: 'Text' },
@@ -97,7 +98,7 @@ function handleCancel() {
   uiStore.closeAddBlockModal()
 }
 
-function handleAddBlock(blockType: (typeof paletteBlockTypes)[number]['blockType']) {
+function handleAddBlock(blockType: DocumentBlockType) {
   const ctx = addBlockModalContext.value
   if (ctx === null) return
   draftStore.addBlock(ctx.parentBlockId, ctx.insertIndex, { blockType, text: '' })

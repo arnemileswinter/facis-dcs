@@ -33,5 +33,19 @@ export const useContractsStore = defineStore('contracts', () => {
     }
   }
 
-  return { contracts, reviewTasks, approvalTasks, negotiationTasks, hasContracts, loadContracts, loading, error }
+  function hasNegotiationTask(contract: Contract) {
+    return negotiationTasks.value.some((task) => task.did === contract.did)
+  }
+
+  return {
+    contracts,
+    reviewTasks,
+    approvalTasks,
+    negotiationTasks,
+    hasContracts,
+    loadContracts,
+    loading,
+    error,
+    hasNegotiationTask,
+  }
 })

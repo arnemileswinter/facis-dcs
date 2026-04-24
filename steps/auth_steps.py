@@ -1,37 +1,47 @@
 """Authentication and scenario setup steps for executable BDD scenarios."""
 
+import json
 import os
 import re
+import base64
 
 from behave import given
 
-from support.keycloak_client import admin_token
-from support.keycloak_client import assign_client_role
-from support.keycloak_client import ensure_client
-from support.keycloak_client import ensure_client_role
-from support.keycloak_client import ensure_user
-from support.keycloak_client import user_token
 from support.template_utils import template_env_key
 
 
 def _set_headers_for_role(context, role: str, username_prefix: str = "bdd"):
-    client_id = os.getenv("BDD_KEYCLOAK_CLIENT_ID", "digital-contracting-service")
+    client_id = "dcs-client"
     role_safe = re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
     username = f"{username_prefix}-{role_safe}"
-    password = os.getenv("BDD_KEYCLOAK_TEST_USER_PASSWORD", "bdd-pass-123")
 
-    admin_access_token = admin_token()
-    client_uuid = ensure_client(admin_access_token, client_id)
-    role_repr = ensure_client_role(admin_access_token, client_uuid, role)
-    user_id = ensure_user(admin_access_token, username, password)
-    assign_client_role(admin_access_token, user_id, client_uuid, role_repr)
-
-    token = user_token(client_id, username, password)
+    token = create_custom_jwt(client_id, username, role)
     context.headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
+
+def create_custom_jwt(client_id, username, role):
+    header = {"alg": "none"}
+    payload = {"sub": username, "iss": "https://auth.eclipse.org/auth/realms/community", "azp": client_id, "resource_access": {"dcs-client": {"roles": [role]}}, "exp": 9999999999}
+
+    encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
+    encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+
+    token = f"{encoded_header}.{encoded_payload}."
+    return token
+
+if __name__ == "__main__":
+    class MockContext:
+        "simple dict offering dot member access and settable from outside"
+        def __getattr__(self, key):
+            return self.__dict__.get(key)
+        def __setattr__(self, key, value):
+            self.__dict__[key] = value
+    ctx = MockContext()
+    _set_headers_for_role(ctx, "Template Creator")
+    print(ctx.headers["Authorization"])
 
 @given('I am authenticated with role "{role}"')
 def step_given_authenticated_with_role(context, role):

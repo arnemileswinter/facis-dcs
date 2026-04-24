@@ -1,18 +1,33 @@
 <template>
   <div class="space-y-6">
     <!-- Section 1: New clause -->
-    <section v-if="uiStore.isTemplateEditable" class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
-      <ClauseEditorForm mode="create" initial-title="" initial-text="" :semantic-conditions="semanticConditions"
-        @submit="addClause" />
+    <section
+      v-if="uiStore.isTemplateEditable"
+      class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm"
+    >
+      <ClauseEditorForm
+        mode="create"
+        initial-title=""
+        initial-text=""
+        :semantic-conditions="semanticConditions"
+        @submit="addClause"
+      />
     </section>
 
     <!-- Section 2: Existing clauses -->
     <section class="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
       <h3 class="text-sm font-semibold text-base-content/80 mb-4">Existing clauses</h3>
-      <ExistingClausesList :clause-blocks="clauseBlocks" :semantic-conditions="semanticConditions"
-        :get-condition-name="getConditionName" @delete="deleteClause" :block-ids-in-outline="store.blockIdsInOutline"
-        :editing-block-id="editingBlockId" @edit="startEditClause" @save="saveEditedClause" @cancel-edit="cancelEdit"
-        :editable="uiStore.isTemplateEditable" />
+      <ExistingClausesList
+        :clause-blocks="clauseBlocks"
+        :semantic-conditions="semanticConditions"
+        @delete="deleteClause"
+        :block-ids-in-outline="store.blockIdsInOutline"
+        :editing-block-id="editingBlockId"
+        @edit="startEditClause"
+        @save="saveEditedClause"
+        @cancel-edit="cancelEdit"
+        :editable="uiStore.isTemplateEditable"
+      />
     </section>
   </div>
 </template>
@@ -28,7 +43,7 @@ import { useTemplateEditorUiStore } from '@template-repository/store/templateEdi
 
 const store = useTemplateDraftStore()
 const uiStore = useTemplateEditorUiStore()
-const { documentBlocks, semanticConditions } = storeToRefs(store)
+const { documentBlocks, semanticConditions: mainSemanticConditions, subTemplateSnapshots } = storeToRefs(store)
 
 const editingBlockId = ref<string | null>(null)
 
@@ -46,14 +61,20 @@ function conditionIdsFromText(text: string): string[] {
   return [...set]
 }
 
-const clauseBlocks = computed((): ClauseBlock[] =>
-  documentBlocks.value.filter((b): b is ClauseBlock => isClauseBlock(b))
-)
+const clauseBlocks = computed((): ClauseBlock[] => {
+  const mainClauses = documentBlocks.value.filter((b): b is ClauseBlock => isClauseBlock(b))
+  const subTemplateClauses = subTemplateSnapshots.value.flatMap((subTemplate) =>
+    (subTemplate.template_data?.documentBlocks ?? []).filter((block): block is ClauseBlock => isClauseBlock(block)),
+  )
+  return [...mainClauses, ...subTemplateClauses]
+})
 
-function getConditionName(conditionId: string): string {
-  const c = semanticConditions.value.find((x) => x.conditionId === conditionId)
-  return c?.conditionName ?? conditionId
-}
+const semanticConditions = computed(() => {
+  const subTemplateConditions = subTemplateSnapshots.value.flatMap(
+    (subTemplate) => subTemplate.template_data?.semanticConditions ?? [],
+  )
+  return [...mainSemanticConditions.value, ...subTemplateConditions]
+})
 
 function addClause(payload: { title: string; text: string }) {
   const text = payload.text.trim()

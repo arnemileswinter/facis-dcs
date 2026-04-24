@@ -363,6 +363,7 @@ dcs-template:DocumentBlockUnionShape
     dcs-template:TextBlockShape
     dcs-template:ClauseBlockShape
     dcs-template:ApprovedTemplateBlockShape
+    dcs-template:MergedApprovedTemplateBlockShape
   ) .
 
 dcs-template:SectionBlockShape
@@ -450,6 +451,53 @@ dcs-template:ApprovedTemplateBlockShape
   sh:property [
     sh:path rdf:type ;
     sh:hasValue dcs-template-data:APPROVED_TEMPLATE ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:blockId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:text ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:title ;
+    sh:datatype xsd:string ;
+    sh:minCount 0 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:templateId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:version ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:or (
+      [ sh:datatype xsd:integer ]
+      [ sh:datatype xsd:double ]
+      [ sh:datatype xsd:decimal ]
+    ) ;
+  ] ;
+  sh:property [
+    sh:path dcs-template-data:document_number ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+  ] .
+
+dcs-template:MergedApprovedTemplateBlockShape
+  a sh:NodeShape ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue dcs-template-data:MERGED_APPROVED_TEMPLATE ;
   ] ;
   sh:property [
     sh:path dcs-template-data:blockId ;
