@@ -244,6 +244,9 @@ ocmW:
 
   cassandra:
     enabled: true
+    persistence:
+      enabled: true
+      size: 8Gi
 
 federatedCatalogue:
   enabled: false

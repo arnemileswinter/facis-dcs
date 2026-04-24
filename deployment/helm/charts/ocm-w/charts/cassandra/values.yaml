@@ -12,6 +12,12 @@ dbUser:
 
 persistence:
   enabled: false
+  # Empty string => use the cluster default StorageClass.
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 8Gi
+  # Optional: pin to an existing PVC instead of templating a new one.
+  existingClaim: ""
 
 resources:
   requests:
