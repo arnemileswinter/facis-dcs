@@ -79,6 +79,7 @@ const renderQrCode = async (uri: string) => {
   await QRCode.toCanvas(qrCodeCanvas.value, uri, {
     width: 300,
     margin: 2,
+    errorCorrectionLevel: 'L',
     color: {
       dark: '#000000',
       light: '#FFFFFF',

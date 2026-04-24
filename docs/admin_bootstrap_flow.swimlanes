@@ -1,0 +1,63 @@
+title: Interim Solution, DCS Admin Credential Bootstrap & Login Flow
+note: This is mostly for development purposes and easier developer experience to get some credential for use to begin with.
+
+note: Roles
+ - Holder: end-user wallet
+ - Frontend: DCS Vue ClientApp (LoginView)
+ - DCS: backend (Go) bootstrap endpoint, OCM-W issuance client, NATS issue responder
+ - WellKnown: ocm-w well-known-service (issuer metadata)
+ - PreAuthBridge: ocm-w pre-authorization-bridge (token endpoint)
+ - Issuance: ocm-w issuance-service (credential endpoint, NATS frame)
+ - NATS: message bus connecting ocm-w services to plugins
+ - Signer: dcs-signer (TSA / HashiCorp Vault transit, ES256)
+ - Postgres: DCS database (admin_bootstrap_state)
+
+Holder -> Frontend: open /ui/auth/login
+Frontend -> DCS: GET /api/bootstrap/status
+DCS -> Postgres: SELECT 1 FROM admin_bootstrap_state
+Postgres --> DCS: claimed=false
+DCS --> Frontend: {claimed:false}
+Frontend -> Frontend: render bootstrap form (DID input)
+note: While claimed=false, login is short-circuited — the frontend does NOT hit Hydra yet. The Hydra/OID4VP handshake only kicks in after the admin has been claimed.
+
+_: **First-run bootstrap path (no admin yet)**
+
+Holder -> Frontend: enter holder DID, click "Generate Admin Offer"
+Frontend -> DCS: POST /api/bootstrap/admin-offer {holder_did}
+DCS -> Postgres: re-check admin_bootstrap_state (409 if already claimed)
+DCS -> Issuance: CreateOffer (DCSRoleCredential, role = ALL roles from userrole.All())
+Issuance --> DCS: offer_uri (openid-credential-offer://...)
+DCS --> Frontend: 201 {offer_uri, offer}
+Frontend -> Frontend: render QR (errorCorrectionLevel:L, 300px)
+Holder -> Frontend: scan QR
+
+_: **OID4VCI redemption (wallet-driven)**
+
+Holder -> WellKnown: GET /.well-known/openid-credential-issuer
+WellKnown --> Holder: issuer metadata (token_endpoint, credential_endpoint)
+Holder -> PreAuthBridge: POST /token (pre-authorized_code)
+PreAuthBridge --> Holder: access_token
+Holder -> Issuance: POST /credential (access_token, proof JWT)
+
+_: **Issuance frame delegates signing to the DCS plugin via NATS**
+
+Issuance ->> NATS: publish digital-contracting-service.<tenant>.<credid>.issue
+NATS ->> DCS: deliver CloudEvent to issue_responder
+DCS -> DCS: build VC claims (sub, role[], iss, iat, exp)
+DCS -> Signer: POST /v1/sign {namespace, key, group, data=base64(signing_input)}
+Signer --> DCS: {signature} (base64 raw ES256, 64 bytes)
+DCS -> DCS: assemble JWT (header.claims.sig, base64url)
+DCS ->> NATS: reply with signed jwt_vc_json
+NATS ->> Issuance: deliver reply
+Issuance --> Holder: {credential: "<eyJhbGciOiJFUzI1Ni...>"}
+
+_: **Wallet stores VC, user manually confirms claim**
+
+Issuance --> Holder: credential delivered to wallet
+Holder -> Frontend: click "Continue to login" (no automatic notification — the wallet and frontend don't talk)
+Frontend -> DCS: POST /api/bootstrap/admin-claimed {holder_did}
+DCS -> Postgres: INSERT admin_bootstrap_state(holder_did, claimed_at)
+DCS --> Frontend: 204
+Frontend -> Frontend: startPresentation() — hands off to the Hydra + OID4VP login flow
+
+_: **From here on, every login goes through the OID4VP/Hydra flow**

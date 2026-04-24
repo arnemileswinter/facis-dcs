@@ -1,0 +1,103 @@
+title: DCS Login via Hydra (OIDC) + OID4VP Wallet Presentation
+
+note: Roles
+ - Holder: end-user wallet holding the DCSRoleCredential
+ - Frontend: DCS Vue ClientApp (LoginView, auth-store)
+ - DCS: backend (Go) — auth service + Hydra admin client + storage NATS subscriber
+ - Hydra: ORY Hydra (OAuth2/OIDC provider for DCS)
+ - CV: ocm-w credential-verification-service (OID4VP request_object + VP verification)
+ - Storage: ocm-w storage-service (publishes verified-presentation events on NATS)
+ - NATS: message bus
+ - Browser: holder's user-agent (separate from wallet; redirects through Hydra)
+
+_: **Phase 1 — Browser hits DCS, gets bounced through Hydra for a login_challenge**
+
+Holder -> Browser: navigate to DCS UI
+Browser -> Frontend: GET /ui/auth/login
+Frontend -> DCS: GET /api/auth/login
+DCS -> Hydra: discovery (.well-known/openid-configuration)
+Hydra --> DCS: authorization_endpoint
+DCS --> Frontend: authURL (Hydra /oauth2/auth?client_id&scope=openid offline_access&state)
+Frontend -> Hydra: redirect to /oauth2/auth
+Hydra --> Browser: 302 to DCS login UI with ?login_challenge=...
+Browser -> Frontend: GET /ui/auth/login?login_challenge=...
+
+_: **Phase 2 — DCS asks CV for an OID4VP request_object and renders QR**
+
+Frontend -> DCS: POST /api/auth/presentation-request {login_challenge}
+DCS -> DCS: generate requestId + nonce, build presentation_definition
+DCS -> CV: GET /v1/tenants/tenant_space/presentation/request?requestId&groupId&ttl&presentationDefinition\n  headers: x-tenantId, x-key, x-did, x-groupId
+note: Host overridden to PRESENTATION_PUBLIC_HOST so response_uri targets the public gateway, such that issuer's well-known resolves at edge
+CV --> DCS: signed JWT request_object
+DCS -> DCS: stash presentationState[requestId] = {challenge, nonce, clientID}
+DCS --> Frontend: {presentation_uri: openid4vp://authorize?request=...&state=requestId}
+Frontend -> Frontend: {far-qrcode fa-lg} Show QR of openid4vp URI
+Frontend -> DCS: poll GET /api/auth/presentation-status?request_id
+...: {fas-spinner} Browser keeps polling, flow now off-handed to wallet-device
+
+
+_: **Phase 3 — Wallet fetches request_object, signs VP, posts directly to CV**
+
+Holder -> Frontend: scan QR (openid4vp:// URI handed to wallet)
+Holder -> CV: GET request_uri (resolves request_object JWT)
+CV --> Holder: signed request_object (nonce, response_uri, presentation_definition)
+note: response_uri is built from PRESENTATION_PUBLIC_HOST (the public gateway / Vite dev proxy), which routes /api/presentation/proof/{id} straight to CV's /v1/tenants/tenant_space/presentation/proof/{id}. DCS is NOT in this hop.
+Holder -> Holder: select DCSRoleCredential, build VP JWT (binds nonce + aud)
+note Holder, Storage: Clarification needed on DCSRoleCredential - does neusta specify its json-ld @context? Do we have a credential definition? Clarify PoA chaining.
+Holder ->> CV: POST /v1/tenants/tenant_space/presentation/proof/{id} (direct_post)\n  vp_token, presentation_submission, state
+CV -> CV: verify VP signature, presentation_definition match, nonce
+CV ->> NATS: publish storage.service.presentation event on "storage" topic (payload = verified VP)
+NATS ->> Storage: deliver to storage-service for archival
+NATS ->> DCS: same event delivered to DCS subscriber (StartPresentationStorageListener)
+
+_: **Phase 4 — DCS subscriber finishes the Hydra login from the verified VP**
+
+DCS -> DCS: CompletePresentationFromVP(requestID, vp): parse VP claims, extract subject + roles
+note: nonce/aud rebinding and submitProofToCV are NOT performed on this path — CV already verified the VP before publishing. Policy enforcement and PoA chain validation are still TODO.
+DCS -> Hydra: PUT /admin/oauth2/auth/requests/login/accept?login_challenge=...\n  {subject, remember, context: {roles, source:wallet_vp}}
+Hydra --> DCS: {redirect_to: ...?consent_challenge=...}
+DCS -> Hydra: GET /admin/oauth2/auth/requests/consent?consent_challenge=...
+Hydra --> DCS: {requested_scope, requested_access_token_audience}
+DCS -> Hydra: PUT /admin/oauth2/auth/requests/consent/accept\n  {grant_scope, grant_audience, session.access_token.roles, session.id_token.roles}
+Hydra --> DCS: {redirect_to: Hydra /oauth2/auth callback continuation}
+DCS -> DCS: presentationState[requestId].Completed = true, .Location = redirect_to
+
+note Holder, Storage: Cross-device binding lives entirely in `presentationState[requestId]`.
+ The wallet (phone) and the browser (laptop) never talk to each other.
+ - Browser side: when Phase 2 issues the QR, DCS stores
+     {login_challenge, nonce, clientID} keyed by requestId, and the browser
+     keeps polling /api/auth/presentation-status?request_id=<requestId>.
+ - Wallet side: the QR carries `state=<requestId>`. The wallet's direct_post
+     goes straight to CV; CV echoes that requestId on the NATS event, so the
+     DCS subscriber can look up the same row and call Hydra login/consent
+     accept with the original login_challenge.
+ - Rejoining: the resulting Hydra redirect_to is written back into the same
+     row as `.Location`. The next browser poll sees Completed=true and
+     navigates the laptop to that URL — that is the moment the verified VP
+     becomes the authenticated Hydra session for the original browser.
+
+_: **Phase 5 — Frontend poll picks up completion and follows the Hydra redirect**
+
+Frontend -> DCS: GET /api/auth/presentation-status?request_id
+DCS --> Frontend: {completed:true, location: hydra redirect_to}
+Frontend -> Hydra: navigate to redirect_to
+Hydra --> Browser: 302 to DCS /api/auth/callback?code&state
+Browser -> DCS: GET /api/auth/callback?code&state
+DCS -> DCS: validate oauth state cookie
+DCS -> Hydra: POST /oauth2/token (grant_type=authorization_code, code, redirect_uri, client_id/secret)
+Hydra --> DCS: {access_token, refresh_token, id_token}
+DCS -> Browser: Set-Cookie refresh_token (HttpOnly), id_token; 302 /ui/auth/success
+Browser -> Frontend: GET /ui/auth/success
+Frontend -> DCS: GET /api/auth/refresh (uses refresh_token cookie)
+DCS -> Hydra: POST /oauth2/token (grant_type=refresh_token)
+Hydra --> DCS: {access_token, expires_in}
+DCS --> Frontend: {access_token, token_type, expires_in}
+Frontend -> Frontend: store access_token, decode roles from id_token, render app
+
+_: **Logout**
+
+Frontend -> DCS: POST /api/auth/logout
+DCS -> DCS: read id_token cookie, clear refresh_token + id_token cookies
+DCS --> Frontend: {logout_url: Hydra end_session_endpoint?id_token_hint&post_logout_redirect_uri}
+Frontend -> Hydra: navigate to end_session_endpoint
+Hydra --> Browser: redirect to post_logout_redirect_uri (UI base path)
