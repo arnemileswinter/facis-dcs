@@ -283,11 +283,6 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return err
 		}
 
-		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
-		if err != nil {
-			return err
-		}
-
 		nextState = contractstate.Submitted
 
 	} else {
