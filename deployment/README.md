@@ -40,6 +40,20 @@ Routing is configured with `route.basePath` (e.g. `/tenant-a/dcs`) or explicit `
 - [Rancher Desktop](https://rancherdesktop.io/) with Kubernetes enabled (provides `kubectl`, `helm`, and NodePort forwarding to `localhost`)
 - Go with [air](https://github.com/air-verse/air) (`go install github.com/air-verse/air@latest`)
 - Node.js 20+
+- Goa **v3** – Installation: Follow the instructions on [Goa Quickstart](https://goa.design/docs/1-goa/quickstart/)
+
+
+#### Initialize all dependencies
+Run the following command in **backend** to initialize all needed dependencies:
+```bash
+go mod tidy
+```
+
+#### Generate Go code with Goa
+Generate the required glue code under `gen/` with the Goa CLI:
+```bash
+goa gen digital-contracting-service/design
+```
 
 ### 1. Deploy dependencies
 
