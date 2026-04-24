@@ -10,11 +10,13 @@ type ComponentType string
 const (
 	ContractTemplateRepo   ComponentType = "CONTRACT_TEMPLATE_REPOSITORY"
 	ContractWorkflowEngine ComponentType = "CONTRACT_WORKFLOW_ENGINE"
+	AuditAndCompliance     ComponentType = "AUDIT_AND_COMPLIANCE"
 )
 
 var validFlag = map[ComponentType]bool{
 	ContractTemplateRepo:   true,
 	ContractWorkflowEngine: true,
+	AuditAndCompliance:     true,
 }
 
 func NewComponentType(s string) (ComponentType, error) {

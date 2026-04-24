@@ -31,13 +31,13 @@ func (r *PostgresAuditAndComplianceRepository) UpdateLogCID(ctx context.Context,
 	return err
 }
 
-func (r *PostgresAuditAndComplianceRepository) ReadLogCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error) {
+func (r *PostgresAuditAndComplianceRepository) ReadLogCID(ctx context.Context, tx *sqlx.Tx, component string, did string) (*string, error) {
 	query := `
         SELECT last_log_cid
-        FROM audit_trail_log WHERE did = $1
+        FROM audit_trail_log WHERE did = $1 AND component = $2;
     `
 	var result *string
-	err := tx.GetContext(ctx, &result, query, did)
+	err := tx.GetContext(ctx, &result, query, did, component)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

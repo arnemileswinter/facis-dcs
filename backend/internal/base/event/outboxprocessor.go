@@ -120,7 +120,7 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 		return fmt.Errorf("could not publish event %d: %w", event.ID, err)
 	}
 
-	globalLogPredCID, err := j.Repo.ReadLogCID(ctx, tx, GlobalAuditTrail)
+	globalLogPredCID, err := j.Repo.ReadLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), GlobalAuditTrail)
 	if err != nil {
 		return fmt.Errorf("could not read log CID: %w", err)
 	}
@@ -129,14 +129,14 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 	switch event.Component {
 	case componenttype.ContractTemplateRepo.String():
 		if event.DID != nil && len(*event.DID) > 1 {
-			resLogPredCID, err = j.Repo.ReadLogCID(ctx, tx, *event.DID)
+			resLogPredCID, err = j.Repo.ReadLogCID(ctx, tx, event.Component, *event.DID)
 			if err != nil {
 				return fmt.Errorf("could not read log CID: %w", err)
 			}
 		}
 	case componenttype.ContractWorkflowEngine.String():
 		if event.DID != nil && len(*event.DID) > 1 {
-			resLogPredCID, err = j.Repo.ReadLogCID(ctx, tx, *event.DID)
+			resLogPredCID, err = j.Repo.ReadLogCID(ctx, tx, event.Component, *event.DID)
 			if err != nil {
 				return fmt.Errorf("could not read log CID: %w", err)
 			}
@@ -175,7 +175,7 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 		}
 	}
 
-	if err = j.Repo.UpdateLogCID(ctx, tx, GlobalAuditTrail, GlobalAuditTrail, &result.Identifier.Value); err != nil {
+	if err = j.Repo.UpdateLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), GlobalAuditTrail, &result.Identifier.Value); err != nil {
 		return fmt.Errorf("could not update log CID: %w", err)
 	}
 

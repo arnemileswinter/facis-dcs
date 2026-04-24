@@ -7,6 +7,6 @@ import (
 )
 
 type AuditAndComplianceRepository interface {
-	ReadLogCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
+	ReadLogCID(ctx context.Context, tx *sqlx.Tx, component string, did string) (*string, error)
 	UpdateLogCID(ctx context.Context, tx *sqlx.Tx, component string, did string, logCID *string) error
 }
