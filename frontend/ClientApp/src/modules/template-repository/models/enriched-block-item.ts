@@ -1,4 +1,4 @@
-import type { DocumentBlock } from './contract-templace'
+import type { DocumentBlock, MergedApprovedTemplateBlock } from './contract-templace'
 
 /**
  * One block row in the editor list: 
@@ -19,4 +19,9 @@ export interface EnrichedBlockItem {
   outdentInsertIndex: number
   indentParentBlockId: string
   indentInsertIndex: number
+  /**
+   * Some approved blocks are merged into the main document for editing 
+   * without conflicting with the original approved template.
+   */
+  mergedApprovedBlock?: MergedApprovedTemplateBlock
 }

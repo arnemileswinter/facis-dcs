@@ -9,10 +9,14 @@ import type {
   DocumentBlockType,
 } from "@template-repository/models/contract-templace"
 
+export const TEMPLATE_DATA_VERSIONS = [1] as const
+export type TemplateDataVersion = (typeof TEMPLATE_DATA_VERSIONS)[number]
+
 interface TemplateDraftState {
   did: string | null
   name: string
   description: string
+  templateDataVersion: TemplateDataVersion
   documentOutline: DocumentOutline
   documentBlocks: DocumentBlock[]
   semanticConditions: SemanticCondition[]
@@ -24,6 +28,7 @@ interface TemplateDraftState {
   version: number | null
   updated_at: string | null
   created_by: string
+  workflow: 'contract' | 'template'
 }
 
 /** Payload for adding a new block. */
@@ -38,10 +43,13 @@ export interface AddBlockPayload {
   templateId?: string
   version?: number
   document_number?: string
+  merged_approved_block_id?: string
 }
 
 export interface AddBlockOptions {
   addToOutline?: boolean
 }
+
+export type SubTemplateReference = Pick<SubTemplateSnapshot, 'did' | 'version' | 'document_number'>
 
 export type { TemplateDraftState }

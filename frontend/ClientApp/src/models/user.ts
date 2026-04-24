@@ -12,5 +12,5 @@ export interface UserProfile {
 
 export interface SelectedUserRole {
   user: UserProfile
-  role: UserRole
+  role: UserRole | 'CONTRACT_NEGOTIATOR'
 }

@@ -1,6 +1,6 @@
 <template>
   <template v-for="(line, index) in lines" :key="index">
-    <span :class="previewTextClass">{{ line }}</span>
+    <span v-if="line.length !== 0" :class="previewTextClass">{{ line }}</span>
     <span v-if="index < lines.length - 1" :class="previewNewlineSpanClass" aria-hidden="true" />
   </template>
 </template>

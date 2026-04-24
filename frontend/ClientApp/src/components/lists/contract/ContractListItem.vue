@@ -2,6 +2,7 @@
 import type { Contract } from '@/models/contract/contract'
 import { ROUTES } from '@/router/router'
 import { useAuthStore } from '@/stores/auth-store'
+import { useContractsStore } from '@/stores/contracts-store'
 import { ContractState } from '@/types/contract-state'
 import { computed } from 'vue'
 
@@ -13,6 +14,15 @@ const authStore = useAuthStore()
 
 const canEdit = computed(() => {
   return props.item.created_by === authStore.user?.username && props.item.state === ContractState.draft
+})
+
+const hasNegotiationTask = computed(() => useContractsStore().hasNegotiationTask(props.item))
+
+const resolveViewRouteName = computed(() => {
+  if (props.item.state === ContractState.negotiation && hasNegotiationTask.value) {
+    return ROUTES.CONTRACTS.NEGOTIATE
+  }
+  return ROUTES.CONTRACTS.VIEW
 })
 </script>
 
@@ -36,7 +46,7 @@ const canEdit = computed(() => {
           </div>
           <div class="card-actions justify-end">
             <RouterLink
-              :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: item.did } }"
+              :to="{ name: resolveViewRouteName, params: { did: item.did } }"
               class="btn btn-sm btn-primary rounded-box"
             >
               View

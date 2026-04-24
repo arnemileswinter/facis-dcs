@@ -75,6 +75,7 @@ watch(hasDid, (hasDid) => {
         did: template.did,
         name: template.name,
         description: template.description,
+        templateDataVersion: template.template_data?.templateDataVersion ?? 1,
         documentOutline: template.template_data?.documentOutline ?? [],
         documentBlocks: template.template_data?.documentBlocks ?? [],
         semanticConditions: template.template_data?.semanticConditions ?? [],

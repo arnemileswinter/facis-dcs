@@ -1,5 +1,6 @@
 import type { ContractState } from '@/types/contract-state'
 import type { ContractNegotiation } from './contract-negotiation'
+import type { ContractData } from '../contract-data'
 
 export interface Contract {
   did: string
@@ -11,6 +12,8 @@ export interface Contract {
   created_at: string
   updated_at: string
   expiration_date?: string
-  contract_data?: unknown
+  contract_data?: ContractData
   negotiations?: ContractNegotiation[]
 }
+
+export type ContractChangeRequest = Pick<Contract, 'name' | 'description' | 'contract_data'>

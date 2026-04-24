@@ -6,7 +6,7 @@
       isInFadeOutSet(item.blockId) && 'opacity-50'
     ]">
       <!-- Indent area: width by depth, left border for children to show hierarchy -->
-      <div :class="[
+      <div v-if="item.block && !isMergedApprovedTemplateBlock(item.block)" :class="[
         'relative flex-shrink-0 min-h-[2.5rem] flex items-center',
         'transition-[width] duration-300 ease-out',
         item.depthLevel > 0 && !horizontalPreviewFor(item) && 'border-l-2 border-base-300',
@@ -33,11 +33,12 @@ import {
   useFlattenedOutline,
   type FlattenedOutlineItem,
 } from '@template-repository/composables/useFlattenedOutline'
-import type { DocumentBlock, DocumentOutline, DocumentOutlineBlock } from '@template-repository/models/contract-templace'
+import type { DocumentBlock, DocumentOutline, DocumentOutlineBlock, MergedApprovedTemplateBlock } from '@template-repository/models/contract-templace'
 import type { EnrichedBlockItem } from '@template-repository/models/enriched-block-item'
-import { isSectionBlock, isApprovedTemplateBlock } from '@template-repository/models/contract-templace'
+import { isSectionBlock, isApprovedTemplateBlock, isMergedApprovedTemplateBlock } from '@template-repository/models/contract-templace'
 import EditorBlock from '@template-repository/components/builder-editor/document-block/EditorBlock.vue'
 import { useBlockMovementPreview } from '@template-repository/composables/useBlockMovementPreview'
+import { getOwnerBlockIdFromMergedBlockId, isMergedBlockId } from '@template-repository/utils/template-data-ref'
 
 const draftStore = useTemplateDraftStore()
 const uiStore = useTemplateEditorUiStore()
@@ -134,6 +135,12 @@ function enrichFlatItem(
   const canIndent = item.siblingIndex > 0 && prevSiblingIsContainer
   const prevSiblingOutlineNode = prevSiblingBlockId ? outline.find((b) => b.blockId === prevSiblingBlockId) : undefined
   const indentInsertIndex = prevSiblingOutlineNode?.children?.length ?? 0
+  let mergedApprovedBlock: MergedApprovedTemplateBlock | undefined = undefined
+  if (isMergedBlockId(item.blockId)) {
+    const ownerBlockId = getOwnerBlockIdFromMergedBlockId(item.blockId)
+    mergedApprovedBlock = documentBlocks.value.find(
+      b => b.blockId === ownerBlockId && isMergedApprovedTemplateBlock(b)) as MergedApprovedTemplateBlock | undefined
+  }
 
   return {
     blockId: item.blockId,
@@ -150,6 +157,7 @@ function enrichFlatItem(
     outdentInsertIndex,
     indentParentBlockId: prevSiblingBlockId ?? '',
     indentInsertIndex,
+    mergedApprovedBlock
   }
 }
 

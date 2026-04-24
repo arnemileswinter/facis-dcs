@@ -6,7 +6,7 @@
     <!-- Pinned Footer -->
     <div v-if="hasDid" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <!-- Decision notes container -->
-      <ConfirmationModal ref="decision-note-dialog" show-editor editor-placeholder="Decision Note" />
+      <ConfirmationModal ref="decision-note-dialog" />
       <div class="max-w-4xl mx-auto px-6 py-3 flex flex-col md:flex-row gap-3">
         <button class="btn btn-ghost md:w-32" @click="router.back()">Cancel</button>
         <button @click="reject" class="btn btn-primary flex-1" :disabled="isSubmitting">
@@ -78,6 +78,7 @@ watch(hasDid, (hasDid) => {
         did: template.did,
         name: template.name,
         description: template.description,
+        templateDataVersion: template.template_data?.templateDataVersion ?? 1,
         documentOutline: template.template_data?.documentOutline ?? [],
         documentBlocks: template.template_data?.documentBlocks ?? [],
         semanticConditions: template.template_data?.semanticConditions ?? [],
@@ -108,7 +109,10 @@ async function approve() {
   }
   isSubmitting.value = true
   try {
-    const decisionNoteResult = await decisionNoteDialog.value?.reveal({ message: 'Add decision note?' })
+    const decisionNoteResult = await decisionNoteDialog.value?.reveal({
+      message: 'Add decision note?',
+      editor: { requiredText: false, placeholder: 'Decision Note' }
+    })
     if (decisionNoteResult?.isCanceled) {
       return
     } else if (decisionNoteResult?.data) {
@@ -136,7 +140,10 @@ async function resubmit() {
   }
   isSubmitting.value = true
   try {
-    const decisionNoteResult = await decisionNoteDialog.value?.reveal({ message: 'Add decision note?' })
+    const decisionNoteResult = await decisionNoteDialog.value?.reveal({
+      message: 'Add decision note?',
+      editor: { requiredText: false, placeholder: 'Decision Note'}
+    })
     if (decisionNoteResult?.isCanceled) {
       return
     } else if (decisionNoteResult?.data) {
@@ -162,7 +169,10 @@ async function reject() {
     console.error('Missing did or updated_at for rejection')
     return
   }
-  const decisionNoteResult = await decisionNoteDialog.value?.reveal({ message: 'Add reason:', requiredText: true })
+  const decisionNoteResult = await decisionNoteDialog.value?.reveal({
+    message: 'Add reason:',
+    editor: { requiredText: true, placeholder: 'Decision Note' }
+  })
   if (decisionNoteResult?.isCanceled) {
     return
   } else if (decisionNoteResult?.data) {

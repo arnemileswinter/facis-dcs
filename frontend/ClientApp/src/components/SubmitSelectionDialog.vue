@@ -5,6 +5,10 @@ import type { UserRole } from '@/types/user-role'
 import { toProperCase } from '@/utils/string'
 import { computed, ref, useTemplateRef, type Ref } from 'vue'
 
+interface User extends UserProfile {
+  availableRoles: (UserRole | 'CONTRACT_NEGOTIATOR')[]
+}
+
 const props = defineProps<{
   dialogType: 'template' | 'contract'
 }>()
@@ -15,16 +19,16 @@ const emit = defineEmits<{
 
 const userSelectionModal = useTemplateRef('user-selection-modal')
 
-const users: Ref<UserProfile[]> = ref([])
+const users: Ref<User[]> = ref([])
 const isLoading = ref(true)
 
 const selectedUsers = ref<Record<string, boolean>>({})
-const selectedRole = ref<Record<string, UserRole>>({})
+const selectedRole = ref<Record<string, UserRole | 'CONTRACT_NEGOTIATOR'>>({})
 
 const roles = computed(() => {
   const roleMap: Record<typeof props.dialogType, { review: UserRole; approve: UserRole; negotiate?: UserRole }> = {
     template: { review: 'TEMPLATE_REVIEWER', approve: 'TEMPLATE_APPROVER' },
-    contract: { review: 'CONTRACT_REVIEWER', approve: 'CONTRACT_APPROVER', negotiate: 'CONTRACT_NEGOTIATOR' },
+    contract: { review: 'CONTRACT_REVIEWER', approve: 'CONTRACT_APPROVER', negotiate: 'CONTRACT_CREATOR' },
   }
   return roleMap[props.dialogType]
 })
@@ -44,14 +48,34 @@ const hasValidSelection = computed(() => {
     users.value.some((user) => selectedRole.value[user.id] === reviewRole.value) &&
     ((props.dialogType === 'template' && !negotiateRole.value) ||
       (props.dialogType === 'contract' &&
-        users.value.some((user) => selectedRole.value[user.id] === negotiateRole.value)))
+        users.value.some((user) => selectedRole.value[user.id] === 'CONTRACT_NEGOTIATOR')))
   )
 })
 const isSubmitDisabled = computed(() => !hasValidSelection.value || !allSelectedUsersHaveRoles.value)
 
 async function openModal() {
   userSelectionModal.value?.showModal()
-  users.value = await userService.getAuthorizedUsersWithRoles(approveRole.value, reviewRole.value, negotiateRole.value)
+  const receivedUsers = await userService.getAuthorizedUsersWithRoles(
+    approveRole.value,
+    reviewRole.value,
+    negotiateRole.value,
+  )
+  users.value = receivedUsers.map((user) => ({
+    ...user,
+    availableRoles:
+      user.roleIds?.reduce<(UserRole | 'CONTRACT_NEGOTIATOR')[]>((acc, role) => {
+        const newRole = 'CONTRACT_NEGOTIATOR'
+        if (role === 'CONTRACT_CREATOR') {
+          acc.push(newRole)
+        } else if (role === 'CONTRACT_REVIEWER') {
+          acc.push(role, newRole)
+        } else {
+          acc.push(role)
+        }
+        return [... new Set(acc)]
+      }, []) ?? [],
+  }))
+
   isLoading.value = false
 }
 
@@ -59,7 +83,7 @@ function onModalSubmit() {
   if (isSubmitDisabled.value) return
   const result = users.value
     .filter((user) => selectedUsers.value[user.id] && selectedRole.value[user.id])
-    .map((user) => ({ user, role: selectedRole.value[user.id]! }))
+    .map(({ availableRoles, ...user }): SelectedUserRole => ({ user: user, role: selectedRole.value[user.id]! }))
   emit('submit', result)
   onModalClose()
 }
@@ -71,7 +95,7 @@ function onModalClose() {
   isLoading.value = true
 }
 
-function isRoleDisabled(role: UserRole, userId: string) {
+function isRoleDisabled(role: UserRole | 'CONTRACT_NEGOTIATOR', userId: string) {
   const roles = Object.values(selectedRole.value)
   return role === approveRole.value && selectedRole.value[userId] !== role && roles.includes(role)
 }
@@ -119,7 +143,12 @@ const roleInfoText = computed(() => {
               :disabled="!selectedUsers[user.id]"
             >
               <option selected :value="selectedRole['']">No role</option>
-              <option v-for="role in user.roleIds" :key="role" :value="role" :disabled="isRoleDisabled(role, user.id)">
+              <option
+                v-for="role in user.availableRoles"
+                :key="role"
+                :value="role"
+                :disabled="isRoleDisabled(role, user.id)"
+              >
                 {{ toProperCase(role) }}
               </option>
             </select>
