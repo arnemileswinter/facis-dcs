@@ -122,7 +122,13 @@ func main() {
 	cweCronJob := contractworkflowengine2.CronJob{DB: db}
 	cweCronJob.Start()
 
-	ipfsAPIClient := ipfs.NewClient("http://localhost:8000/v1/tenants/tenant_space", "http://localhost:5001")
+	// Initialize IPFS client
+	ipfsTenantBaseURL := os.Getenv("IPFS_TENANT_BASE_URL")
+	mfsBaseURL := os.Getenv("IPFS_MFS_BASE_URL")
+	if oidcIssuerURL == "" || oidcClientID == "" {
+		log.Fatalf(ctx, nil, "IPFS configuration missing: IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL environment variables must be specified")
+	}
+	ipfsAPIClient := ipfs.NewClient(ipfsTenantBaseURL, mfsBaseURL)
 	aRepo := pq.PostgresAuditTrailRepository{}
 	outboxProcessor := event.OutboxProcessor{
 		DB:         db,
