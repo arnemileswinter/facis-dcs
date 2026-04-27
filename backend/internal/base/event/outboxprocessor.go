@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/ipfs"
@@ -13,33 +14,11 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const GlobalAuditTrail string = "GLOBAL_AUDIT_TRAIL"
-
 type OutboxProcessor struct {
 	DB         *sqlx.DB
 	PubClient  *CloudEventPubClient
 	IPFSClient *ipfs.APIClient
 	ARepo      db.AuditTrailRepository
-}
-
-type OutboxEvent struct {
-	ID        int64     `db:"id"         json:"id"`
-	Component string    `db:"component"  json:"component"`
-	EventType string    `db:"event_type" json:"event_type"`
-	EventData []byte    `db:"event_data" json:"event_data"`
-	DID       *string   `db:"did"        json:"did"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-}
-
-type AuditLogEntry struct {
-	ID               int64     `json:"id"`
-	Component        string    `json:"component"`
-	EventType        string    `json:"event_type"`
-	EventData        []byte    `json:"event_data"`
-	DID              *string   `json:"did"`
-	CreatedAt        time.Time `json:"created_at"`
-	ResLogPredCID    *string   `json:"res_log_pred_cid"`
-	GlobalLogPredCID *string   `json:"global_log_pred_cid"`
 }
 
 func (j OutboxProcessor) Start(ctx context.Context) error {
@@ -71,9 +50,9 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			return fmt.Errorf("could not query outbox events: %w", err)
 		}
 
-		var events []OutboxEvent
+		var events []datatype.OutboxEvent
 		for rows.Next() {
-			var event OutboxEvent
+			var event datatype.OutboxEvent
 			if err := rows.StructScan(&event); err != nil {
 				rows.Close()
 				return fmt.Errorf("could not scan event: %w", err)
@@ -109,7 +88,7 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 	}
 }
 
-func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) error {
+func (j OutboxProcessor) processEvent(ctx context.Context, event datatype.OutboxEvent) error {
 	tx, err := j.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("could not start transaction: %w", err)
@@ -120,7 +99,7 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 		return fmt.Errorf("could not publish event %d: %w", event.ID, err)
 	}
 
-	globalLogPredCID, err := j.ARepo.ReadLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), GlobalAuditTrail)
+	globalLogPredCID, err := j.ARepo.ReadLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), conf.GlobalAuditTrailName())
 	if err != nil {
 		return fmt.Errorf("could not read log CID: %w", err)
 	}
@@ -143,7 +122,7 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 		}
 	}
 
-	auditLogEntry := AuditLogEntry{
+	auditLogEntry := datatype.AuditLogEntry{
 		ID:               event.ID,
 		Component:        event.Component,
 		EventType:        event.EventType,
@@ -175,7 +154,7 @@ func (j OutboxProcessor) processEvent(ctx context.Context, event OutboxEvent) er
 		}
 	}
 
-	if err = j.ARepo.UpdateLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), GlobalAuditTrail, &result.Identifier.Value); err != nil {
+	if err = j.ARepo.UpdateLogCID(ctx, tx, componenttype.AuditAndCompliance.String(), conf.GlobalAuditTrailName(), &result.Identifier.Value); err != nil {
 		return fmt.Errorf("could not update log CID: %w", err)
 	}
 
