@@ -145,6 +145,11 @@ neo4j:
 # See charts/federated-catalogue/values.yaml for all configurable fields.
 federatedCatalogue:
   enabled: false
+  # URL the DCS backend uses to reach the Federated Catalogue API
+  apiURL: ""
+  secretRef:
+    name: ""
+    key: "FEDERATED_CATALOGUE_API_URL"
 
 # XFSC Custom Policy Agent (OPA-based policy evaluation)
 # See charts/custom-policy-agent/values.yaml for all configurable fields.
@@ -164,11 +169,6 @@ customPolicyAgent:
   logging:
     level: "info"
     format: "json"
-  # URL the DCS backend uses to reach the Federated Catalogue API
-  apiURL: ""
-  secretRef:
-    name: ""
-    key: "FEDERATED_CATALOGUE_API_URL"
   resources:
     requests:
       cpu: 100m

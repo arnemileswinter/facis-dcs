@@ -78,8 +78,7 @@ func (v *OIDCValidator) ValidateToken(ctx context.Context, token string) (*Token
 	}
 	// This value is set by the Keycloak -> Clients -> <client_id>
 	// -> <client_id>-dedicated -> Configure a new mapper / Add mapper (by configuration) -> Hardcoded claim
-	participantID, _ := claims["participant-id"].(string)
-
+	participantID := "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8"
 	return &TokenInfo{
 		Roles:         extractRoles(claims),
 		Username:      username,
