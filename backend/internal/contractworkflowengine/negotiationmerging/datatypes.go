@@ -3,9 +3,13 @@ package negotiationmerging
 import "encoding/json"
 
 type ChangeRequest struct {
-	Name         *string       `json:"name"`
-	Description  *string       `json:"description"`
-	ContractData *ContractData `json:"contract_data"`
+	Name            *string       `json:"name"`
+	Description     *string       `json:"description"`
+	ContractData    *ContractData `json:"contract_data"`
+	StartDate       *string       `json:"start_date"`
+	ExpDate         *string       `json:"exp_date,omitempty"`
+	ExpNoticePeriod *int          `json:"exp_notice_period,omitempty"`
+	ExpPolicy       *string       `json:"exp_policy,omitempty"`
 }
 
 type ContractData struct {
@@ -21,7 +25,7 @@ type DocumentBlock struct {
 	Text           string   `json:"text"`
 	Type           string   `json:"type"`
 	BlockID        string   `json:"blockId"`
-	Title          string   `json:"title,omitempty"`
+	Title          *string  `json:"title,omitempty"`
 	ConditionIDs   []string `json:"conditionIds,omitempty"`
 	Version        int      `json:"version,omitempty"`
 	TemplateID     string   `json:"templateId,omitempty"`
@@ -58,6 +62,7 @@ type SemanticConditionValue struct {
 type SubTemplateSnapshot struct {
 	DID          string       `json:"did"`
 	Name         string       `json:"name"`
+	Version      *int         `json:"version,omitempty"`
 	Description  string       `json:"description"`
 	TemplateData TemplateData `json:"template_data"`
 }
