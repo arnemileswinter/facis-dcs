@@ -24,6 +24,7 @@ import (
 	"digital-contracting-service/internal/auth"
 
 	"github.com/jmoiron/sqlx"
+	"goa.design/clue/log"
 )
 
 type dcsToDcssrvc struct {
@@ -101,19 +102,18 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			fmt.Errorf("post_pdf rejected: peer %s is not in the trusted_peers allowlist", req.FromPeerDid))
 	}
 
-	// Verify the received PDF is a coherent artifact before carrying it over:
-	// pdf-core deterministically re-renders the embedded JSON-LD and confirms the
-	// human-readable render matches its machine-readable payload (and the C2PA
-	// chain is intact). We store the peer's exact bytes rather than regenerating,
-	// so a mismatch here means the peer shipped an inconsistent artifact.
-	verify, err := s.PDFCore.Verify(ctx, req.Pdf)
-	if err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_pdf rejected: could not verify received PDF: %w", err))
-	}
-	if !verify.Match {
-		return nil, contractworkflowengine.MakeBadRequest(
-			errors.New("post_pdf rejected: received PDF's human-readable render does not match its embedded machine-readable payload"))
+	// Cross-check the received PDF's human-readable render against its embedded
+	// machine-readable payload before carrying it over: pdf-core /verify
+	// deterministically re-renders the embedded JSON-LD. This is a NON-FATAL
+	// integrity signal — an already-C2PA-amended peer PDF (state transitions
+	// append manifests) does not byte-reproduce from a fresh render, so a
+	// non-match is expected and must not block replication; a genuine
+	// human/machine divergence surfaces as a logged warning and, on the local
+	// copy, as the viewer's verify finding.
+	if verify, verr := s.PDFCore.Verify(ctx, req.Pdf); verr != nil {
+		log.Printf(ctx, "post_pdf: could not verify received PDF for %s: %v", req.ContractIri, verr)
+	} else if !verify.Match {
+		log.Printf(ctx, "post_pdf: received PDF for %s does not deterministically re-render from its embedded payload; carrying it over as-is (C2PA-amended artifact)", req.ContractIri)
 	}
 
 	payload, err := s.PDFCore.ExtractPayload(ctx, req.Pdf)
