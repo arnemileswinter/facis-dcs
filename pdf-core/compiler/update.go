@@ -360,7 +360,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // update section. It supersedes:
 //   - obj 2  (Pages)        — updated /Kids list pointing to new page objects
 //   - obj 9  (C2PA manifest) — updated hard-binding hash and provenance chain
-//   - obj 11 (embedded JSON-LD) — replaced with the new canonical payload
+//   - obj 11 (embedded JSON-LD) — replaced with the new payload, carried verbatim
 //
 // New objects (page content streams, page dictionaries, annotations) are
 // appended with IDs beyond the existing maximum so originals are unreachable
