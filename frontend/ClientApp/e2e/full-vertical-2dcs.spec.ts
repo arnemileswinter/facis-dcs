@@ -1,9 +1,11 @@
 import { expect, test } from './dcs-test'
 import {
+  apiAuthHeaders,
   assertManifestChainGrew,
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
+  contractUpdatedAt,
   counterOffer,
   createContractViaUi,
   instanceA,
@@ -83,10 +85,13 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   let aChain = 0
   let bChain = 0
   await test.step('propose to B; B receives OFFERED with a verifiable artifact', async () => {
-    const retrieve = await a.page.request.get(`${E2E_API_BASE}/contract/retrieve/${encodeURIComponent(contractDid)}`)
-    const updatedAt = ((await retrieve.json()) as { updated_at?: string }).updated_at
+    // Offer is a Contract Creator transition; establish that session so the raw
+    // retrieve/offer carry the bearer, then echo the optimistic-lock updated_at.
+    const auth = await apiAuthHeaders(a, 'Contract Creator', '/ui/contracts/new')
+    const updatedAt = await contractUpdatedAt(a, contractDid, auth)
     const offered = await a.page.request.post(`${E2E_API_BASE}/contract/offer`, {
       data: { did: contractDid, updated_at: updatedAt },
+      headers: auth,
     })
     expect(offered.ok(), `offer ${offered.status()}: ${await offered.text()}`).toBeTruthy()
 

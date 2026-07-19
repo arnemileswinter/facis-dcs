@@ -110,6 +110,46 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
 }
 
 /**
+ * Establishes a role session on the instance and returns the Authorization
+ * header its raw page.request calls need. applySession injects the token into
+ * localStorage, but only the app's axios interceptor turns that into a bearer —
+ * a raw page.request forwards cookies but omits the header, so JWT-scoped
+ * endpoints 401. The navigation also refreshes the role's single-use token.
+ */
+export async function apiAuthHeaders(
+  inst: Instance,
+  role: DcsRole,
+  landing: string,
+): Promise<{ Authorization: string }> {
+  await inst.gotoAs(role, landing)
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  expect(token, `no access token for ${role} on ${inst.origin}`).toBeTruthy()
+  return { Authorization: `Bearer ${token}` }
+}
+
+/**
+ * Reads the contract's current optimistic-lock token (updated_at) from the
+ * instance's own authenticated retrieve-by-id — the value state-transition POSTs
+ * (offer/deploy/…) must echo. Fails loudly with the response shape if absent.
+ */
+export async function contractUpdatedAt(
+  inst: Instance,
+  contractDid: string,
+  auth: { Authorization: string },
+): Promise<string> {
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  expect(
+    resp.ok(),
+    `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()} ${await resp.text()}`,
+  ).toBeTruthy()
+  const body = (await resp.json()) as { updated_at?: string }
+  expect(body.updated_at, `retrieve ${contractDid} on ${inst.origin} returned no updated_at`).toBeTruthy()
+  return body.updated_at!
+}
+
+/**
  * Independently verifies the contract's exported PDF is a real, conformant
  * artifact — PDF/A-3a (veraPDF) + a valid C2PA manifest (c2patool/c2pa-rs) —
  * exporting it through the instance's own Contract Viewer and shelling out to
@@ -204,10 +244,16 @@ export async function manifestChainLength(inst: Instance, contractDid: string): 
  * PDF exchange, so allow the same window the peer-trust steps use).
  */
 export async function assertReceivedInState(inst: Instance, contractDid: string, expected: string): Promise<void> {
+  // Establish a Contract Manager session on this instance so the raw retrieve
+  // carries the bearer the JWT-scoped endpoint requires (page.request forwards
+  // cookies but not the Authorization header the app's axios interceptor adds).
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
   const deadline = Date.now() + 45_000
   let last = ''
   while (Date.now() < deadline) {
-    const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`)
+    const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+      headers: auth,
+    })
     if (resp.ok()) {
       last = String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
       if (last === expected.toUpperCase()) return
