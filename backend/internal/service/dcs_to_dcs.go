@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
+
+	"goa.design/clue/log"
 
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/ipfs"
@@ -107,14 +111,22 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	// /verify/content compares only the page content streams, so the C2PA,
 	// signature and amendment layers a peer legitimately appended do not trip
 	// it; genuine tampering does.
-	contentMatch, verr := s.PDFCore.VerifyContent(ctx, req.Pdf)
+	contentMatch, mismatchDetail, verr := s.PDFCore.VerifyContent(ctx, req.Pdf)
 	if verr != nil {
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_pdf rejected: could not content-verify received PDF: %w", verr))
 	}
 	if !contentMatch {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New(
-			"post_pdf rejected: received PDF's human-readable page content does not match its embedded machine-readable payload"))
+		// Diagnostic (rejection path only; the fatal gate is unchanged): surface
+		// WHICH page diverged + a snippet of both renders, plus the embedded
+		// payload's len+hash, so the exact human↔machine divergence is visible in
+		// the peer's log.
+		embedded, _ := s.PDFCore.ExtractPayload(ctx, req.Pdf)
+		esum := sha256.Sum256(embedded)
+		log.Printf(ctx, "post_pdf VerifyContent mismatch for %s: %s | embedded payload len=%d sha256=%s",
+			req.ContractIri, mismatchDetail, len(embedded), hex.EncodeToString(esum[:8]))
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf(
+			"post_pdf rejected: received PDF's human-readable page content does not match its embedded machine-readable payload: %s", mismatchDetail))
 	}
 
 	payload, err := s.PDFCore.ExtractPayload(ctx, req.Pdf)

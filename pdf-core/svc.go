@@ -16,7 +16,6 @@ import (
 	compiler "example.com/m/V2/compiler"
 	"example.com/m/V2/manifest"
 
-
 	"github.com/google/uuid"
 )
 
@@ -326,12 +325,16 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errUnprocessableEntity(err))
 		return
 	}
-	match := compiler.MatchPageContent(raw, recompiled) == nil
+	var mismatch string
+	if err := compiler.MatchPageContent(raw, recompiled); err != nil {
+		mismatch = err.Error()
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(struct {
-		Match bool `json:"match"`
-	}{Match: match})
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch,omitempty"`
+	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
 // isVCProofStructurallyValid returns true when the VC JSON contains a

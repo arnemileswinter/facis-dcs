@@ -346,30 +346,33 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 // machine-readable payload. Unlike Verify (byte-prefix reproduction), this is
 // tolerant of the C2PA, signature and amendment layers a peer may have appended,
 // so a legitimately amended offered PDF still matches while tampered page content
-// does not. Returns an error on non-2xx.
-func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, error) {
+// does not. On a mismatch it also returns a diagnostic detail (which page diverged
+// and a snippet of both renders) so the caller can log WHERE they diverge. Returns
+// an error on non-2xx.
+func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/verify/content", bytes.NewReader(pdf))
 	if err != nil {
-		return false, fmt.Errorf("pdf-core verify/content request: %w", err)
+		return false, "", fmt.Errorf("pdf-core verify/content request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("pdf-core verify/content: %w", err)
+		return false, "", fmt.Errorf("pdf-core verify/content: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if err := checkStatus(resp); err != nil {
-		return false, err
+		return false, "", err
 	}
 	var body struct {
-		Match bool `json:"match"`
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return false, fmt.Errorf("pdf-core verify/content: decode: %w", err)
+		return false, "", fmt.Errorf("pdf-core verify/content: decode: %w", err)
 	}
-	return body.Match, nil
+	return body.Match, body.Mismatch, nil
 }
 
 // ExtractManifest posts pdf to POST /manifest/extract and returns the raw JUMBF
