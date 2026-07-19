@@ -206,11 +206,10 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
   await test.step('submit contract into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Create', exact: true }).click()
     const submitted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST',
     )
-    await completeParticipantDialog(page)
+    await page.getByRole('button', { name: 'Submit', exact: true }).click()
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })
