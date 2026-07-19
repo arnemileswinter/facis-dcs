@@ -317,6 +317,18 @@ func shapeForModel(raw []byte) ([]byte, error) {
 	return json.Marshal(stripDCSTerms(doc))
 }
 
+// listValuedTerms are the documentStructure properties the render model reads as
+// Go slices. JSON-LD serializes a single-cardinality value as a bare object (or
+// scalar) rather than a 1-element array, so shapeForModel coerces them to arrays.
+var listValuedTerms = map[string]bool{
+	"layout":          true,
+	"blocks":          true,
+	"children":        true,
+	"content":         true,
+	"signatureFields": true,
+	"subTemplates":    true,
+}
+
 func stripDCSTerms(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -332,7 +344,13 @@ func stripDCSTerms(v any) any {
 				out[key] = stripDCSType(val)
 				continue
 			}
-			out[key] = stripDCSTerms(val)
+			shaped := stripDCSTerms(val)
+			if listValuedTerms[key] {
+				if _, isArray := shaped.([]any); !isArray {
+					shaped = []any{shaped}
+				}
+			}
+			out[key] = shaped
 		}
 		return out
 	case []any:

@@ -1,0 +1,44 @@
+package compiler
+
+import (
+	"context"
+	"testing"
+)
+
+// A template/component whose documentStructure has a SINGLE layout node (and a
+// single block) serializes them as objects, not 1-element arrays — JSON-LD's
+// single-vs-array ambiguity. pdf-core must accept both shapes.
+const templateSingleNodePayload = `{
+  "@type":"dcs:ContractTemplate",
+  "dcs:metadata":{"@type":"dcs:TemplateMetadata","dcs:title":"Single Node Template"},
+  "dcs:documentStructure":{"@type":"dcs:DocumentStructure",
+    "dcs:layout":{"@type":"dcs:LayoutNode","dcs:isRoot":true,"dcs:children":{"@list":["urn:t#c1"]}},
+    "dcs:blocks":{"@list":[
+      {"@type":"dcs:Clause","@id":"urn:t#c1","dcs:content":["The amount is ",{"@type":"dcs:Placeholder"},"."]}
+    ]}
+  }
+}`
+
+func TestTemplateSingleLayoutNodeCompiles(t *testing.T) {
+	_, err := CompilePDF(WithSigner(context.Background(), NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
+	if err != nil {
+		t.Fatalf("template with single layout node must compile: %v", err)
+	}
+}
+
+func TestTemplateDoubleCompileDeterministic(t *testing.T) {
+	ctx := context.Background()
+	p1, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		p2, err := CompilePDF(WithSigner(ctx, NewCapturingSigner()), []byte(templateSingleNodePayload), CanonicalCompiledAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := MatchPageContent(p1, p2); err != nil {
+			t.Fatalf("template double-compile page content differs (run %d): %v", i, err)
+		}
+	}
+}
