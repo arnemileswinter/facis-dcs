@@ -14,7 +14,6 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/ipfs"
-	"digital-contracting-service/internal/base/jsonld"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -73,14 +72,11 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		return fmt.Errorf("could not read local contract copy: %w", err)
 	}
 
-	// pdf-core embeds the canonical, IRI-expanded JSON-LD; re-compact it to the
-	// FACIS context so this copy matches the originator's compact form (ADR-13).
-	compacted, err := jsonld.CompactToFacis(cmd.Payload)
-	if err != nil {
-		return fmt.Errorf("could not re-compact shipped contract JSON-LD: %w", err)
-	}
-	payload := datatype.JSON(compacted)
-	templateIRI, templateVersion, name := parseShippedContractMeta(compacted)
+	// pdf-core carries the contract JSON-LD VERBATIM (ADR-13): the shipped payload
+	// is already this instance's native DCS form — the exact bytes the originator
+	// embedded — so it is used as-is, with no dialect round-trip.
+	payload := datatype.JSON(cmd.Payload)
+	templateIRI, templateVersion, name := parseShippedContractMeta(cmd.Payload)
 	now := time.Now().UTC()
 
 	data := db.Contract{
@@ -149,7 +145,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)
 		}
-		payloadSum := sha256.Sum256(compacted)
+		payloadSum := sha256.Sum256(cmd.Payload)
 		if err := h.CRepo.UpdatePDFState(ctx, tx, cmd.ContractIRI, db.ContractPDFState{
 			IPFSCID:     stored.Identifier.Value,
 			C2PAState:   c2paState,

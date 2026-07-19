@@ -218,10 +218,12 @@ func extractDocumentModelFromCanonical(canonical []byte, hashHex string) (docume
 		SignatureFields: []sigFieldDef{},
 		Glossary:        []glossaryTerm{},
 		NamespaceMap:    canonicalNamespaceMap(),
-		CanonicalJSON:   canonical,
-		PayloadHash:     hashHex,
-		FileID:          hashHex[:32],
-		ContractID:      tmpl.ID,
+		// EmbeddedPayload is set by the caller (CompilePDF/updatePDF) to the
+		// VERBATIM submitted bytes — not the canonical form used here only to
+		// build the render model and the graph hash.
+		PayloadHash: hashHex,
+		FileID:      hashHex[:32],
+		ContractID:  tmpl.ID,
 	}
 
 	if tmpl.Metadata == nil || strings.TrimSpace(tmpl.Metadata.Title) == "" {
@@ -283,10 +285,6 @@ func extractDocumentModelFromCanonical(canonical []byte, hashHex string) (docume
 		}
 	}
 	collectRefs(model.Sections)
-
-	if section, ok := buildPolicySection(tmpl.Policies); ok {
-		model.Sections = append(model.Sections, section)
-	}
 
 	return model, nil
 }

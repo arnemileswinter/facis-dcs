@@ -187,7 +187,9 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
-	pdf, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), signer), canonical, compiler.CanonicalCompiledAt)
+	// Pass the verbatim raw payload: CompilePDF canonicalizes internally for the
+	// render model + graph hash, but embeds these exact bytes as the attachment.
+	pdf, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), signer), raw, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -386,7 +388,8 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 	manifestURL := strings.TrimSpace(string(parts["manifest_url"]))
 
 	signer := compiler.NewCapturingSigner()
-	updated, err := compiler.UpdatePDFWithOptions(compiler.WithSigner(r.Context(), signer), oldPDF, canonical, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
+	// Verbatim: the amended attachment is embedded exactly as submitted.
+	updated, err := compiler.UpdatePDFWithOptions(compiler.WithSigner(r.Context(), signer), oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
 	if err != nil {
 		if errors.Is(err, compiler.ErrNoChanges) {
 			writeError(w, errConflict(err))
@@ -560,16 +563,16 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	canonicalPDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), canonical, compiler.CanonicalCompiledAt)
+	referencePDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payloadBytes, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	if err := compiler.MatchPageContent(submittedPDF, canonicalPDF); err != nil {
+	if err := compiler.MatchPageContent(submittedPDF, referencePDF); err != nil {
 		writeError(w, errConflict(err))
 		return
 	}
-	result, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), canonicalPDF, canonical)
+	result, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), referencePDF, payloadBytes)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return

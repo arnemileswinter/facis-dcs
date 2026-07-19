@@ -269,20 +269,36 @@ func TestDownload_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestDownload_EquivalentJSONLDFlavorsProduceIdenticalPDF(t *testing.T) {
-	bodies := []string{minimalPayload, minimalPayloadFlavorPrefixed, minimalPayloadFlavorExpanded}
-	results := make([][]byte, 0, len(bodies))
-	for i, payload := range bodies {
+func TestDownload_CarriesJSONLDAttachmentVerbatim(t *testing.T) {
+	// pdf-core carries the JSON-LD attachment VERBATIM — each compiled PDF embeds
+	// exactly the bytes submitted, byte-preserved, whatever the serialization
+	// flavor. Canonicalizing the OUTPUT so distinct flavors collapse to one form
+	// is NOT pdf-core's concern anymore (DCS canonicalizes before sending); a
+	// renderer must not silently rewrite the document it carries. pdf-core's own
+	// guarantee — the visible render reproduces from documentStructure — is
+	// covered by determinism.feature.
+	for i, payload := range []string{minimalPayload, minimalPayloadFlavorPrefixed, minimalPayloadFlavorExpanded} {
 		rec := doRequest(http.MethodPost, "/render",
 			bytes.NewBufferString(payload), "application/ld+json")
 		if rec.Code != http.StatusOK {
-			t.Fatalf("Download flavor %d failed: status %d", i+1, rec.Code)
+			t.Fatalf("Download flavor %d failed: status %d", i, rec.Code)
 		}
-		results = append(results, rec.Body.Bytes())
-	}
-	for i := 1; i < len(results); i++ {
-		if !bytes.Equal(results[0], results[i]) {
-			t.Fatalf("expected identical PDF bytes for semantically equivalent JSON-LD flavors (baseline vs flavor %d)", i+1)
+		var env struct {
+			PDFBase64 string `json:"pdf_base64"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+			t.Fatalf("flavor %d: decode prepared envelope: %v", i, err)
+		}
+		pdf, err := base64.StdEncoding.DecodeString(env.PDFBase64)
+		if err != nil {
+			t.Fatalf("flavor %d: decode pdf: %v", i, err)
+		}
+		embedded, err := compiler.ExtractEmbeddedJSONLD(pdf)
+		if err != nil {
+			t.Fatalf("flavor %d: extract embedded: %v", i, err)
+		}
+		if strings.TrimSpace(string(embedded)) != strings.TrimSpace(payload) {
+			t.Fatalf("flavor %d: embedded attachment is not the verbatim submitted payload\ngot:  %.120s\nwant: %.120s", i, embedded, payload)
 		}
 	}
 }

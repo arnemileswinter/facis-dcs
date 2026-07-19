@@ -208,8 +208,14 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		return nil, fmt.Errorf("canonicalize new payload: %w", err)
 	}
 
-	// oldPayload is already canonical (it was embedded by a prior CompilePDF call).
-	oldNQuads, err := NormalizePayload(oldPayload)
+	// oldPayload is the VERBATIM attachment a prior compile/update embedded, so
+	// canonicalize it before hashing — the "no changes" guard must compare the two
+	// payloads on the same canonical (graph) basis as newCanonical.
+	oldCanonical, err := CanonicalizePayload(oldPayload)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize old payload: %w", err)
+	}
+	oldNQuads, err := NormalizePayload(oldCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +245,9 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	if err != nil {
 		return nil, err
 	}
+	// Carry the amended attachment verbatim (same rule as the initial compile):
+	// the superseding embedded object holds the exact submitted bytes.
+	newDoc.EmbeddedPayload = newPayload
 
 	// A PAdES signature freezes the visible content: the signature's /ByteRange
 	// covers the pages and its DocMDP permissions forbid altering them. A
@@ -326,7 +335,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		} else {
 			appendix = buildUpdateAppendixBytes(
 				len(oldPDF), prevStartXref, oldSize, fileID,
-				updatedC2PA, newDoc.CanonicalJSON, newDoc.PayloadHash,
+				updatedC2PA, newDoc.EmbeddedPayload, newDoc.PayloadHash,
 				newPages, vcBytes, vcFileObjID, vcSpecObjID, remoteManifestURL,
 			)
 		}
@@ -360,7 +369,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 func buildUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize int,
 	fileID string,
-	updatedC2PA, newCanonicalJSON []byte,
+	updatedC2PA, newEmbeddedPayload []byte,
 	newPayloadHash string,
 	newPages []pageLayout,
 	vcBytes []byte, vcFileObjID, vcSpecObjID int,
@@ -440,9 +449,9 @@ func buildUpdateAppendixBytes(
 	// Supersede obj 11: updated embedded JSON-LD.
 	entries = append(entries, objEntry{embFileID, baseLen + buf.Len()})
 	buf.WriteString(fmt.Sprintf("%d 0 obj\n", embFileID))
-	buf.Write(streamObject(newCanonicalJSON, fmt.Sprintf(
+	buf.Write(streamObject(newEmbeddedPayload, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /CheckSum <%s> >> >>",
-		len(newCanonicalJSON), len(newCanonicalJSON), newPayloadHash[:32],
+		len(newEmbeddedPayload), len(newEmbeddedPayload), newPayloadHash[:32],
 	)))
 	buf.WriteString("\nendobj\n")
 
