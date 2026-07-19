@@ -344,6 +344,79 @@ func TestVerify_WrongContentType(t *testing.T) {
 	}
 }
 
+// ---- Verify content --------------------------------------------------------
+
+// verifyContent posts a PDF to /verify/content and returns the decoded match.
+func verifyContentMatch(t *testing.T, pdf []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	return doRequest(http.MethodPost, "/verify/content",
+		bytes.NewReader(pdf), "application/pdf")
+}
+
+// TestVerifyContent_SignedPDFMatches proves the content-only check accepts a
+// fully signed (C2PA-embedded) PDF: unlike /verify's byte-prefix reproduction,
+// /verify/content compares only the page content streams, so the appended
+// signature and provenance layers do not make a legitimate artifact diverge.
+func TestVerifyContent_SignedPDFMatches(t *testing.T) {
+	pdf := compilePDF(t)
+
+	rec := verifyContentMatch(t, pdf)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify/content: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Match bool `json:"match"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode verify/content response: %v", err)
+	}
+	if !body.Match {
+		t.Error("expected match=true for a signed PDF whose page content renders from its embedded payload")
+	}
+}
+
+// TestVerifyContent_TamperedPageContentRejected edits only the visible page
+// content stream (leaving the embedded machine-readable payload untouched) and
+// asserts the endpoint reports match=false. This is the legal guarantee PostPdf
+// relies on: a human-readable form that no longer matches its embedded payload
+// must be refused. The clause literal "clause one" appears twice — once in the
+// embedded JSON-LD (["clause one"]) and once in the page stream ((clause one)
+// Tj); only the page-stream copy is swapped, for an equal-length divergence
+// that keeps the xref table valid.
+func TestVerifyContent_TamperedPageContentRejected(t *testing.T) {
+	pdf := compilePDF(t)
+
+	tampered := bytes.Replace(pdf, []byte("(clause one) Tj"), []byte("(clause TWO) Tj"), 1)
+	if bytes.Equal(tampered, pdf) {
+		t.Fatal("test setup: page-content clause literal not found to tamper")
+	}
+
+	rec := verifyContentMatch(t, tampered)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify/content: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Match bool `json:"match"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode verify/content response: %v", err)
+	}
+	if body.Match {
+		t.Error("expected match=false: page content was tampered but the embedded payload was not")
+	}
+}
+
+func TestVerifyContent_WrongContentType(t *testing.T) {
+	rec := doRequest(http.MethodPost, "/verify/content",
+		bytes.NewBufferString("{}"), "application/json")
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415, got %d", rec.Code)
+	}
+	if name := errorName(t, rec.Body.Bytes()); name != "unsupported_media_type" {
+		t.Fatalf("expected unsupported_media_type, got %q", name)
+	}
+}
+
 // ---- Update -----------------------------------------------------------------
 
 func TestUpdate_WrongContentType(t *testing.T) {

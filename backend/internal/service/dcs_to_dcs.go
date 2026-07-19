@@ -24,7 +24,6 @@ import (
 	"digital-contracting-service/internal/auth"
 
 	"github.com/jmoiron/sqlx"
-	"goa.design/clue/log"
 )
 
 type dcsToDcssrvc struct {
@@ -102,18 +101,20 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			fmt.Errorf("post_pdf rejected: peer %s is not in the trusted_peers allowlist", req.FromPeerDid))
 	}
 
-	// Cross-check the received PDF's human-readable render against its embedded
-	// machine-readable payload before carrying it over: pdf-core /verify
-	// deterministically re-renders the embedded JSON-LD. This is a NON-FATAL
-	// integrity signal — an already-C2PA-amended peer PDF (state transitions
-	// append manifests) does not byte-reproduce from a fresh render, so a
-	// non-match is expected and must not block replication; a genuine
-	// human/machine divergence surfaces as a logged warning and, on the local
-	// copy, as the viewer's verify finding.
-	if verify, verr := s.PDFCore.Verify(ctx, req.Pdf); verr != nil {
-		log.Printf(ctx, "post_pdf: could not verify received PDF for %s: %v", req.ContractIri, verr)
-	} else if !verify.Match {
-		log.Printf(ctx, "post_pdf: received PDF for %s does not deterministically re-render from its embedded payload; carrying it over as-is (C2PA-amended artifact)", req.ContractIri)
+	// Legal gate: the received PDF's human-readable page content MUST be the
+	// deterministic re-render of its own embedded machine-readable payload, or
+	// the two forms of the contract have diverged and we refuse it. pdf-core
+	// /verify/content compares only the page content streams, so the C2PA,
+	// signature and amendment layers a peer legitimately appended do not trip
+	// it; genuine tampering does.
+	contentMatch, verr := s.PDFCore.VerifyContent(ctx, req.Pdf)
+	if verr != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: could not content-verify received PDF: %w", verr))
+	}
+	if !contentMatch {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New(
+			"post_pdf rejected: received PDF's human-readable page content does not match its embedded machine-readable payload"))
 	}
 
 	payload, err := s.PDFCore.ExtractPayload(ctx, req.Pdf)

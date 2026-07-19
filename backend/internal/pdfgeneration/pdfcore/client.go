@@ -341,6 +341,37 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	return result, nil
 }
 
+// VerifyContent posts pdf to POST /verify/content and reports whether the PDF's
+// human-readable page content is the deterministic re-render of its own embedded
+// machine-readable payload. Unlike Verify (byte-prefix reproduction), this is
+// tolerant of the C2PA, signature and amendment layers a peer may have appended,
+// so a legitimately amended offered PDF still matches while tampered page content
+// does not. Returns an error on non-2xx.
+func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/verify/content", bytes.NewReader(pdf))
+	if err != nil {
+		return false, fmt.Errorf("pdf-core verify/content request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("pdf-core verify/content: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return false, err
+	}
+	var body struct {
+		Match bool `json:"match"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, fmt.Errorf("pdf-core verify/content: decode: %w", err)
+	}
+	return body.Match, nil
+}
+
 // ExtractManifest posts pdf to POST /manifest/extract and returns the raw JUMBF
 // C2PA manifest store bytes embedded in the PDF (DCS-OR-C2PA-008).
 func (c *Client) ExtractManifest(ctx context.Context, pdf []byte) ([]byte, error) {

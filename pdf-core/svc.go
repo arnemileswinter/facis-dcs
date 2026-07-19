@@ -282,6 +282,46 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// verifyContent checks ONLY that the submitted PDF's visible page content is the
+// deterministic render of its own embedded machine-readable payload, tolerant of
+// C2PA / signature / amendment incremental-update layers appended after the base
+// (which /verify's byte-prefix reproduction check rejects). This is the legal
+// human↔machine guarantee a DCS applies to a peer-received PDF that may already
+// carry appended manifests: tampering of the visible document fails, an
+// already-C2PA-amended offer passes.
+func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
+	if err := checkMediaType(r.Header.Get("Content-Type"), "application/pdf"); err != nil {
+		writeError(w, err)
+		return
+	}
+	raw, err := limitRead(r.Body, 32<<20)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	payload, err := compiler.ExtractLatestEmbeddedJSONLD(raw)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	compiledAt, err := compiler.ExtractLifecycleEffectiveAt(raw)
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("extract lifecycle timestamp: %w", err)))
+		return
+	}
+	recompiled, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payload, compiledAt)
+	if err != nil {
+		writeError(w, errUnprocessableEntity(err))
+		return
+	}
+	match := compiler.MatchPageContent(raw, recompiled) == nil
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(struct {
+		Match bool `json:"match"`
+	}{Match: match})
+}
+
 // isVCProofStructurallyValid returns true when the VC JSON contains a
 // recognisable proof field, without performing cryptographic verification.
 func isVCProofStructurallyValid(vcBytes []byte) bool {
