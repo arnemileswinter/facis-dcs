@@ -21,6 +21,13 @@ import (
 //go:embed testdata/fonts/LiberationSans-Regular.ttf
 var liberationSansTTF []byte
 
+// CanonicalCompiledAt is the fixed render epoch stamped as every compiled PDF's
+// lifecycle effective_at, keeping compilation deterministic (same payload →
+// byte-identical output). It matches the PDF's hardcoded metadata dates
+// (2026-06-04); the trusted contract time is the PAdES B-T timestamp applied at
+// signing, not this render epoch.
+var CanonicalCompiledAt = time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
+
 func CompilePDF(ctx context.Context, payload []byte, compiledAt time.Time) ([]byte, error) {
 	// Compact to stable canonical form first. All subsequent operations (URDNA2015
 	// hash and model extraction) run on the same canonical representation so the
@@ -132,7 +139,7 @@ func AppendVerificationWitness(ctx context.Context, pdf []byte, payload []byte) 
 	exclusions := []c2paExclusion{}
 	var candidate []byte
 	for iteration := 0; iteration < 6; iteration++ {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, hardBindingHash, exclusions, time.Now(), "")
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, hardBindingHash, exclusions, CanonicalCompiledAt, "")
 		if err != nil {
 			return nil, err
 		}

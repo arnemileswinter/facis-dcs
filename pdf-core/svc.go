@@ -16,7 +16,6 @@ import (
 	compiler "example.com/m/V2/compiler"
 	"example.com/m/V2/manifest"
 
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -188,7 +187,7 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signer := compiler.NewCapturingSigner()
-	pdf, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), signer), canonical, time.Now())
+	pdf, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), signer), canonical, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -386,9 +385,8 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 	// Absent (the default) => neither is emitted.
 	manifestURL := strings.TrimSpace(string(parts["manifest_url"]))
 
-	now := time.Now()
 	signer := compiler.NewCapturingSigner()
-	updated, err := compiler.UpdatePDFWithOptions(compiler.WithSigner(r.Context(), signer), oldPDF, canonical, vcBytes, manifestURL, now)
+	updated, err := compiler.UpdatePDFWithOptions(compiler.WithSigner(r.Context(), signer), oldPDF, canonical, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
 	if err != nil {
 		if errors.Is(err, compiler.ErrNoChanges) {
 			writeError(w, errConflict(err))
@@ -562,7 +560,7 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	canonicalPDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), canonical, time.Now())
+	canonicalPDF, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), canonical, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
