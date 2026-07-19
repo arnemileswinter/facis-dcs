@@ -526,6 +526,7 @@ func main() {
 		TRepo:      &ctRepo,
 		PDFCore:    pdfCoreClient,
 		IssuerDID:  issuerDID,
+		LocalPeer:  did,
 		VCIssuer:   provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
 	}
 	go func() {

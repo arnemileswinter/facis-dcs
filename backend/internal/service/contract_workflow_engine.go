@@ -548,26 +548,28 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
+	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String()))
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
-		Did:             contractResult.DID,
-		ContractVersion: contractResult.ContractVersion,
-		State:           contractResult.State.String(),
-		Name:            contractResult.Name,
-		Description:     contractResult.Description,
-		CreatedBy:       contractResult.CreatedBy,
-		CreatedAt:       contractResult.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       contractResult.UpdatedAt.Format(time.RFC3339),
-		ContractData:    contractResult.ContractData,
-		TemplateDid:     contractResult.TemplateDID,
-		TemplateVersion: contractResult.TemplateVersion,
-		Negotiations:    negotiationList,
-		StartDate:       startDate,
-		ExpDate:         expDate,
-		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: contractResult.ExpNoticePeriod,
-		Responsible:     contractResult.Responsible,
-		Kpis:            kpis,
-		KpiViolations:   kpiViolations,
+		Did:                contractResult.DID,
+		ContractVersion:    contractResult.ContractVersion,
+		State:              contractResult.State.String(),
+		ExtrinsicLifecycle: &extrinsic,
+		Name:               contractResult.Name,
+		Description:        contractResult.Description,
+		CreatedBy:          contractResult.CreatedBy,
+		CreatedAt:          contractResult.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:          contractResult.UpdatedAt.Format(time.RFC3339),
+		ContractData:       contractResult.ContractData,
+		TemplateDid:        contractResult.TemplateDID,
+		TemplateVersion:    contractResult.TemplateVersion,
+		Negotiations:       negotiationList,
+		StartDate:          startDate,
+		ExpDate:            expDate,
+		ExpPolicy:          expPolicy,
+		ExpNoticePeriod:    contractResult.ExpNoticePeriod,
+		Responsible:        contractResult.Responsible,
+		Kpis:               kpis,
+		KpiViolations:      kpiViolations,
 	}, nil
 }
 

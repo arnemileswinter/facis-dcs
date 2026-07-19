@@ -78,6 +78,11 @@ type Subscriber struct {
 	TRepo      tpldb.ContractTemplateRepo
 	PDFCore    *pdfcore.Client
 	IssuerDID  string
+	// LocalPeer is this instance's own did:web. A contract whose Origin is not
+	// this DID was received from a peer (ADR-13); its stored PDF carries the
+	// counterparty's C2PA chain, so a content change must amend that base rather
+	// than fresh-render (which would strip the counterparty's provenance).
+	LocalPeer string
 	// VCIssuer issues and signs a W3C VC for each lifecycle event (DCS-OR-C2PA-004/005).
 	VCIssuer provenance.VCIssuer
 }
@@ -186,10 +191,14 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 	}
 
 	// A pure state transition appends to the existing PDF to preserve the C2PA
-	// chain; the genesis render or a content change (a DRAFT edit) starts from a
-	// freshly rendered PDF that reflects the current content.
+	// chain; a local genesis render or a local content edit starts from a freshly
+	// rendered PDF. A content change on a PEER-RECEIVED contract (a counteroffer
+	// edit) must also amend the stored base — that base is the counterparty's own
+	// PDF, so amending it chains their manifest as an ingredient and the C2PA
+	// provenance grows across the negotiation instead of resetting (ADR-13).
+	peerReceived := contract.Origin != "" && contract.Origin != s.LocalPeer
 	var basePDF []byte
-	if pdfState.IPFSCID != "" && !contentChanged {
+	if pdfState.IPFSCID != "" && (!contentChanged || peerReceived) {
 		ipfsResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
 		if err != nil || len(ipfsResult.Data) == 0 {
 			return fmt.Errorf("fetch PDF from IPFS %s for contract %s: %w", pdfState.IPFSCID, cweEvt.DID, err)

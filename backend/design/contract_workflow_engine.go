@@ -265,6 +265,7 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 	Attribute("did", String, "DID of the contract")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "Current state of the contract")
+	Attribute("extrinsic_lifecycle", String, "Peer-facing negotiation lifecycle inferred from the intrinsic state (proposed/agreed/executed), ADR-13")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "The description of the contract")
 
