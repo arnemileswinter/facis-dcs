@@ -148,15 +148,13 @@ function verifySemanticValues(): boolean {
   return false
 }
 
-const createContract = async ({ reviewers, approvers, negotiators }: ParticipantSelection) => {
+const createContract = async ({ counterparty }: ParticipantSelection) => {
   isSubmitting.value = true
   try {
     if (selectedTemplate.value) {
       const response = await contractWorkflowService.create({
         template_did: selectedTemplate.value.did,
-        reviewers,
-        approvers,
-        negotiators,
+        counterparty,
       })
       did.value = response.did
       if (selectedParentContractDid.value) {
@@ -205,7 +203,7 @@ const updateContract = async () => {
   }
 }
 
-const submitContract = async ({ reviewers, approvers, negotiators }: ParticipantSelection) => {
+const submitContract = async () => {
   if (!contract.value || !verifySemanticValues()) return
   isSubmitting.value = true
   try {
@@ -213,9 +211,6 @@ const submitContract = async ({ reviewers, approvers, negotiators }: Participant
     const response = await contractWorkflowService.submit({
       did: updatedContract.did,
       updated_at: updatedContract.updated_at,
-      reviewers,
-      approvers,
-      negotiators,
     })
     if (response.did) {
       await router.push({ name: ROUTES.CONTRACTS.LIST })
@@ -492,12 +487,15 @@ onBeforeRouteLeave(() => {
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Update
         </button>
-        <ParticipantSelectionDialog
+        <button
           v-if="contract?.state === ContractState.draft && canSubmitContract"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
-          @submit="submitContract"
-        />
+          @click="submitContract"
+        >
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Submit
+        </button>
         <button
           v-else-if="contract?.state === ContractState.rejected && canSubmitContract"
           class="btn flex-1 btn-primary"
