@@ -42,10 +42,48 @@ func expandCanonicalIRI(compact string) string {
 	return compact
 }
 
-// parseCanonicalSegment maps one ContentItem from the canonical compact form to
-// a clauseSegment. The compact form uses short term names and prefix notation
-// for IRIs; expandCanonicalIRI resolves them to full IRIs where needed.
-func parseCanonicalSegment(item ContentItem) clauseSegment {
+// requirementFieldValue extracts a field's filled value from parameterValue,
+// accepting a bare scalar, a JSON number, or a typed {"@value":…} literal.
+func requirementFieldValue(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var n json.Number
+	if json.Unmarshal(raw, &n) == nil {
+		return n.String()
+	}
+	var obj map[string]any
+	if json.Unmarshal(raw, &obj) == nil {
+		if v, ok := obj["@value"]; ok {
+			return fmt.Sprint(v)
+		}
+	}
+	return ""
+}
+
+// placeholderFillValue resolves a Placeholder's dcs:bindsTo reference to the
+// bound field's filled value ("" when unbound or unfilled).
+func placeholderFillValue(item ContentItem, fields map[string]string) string {
+	if len(item.Raw) == 0 {
+		return ""
+	}
+	var raw map[string]any
+	if json.Unmarshal(item.Raw, &raw) != nil {
+		return ""
+	}
+	binds, ok := raw["bindsTo"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := binds["@id"].(string)
+	return fields[id]
+}
+
+func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSegment {
 	// Value objects: typed literal or plain string.
 	if item.Value != "" {
 		if item.Datatype != "" {
@@ -56,8 +94,12 @@ func parseCanonicalSegment(item ContentItem) clauseSegment {
 
 	// Decode raw JSON for schema: properties (schema:url, schema:name).
 
-	// Placeholder: dcs:Placeholder in content renders as five underscores.
+	// Placeholder: renders its bound field's filled value in a contract, or the
+	// empty slot ("_____") in a template / when the field is unfilled.
 	if item.Datatype == "Placeholder" || item.Datatype == "dcs:Placeholder" {
+		if v := placeholderFillValue(item, fields); v != "" {
+			return clauseSegment{Type: "prose", Text: v}
+		}
 		return clauseSegment{Type: "prose", Text: "_____"}
 	}
 
@@ -101,7 +143,7 @@ func parseCanonicalSegment(item ContentItem) clauseSegment {
 	return clauseSegment{Type: "prose"}
 }
 
-func parseCanonicalClause(block *Block) clauseData {
+func parseCanonicalClause(block *Block, fields map[string]string) clauseData {
 	if block.Type == "TextBlock" {
 		return clauseData{Segments: []clauseSegment{{Type: "prose", Text: block.Text}}}
 	}
@@ -110,13 +152,13 @@ func parseCanonicalClause(block *Block) clauseData {
 	for _, rawItem := range block.Content {
 		var item ContentItem
 		if err := json.Unmarshal(rawItem, &item); err == nil {
-			clause.Segments = append(clause.Segments, parseCanonicalSegment(item))
+			clause.Segments = append(clause.Segments, parseCanonicalSegment(item, fields))
 		}
 	}
 	return clause
 }
 
-func walkCanonicalSectionNode(sec sectionData, ln *LayoutNode, layoutByID map[string]*LayoutNode, blockByID map[string]*Block) sectionData {
+func walkCanonicalSectionNode(sec sectionData, ln *LayoutNode, layoutByID map[string]*LayoutNode, blockByID map[string]*Block, fields map[string]string) sectionData {
 	for _, childID := range ln.Children {
 		block := blockByID[childID]
 		if block == nil {
@@ -124,14 +166,14 @@ func walkCanonicalSectionNode(sec sectionData, ln *LayoutNode, layoutByID map[st
 		}
 		switch block.Type {
 		case "Clause", "TextBlock":
-			sec.Clauses = append(sec.Clauses, parseCanonicalClause(block))
+			sec.Clauses = append(sec.Clauses, parseCanonicalClause(block, fields))
 		case "Section":
 			sub := sectionData{
 				Heading: strings.TrimSpace(block.Title),
 				Clauses: []clauseData{},
 			}
 			if subLayout, ok := layoutByID[childID]; ok {
-				sub = walkCanonicalSectionNode(sub, subLayout, layoutByID, blockByID)
+				sub = walkCanonicalSectionNode(sub, subLayout, layoutByID, blockByID, fields)
 			}
 			sec.Subsections = append(sec.Subsections, sub)
 		}
@@ -139,7 +181,7 @@ func walkCanonicalSectionNode(sec sectionData, ln *LayoutNode, layoutByID map[st
 	return sec
 }
 
-func walkCanonicalSections(ds *DocumentStructure) []sectionData {
+func walkCanonicalSections(ds *DocumentStructure, fields map[string]string) []sectionData {
 	blockByID := make(map[string]*Block, len(ds.Blocks))
 	for i := range ds.Blocks {
 		b := &ds.Blocks[i]
@@ -189,14 +231,14 @@ func walkCanonicalSections(ds *DocumentStructure) []sectionData {
 				Clauses: []clauseData{},
 			}
 			if secLayout, ok := layoutByID[childID]; ok {
-				sec = walkCanonicalSectionNode(sec, secLayout, layoutByID, blockByID)
+				sec = walkCanonicalSectionNode(sec, secLayout, layoutByID, blockByID, fields)
 			}
 			sections = append(sections, sec)
 		case "Clause", "TextBlock":
 			if anonymous == nil {
 				anonymous = &sectionData{Clauses: []clauseData{}}
 			}
-			anonymous.Clauses = append(anonymous.Clauses, parseCanonicalClause(block))
+			anonymous.Clauses = append(anonymous.Clauses, parseCanonicalClause(block, fields))
 		}
 	}
 	flushAnonymousSection(anonymous)
@@ -231,8 +273,17 @@ func extractDocumentModelFromCanonical(canonical []byte, hashHex string) (docume
 	}
 	model.Title = strings.TrimSpace(tmpl.Metadata.Title)
 
+	fields := map[string]string{}
+	for _, dr := range tmpl.ContractData {
+		for _, f := range dr.Fields {
+			if v := requirementFieldValue(f.ParameterValue); v != "" {
+				fields[f.ID] = v
+			}
+		}
+	}
+
 	if tmpl.DocumentStructure != nil {
-		model.Sections = walkCanonicalSections(tmpl.DocumentStructure)
+		model.Sections = walkCanonicalSections(tmpl.DocumentStructure, fields)
 	}
 
 	for _, sf := range tmpl.SignatureFields {
@@ -327,6 +378,8 @@ var listValuedTerms = map[string]bool{
 	"content":         true,
 	"signatureFields": true,
 	"subTemplates":    true,
+	"contractData":    true,
+	"fields":          true,
 }
 
 // idRefListTerms are list properties the model reads as []string of bare IRIs,

@@ -14,6 +14,22 @@ type ContractTemplate struct {
 	Metadata          *TemplateMetadata  `json:"metadata,omitempty"`
 	DocumentStructure *DocumentStructure `json:"documentStructure,omitempty"`
 	SignatureFields   []SignatureField   `json:"signatureFields,omitempty"`
+	// ContractData carries the requirement fields. A field's parameterValue is the
+	// filling shown wherever a Placeholder binds to that field's @id (empty when a
+	// template, present once a contract fills it). This is human-readable content.
+	ContractData []DataRequirement `json:"contractData,omitempty"`
+}
+
+// DataRequirement groups requirement fields (dcs:DataRequirement).
+type DataRequirement struct {
+	Fields []RequirementField `json:"fields,omitempty"`
+}
+
+// RequirementField is one fillable field; ParameterValue is its filling (raw so a
+// bare scalar, a JSON number, or a typed {"@value":…} literal all decode).
+type RequirementField struct {
+	ID             string          `json:"@id,omitempty"`
+	ParameterValue json.RawMessage `json:"parameterValue,omitempty"`
 }
 
 // TemplateMetadata holds the dcs:TemplateMetadata node.
