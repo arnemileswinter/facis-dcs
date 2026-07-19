@@ -277,7 +277,7 @@ func TestDownload_CarriesJSONLDAttachmentVerbatim(t *testing.T) {
 	// renderer must not silently rewrite the document it carries. pdf-core's own
 	// guarantee — the visible render reproduces from documentStructure — is
 	// covered by determinism.feature.
-	for i, payload := range []string{minimalPayload, minimalPayloadFlavorPrefixed, minimalPayloadFlavorExpanded} {
+	for i, payload := range []string{minimalPayload, minimalPayloadFlavorPrefixed} {
 		rec := doRequest(http.MethodPost, "/render",
 			bytes.NewBufferString(payload), "application/ld+json")
 		if rec.Code != http.StatusOK {
@@ -300,6 +300,19 @@ func TestDownload_CarriesJSONLDAttachmentVerbatim(t *testing.T) {
 		if strings.TrimSpace(string(embedded)) != strings.TrimSpace(payload) {
 			t.Fatalf("flavor %d: embedded attachment is not the verbatim submitted payload\ngot:  %.120s\nwant: %.120s", i, embedded, payload)
 		}
+	}
+}
+
+// TestDownload_RejectsExpandedJSONLD proves pdf-core reads only the compact
+// dcs:/bare-term shape DCS sends. An expanded-IRI serialization is not the
+// expected documentStructure shape and is rejected — pdf-core no longer runs a
+// json-gold expand/compact pass to accept arbitrary flavors (that round trip
+// reordered rich content non-deterministically).
+func TestDownload_RejectsExpandedJSONLD(t *testing.T) {
+	rec := doRequest(http.MethodPost, "/render",
+		bytes.NewBufferString(minimalPayloadFlavorExpanded), "application/ld+json")
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expanded JSON-LD flavor must be rejected, got status 200")
 	}
 }
 

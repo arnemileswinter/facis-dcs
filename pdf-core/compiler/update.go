@@ -205,25 +205,14 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		return nil, fmt.Errorf("extract embedded JSON-LD: %w", err)
 	}
 
-	// Canonicalize newPayload so the URDNA2015 hash is computed on the same
-	// canonical representation used for model extraction and PDF embedding.
-	newCanonical, err := CanonicalizePayload(newPayload)
-	if err != nil {
-		return nil, fmt.Errorf("canonicalize new payload: %w", err)
-	}
-
-	// oldPayload is the VERBATIM attachment a prior compile/update embedded, so
-	// canonicalize it before hashing — the "no changes" guard must compare the two
-	// payloads on the same canonical (graph) basis as newCanonical.
-	oldCanonical, err := CanonicalizePayload(oldPayload)
-	if err != nil {
-		return nil, fmt.Errorf("canonicalize old payload: %w", err)
-	}
-	oldNQuads, err := NormalizePayload(oldCanonical)
+	// The "no changes" guard compares the two payloads by their URDNA2015 graph
+	// hash — deterministic regardless of serialization, so the verbatim old and
+	// new attachments compare on the same canonical graph basis.
+	oldNQuads, err := NormalizePayload(oldPayload)
 	if err != nil {
 		return nil, err
 	}
-	newNQuads, err := NormalizePayload(newCanonical)
+	newNQuads, err := NormalizePayload(newPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +234,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		return nil, fmt.Errorf("find startxref: %w", err)
 	}
 
-	newDoc, err := extractDocumentModelFromCanonical(newCanonical, newHashHex)
+	newDoc, err := extractDocumentModel(newPayload, newHashHex)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +262,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		if r, ok := currentRootObjID(oldPDF); ok {
 			rootObjID = r
 		}
-		manifestDoc, err = extractDocumentModelFromCanonical(oldPayload, oldHashHex)
+		manifestDoc, err = extractDocumentModel(oldPayload, oldHashHex)
 		if err != nil {
 			return nil, fmt.Errorf("extract frozen document model: %w", err)
 		}

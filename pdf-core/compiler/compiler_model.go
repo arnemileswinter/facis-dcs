@@ -289,6 +289,82 @@ func extractDocumentModelFromCanonical(canonical []byte, hashHex string) (docume
 	return model, nil
 }
 
+// extractDocumentModel builds the render model directly from the verbatim
+// payload's documentStructure, honoring @list order. It strips the dcs: prefix
+// and unwraps @list wrappers without a json-gold expand/compact round trip, so
+// the ordered structures the payload carries drive the render deterministically
+// (that round trip reorders @set/multi-value nodes non-deterministically).
+func extractDocumentModel(payload []byte, hashHex string) (documentModel, error) {
+	shaped, err := shapeForModel(payload)
+	if err != nil {
+		return documentModel{}, err
+	}
+	return extractDocumentModelFromCanonical(shaped, hashHex)
+}
+
+// shapeForModel rewrites a JSON-LD payload into the bare-term, plain-array shape
+// the render structs read: it strips the dcs: prefix from keys and @type values
+// and unwraps {"@list":[...]} to [...], preserving array order. It never
+// reorders, so the same payload always yields identical model input.
+func shapeForModel(raw []byte) ([]byte, error) {
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("invalid JSON-LD payload: %w", err)
+	}
+	if _, ok := doc.(map[string]any); !ok {
+		return nil, fmt.Errorf("JSON-LD payload must be a JSON object at the root")
+	}
+	return json.Marshal(stripDCSTerms(doc))
+}
+
+func stripDCSTerms(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if len(t) == 1 {
+			if list, ok := t["@list"]; ok {
+				return stripDCSTerms(list)
+			}
+		}
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			key := stripDCSPrefix(k)
+			if key == "@type" {
+				out[key] = stripDCSType(val)
+				continue
+			}
+			out[key] = stripDCSTerms(val)
+		}
+		return out
+	case []any:
+		for i := range t {
+			t[i] = stripDCSTerms(t[i])
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+func stripDCSType(v any) any {
+	switch t := v.(type) {
+	case string:
+		return stripDCSPrefix(t)
+	case []any:
+		for i := range t {
+			if s, ok := t[i].(string); ok {
+				t[i] = stripDCSPrefix(s)
+			}
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+func stripDCSPrefix(s string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(s, "dcs:"), dcsOntologyIRI)
+}
+
 func compactIRI(iri string, nsMap map[string]string) string {
 	prefixes := make([]string, 0, len(nsMap))
 	for p := range nsMap {

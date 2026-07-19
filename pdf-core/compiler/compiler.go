@@ -29,22 +29,19 @@ var liberationSansTTF []byte
 var CanonicalCompiledAt = time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 
 func CompilePDF(ctx context.Context, payload []byte, compiledAt time.Time) ([]byte, error) {
-	// The graph hash (URDNA2015) and the render model are derived from an internal
-	// canonical form, so the FileID is invariant across semantically equivalent
-	// input flavors and documentStructure parses uniformly. The canonical form is
-	// used ONLY internally — the JSON-LD attachment is embedded VERBATIM below.
-	canonical, err := CanonicalizePayload(payload)
-	if err != nil {
-		return nil, err
-	}
-	nquads, err := NormalizePayload(canonical)
+	// The FileID is the URDNA2015 graph hash of the payload — deterministic
+	// regardless of serialization. The render model is extracted directly from the
+	// payload's @list-ordered documentStructure (no json-gold expand/compact,
+	// which reorders rich content non-deterministically). The attachment is
+	// embedded VERBATIM below.
+	nquads, err := NormalizePayload(payload)
 	if err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(nquads)
 	hashHex := hex.EncodeToString(sum[:])
 
-	doc, err := extractDocumentModelFromCanonical(canonical, hashHex)
+	doc, err := extractDocumentModel(payload, hashHex)
 	if err != nil {
 		return nil, err
 	}
