@@ -1,51 +1,81 @@
-import { expect, seededFixtures, test } from './dcs-test'
+import { expect, test } from './dcs-test'
 import {
   assertManifestChainGrew,
   assertReceivedInState,
+  authorContractTemplate,
+  authorSemanticComponent,
   counterOffer,
+  createContractViaUi,
   instanceA,
   manifestChainLength,
   openInstanceB,
+  publishShapeOnInstance,
+  registerTemplateOn,
+  resolveDidWeb,
   signOnInstance,
+  submitReviewApproveTemplateOn,
   verifyArtifact,
 } from './multi-dcs-helpers'
 import { E2E_API_BASE, E2E_FRONTEND_ORIGIN } from '../playwright.config'
 
 /**
  * The normative two-instance negotiation vertical: instance A (originator) and
- * instance B (counterparty) drive a contract from proposal through a
- * non-trivial negotiation ping-pong to mutual signature, deployment and audit,
- * with every exported artifact independently verified (PDF/A-3a via veraPDF +
- * a valid, GROWING C2PA chain via c2patool) on BOTH parties at every hop.
+ * instance B (counterparty) drive a contract from its own authored vocabulary
+ * and template — SHACL shape, component with a semantic clause, composed
+ * contract template published to the Federated Catalogue — all the way through
+ * proposal, a non-trivial negotiation ping-pong, mutual signature, deployment
+ * and audit, with every exported artifact independently verified (PDF/A-3a via
+ * veraPDF + a valid, GROWING C2PA chain via c2patool) on BOTH parties at every
+ * hop. No seeded fixtures: A authors the whole contract through the real UI
+ * before offering it to B.
  *
  * Marked test.fixme until the backend R5/R5c work is merged: the negotiation
  * counter-offer round-trip (each adjustment ships a new PDF, chain grows), the
  * settle/consolidation gate (signing refused pre-settle; extrinsic phase
  * proposed→agreed→executed on the retrieve API), and cross-instance double
  * signing (B signs on A's signed PDF). Un-fixme and iterate to green once those
- * land. The single-instance full-vertical.spec.ts stays as the authoring/
+ * land. The single-instance full-vertical.spec.ts stays as the local-only
  * lifecycle coverage until this supersedes it.
  */
 test.fixme('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
   test.setTimeout(900_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
-  const { templateDid } = seededFixtures()
+
+  const unique = Date.now()
+  const shapeName = `e2e-payment-shape-${unique}`
+  const componentName = `2DCS Component ${unique}`
+  const contractTemplateName = `2DCS Contract ${unique}`
 
   let contractDid = ''
+  let componentDid = ''
+  let contractTemplateDid = ''
 
-  // ---- Stage 4: A derives a contract from an approved template and offers it.
-  // (Stages 1-3 — SHACL shape, component with full editor prose, template with
-  // custom wrapping, FC publish — are covered by full-vertical.spec.ts; here we
-  // start from an approved template to focus the two-instance coverage.)
+  // ---- Stage 1: A publishes a non-trivial SHACL shape through its Semantic Hub.
+  await test.step('A publishes a SHACL shape via the Semantic Hub UI', async () => {
+    await publishShapeOnInstance(a, shapeName)
+  })
+
+  // ---- Stage 2: A authors a component template with a semantic clause (prose +
+  // SHACL-backed requirement field + ODRL policy), then review/approve it.
+  await test.step('A authors a semantic component and approves it', async () => {
+    componentDid = await authorSemanticComponent(a, componentName)
+    await submitReviewApproveTemplateOn(a, componentDid, componentName)
+  })
+
+  // ---- Stage 3: A composes a contract template from the approved component
+  // with custom wrapping, approves it, and registers it to the Federated Catalogue.
+  await test.step('A composes a contract template and publishes it to the FC', async () => {
+    contractTemplateDid = await authorContractTemplate(a, contractTemplateName, componentName)
+    await submitReviewApproveTemplateOn(a, contractTemplateDid, contractTemplateName)
+    await registerTemplateOn(a, contractTemplateDid, contractTemplateName)
+  })
+
+  // ---- Stage 4: A derives a contract from its registered template through the
+  // real UI, naming B (B's own did:web) as the counterparty via the R6 dialog.
   await test.step('A creates a contract with B as counterparty', async () => {
-    await a.gotoAs('Contract Creator', '/ui/contracts')
-    const created = await a.page.request.post(`${E2E_API_BASE}/contract/create`, {
-      data: { template_did: templateDid, counterparty: b.origin },
-    })
-    expect(created.ok(), `contract create ${created.status()}: ${await created.text()}`).toBeTruthy()
-    contractDid = String(((await created.json()) as { did?: string }).did ?? '')
-    expect(contractDid).toBeTruthy()
+    const bDidWeb = await resolveDidWeb(b)
+    contractDid = await createContractViaUi(a, contractTemplateName, bDidWeb)
   })
 
   // ---- Stage 5: propose to B; B receives it OFFERED with a valid C2PA

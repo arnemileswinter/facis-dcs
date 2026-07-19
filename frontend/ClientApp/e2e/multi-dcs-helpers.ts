@@ -173,6 +173,264 @@ export async function assertReceivedInState(inst: Instance, contractDid: string,
   expect(last, `contract ${contractDid} on ${inst.origin} reached ${expected}`).toBe(expected.toUpperCase())
 }
 
+/** Confirms the shared ConfirmationModal (comment/decision-note dialogs) on an
+ *  instance's page. */
+async function confirmModalOn(inst: Instance, buttonName: 'Submit' | 'Confirm'): Promise<void> {
+  const dialog = inst.page.getByRole('dialog').filter({ hasText: 'Confirmation' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: buttonName, exact: true }).click()
+}
+
+/** Waits until a template detail view finished loading (Global Name populated). */
+async function waitForTemplateLoadedOn(inst: Instance, name: string): Promise<void> {
+  await expect(inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name)
+}
+
+/**
+ * Asserts a PDF/A can be exported for a document at the current lifecycle step
+ * on an instance, using that instance's active bearer token and API base — the
+ * same authenticated GET /pdf/export/{kind}/{did} the Export PDF button issues.
+ */
+async function assertPdfExportOn(
+  inst: Instance,
+  kind: 'template' | 'contract',
+  did: string,
+  step: string,
+): Promise<void> {
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  const resp = await inst.page.request.get(`${inst.apiBase}/pdf/export/${kind}/${encodeURIComponent(did)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(resp.ok(), `export ${kind} PDF at "${step}" on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const bytes = await resp.body()
+  expect(bytes.subarray(0, 5).toString('latin1'), `PDF/A magic bytes at "${step}"`).toBe('%PDF-')
+}
+
+/** A non-trivial SHACL NodeShape TTL for the hub-publish stage: a payment
+ *  clause asset type with a constrained monetary amount and currency. */
+function paymentShapeTtl(name: string): string {
+  return `@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex: <https://example.org/${name}#> .
+
+ex:PaymentClauseShape
+  a sh:NodeShape ;
+  sh:targetClass ex:PaymentClause ;
+  sh:property [
+    sh:path ex:amount ;
+    sh:datatype xsd:decimal ;
+    sh:minInclusive 0 ;
+    sh:minCount 1 ;
+  ] ;
+  sh:property [
+    sh:path ex:currency ;
+    sh:datatype xsd:string ;
+    sh:in ( "EUR" "USD" ) ;
+    sh:minCount 1 ;
+  ] .
+`
+}
+
+/**
+ * Stage 1 — publishes a brand-new, non-trivial SHACL shapes-graph entry into
+ * the instance's Semantic Hub through the dashboard UI (the Gaia-X case: an
+ * external shape enters the running instance without a rebuild), then confirms
+ * it resolves through the hub's public route. The vertical authors its own
+ * vocabulary rather than assuming a seeded fixture.
+ */
+export async function publishShapeOnInstance(inst: Instance, name: string): Promise<void> {
+  await inst.gotoAs('Template Manager', '/ui/semantic-hub')
+  await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
+  await inst.page.getByLabel('Entry name').fill(name)
+  await inst.page.getByLabel('Entry kind').selectOption('shapes')
+  await inst.page.getByLabel('Entry content').fill(paymentShapeTtl(name))
+  await inst.page.getByRole('button', { name: 'Publish entry' }).click()
+  await expect(inst.page.getByRole('heading', { name })).toBeVisible()
+  await expect(inst.page.getByText('active').first()).toBeVisible()
+
+  const resolved = await inst.page.request.get(`${inst.apiBase}/semantic/shapes/${name}`)
+  expect(resolved.ok(), `published shape ${name} resolves on ${inst.origin}`).toBeTruthy()
+  expect(await resolved.text()).toContain('PaymentClauseShape')
+}
+
+/**
+ * Stage 2 — builds a Component template with a semantic clause through the real
+ * editor: a titled clause carrying human prose beside its machine-readable ODRL
+ * meaning, bound to a SHACL-backed hub requirement field (Payment Amount), with
+ * a permission bounded by that field, placed into the document outline. Returns
+ * the created component's DID.
+ */
+export async function authorSemanticComponent(inst: Instance, name: string): Promise<string> {
+  await inst.gotoAs('Template Creator', '/ui/templates/new')
+  await inst.page.getByRole('button', { name: /Component/ }).click()
+  await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
+  await inst.page
+    .getByRole('group')
+    .filter({ hasText: 'Base Description' })
+    .getByRole('textbox')
+    .fill('Payment component authored by the two-instance vertical.')
+
+  await inst.page.getByRole('tab', { name: /Clauses/ }).click()
+  const editor = inst.page.getByTestId('split-clause-editor')
+  await editor.getByPlaceholder('Clause title').fill('Payment terms')
+  await editor.locator('select').first().selectOption({ label: 'Payment Amount' })
+  await editor.locator('.clause-editor').first().click()
+  await inst.page.keyboard.type('The provider invoices the agreed payment amount.')
+
+  const ruleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Action').selectOption({ label: 'use' })
+  await editor.getByRole('button', { name: '+ constraint' }).click()
+  const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
+  await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('input[placeholder="value"]').fill('500')
+
+  await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
+  await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
+
+  const modal = inst.page.getByRole('dialog')
+  await inst.page.getByRole('button', { name: 'Place in document' }).first().click()
+  await expect(modal.getByText('Selected clause')).toBeVisible()
+  await modal.getByRole('button', { name: /Payment terms/ }).click()
+  await expect(inst.page.getByRole('dialog')).toBeHidden()
+
+  const created = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/create') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Create', exact: true }).click()
+  const componentDid = ((await (await created).json()) as { did: string }).did
+  expect(componentDid).toBeTruthy()
+  await assertPdfExportOn(inst, 'template', componentDid, 'component DRAFT')
+  return componentDid
+}
+
+/** DRAFT → SUBMITTED → REVIEWED → APPROVED for one template on an instance,
+ *  via the real UI (submit, verify + reviewer recommendation, approval). */
+export async function submitReviewApproveTemplateOn(inst: Instance, did: string, name: string): Promise<void> {
+  await inst.gotoAs('Template Creator', `/ui/templates/view/${did}`)
+  const submitted = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await submitted
+  await assertPdfExportOn(inst, 'template', did, `${name} SUBMITTED`)
+
+  await inst.gotoAs('Template Reviewer', `/ui/templates/review/${did}`)
+  await waitForTemplateLoadedOn(inst, name)
+  const verified = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
+  await verified
+  await inst.page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
+  const forwarded = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await confirmModalOn(inst, 'Submit')
+  await forwarded
+
+  await inst.gotoAs('Template Approver', `/ui/templates/approve/${did}`)
+  await waitForTemplateLoadedOn(inst, name)
+  const approved = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/approve') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await confirmModalOn(inst, 'Submit')
+  await approved
+  await assertPdfExportOn(inst, 'template', did, `${name} APPROVED`)
+}
+
+/**
+ * Stage 3 — composes a Contract Template on an instance that pins the approved
+ * component as a sub-template snapshot and references it in a custom document
+ * wrapping (Builder outline). Returns the created contract template's DID.
+ */
+export async function authorContractTemplate(inst: Instance, name: string, componentName: string): Promise<string> {
+  await inst.gotoAs('Template Creator', '/ui/templates/new')
+  await inst.page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
+  await inst.page
+    .getByRole('group')
+    .filter({ hasText: 'Base Description' })
+    .getByRole('textbox')
+    .fill('Contract template composed by the two-instance vertical.')
+
+  await inst.page.getByText('Component Templates', { exact: true }).click()
+  await inst.page.getByPlaceholder('Search templates…').fill(componentName)
+  await inst.page.getByRole('button', { name: componentName }).click()
+  await expect(inst.page.getByText('No component templates selected yet.')).toBeHidden()
+
+  await inst.page.getByRole('tab', { name: /Builder/ }).click()
+  await inst.page
+    .getByRole('button', { name: /add.*block/i })
+    .first()
+    .click()
+  const modal = inst.page.getByRole('dialog')
+  await expect(modal.getByText('Approved sub-templates:')).toBeVisible()
+  await modal.getByText(componentName).first().click()
+  await expect(inst.page.getByRole('dialog')).toBeHidden()
+
+  const created = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/create') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Create', exact: true }).click()
+  const contractTemplateDid = ((await (await created).json()) as { did: string }).did
+  expect(contractTemplateDid).toBeTruthy()
+  return contractTemplateDid
+}
+
+/** Stage 3 tail — registers an approved contract template (publishes it to the
+ *  Federated Catalogue) so contracts can be derived from it. */
+export async function registerTemplateOn(inst: Instance, did: string, name: string): Promise<void> {
+  await inst.gotoAs('Template Manager', `/ui/templates/view/${did}`)
+  await waitForTemplateLoadedOn(inst, name)
+  const registered = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Register', exact: true }).click()
+  await registered
+}
+
+/** The counterparty's own did:web, resolved from its origin-root DID document
+ *  (/.well-known/did.json) — the value A types into the R6 counterparty input. */
+export async function resolveDidWeb(inst: Instance): Promise<string> {
+  const resp = await inst.page.request.get(`${inst.origin}/.well-known/did.json`)
+  expect(resp.ok(), `DID document for ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const id = String(((await resp.json()) as { id?: string }).id ?? '')
+  expect(id).toBeTruthy()
+  return id
+}
+
+/**
+ * Stage 4 — derives a contract from a registered template through the real UI,
+ * naming the counterparty via the R6 ParticipantSelectionDialog (a single
+ * counterparty did:web input). Returns the created contract's DID.
+ */
+export async function createContractViaUi(inst: Instance, templateName: string, counterparty: string): Promise<string> {
+  await inst.gotoAs('Contract Creator', '/ui/contracts/new')
+  const picker = inst.page.locator('select').first()
+  const option = picker.locator('option', { hasText: templateName })
+  await expect(option).toHaveCount(1)
+  await picker.selectOption({ label: (await option.textContent())!.trim() })
+
+  await inst.page.getByRole('button', { name: 'Create', exact: true }).click()
+  const dialog = inst.page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByPlaceholder('did:web:...').fill(counterparty)
+  const created = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/create') && r.request().method() === 'POST',
+  )
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
+  const resp = await created
+  expect(resp.ok(), `contract create ${resp.status()}: ${await resp.text()}`).toBeTruthy()
+  const contractDid = String(((await resp.json()) as { did?: string }).did ?? '')
+  expect(contractDid).toBeTruthy()
+  return contractDid
+}
+
 /**
  * Makes a non-trivial counter-offer on the instance's Negotiate view: edits a
  * requirement value in the contract editor (producing a change request) and

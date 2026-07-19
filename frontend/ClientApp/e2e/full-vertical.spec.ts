@@ -33,13 +33,12 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
   await dialog.getByRole('button', { name: buttonName, exact: true }).click()
 }
 
-/** Fills the ParticipantSelectionDialog with the local instance DID. */
+/** Applies the R6 ParticipantSelectionDialog with no counterparty — a single
+ *  instance derives a purely local contract (review/approval/negotiation are
+ *  its own instance's RBAC roles, not a peer DID). */
 async function completeParticipantDialog(page: Page): Promise<void> {
-  const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Participants' })
+  const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'Add local DID' }).click()
-  // One entry per list (reviewers/approvers/negotiators) once the DID landed.
-  await expect(dialog.getByText(/^did:/).first()).toBeVisible()
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
@@ -271,15 +270,14 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 7: DRAFT → NEGOTIATION → SUBMITTED → REVIEWED → APPROVED ----
   await test.step('submit contract into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
-    // The submit trigger is the second ParticipantSelectionDialog instance —
-    // its trigger button is labeled "Create" (component-fixed label). Wait for
-    // the contract to load so the DRAFT-only submit control has rendered.
+    // In edit mode the DRAFT-only submit is a plain "Submit" button (R6 removed
+    // the participant dialog from the submit path). Wait for the contract to
+    // load so the control has rendered.
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Create', exact: true }).click()
     const submitted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST',
     )
-    await completeParticipantDialog(page)
+    await page.getByRole('button', { name: 'Submit', exact: true }).click()
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })
