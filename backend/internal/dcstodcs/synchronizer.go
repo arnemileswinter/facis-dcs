@@ -70,7 +70,15 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		// signed PDF directly). shipContractPDF gates on the shippable state.
 		switch source {
 		case componenttype.ContractWorkflowEngine:
-			if evt.Type() != eventtype.PDFRegenerated.String() {
+			// Ship when the regenerator produced a fresh PDF (a content or C2PA
+			// state change) OR when the contract entered the shippable OFFERED
+			// state. An offer is a pure state transition that changes neither the
+			// payload hash nor the C2PA lifecycle (DRAFT and OFFERED both map to
+			// "draft"), so a contract edited while DRAFT and then offered emits no
+			// PDF_REGENERATED — the offer itself must trigger the ship of the
+			// already-stored PDF (shipContractPDF still gates on the shippable
+			// state, so a non-shippable transition is a no-op).
+			if evt.Type() != eventtype.PDFRegenerated.String() && evt.Type() != eventtype.Offer.String() {
 				return
 			}
 		case componenttype.SignatureManagement:
