@@ -42,6 +42,7 @@ export const E2E_DSS_URL = process.env.E2E_DSS_URL ?? 'http://localhost:18099'
  * two organizations would. The full-vertical peer-negotiation test drives
  * B's real UI through this origin.
  */
+export const E2E_FRONTEND_ORIGIN = `http://localhost:${FRONTEND_PORT}`
 const FRONTEND_B_PORT = Number(process.env.E2E_FRONTEND_B_PORT ?? 5198)
 export const E2E_FRONTEND_B_ORIGIN = `http://localhost:${FRONTEND_B_PORT}`
 export const E2E_API_BASE_B =
