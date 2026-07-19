@@ -249,18 +249,29 @@ export async function assertReceivedInState(inst: Instance, contractDid: string,
   // cookies but not the Authorization header the app's axios interceptor adds).
   const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
   const deadline = Date.now() + 45_000
-  let last = ''
+  let lastState = ''
+  let lastStatus = 0
+  let lastBody = ''
   while (Date.now() < deadline) {
     const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
       headers: auth,
     })
+    lastStatus = resp.status()
+    lastBody = await resp.text()
     if (resp.ok()) {
-      last = String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
-      if (last === expected.toUpperCase()) return
+      lastState = String((JSON.parse(lastBody) as { state?: string }).state ?? '').toUpperCase()
+      if (lastState === expected.toUpperCase()) return
     }
     await inst.page.waitForTimeout(1500)
   }
-  expect(last, `contract ${contractDid} on ${inst.origin} reached ${expected}`).toBe(expected.toUpperCase())
+  // Peer replication failed: surface exactly what this instance sees so the CI
+  // log disambiguates a never-created copy (ship/trust rejection at PostPdf) from
+  // a slow or errored sync — the two look identical as an empty state otherwise.
+  expect(
+    lastState,
+    `contract ${contractDid} on ${inst.origin} never reached ${expected} within 45s ` +
+      `(last retrieve HTTP ${lastStatus}, state "${lastState}", body ${lastBody.slice(0, 400)})`,
+  ).toBe(expected.toUpperCase())
 }
 
 /** Confirms the shared ConfirmationModal (comment/decision-note dialogs) on an

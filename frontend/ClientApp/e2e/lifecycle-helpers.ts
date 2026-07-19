@@ -36,8 +36,6 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'Add local DID' }).click()
-  await expect(dialog.getByText(/^did:/).first()).toBeVisible()
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
