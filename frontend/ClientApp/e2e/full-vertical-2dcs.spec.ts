@@ -29,15 +29,14 @@ import { E2E_API_BASE, E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * hop. No seeded fixtures: A authors the whole contract through the real UI
  * before offering it to B.
  *
- * Marked test.fixme until the backend R5/R5c work is merged: the negotiation
- * counter-offer round-trip (each adjustment ships a new PDF, chain grows), the
+ * Exercises the merged backend R5/R5c work: the negotiation counter-offer
+ * round-trip (each adjustment ships a new PDF, chain grows), the
  * settle/consolidation gate (signing refused pre-settle; extrinsic phase
  * proposed→agreed→executed on the retrieve API), and cross-instance double
- * signing (B signs on A's signed PDF). Un-fixme and iterate to green once those
- * land. The single-instance full-vertical.spec.ts stays as the local-only
- * lifecycle coverage until this supersedes it.
+ * signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
+ * stays as the local-only lifecycle coverage until this supersedes it.
  */
-test.fixme('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
+test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
   test.setTimeout(900_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
