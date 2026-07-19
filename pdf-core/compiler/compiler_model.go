@@ -329,6 +329,26 @@ var listValuedTerms = map[string]bool{
 	"subTemplates":    true,
 }
 
+// idRefListTerms are list properties the model reads as []string of bare IRIs,
+// but DCS serializes each element as an @id-reference object ({"@id":"c1"}).
+// flattenIDRefs reduces each such element to its @id string.
+var idRefListTerms = map[string]bool{"children": true}
+
+func flattenIDRefs(v any) any {
+	arr, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	for i, e := range arr {
+		if m, ok := e.(map[string]any); ok {
+			if id, ok := m["@id"].(string); ok {
+				arr[i] = id
+			}
+		}
+	}
+	return arr
+}
+
 func stripDCSTerms(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -349,6 +369,9 @@ func stripDCSTerms(v any) any {
 				if _, isArray := shaped.([]any); !isArray {
 					shaped = []any{shaped}
 				}
+			}
+			if idRefListTerms[key] {
+				shaped = flattenIDRefs(shaped)
 			}
 			out[key] = shaped
 		}
