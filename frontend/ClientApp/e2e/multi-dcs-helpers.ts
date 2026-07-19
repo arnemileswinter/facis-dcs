@@ -100,3 +100,95 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   await inst.page.locator('input[type="file"]').setInputFiles(signedPath)
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 120_000 })
 }
+
+/**
+ * Independently verifies the contract's exported PDF is a real, conformant
+ * artifact — PDF/A-3a (veraPDF) + a valid C2PA manifest (c2patool/c2pa-rs) —
+ * exporting it through the instance's own Contract Viewer and shelling out to
+ * e2e/verify_artifact.py (the same external validators pdf-core runs). The
+ * optional lifecycle is the SRS C2PA banner (draft during negotiation, active
+ * once signed) — NOT the extrinsic negotiation phase.
+ */
+export async function verifyArtifact(
+  inst: Instance,
+  contractDid: string,
+  opts: { lifecycle?: string } = {},
+): Promise<void> {
+  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const download = inst.page.waitForEvent('download', { timeout: 90_000 })
+  await inst.page.getByRole('button', { name: 'Export PDF' }).click()
+  const pdfPath = (await (await download).path())!
+  const args = [path.join(here, 'verify_artifact.py'), pdfPath]
+  if (opts.lifecycle) args.push('--lifecycle', opts.lifecycle)
+  execFileSync(python, args, { cwd: repoRoot, stdio: 'pipe' })
+}
+
+/** The public C2PA manifest-history URL for a contract on an instance (the
+ *  `?history=true` parsed chain enumeration is a sibling of the API prefix). */
+function manifestHistoryUrl(inst: Instance, contractDid: string): string {
+  const root = inst.apiBase.replace(/\/api\/?$/, '')
+  return `${root}/c2pa/manifest/${encodeURIComponent(contractDid)}?history=true`
+}
+
+/**
+ * Asserts the contract's C2PA manifest ingredient chain on this instance has
+ * grown past prevCount (each PDF exchange adds one ingredient, so the
+ * counterparty's provenance is chained rather than reset) and returns the new
+ * length. Call on BOTH instances across a negotiation exchange.
+ */
+export async function assertManifestChainGrew(inst: Instance, contractDid: string, prevCount: number): Promise<number> {
+  const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
+  expect(resp.ok(), `C2PA manifest history HTTP ${resp.status()} for ${contractDid} on ${inst.origin}`).toBeTruthy()
+  const chain = (await resp.json()) as unknown[]
+  expect(Array.isArray(chain), `manifest history is a chain list on ${inst.origin}`).toBeTruthy()
+  expect(chain.length, `C2PA manifest chain on ${inst.origin} should grow past ${prevCount}`).toBeGreaterThan(prevCount)
+  return chain.length
+}
+
+/** Current length of the contract's C2PA manifest chain on an instance (0 if
+ *  none yet), for seeding assertManifestChainGrew. */
+export async function manifestChainLength(inst: Instance, contractDid: string): Promise<number> {
+  const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
+  if (!resp.ok()) return 0
+  const chain = (await resp.json()) as unknown[]
+  return Array.isArray(chain) ? chain.length : 0
+}
+
+/**
+ * Polls the instance's own /contract/retrieve until the contract's state
+ * matches expected (the peer-facing copy replicates asynchronously over the
+ * PDF exchange, so allow the same window the peer-trust steps use).
+ */
+export async function assertReceivedInState(inst: Instance, contractDid: string, expected: string): Promise<void> {
+  const deadline = Date.now() + 45_000
+  let last = ''
+  while (Date.now() < deadline) {
+    const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`)
+    if (resp.ok()) {
+      last = String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
+      if (last === expected.toUpperCase()) return
+    }
+    await inst.page.waitForTimeout(1500)
+  }
+  expect(last, `contract ${contractDid} on ${inst.origin} reached ${expected}`).toBe(expected.toUpperCase())
+}
+
+/**
+ * Makes a non-trivial counter-offer on the instance's Negotiate view: edits a
+ * requirement value in the contract editor (producing a change request) and
+ * submits it, which regenerates the PDF and re-ships it to the counterparty.
+ * NOTE: the editor field-drilling here is the coordination seam with the
+ * backend R5 (counter-offer round-trip) — refine the selector during
+ * integration once the negotiate → settle flow is wired end to end.
+ */
+export async function counterOffer(inst: Instance, contractDid: string, opts: { value: string }): Promise<void> {
+  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  const firstValue = inst.page.locator('input[type="text"], input[type="number"]').first()
+  await expect(firstValue).toBeVisible({ timeout: 30_000 })
+  await firstValue.fill(opts.value)
+  const proposed = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/negotiate') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: /Negotiate|Propose/ }).click()
+  await proposed
+}
