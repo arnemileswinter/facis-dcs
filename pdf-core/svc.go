@@ -255,6 +255,17 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")))
 			return
 		}
+		// An unsigned base must be byte-EQUAL to its deterministic recompile. The
+		// only legitimate bytes appended after a compiled base are a PAdES
+		// signature layer (which makes the PDF signed) or a dcs incremental update
+		// (handled by the branch above via its marker). Trailing content on an
+		// otherwise-unsigned PDF is an offline amendment made outside /update —
+		// reject it (DCS-OR-C2PA-002 tamper-evidence).
+		if !compiler.IsPAdESSigned(raw) &&
+			len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
+			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")))
+			return
+		}
 	}
 
 	// Extract VC attachment if present — returned to the caller so it can

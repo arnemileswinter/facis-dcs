@@ -88,6 +88,10 @@ func currentRootObjID(pdf []byte) (int, bool) {
 // update over such a PDF must be provenance-only — re-rendering the pages or
 // re-stamping the AcroForm signature field would drop the signed field's /V and
 // invalidate the signature (DCS-OR-C2PA-010).
+// IsPAdESSigned reports whether pdf carries a PAdES signature. Exported for the
+// service layer's offline-tamper check on the plain re-render verify path.
+func IsPAdESSigned(pdf []byte) bool { return isPAdESSigned(pdf) }
+
 func isPAdESSigned(pdf []byte) bool {
 	if !bytes.Contains(pdf, []byte("/ByteRange")) {
 		return false
@@ -330,7 +334,8 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		if signed {
 			appendix = buildSignedUpdateAppendixBytes(
 				len(oldPDF), prevStartXref, oldSize, rootObjID, fileID,
-				updatedC2PA, vcBytes, vcFileObjID, vcSpecObjID, remoteManifestURL,
+				updatedC2PA, newDoc.EmbeddedPayload, newDoc.PayloadHash,
+				vcBytes, vcFileObjID, vcSpecObjID, remoteManifestURL,
 			)
 		} else {
 			appendix = buildUpdateAppendixBytes(
@@ -553,12 +558,13 @@ func buildUpdateAppendixBytes(
 func buildSignedUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize, rootObjID int,
 	fileID string,
-	updatedC2PA []byte,
+	updatedC2PA, newEmbeddedPayload []byte, newPayloadHash string,
 	vcBytes []byte, vcFileObjID, vcSpecObjID int,
 	remoteManifestURL string,
 ) []byte {
 	const (
 		c2paObjID     = 9
+		embFileID     = 11
 		metadataObjID = 13
 	)
 
@@ -592,6 +598,20 @@ func buildSignedUpdateAppendixBytes(
 			"<< /Type /Metadata /Subtype /XML /Length %d >>", len(updatedXMP))))
 		buf.WriteString("\nendobj\n")
 	}
+
+	// Supersede obj 11 (embedded JSON-LD) with the new payload, carried VERBATIM,
+	// as an appended incremental-update object (SRS DCS-OR-C2PA-002: the amend must
+	// use incremental updates so the existing PAdES signature stays valid — the
+	// original signed bytes are preserved as a prefix; the new payload lives here,
+	// beyond the sealed range). Content-changing amends of a signed PDF are a
+	// first-class "amended" lifecycle transition, not a frozen provenance-only one.
+	entries = append(entries, objEntry{embFileID, baseLen + buf.Len()})
+	buf.WriteString(fmt.Sprintf("%d 0 obj\n", embFileID))
+	buf.Write(streamObject(newEmbeddedPayload, fmt.Sprintf(
+		"<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /CheckSum <%s> >> >>",
+		len(newEmbeddedPayload), len(newEmbeddedPayload), newPayloadHash[:32],
+	)))
+	buf.WriteString("\nendobj\n")
 
 	// Supersede obj 9: updated C2PA manifest — written last so its stream offset
 	// stabilises across the hard-binding hash iterations. The catalog reaches it
