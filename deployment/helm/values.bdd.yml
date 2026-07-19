@@ -45,6 +45,12 @@ extraEnv:
   # backend/cmd/dcs/main.go's seedTrustedPeersFromEnv.
   - name: DCS_TRUSTED_PEERS
     value: "did:web:dcs-b.localhost%3A18080"
+  # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut). The prod
+  # default is minutes; BDD/e2e run it fast so a peer PDF ship that fires before
+  # the async regenerator stored the CID (or that transiently failed) is
+  # re-attempted and delivered well within the scenarios' replication wait.
+  - name: DCS_SYNC_FAIL_RETRY_INTERVAL
+    value: "10s"
   # Real deployment dispatch to the shipped ORCE contract-target-flow
   # (UC-05-01): the flow verifies the payload hash, acks synchronously, and
   # then POSTs the authoritative acknowledgement + a measured KPI back to

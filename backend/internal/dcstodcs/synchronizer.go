@@ -187,8 +187,18 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 	_ = readTx.Rollback()
 
 	state := string(contractData.State)
-	if !shippableStates[state] || pdfState.IPFSCID == "" {
+	if !shippableStates[state] {
 		return nil
+	}
+	if pdfState.IPFSCID == "" {
+		// The contract is shippable but its PDF has not been stored yet: the
+		// regenerator compiles it asynchronously, so an offer (a pure state
+		// transition) can fire before the CID exists. Never silently drop the
+		// ship — record a sync_fail so the DB-backed retry scheduler re-attempts
+		// once the CID is written. A dropped ship with no record and no retry is
+		// a correctness bug, not merely a timing race.
+		return s.recordShipOutcome(ctx, did,
+			fmt.Errorf("contract %s is shippable but its PDF is not stored yet; deferring ship to the retry scheduler", did))
 	}
 
 	recipients := contractData.Responsible.GetParties()

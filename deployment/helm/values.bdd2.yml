@@ -42,6 +42,11 @@ extraEnv:
   # backend/cmd/dcs/main.go's seedTrustedPeersFromEnv (~:304/665).
   - name: DCS_TRUSTED_PEERS
     value: "did:web:dcs-a.localhost%3A18080"
+  # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut): fast in
+  # BDD/e2e so a deferred/failed peer PDF ship is re-attempted and delivered
+  # within the scenarios' replication wait (see values.bdd.yml for the rationale).
+  - name: DCS_SYNC_FAIL_RETRY_INTERVAL
+    value: "10s"
 
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper — unique per release, so this doesn't

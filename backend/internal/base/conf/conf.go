@@ -52,6 +52,19 @@ func LoginLockoutDuration() time.Duration {
 	return 15 * time.Minute
 }
 
+// SyncFailCronJobTimeOut is how often the DB-backed sync-fail scheduler
+// re-attempts contract PDF ships that were dropped or failed. Because it reads
+// its work from the sync_fails table rather than the event bus, it is the
+// reliable delivery backbone for DCS-to-DCS federation — independent of NATS
+// at-most-once event redelivery — so it must reconcile well within a
+// negotiation round, not once a day. DCS_SYNC_FAIL_RETRY_INTERVAL (a Go
+// duration, e.g. "15s") overrides the default; BDD/e2e set it low so
+// replication is deterministic within the test wait.
 func SyncFailCronJobTimeOut() time.Duration {
-	return 24 * time.Hour
+	if v := os.Getenv("DCS_SYNC_FAIL_RETRY_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 5 * time.Minute
 }
