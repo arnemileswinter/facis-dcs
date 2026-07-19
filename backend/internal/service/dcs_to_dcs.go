@@ -101,18 +101,34 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			fmt.Errorf("post_pdf rejected: peer %s is not in the trusted_peers allowlist", req.FromPeerDid))
 	}
 
+	// Verify the received PDF is a coherent artifact before carrying it over:
+	// pdf-core deterministically re-renders the embedded JSON-LD and confirms the
+	// human-readable render matches its machine-readable payload (and the C2PA
+	// chain is intact). We store the peer's exact bytes rather than regenerating,
+	// so a mismatch here means the peer shipped an inconsistent artifact.
+	verify, err := s.PDFCore.Verify(ctx, req.Pdf)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: could not verify received PDF: %w", err))
+	}
+	if !verify.Match {
+		return nil, contractworkflowengine.MakeBadRequest(
+			errors.New("post_pdf rejected: received PDF's human-readable render does not match its embedded machine-readable payload"))
+	}
+
 	payload, err := s.PDFCore.ExtractPayload(ctx, req.Pdf)
 	if err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_pdf rejected: could not extract contract payload from PDF: %w", err))
 	}
 
-	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo}
+	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, IPFSClient: s.IPFSClient}
 	if err := receiver.Handle(ctx, command.PeerPdfReceiveCmd{
 		ContractIRI:  req.ContractIri,
 		Counterparty: req.FromPeerDid,
 		LocalPeer:    localPeer,
 		Payload:      payload,
+		Pdf:          req.Pdf,
 	}); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
