@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +16,13 @@ import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
 const python = process.env.E2E_BDD_PYTHON || path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
+
+/**
+ * Where the vertical persists every hop's PDF and its embedded JSON-LD for human
+ * supervision — sibling of the e2e dir, outside Playwright's test-results output
+ * (which it wipes at run start), and uploaded whole by CI as vertical-pdf-artifacts.
+ */
+const artifactDir = path.resolve(here, '../vertical-artifacts')
 
 /**
  * A single DCS instance the two-instance vertical drives from its own UI: its
@@ -112,15 +120,51 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
 export async function verifyArtifact(
   inst: Instance,
   contractDid: string,
-  opts: { lifecycle?: string } = {},
+  opts: { lifecycle?: string; save?: string } = {},
 ): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
-  const download = inst.page.waitForEvent('download', { timeout: 90_000 })
-  await inst.page.getByRole('button', { name: 'Export PDF' }).click()
-  const pdfPath = (await (await download).path())!
+  const pdfPath = await exportContractPdf(inst, contractDid)
   const args = [path.join(here, 'verify_artifact.py'), pdfPath]
   if (opts.lifecycle) args.push('--lifecycle', opts.lifecycle)
   execFileSync(python, args, { cwd: repoRoot, stdio: 'pipe' })
+  if (opts.save) persistArtifact(pdfPath, opts.save)
+}
+
+/** Exports the contract's PDF through the instance's own Contract Viewer (the
+ *  Export PDF download) and returns the local path to the downloaded bytes. */
+async function exportContractPdf(inst: Instance, contractDid: string): Promise<string> {
+  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const download = inst.page.waitForEvent('download', { timeout: 90_000 })
+  await inst.page.getByRole('button', { name: 'Export PDF' }).click()
+  return (await (await download).path())!
+}
+
+/**
+ * Persists a hop's exported PDF and its embedded JSON-LD payload into the
+ * vertical-artifacts dir (uploaded by CI for human supervision): `{label}.pdf`
+ * beside `{label}.jsonld`. The JSON-LD is extracted from the very bytes we
+ * saved, so the machine-readable payload always matches the human-readable PDF.
+ */
+function persistArtifact(pdfPath: string, label: string): void {
+  fs.mkdirSync(artifactDir, { recursive: true })
+  const outPdf = path.join(artifactDir, `${label}.pdf`)
+  fs.copyFileSync(pdfPath, outPdf)
+  execFileSync(
+    python,
+    [
+      path.join(here, 'verify_artifact.py'),
+      outPdf,
+      '--extract-only',
+      '--dump-jsonld',
+      path.join(artifactDir, `${label}.jsonld`),
+    ],
+    { cwd: repoRoot, stdio: 'pipe' },
+  )
+}
+
+/** Saves a hop's PDF + embedded JSON-LD for the party's copy without running the
+ *  heavyweight veraPDF/c2patool validators (those run at the verify hops). */
+export async function saveArtifact(inst: Instance, contractDid: string, label: string): Promise<void> {
+  persistArtifact(await exportContractPdf(inst, contractDid), label)
 }
 
 /** The public C2PA manifest-history URL for a contract on an instance (the

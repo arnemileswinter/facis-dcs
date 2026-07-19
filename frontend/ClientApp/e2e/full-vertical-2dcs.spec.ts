@@ -12,6 +12,7 @@ import {
   publishShapeOnInstance,
   registerTemplateOn,
   resolveDidWeb,
+  saveArtifact,
   signOnInstance,
   submitReviewApproveTemplateOn,
   verifyArtifact,
@@ -90,7 +91,8 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     expect(offered.ok(), `offer ${offered.status()}: ${await offered.text()}`).toBeTruthy()
 
     await assertReceivedInState(b, contractDid, 'OFFERED')
-    await verifyArtifact(b, contractDid, { lifecycle: 'draft' })
+    await verifyArtifact(b, contractDid, { lifecycle: 'draft', save: '01-offer-B' })
+    await saveArtifact(a, contractDid, '01-offer-A')
     aChain = await manifestChainLength(a, contractDid)
     bChain = await manifestChainLength(b, contractDid)
   })
@@ -101,10 +103,14 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     await counterOffer(b, contractDid, { value: '10000' })
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    await saveArtifact(b, contractDid, '02-counter-10k-B')
+    await saveArtifact(a, contractDid, '02-counter-10k-A')
 
     await counterOffer(a, contractDid, { value: '15000' })
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    await saveArtifact(a, contractDid, '03-counter-15k-A')
+    await saveArtifact(b, contractDid, '03-counter-15k-B')
   })
 
   // ---- Stage 7: consolidation/settle. Signing is gated until settlement; the
@@ -121,6 +127,8 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     expect(settle.ok(), `settle ${settle.status()}: ${await settle.text()}`).toBeTruthy()
     await assertReceivedInState(a, contractDid, 'ACCEPTED')
     await assertReceivedInState(b, contractDid, 'ACCEPTED')
+    await saveArtifact(a, contractDid, '07-settle-A')
+    await saveArtifact(b, contractDid, '07-settle-B')
   })
 
   // ---- Stage 8: both sign. A signs A's field, ships; B signs on top of A's
@@ -128,9 +136,11 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   await test.step('both sign; double-signed artifact verifies', async () => {
     await signOnInstance(a, contractDid, 'Instance A Signatory')
     await assertReceivedInState(b, contractDid, 'SIGNED')
+    await saveArtifact(a, contractDid, '08-signed-A')
+    await saveArtifact(b, contractDid, '08-signed-B')
     await signOnInstance(b, contractDid, 'Instance B Signatory')
-    await verifyArtifact(a, contractDid, { lifecycle: 'active' })
-    await verifyArtifact(b, contractDid, { lifecycle: 'active' })
+    await verifyArtifact(a, contractDid, { lifecycle: 'active', save: '09-double-signed-A' })
+    await verifyArtifact(b, contractDid, { lifecycle: 'active', save: '09-double-signed-B' })
   })
 
   // ---- Stages 9-10: deploy to the target, receipt + async KPIs vs policy,

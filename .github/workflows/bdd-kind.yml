@@ -261,6 +261,14 @@ jobs:
           path: frontend/ClientApp/playwright-report/**
           retention-days: 30
 
+      - name: Upload vertical PDF artifacts
+        if: always() && hashFiles('frontend/ClientApp/vertical-artifacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: vertical-pdf-artifacts
+          path: frontend/ClientApp/vertical-artifacts/**
+          retention-days: 30
+
       - name: Dump namespace info on failure
         if: failure()
         run: |

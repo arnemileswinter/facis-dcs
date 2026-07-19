@@ -94,19 +94,72 @@ def _c2patool(pdf_path: str, lifecycle: str | None) -> None:
             )
 
 
+def _extract_embedded_jsonld(pdf: bytes) -> bytes:
+    """Return the embedded contract.jsonld byte stream (the latest, superseding
+    definition for an incrementally updated PDF), mirroring pdf-core's own
+    extractJSONLDStream. The EmbeddedFile stream is uncompressed JSON-LD."""
+    fs_pos = pdf.find(b"/F (contract.jsonld)")
+    if fs_pos < 0:
+        raise SystemExit("embedded JSON-LD filespec not found")
+    ef = pdf.find(b"/EF << /F ", fs_pos)
+    if ef < 0:
+        raise SystemExit("embedded JSON-LD object reference not found")
+    ef += len(b"/EF << /F ")
+    ref_end = pdf.find(b" 0 R", ef)
+    if ref_end < 0:
+        raise SystemExit("embedded JSON-LD object reference malformed")
+    obj_id = int(pdf[ef:ref_end].strip())
+    obj_pos = pdf.rfind(b"%d 0 obj" % obj_id)
+    if obj_pos < 0:
+        raise SystemExit("embedded JSON-LD object not found")
+    start = pdf.find(b"stream", obj_pos)
+    if start < 0:
+        raise SystemExit("embedded JSON-LD stream start not found")
+    start += len(b"stream")
+    if pdf[start:start + 2] == b"\r\n":
+        start += 2
+    elif pdf[start:start + 1] in (b"\n", b"\r"):
+        start += 1
+    end = pdf.find(b"endstream", start)
+    if end < 0:
+        raise SystemExit("embedded JSON-LD stream end not found")
+    data = pdf[start:end]
+    if data.endswith(b"\r\n"):
+        return data[:-2]
+    if data.endswith(b"\n") or data.endswith(b"\r"):
+        return data[:-1]
+    return data
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify a DCS contract PDF (PDF/A-3a + C2PA).")
     parser.add_argument("pdf")
     parser.add_argument("--lifecycle", default=None,
                         help="expected C2PA lifecycle banner: proposed|agreed|executed")
+    parser.add_argument("--dump-jsonld", default=None,
+                        help="also write the PDF's embedded contract JSON-LD payload to this path")
+    parser.add_argument("--extract-only", action="store_true",
+                        help="skip veraPDF/c2patool and only extract the embedded JSON-LD (use with --dump-jsonld)")
     args = parser.parse_args()
     if not os.path.isfile(args.pdf):
         raise SystemExit(f"no such PDF: {args.pdf}")
     with open(args.pdf, "rb") as fh:
-        if fh.read(5) != b"%PDF-":
-            raise SystemExit(f"{args.pdf} is not a PDF")
-    _verapdf(args.pdf)
-    _c2patool(args.pdf, args.lifecycle)
+        pdf_bytes = fh.read()
+    if pdf_bytes[:5] != b"%PDF-":
+        raise SystemExit(f"{args.pdf} is not a PDF")
+    if not args.extract_only:
+        _verapdf(args.pdf)
+        _c2patool(args.pdf, args.lifecycle)
+    if args.dump_jsonld:
+        payload = _extract_embedded_jsonld(pdf_bytes)
+        out_dir = os.path.dirname(os.path.abspath(args.dump_jsonld))
+        os.makedirs(out_dir, exist_ok=True)
+        with open(args.dump_jsonld, "wb") as fh:
+            fh.write(payload)
+    if args.extract_only:
+        print(json.dumps({"pdf": os.path.basename(args.pdf),
+                          "extracted_jsonld": bool(args.dump_jsonld)}))
+        return 0
     print(json.dumps({"pdf": os.path.basename(args.pdf), "pdfa3a": "PASS",
                       "c2pa": "VALID", "lifecycle": args.lifecycle or "n/a"}))
     return 0
