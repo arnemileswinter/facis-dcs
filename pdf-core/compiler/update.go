@@ -296,6 +296,17 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		vcSpecObjID = nextID
 	}
 
+	// When a lifecycle VC is attached, supersede the catalog so the VC filespec
+	// is a listed associated file (ISO 19005-3 clause 6.8): its /AFRelationship
+	// requires membership in the document /AF array and /EmbeddedFiles tree.
+	var patchedCatalog []byte
+	if vcBytes != nil {
+		patchedCatalog, err = catalogWithVCAssociated(oldPDF, rootObjID, vcSpecObjID)
+		if err != nil {
+			return nil, fmt.Errorf("associate lifecycle VC in catalog: %w", err)
+		}
+	}
+
 	originalC2PA, err := extractEmbeddedStreamByFileSpecName(oldPDF, "content_credential.c2pa")
 	if err != nil {
 		return nil, fmt.Errorf("extract original C2PA: %w", err)
@@ -317,13 +328,14 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 			appendix = buildSignedUpdateAppendixBytes(
 				len(oldPDF), prevStartXref, oldSize, rootObjID, fileID,
 				updatedC2PA, newDoc.EmbeddedPayload, newDoc.PayloadHash,
-				vcBytes, vcFileObjID, vcSpecObjID, remoteManifestURL,
+				vcBytes, vcFileObjID, vcSpecObjID, patchedCatalog, remoteManifestURL,
 			)
 		} else {
 			appendix = buildUpdateAppendixBytes(
 				len(oldPDF), prevStartXref, oldSize, fileID,
 				updatedC2PA, newDoc.EmbeddedPayload, newDoc.PayloadHash,
-				newPages, vcBytes, vcFileObjID, vcSpecObjID, remoteManifestURL,
+				newPages, vcBytes, vcFileObjID, vcSpecObjID,
+				rootObjID, patchedCatalog, remoteManifestURL,
 			)
 		}
 		result = append(append([]byte(nil), oldPDF...), appendix...)
@@ -353,6 +365,37 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // appended with IDs beyond the existing maximum so originals are unreachable
 // via the updated xref chain but their bytes remain intact for signature
 // verification.
+// catalogWithVCAssociated reads the document catalog (objID) from pdf and returns
+// its dictionary bytes with the lifecycle-VC filespec (vcSpecObjID) added to the
+// /AF array and the /EmbeddedFiles name tree, so the attached VC is a properly
+// listed associated file (ISO 19005-3 clause 6.8). Returns the dict without the
+// object header/trailer, to be re-emitted as a superseded object.
+func catalogWithVCAssociated(pdf []byte, objID, vcSpecObjID int) ([]byte, error) {
+	off := findLastObjectHeaderOffset(pdf, objID)
+	if off < 0 {
+		return nil, fmt.Errorf("catalog object %d not found", objID)
+	}
+	start := off + len(fmt.Sprintf("%d 0 obj\n", objID))
+	end := bytes.Index(pdf[start:], []byte("\nendobj"))
+	if end < 0 {
+		return nil, fmt.Errorf("catalog object %d end not found", objID)
+	}
+	dict := append([]byte(nil), pdf[start:start+end]...)
+	vcRef := []byte(fmt.Sprintf("%d 0 R", vcSpecObjID))
+	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], vcRef) {
+		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(vcRef)+"]"))
+	}
+	if ef := catalogEFRE.FindSubmatchIndex(dict); ef != nil && !bytes.Contains(dict[ef[4]:ef[5]], []byte("contract-lifecycle-vc.json")) {
+		dict = catalogEFRE.ReplaceAll(dict, []byte("${1}${2} (contract-lifecycle-vc.json) "+string(vcRef)+"${3}"))
+	}
+	return dict, nil
+}
+
+var (
+	catalogAFRE = regexp.MustCompile(`/AF \[([^\]]*)\]`)
+	catalogEFRE = regexp.MustCompile(`(/EmbeddedFiles << /Names \[)([^\]]*)(\])`)
+)
+
 func buildUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize int,
 	fileID string,
@@ -360,6 +403,7 @@ func buildUpdateAppendixBytes(
 	newPayloadHash string,
 	newPages []pageLayout,
 	vcBytes []byte, vcFileObjID, vcSpecObjID int,
+	rootObjID int, patchedCatalog []byte,
 	remoteManifestURL string,
 ) []byte {
 	const (
@@ -490,6 +534,13 @@ func buildUpdateAppendixBytes(
 	buf.WriteString("\nendobj\n")
 
 	// Write xref with contiguous subsections.
+	if len(patchedCatalog) > 0 {
+		entries = append(entries, objEntry{rootObjID, baseLen + buf.Len()})
+		buf.WriteString(fmt.Sprintf("%d 0 obj\n", rootObjID))
+		buf.Write(patchedCatalog)
+		buf.WriteString("\nendobj\n")
+	}
+
 	sort.Slice(entries, func(i, j int) bool { return entries[i].id < entries[j].id })
 	xrefStart := baseLen + buf.Len()
 	buf.WriteString("xref\n")
@@ -542,6 +593,7 @@ func buildSignedUpdateAppendixBytes(
 	fileID string,
 	updatedC2PA, newEmbeddedPayload []byte, newPayloadHash string,
 	vcBytes []byte, vcFileObjID, vcSpecObjID int,
+	patchedCatalog []byte,
 	remoteManifestURL string,
 ) []byte {
 	const (
@@ -603,6 +655,13 @@ func buildSignedUpdateAppendixBytes(
 	buf.Write(streamObject(updatedC2PA, fmt.Sprintf(
 		"<< /Type /EmbeddedFile /Subtype /application#2Fc2pa /Length %d >>", len(updatedC2PA))))
 	buf.WriteString("\nendobj\n")
+
+	if len(patchedCatalog) > 0 {
+		entries = append(entries, objEntry{rootObjID, baseLen + buf.Len()})
+		buf.WriteString(fmt.Sprintf("%d 0 obj\n", rootObjID))
+		buf.Write(patchedCatalog)
+		buf.WriteString("\nendobj\n")
+	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].id < entries[j].id })
 	xrefStart := baseLen + buf.Len()
