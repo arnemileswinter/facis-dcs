@@ -187,7 +187,9 @@ export const useDcsDraftStore = defineStore(storeId, {
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
           blocks: extractBlockList(structure['dcs:blocks']),
-          layout: structure['dcs:layout'].length ? structure['dcs:layout'] : getInitialLayout(),
+          layout: extractLayoutList(structure['dcs:layout']).length
+            ? extractLayoutList(structure['dcs:layout'])
+            : getInitialLayout(),
           contractData: rawDoc['dcs:contractData'],
           policies: flattenPolicySet(rawDoc['dcs:policies']),
           customMetaData: (metadata['dcs:customMetaData'] as MetaData[]) ?? [],
@@ -575,7 +577,7 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
       '@type': 'dcs:DocumentStructure',
       ...(input.documentId ? { '@id': `${input.documentId}#document-structure` } : {}),
       'dcs:blocks': { '@list': canonicalBlocks },
-      'dcs:layout': canonicalLayout,
+      'dcs:layout': { '@list': canonicalLayout },
     },
     'dcs:contractData': contractData,
     'dcs:policies': assemblePolicySet(input.policies, input.documentId),
@@ -654,7 +656,7 @@ export function getBlocksFromTemplateData(td: SubTemplateSnapshot['template_data
 }
 
 export function getLayoutFromTemplateData(td: SubTemplateSnapshot['template_data']): DcsLayoutNode[] {
-  return isDcsDocumentData(td) ? td['dcs:documentStructure']['dcs:layout'] : []
+  return isDcsDocumentData(td) ? extractLayoutList(td['dcs:documentStructure']['dcs:layout']) : []
 }
 
 export function getSemanticConditionsFromTemplateData(
@@ -667,6 +669,10 @@ export function getSemanticConditionsFromTemplateData(
 // ---- Layout helpers ----
 
 function extractBlockList(raw: DcsDocumentStructure['dcs:blocks'] | DcsBlock[]): DcsBlock[] {
+  return Array.isArray(raw) ? raw : raw['@list']
+}
+
+function extractLayoutList(raw: DcsDocumentStructure['dcs:layout'] | DcsLayoutNode[]): DcsLayoutNode[] {
   return Array.isArray(raw) ? raw : raw['@list']
 }
 

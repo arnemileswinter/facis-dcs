@@ -104,7 +104,7 @@ export interface DcsDocumentStructure {
   '@id'?: string
   '@type': 'dcs:DocumentStructure'
   'dcs:blocks': { '@list': DcsBlock[] }
-  'dcs:layout': DcsLayoutNode[]
+  'dcs:layout': { '@list': DcsLayoutNode[] }
 }
 
 export interface DcsContractField {

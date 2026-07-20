@@ -555,7 +555,10 @@ func validateCanonicalReferences(data documentData, documentStructure map[string
 	if !ok {
 		return errors.New("documentStructure.dcs:blocks must be an array")
 	}
-	layout, ok := documentStructure["dcs:layout"].([]any)
+	layout, ok := jsonLDList(documentStructure["dcs:layout"])
+	if !ok {
+		layout, ok = documentStructure["dcs:layout"].([]any)
+	}
 	if !ok {
 		return errors.New("documentStructure.dcs:layout must be an array")
 	}

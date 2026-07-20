@@ -188,7 +188,7 @@ func auditCanonicalDocumentStructure(policySet *templatePolicySet, rule template
 	if !ok || len(blocks) == 0 {
 		findings = append(findings, newPolicyFinding(policySet, rule, "dcs:documentStructure.dcs:blocks must contain at least one block", "dcs:documentStructure.dcs:blocks", ""))
 	}
-	layout, ok := structure["dcs:layout"].([]any)
+	layout, ok := canonicalLayout(structure)
 	if !ok || len(layout) == 0 {
 		findings = append(findings, newPolicyFinding(policySet, rule, "dcs:documentStructure.dcs:layout must contain at least one layout node", "dcs:documentStructure.dcs:layout", ""))
 	}
@@ -376,7 +376,7 @@ func auditDocumentStructureIntegrity(policySet *templatePolicySet, rule template
 			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("document block %q requires @type", blockID), blockID, ""))
 		}
 	}
-	layout, ok := structure["dcs:layout"].([]any)
+	layout, ok := canonicalLayout(structure)
 	if !ok {
 		if requireCompleteLayout {
 			findings = append(findings, newPolicyFinding(policySet, rule, "dcs:documentStructure.dcs:layout must contain at least one layout node", "dcs:documentStructure.dcs:layout", ""))
@@ -532,6 +532,14 @@ func canonicalBlocks(structure map[string]any) ([]any, bool) {
 		blocks, ok = structure["dcs:blocks"].([]any)
 	}
 	return blocks, ok
+}
+
+func canonicalLayout(structure map[string]any) ([]any, bool) {
+	layout, ok := jsonLDList(structure["dcs:layout"])
+	if !ok {
+		layout, ok = structure["dcs:layout"].([]any)
+	}
+	return layout, ok
 }
 
 func canonicalContractDataFieldIDs(data documentData) map[string]bool {
