@@ -157,16 +157,28 @@ def build_contract_document(contract_did: str, field_name: str, policies, actual
                     }
                 ]
             },
-            "dcs:layout": [
-                {
-                    "@id": "urn:uuid:block-root",
-                    "@type": "dcs:LayoutNode",
-                    "dcs:isRoot": True,
-                    "dcs:children": {"@list": [{"@id": "urn:uuid:block-clause-1"}]},
-                }
-            ],
+            "dcs:layout": {
+                "@list": [
+                    {
+                        "@id": "urn:uuid:block-root",
+                        "@type": "dcs:LayoutNode",
+                        "dcs:isRoot": True,
+                        "dcs:children": {"@list": [{"@id": "urn:uuid:block-clause-1"}]},
+                    }
+                ]
+            },
         },
         "dcs:contractData": [_placeholder_node(field_name, actual_value)],
+        # A full-document PUT replaces contract_data wholesale, so the signature
+        # field the draft was seeded with must be re-declared here or the
+        # prepared PDF has nothing for the wallet ceremony to sign.
+        "dcs:signatureFields": [
+            {
+                "@id": "urn:uuid:sig-field-1",
+                "@type": "dcs:SignatureField",
+                "dcs:signatoryName": "BDD Counterparty Signer",
+            }
+        ],
         "dcs:policies": policies,
     }
 
