@@ -509,7 +509,7 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <button
-          v-if="contract?.state === ContractState.negotiation"
+          v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting || !hasChangeRequest || !!compareChangesData"
           @click="negotiateContractChange"

@@ -551,22 +551,11 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
  * integration once the negotiate → settle flow is wired end to end.
  */
 export async function counterOffer(inst: Instance, contractDid: string, opts: { value: string }): Promise<void> {
-  // The "Change Proposal" control only renders in NEGOTIATION; a freshly OFFERED
-  // contract (a received offer, or one just re-shipped by the counterparty) must
-  // first transition Offered --Submit--> Negotiation. Do it via the authenticated
-  // API only when actually OFFERED, so an in-negotiation contract is not advanced.
-  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
-  const retrieve = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
-    headers: auth,
-  })
-  const current = (await retrieve.json()) as { state?: string; updated_at?: string }
-  if (current.state === 'OFFERED') {
-    const submitted = await inst.page.request.post(`${inst.apiBase}/contract/submit`, {
-      headers: auth,
-      data: { did: contractDid, updated_at: current.updated_at },
-    })
-    expect(submitted.ok(), `submit->negotiation ${submitted.status()}: ${await submitted.text()}`).toBeTruthy()
-  }
+  // The counterparty makes a counter-offer by proposing a redline through the
+  // real Negotiate UI. Its received copy is OFFERED and it holds the Negotiator
+  // role (not Creator), so it cannot /contract/submit (Creator-only) — instead
+  // its "Change Proposal" (/contract/negotiate) opens negotiation directly
+  // (Offered --EventNegotiate--> Negotiation; SRS DCS-IR-CWE-03/DCS-FR-CWE-18).
   await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
   const firstValue = inst.page.locator('input[type="text"], input[type="number"]').first()
   await expect(firstValue).toBeVisible({ timeout: 30_000 })
