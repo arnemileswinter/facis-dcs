@@ -1,5 +1,6 @@
 @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
 @prefix dcst: <https://w3id.org/facis/dcs/taxonomy/v1#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -56,6 +57,7 @@ dcst:constraint-iso3166-alpha3-country a dcs:ValueConstraint ;
   dcs:format "iso-3166-1-alpha-3" ;
   dcs:pattern "^[A-Z]{3}$" ;
   dcs:allowedValuesRef "ISO 3166-1 alpha-3" ;
+  dcs:odrlLeftOperand odrl:spatial ;
   dcs:valueCatalog dcst:catalog-iso3166-alpha3-country ;
   dcs:allowedValue "DEU", "AUT", "CHE", "USA" ;
   rdfs:label "ISO 3166-1 alpha-3 Country Constraint"@en .

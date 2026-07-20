@@ -1084,8 +1084,8 @@ function contractDataToSemanticConditions(
       const targets =
         rightOperand === undefined || isReference
           ? []
-          : Array.isArray(rightOperand)
-            ? rightOperand.map(jsonLdValue)
+          : '@list' in rightOperand
+            ? rightOperand['@list'].map(jsonLdValue)
             : [jsonLdValue(rightOperand)]
       const fieldId = constraint['odrl:leftOperand']['@id']
       operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets }])
@@ -1140,10 +1140,10 @@ function contractDataToSemanticConditions(
 function odrlRightOperand(
   operator: SemanticParameterOperator,
   parameterType: SemanticConditionParameter['type'],
-): JsonLdTypedValue | JsonLdTypedValue[] | undefined {
+): JsonLdTypedValue | { '@list': JsonLdTypedValue[] } | undefined {
   if (!operator.targets.length) return undefined
   const operands = operator.targets.map((target) => typedJsonLdValue(target, parameterType))
-  if (isSetOperator(operator.operate)) return operands
+  if (isSetOperator(operator.operate)) return { '@list': operands }
   return operands[0]
 }
 
@@ -1196,7 +1196,8 @@ function isSetOperator(operator: string): boolean {
   return operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf'
 }
 
-function jsonLdValue(value: JsonLdTypedValue): unknown {
+function jsonLdValue(value: JsonLdTypedValue | JsonLdReference): unknown {
+  if ('@id' in value) return value['@id']
   switch (value['@type']) {
     case 'xsd:decimal':
     case 'xsd:integer':
@@ -1218,5 +1219,6 @@ function cloneValueConstraint(
     ...constraint,
     allowedValues: constraint.allowedValues ? [...constraint.allowedValues] : undefined,
     valueOptions: constraint.valueOptions?.map((option) => ({ ...option })),
+    odrlLeftOperands: constraint.odrlLeftOperands ? [...constraint.odrlLeftOperands] : undefined,
   }
 }

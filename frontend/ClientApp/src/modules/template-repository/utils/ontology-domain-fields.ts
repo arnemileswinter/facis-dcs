@@ -124,6 +124,7 @@ function parseValueOptions(graph: OntologyGraph): ReadonlyMap<string, SemanticVa
       value,
       label: graph.first(subject, `${SKOS}prefLabel`) || undefined,
       symbol: graph.first(subject, `${DCS}valueSymbol`) || undefined,
+      iri: subject,
     })
   }
   return options
@@ -142,6 +143,7 @@ function parseValueConstraints(graph: OntologyGraph): ReadonlyMap<string, Semant
         .map((value) => valueOptions.get(value))
         .filter((option): option is SemanticValueOption => !!option),
       allowedValuesRef: graph.first(subject, `${DCS}allowedValuesRef`) || undefined,
+      odrlLeftOperands: graph.values(subject, `${DCS}odrlLeftOperand`),
       min: graph.firstNumber(subject, `${DCS}minInclusive`),
       max: graph.firstNumber(subject, `${DCS}maxInclusive`),
       description: graph.first(subject, `${RDFS}label`) || undefined,
@@ -187,6 +189,7 @@ function cloneConstraint(constraint?: SemanticValueConstraint): SemanticValueCon
     ...constraint,
     allowedValues: constraint.allowedValues ? [...constraint.allowedValues] : undefined,
     valueOptions: constraint.valueOptions ? constraint.valueOptions.map((option) => ({ ...option })) : undefined,
+    odrlLeftOperands: constraint.odrlLeftOperands ? [...constraint.odrlLeftOperands] : undefined,
   }
 }
 

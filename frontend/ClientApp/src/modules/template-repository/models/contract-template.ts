@@ -66,6 +66,7 @@ export interface SemanticValueConstraint {
   allowedValues?: readonly string[]
   valueOptions?: readonly SemanticValueOption[]
   allowedValuesRef?: string
+  odrlLeftOperands?: readonly string[]
   min?: number
   max?: number
   description?: string
@@ -75,6 +76,7 @@ export interface SemanticValueOption {
   value: string
   label?: string
   symbol?: string
+  iri?: string
 }
 
 // ---- Validation Metadata ----

@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import {
+  type AtomicDraft,
   CONSTRAINT_COMBINATORS,
   type ConstraintNodeDraft,
   type GroupDraft,
   isGroupDraft,
   newAtomic,
   newGroup,
+  type OperandDraftValue,
 } from '@template-repository/components/clauses-editor/constraint-draft'
 import { ODRL_CONTEXT_OPERANDS, ODRL_OPERATORS } from '@template-repository/utils/odrl-vocabulary'
+import { resolveConstraintForLeftOperand } from '@template-repository/utils/value-constraint-catalog'
+import { formatValueOption, resolveValueOptions } from '@template-repository/utils/value-option-catalog'
 
 /**
  * Authors one ODRL constraint group — a combinator over child nodes, each an
@@ -43,6 +47,54 @@ function removeChild(index: number) {
 function childGroup(child: ConstraintNodeDraft): GroupDraft {
   return child as GroupDraft
 }
+
+function isSetOperator(operator: string): boolean {
+  return operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf' || operator === 'odrl:isAllOf'
+}
+
+function valueOptionsFor(child: AtomicDraft) {
+  return resolveValueOptions(resolveConstraintForLeftOperand(child.leftOperand))
+}
+
+function optionOperand(optionValue: string, child: AtomicDraft): OperandDraftValue {
+  const option = valueOptionsFor(child).find((item) => item.value === optionValue || item.iri === optionValue)
+  if (option?.iri) return { '@id': option.iri }
+  return { '@value': optionValue, '@type': 'xsd:string' }
+}
+
+function operandKey(value: OperandDraftValue): string {
+  return '@id' in value ? value['@id'] : String(value['@value'])
+}
+
+function selectedOptionValues(child: AtomicDraft): string[] {
+  return child.values.map(operandKey)
+}
+
+function fixedValueFor(child: AtomicDraft): string {
+  const [first] = child.values
+  return first ? operandKey(first) : ''
+}
+
+function setSingleOption(child: AtomicDraft, event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  child.values = value ? [optionOperand(value, child)] : []
+  child.value = ''
+}
+
+function setMultipleOptions(child: AtomicDraft, event: Event) {
+  const select = event.target as HTMLSelectElement
+  child.values = Array.from(select.selectedOptions).map((option) => optionOperand(option.value, child))
+  child.value = ''
+}
+
+function clearFixedValues(child: AtomicDraft) {
+  child.values = []
+}
+
+function resetFixedOperand(child: AtomicDraft) {
+  child.value = ''
+  child.values = []
+}
 </script>
 
 <template>
@@ -72,7 +124,7 @@ function childGroup(child: ConstraintNodeDraft): GroupDraft {
 
       <!-- An atomic constraint row. -->
       <div v-else class="flex flex-wrap items-center gap-1">
-        <select v-model="child.leftOperand" class="select-bordered select select-xs">
+        <select v-model="child.leftOperand" class="select-bordered select select-xs" @change="resetFixedOperand(child)">
           <optgroup v-if="fields.length" label="Data fields">
             <option v-for="f in fields" :key="f.id" :value="f.id">{{ f.label }}</option>
           </optgroup>
@@ -90,12 +142,45 @@ function childGroup(child: ConstraintNodeDraft): GroupDraft {
           </optgroup>
         </select>
         <input
-          v-if="!child.rightSource"
+          v-if="!child.rightSource && !valueOptionsFor(child).length"
           v-model="child.value"
           type="text"
           placeholder="value"
           class="input-bordered input input-xs w-28"
+          @input="clearFixedValues(child)"
         />
+        <select
+          v-else-if="!child.rightSource && valueOptionsFor(child).length && !isSetOperator(child.operator)"
+          :value="fixedValueFor(child)"
+          class="select-bordered select min-w-36 select-xs"
+          @change="setSingleOption(child, $event)"
+        >
+          <option value="">choose value</option>
+          <option
+            v-for="option in valueOptionsFor(child)"
+            :key="option.iri ?? option.value"
+            :value="option.iri ?? option.value"
+            :selected="fixedValueFor(child) === (option.iri ?? option.value)"
+          >
+            {{ formatValueOption(option.value, valueOptionsFor(child)) }}
+          </option>
+        </select>
+        <select
+          v-else-if="!child.rightSource"
+          :value="selectedOptionValues(child)"
+          multiple
+          class="select-bordered select h-20 min-w-40 select-xs"
+          @change="setMultipleOptions(child, $event)"
+        >
+          <option
+            v-for="option in valueOptionsFor(child)"
+            :key="option.iri ?? option.value"
+            :value="option.iri ?? option.value"
+            :selected="selectedOptionValues(child).includes(option.iri ?? option.value)"
+          >
+            {{ formatValueOption(option.value, valueOptionsFor(child)) }}
+          </option>
+        </select>
         <button type="button" class="btn btn-ghost btn-xs" @click="removeChild(i)">✕</button>
       </div>
     </template>

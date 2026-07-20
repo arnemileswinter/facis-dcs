@@ -37,6 +37,15 @@ export function resolveValueConstraintOptions(
   )
 }
 
+export function resolveConstraintForLeftOperand(leftOperand: string): SemanticValueConstraint | undefined {
+  const fieldConstraint = ONTOLOGY_DOMAIN_FIELDS.find((field) => field.ontologyId === leftOperand)?.valueConstraint
+  if (fieldConstraint) return fieldConstraint
+
+  return ONTOLOGY_DOMAIN_FIELDS.find((field) =>
+    field.valueConstraint?.odrlLeftOperands?.some((operand) => operand === leftOperand),
+  )?.valueConstraint
+}
+
 function normalizeAllowedValuesRef(value?: string) {
   return value?.trim().replace(/\s+/g, ' ').toLowerCase() ?? ''
 }

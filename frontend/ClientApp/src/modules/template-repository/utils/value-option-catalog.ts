@@ -7,7 +7,8 @@ import type {
   SemanticValueOption,
 } from '@/modules/template-repository/models/contract-template'
 
-export type ValueOption = Required<Pick<SemanticValueOption, 'value' | 'label'>> & Pick<SemanticValueOption, 'symbol'>
+export type ValueOption = Required<Pick<SemanticValueOption, 'value' | 'label'>> &
+  Pick<SemanticValueOption, 'symbol' | 'iri'>
 
 export function resolveValueOptions(constraint?: SemanticValueConstraint): readonly ValueOption[] {
   if (!constraint) return []
