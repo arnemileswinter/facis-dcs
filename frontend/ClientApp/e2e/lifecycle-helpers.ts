@@ -157,8 +157,9 @@ async function authorPaymentComponent(
   return componentDid
 }
 
-/** Composes a Contract template that pins an approved component as a
- *  sub-template and references it in the Builder outline. Returns its DID. */
+/** Composes a Contract template by inlining an approved component's blocks,
+ *  placeholders and policies into the Builder outline (flatten-on-compose).
+ *  Returns its DID. */
 async function authorContractTemplateFrom(
   page: Page,
   loginAs: LoginAs,
@@ -174,19 +175,15 @@ async function authorContractTemplateFrom(
     .getByRole('textbox')
     .fill('Contract template composed for the fixture lifecycle e2e.')
 
-  await page.getByText('Component Templates', { exact: true }).click()
-  await page.getByPlaceholder('Search templates…').fill(componentName)
-  await page.getByRole('button', { name: componentName }).click()
-  await expect(page.getByText('No component templates selected yet.')).toBeHidden()
-
   await page.getByRole('tab', { name: /Builder/ }).click()
   await page
     .getByRole('button', { name: /add.*block/i })
     .first()
     .click()
   const modal = page.getByRole('dialog')
-  await expect(modal.getByText('Approved sub-templates:')).toBeVisible()
-  await modal.getByText(componentName).first().click()
+  await expect(modal.getByText('Components (inlined on add):')).toBeVisible()
+  await modal.getByPlaceholder('Search components').fill(componentName)
+  await modal.getByRole('button', { name: new RegExp(componentName) }).click()
   await expect(page.getByRole('dialog')).toBeHidden()
 
   const created = page.waitForResponse(

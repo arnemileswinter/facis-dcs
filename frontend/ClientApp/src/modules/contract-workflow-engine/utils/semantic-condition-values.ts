@@ -1,6 +1,4 @@
-import { isDcsDocumentData } from '@/models/dcs-jsonld'
 import type { SemanticConditionValue } from '@/models/contract-data'
-import type { SubTemplateSnapshot } from '@/models/contract-template'
 import type { DcsContractData, DcsPlaceholder } from '@/models/dcs-jsonld'
 
 /**
@@ -11,16 +9,9 @@ import type { DcsContractData, DcsPlaceholder } from '@/models/dcs-jsonld'
  * so a value is matched to its placeholder by @id.
  */
 
-/** The document's declared placeholders, including sub-template snapshots'. */
+/** The document's declared placeholders. */
 export function collectDeclaredRequirements(cd: Partial<DcsContractData>): DcsPlaceholder[] {
-  const placeholders = [...(cd['dcs:contractData'] ?? [])]
-  for (const snapshot of cd['dcs:metadata']?.['dcs:subTemplates'] ?? []) {
-    const template = snapshot['dcs:template']
-    if (isDcsDocumentData(template)) {
-      placeholders.push(...(template['dcs:contractData'] ?? []))
-    }
-  }
-  return placeholders
+  return [...(cd['dcs:contractData'] ?? [])]
 }
 
 /**
@@ -43,28 +34,6 @@ export function applyInlineSemanticValues(
       return rest
     }
     return { ...rest, 'dcs:value': value.parameterValue }
-  })
-}
-
-/**
- * Applies submitted values inline to each sub-template snapshot's own
- * placeholders, returning new snapshots — a value targeting a composed
- * sub-template's placeholder is carried on that node, wherever it is declared.
- */
-export function applyInlineSemanticValuesToSnapshots(
-  snapshots: SubTemplateSnapshot[],
-  values: SemanticConditionValue[],
-): SubTemplateSnapshot[] {
-  return snapshots.map((snapshot) => {
-    const template = snapshot.template_data
-    if (!isDcsDocumentData(template)) return snapshot
-    return {
-      ...snapshot,
-      template_data: {
-        ...template,
-        'dcs:contractData': applyInlineSemanticValues(template['dcs:contractData'] ?? [], values),
-      },
-    }
   })
 }
 

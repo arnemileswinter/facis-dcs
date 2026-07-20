@@ -435,7 +435,6 @@ var listValuedTerms = map[string]bool{
 	"children":        true,
 	"content":         true,
 	"signatureFields": true,
-	"subTemplates":    true,
 	"contractData":    true,
 	"fields":          true,
 }

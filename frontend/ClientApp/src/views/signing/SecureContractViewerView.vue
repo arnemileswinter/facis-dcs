@@ -141,7 +141,6 @@ function loadContractContent(contractData: unknown) {
     layout: cd.layout,
     contractData: cd.contractData,
     policies: cd.policies,
-    subTemplateSnapshots: cd.subTemplateSnapshots,
   })
   contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
   hasContent.value = true
@@ -283,7 +282,6 @@ async function validate() {
                   :blocks="dcsDraftStore.blocks"
                   :semantic-conditions="dcsDraftStore.semanticConditions"
                   :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
-                  :sub-template-snapshots="dcsDraftStore.subTemplateSnapshots"
                 />
               </div>
               <p v-else class="text-sm text-base-content/50 italic">This contract has no renderable clause content.</p>

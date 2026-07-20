@@ -505,9 +505,9 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
 }
 
 /**
- * Stage 3 — composes a Contract Template on an instance that pins the approved
- * component as a sub-template snapshot and references it in a custom document
- * wrapping (Builder outline). Returns the created contract template's DID.
+ * Stage 3 — composes a Contract Template on an instance by inlining the approved
+ * component's blocks, placeholders and policies into the document (Builder
+ * outline, flatten-on-compose). Returns the created contract template's DID.
  */
 export async function authorContractTemplate(inst: Instance, name: string, componentName: string): Promise<string> {
   await inst.gotoAs('Template Creator', '/ui/templates/new')
@@ -519,19 +519,15 @@ export async function authorContractTemplate(inst: Instance, name: string, compo
     .getByRole('textbox')
     .fill('Contract template composed by the two-instance vertical.')
 
-  await inst.page.getByText('Component Templates', { exact: true }).click()
-  await inst.page.getByPlaceholder('Search templates…').fill(componentName)
-  await inst.page.getByRole('button', { name: componentName }).click()
-  await expect(inst.page.getByText('No component templates selected yet.')).toBeHidden()
-
   await inst.page.getByRole('tab', { name: /Builder/ }).click()
   await inst.page
     .getByRole('button', { name: /add.*block/i })
     .first()
     .click()
   const modal = inst.page.getByRole('dialog')
-  await expect(modal.getByText('Approved sub-templates:')).toBeVisible()
-  await modal.getByText(componentName).first().click()
+  await expect(modal.getByText('Components (inlined on add):')).toBeVisible()
+  await modal.getByPlaceholder('Search components').fill(componentName)
+  await modal.getByRole('button', { name: new RegExp(componentName) }).click()
   await expect(inst.page.getByRole('dialog')).toBeHidden()
 
   const created = inst.page.waitForResponse(

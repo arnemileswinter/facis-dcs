@@ -189,21 +189,16 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       .getByRole('textbox')
       .fill('Contract template composed for the full vertical.')
 
-    // Pin the approved component as a sub-template snapshot (Details tab picker).
-    await page.getByText('Component Templates', { exact: true }).click()
-    await page.getByPlaceholder('Search templates…').fill(componentName)
-    await page.getByRole('button', { name: componentName }).click()
-    await expect(page.getByText('No component templates selected yet.')).toBeHidden()
-
-    // Reference it in the document outline (Builder tab).
+    // Inline the approved component into the document outline (flatten-on-compose).
     await page.getByRole('tab', { name: /Builder/ }).click()
     await page
       .getByRole('button', { name: /add.*block/i })
       .first()
       .click()
     const modal = page.getByRole('dialog')
-    await expect(modal.getByText('Approved sub-templates:')).toBeVisible()
-    await modal.getByText(componentName).first().click()
+    await expect(modal.getByText('Components (inlined on add):')).toBeVisible()
+    await modal.getByPlaceholder('Search components').fill(componentName)
+    await modal.getByRole('button', { name: new RegExp(componentName) }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
 
     const created = page.waitForResponse(
@@ -255,9 +250,8 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       .or(page.getByText('Contract Content', { exact: true }))
       .first()
       .click()
-    // The component's clause renders its prose (composed sub-template clauses
-    // are immutable at contract time — the ODRL rule and its field rode along
-    // from the component).
+    // The component's clause renders its prose (its ODRL rule and its field were
+    // inlined into the template at compose time and rode along into the contract).
     await expect(page.getByText(/The provider invoices the agreed payment amount/).first()).toBeVisible()
 
     const updated = page.waitForRequest((r) => r.url().includes('/contract/update') && r.method() === 'PUT')

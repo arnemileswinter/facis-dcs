@@ -14,7 +14,6 @@ export interface DcsTemplateMetadata {
   'dcs:description'?: string
   'dcs:templateType': string
   'dcs:customMetaData'?: unknown[]
-  'dcs:subTemplates'?: DcsSubTemplateSnapshot[]
 }
 
 export interface DcsContractMetadata {
@@ -23,7 +22,6 @@ export interface DcsContractMetadata {
   'dcs:title'?: string
   'dcs:description'?: string
   'dcs:customMetaData'?: unknown[]
-  'dcs:subTemplates'?: DcsSubTemplateSnapshot[]
 }
 
 /** An xsd datatype a placeholder resolves to (from its SHACL sh:datatype). */
@@ -83,15 +81,7 @@ export interface DcsClause {
   'dcs:signatureFields'?: DcsSignatureField[]
 }
 
-export interface DcsApprovedTemplate {
-  '@type': 'dcs:ApprovedTemplate'
-  '@id': string
-  'dcs:templateDid': string
-  'dcs:version': number
-  'dcs:documentNumber'?: string
-}
-
-export type DcsBlock = DcsSection | DcsTextBlock | DcsClause | DcsApprovedTemplate
+export type DcsBlock = DcsSection | DcsTextBlock | DcsClause
 
 export interface DcsLayoutNode {
   '@id': string
@@ -203,15 +193,6 @@ export interface OdrlSet {
   'odrl:prohibition'?: OdrlRule[]
 }
 
-export interface DcsSubTemplateSnapshot {
-  '@id': string
-  'dcs:version': number
-  'dcs:documentNumber'?: string
-  'dcs:name'?: string
-  'dcs:description'?: string
-  'dcs:template': DcsTemplateData
-}
-
 export interface DcsDocumentData {
   /** Anchored server-side to the Semantic Hub's versioned context URL; the client never emits it. */
   '@context'?: unknown
@@ -253,10 +234,6 @@ export function isDcsTextBlock(block: DcsBlock): block is DcsTextBlock {
 
 export function isDcsClause(block: DcsBlock): block is DcsClause {
   return block['@type'] === 'dcs:Clause'
-}
-
-export function isDcsApprovedTemplate(block: DcsBlock): block is DcsApprovedTemplate {
-  return block['@type'] === 'dcs:ApprovedTemplate'
 }
 
 export function isDcsPlaceholder(seg: DcsContentSegment): seg is DcsPlaceholderRef {

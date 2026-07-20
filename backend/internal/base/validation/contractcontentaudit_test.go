@@ -783,28 +783,18 @@ func slaFieldID(conditionID, parameterName string) string {
 
 func canonicalAuditContractWithTemplateParties() map[string]any {
 	contract := canonicalAuditContract()
-	contract["dcs:contractData"] = []any{}
 	contract["dcs:policies"] = []any{}
 	contract["dcs:metadata"] = map[string]any{
 		"@type":     "dcs:ContractMetadata",
 		"dcs:title": "Canonical audit contract",
-		"dcs:subTemplates": []any{
-			map[string]any{
-				"@id":         "did:example:template",
-				"dcs:version": 1,
-				"dcs:template": map[string]any{
-					"@type": "dcs:ContractTemplate",
-					"dcs:contractData": append(
-						companyPartyRequirement("condition-customer", "customer"),
-						companyPartyRequirement("condition-provider", "provider")...,
-					),
-				},
-			},
-		},
 	}
-	subData := slaRequirement("condition-service", "service.sla.availability")
-	subData = append(subData, slaRequirement("condition-legal", "contract.jurisdiction")...)
-	contract["dcs:contractData"] = subData
+	contractData := append(
+		companyPartyRequirement("condition-customer", "customer"),
+		companyPartyRequirement("condition-provider", "provider")...,
+	)
+	contractData = append(contractData, slaRequirement("condition-service", "service.sla.availability")...)
+	contractData = append(contractData, slaRequirement("condition-legal", "contract.jurisdiction")...)
+	contract["dcs:contractData"] = contractData
 	applyInlineFieldValues(contract, []any{
 		map[string]any{"forField": "urn:uuid:field-condition-customer-legal-name", "parameterValue": "Firma A"},
 		map[string]any{"forField": "urn:uuid:field-condition-customer-country", "parameterValue": "DEU"},

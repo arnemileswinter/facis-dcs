@@ -21,10 +21,7 @@ import {
   fromDocumentSemanticValues,
 } from '@/modules/contract-workflow-engine/utils/semantic-condition-values'
 import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import {
-  buildContractDocument,
-  getSemanticConditionsFromTemplateData,
-} from '@/modules/template-repository/store/dcsDraftStore'
+import { buildContractDocument } from '@/modules/template-repository/store/dcsDraftStore'
 import { useDcsDraftStore } from '@/modules/template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -76,15 +73,8 @@ const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.
 const story = computed(() => contractStory(contract.value?.state))
 
 const verificationResult = computed(() => {
-  const subTemplateSemanticConditions = dcsDraftStore.subTemplateSnapshots.map((subTemplate) => ({
-    templateId: subTemplate.did,
-    version: subTemplate.version,
-    document_number: subTemplate.document_number,
-    semanticConditions: getSemanticConditionsFromTemplateData(subTemplate.template_data),
-  }))
   return verifySemanticValue(
     dcsDraftStore.semanticConditions,
-    subTemplateSemanticConditions,
     contractContentValuesStore.semanticConditionValues,
     dcsDraftStore.blocks,
   )
@@ -140,7 +130,6 @@ function buildCurrentContractData(): ContractData | undefined {
     layout: dcsDraftStore.layout,
     contractData: dcsDraftStore.contractData,
     policies: dcsDraftStore.policies,
-    subTemplateSnapshots: dcsDraftStore.subTemplateSnapshots,
     semanticConditionValues: contractContentValuesStore.semanticConditionValues,
     derivedFromTemplate: contract.value.contract_data?.derivedFromTemplate,
     parentContractDid: contract.value.contract_data?.['dcs:parentContract']?.['@id'],
@@ -170,7 +159,7 @@ watch(
 )
 
 watch(
-  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions, dcsDraftStore.subTemplateSnapshots],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
@@ -178,7 +167,6 @@ watch(
           conditionValue,
           dcsDraftStore.blocks,
           dcsDraftStore.semanticConditions,
-          dcsDraftStore.subTemplateSnapshots,
         ),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
@@ -282,7 +270,6 @@ function applyContractDataToDraft(contractData?: unknown) {
       layout: cd.layout,
       contractData: cd.contractData,
       policies: cd.policies,
-      subTemplateSnapshots: cd.subTemplateSnapshots,
     })
     contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
   } else {
@@ -465,7 +452,6 @@ const exportPDF = async () => {
                         :semantic-conditions="dcsDraftStore.semanticConditions"
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
-                        :sub-template-snapshots="dcsDraftStore.subTemplateSnapshots"
                         :set-semantic-condition-value="setSemanticConditionValue"
                       />
                     </div>
