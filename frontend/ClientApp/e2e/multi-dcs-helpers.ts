@@ -221,11 +221,12 @@ export async function saveArtifact(inst: Instance, contractDid: string, label: s
   persistArtifact(await exportContractPdf(inst, contractDid), label)
 }
 
-/** The public C2PA manifest-history URL for a contract on an instance (the
- *  `?history=true` parsed chain enumeration is a sibling of the API prefix). */
+/** The C2PA manifest-history URL for a contract on an instance. The C2PA
+ *  service is mounted on the API muxer (backend cmd/dcs/http.go), so it lives
+ *  under DCS_API_PATH (/digital-contracting-service/api) like every other app
+ *  endpoint — not at the service root (that is did.json, on the raw mux). */
 function manifestHistoryUrl(inst: Instance, contractDid: string): string {
-  const root = inst.apiBase.replace(/\/api\/?$/, '')
-  return `${root}/c2pa/manifest/${encodeURIComponent(contractDid)}?history=true`
+  return `${inst.apiBase}/c2pa/manifest/${encodeURIComponent(contractDid)}?history=true`
 }
 
 /**
