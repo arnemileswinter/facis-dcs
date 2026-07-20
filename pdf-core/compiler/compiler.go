@@ -47,6 +47,7 @@ func CompilePDF(ctx context.Context, payload []byte, compiledAt time.Time) ([]by
 	// a re-canonicalized form. The visible render is fully determined by
 	// documentStructure (already parsed into doc), so verify still reproduces it.
 	doc.EmbeddedPayload = payload
+	doc.PayloadCID = payloadCID(payload)
 	doc.CompiledAt = compiledAt
 	return renderPDF(ctx, doc)
 }

@@ -233,6 +233,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	// Carry the amended attachment verbatim (same rule as the initial compile):
 	// the superseding embedded object holds the exact submitted bytes.
 	newDoc.EmbeddedPayload = newPayload
+	newDoc.PayloadCID = payloadCID(newPayload)
 
 	// A PAdES signature freezes the visible content: the signature's /ByteRange
 	// covers the pages and its DocMDP permissions forbid altering them. A

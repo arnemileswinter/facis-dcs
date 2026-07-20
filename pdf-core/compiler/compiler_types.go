@@ -65,6 +65,7 @@ type documentModel struct {
 	// (the visible render comes from documentStructure, parsed separately).
 	EmbeddedPayload []byte
 	PayloadHash     string
+	PayloadCID      string // CIDv1(raw,sha256) of EmbeddedPayload — the rendered backlink
 	FileID          string
 	ContractID      string    // @id from the JSON-LD root node
 	CompiledAt      time.Time // timestamp embedded in the dcs.lifecycle assertion
