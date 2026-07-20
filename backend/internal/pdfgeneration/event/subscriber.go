@@ -19,7 +19,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/ipfs"
-	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
@@ -191,16 +190,18 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return nil // already up to date — idempotent re-delivery
 	}
 
-	// The C2PA chain must grow monotonically across the negotiation on both
-	// parties (ADR-13). A pure state transition, a peer-received counter-offer
-	// edit, and any local content edit once the contract has left DRAFT all amend
-	// the stored PDF (pdfCore.Update chains the prior manifest as an ingredient)
-	// so provenance accrues instead of resetting. Only a genesis render or a local
-	// DRAFT-phase edit — before any provenance is worth preserving — starts fresh.
-	peerReceived := contract.Origin != "" && contract.Origin != s.LocalPeer
-	inNegotiation := string(contract.State) != contractstate.Draft.String()
+	// The signature fields are seeded at genesis (create.go), so the initial
+	// render already carries the full signable AcroForm structure and no later
+	// render needs to introduce fields. Every regeneration therefore AMENDS the
+	// stored PDF (pdfCore.Update chains the prior manifest as an ingredient) —
+	// whether the change is a state transition, a local content edit, or a
+	// peer-received counter-offer — so the C2PA provenance chain and any embedded
+	// signatures always carry through and grow instead of resetting (ADR-13). The
+	// inbound peer PDF is the authoritative base: it holds provenance and
+	// credentials this instance cannot reproduce. A fresh render happens only at
+	// genesis, when there is no stored PDF yet.
 	var basePDF []byte
-	if pdfState.IPFSCID != "" && (!contentChanged || peerReceived || inNegotiation) {
+	if pdfState.IPFSCID != "" {
 		ipfsResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
 		if err != nil || len(ipfsResult.Data) == 0 {
 			return fmt.Errorf("fetch PDF from IPFS %s for contract %s: %w", pdfState.IPFSCID, cweEvt.DID, err)
