@@ -348,6 +348,11 @@ spec:
         - name: identity
           secret:
             secretName: {{ include "digital-contracting-service.identitySecretName" . | quote }}
+            # Published by the hsm-provision post-install hook AFTER the pod is
+            # scheduled. optional lets the pod schedule (the wait-for-hsm-token
+            # initContainer already gates the app until provisioning completes);
+            # required would FailedMount → BackOff before init even runs.
+            optional: true
       {{- end }}
       {{- if .Values.signing.tsaTrustCertSecret }}
         - name: tsa-trust
