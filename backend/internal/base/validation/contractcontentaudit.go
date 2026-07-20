@@ -621,8 +621,8 @@ func normalizeObject(raw any) (map[string]any, error) {
 }
 
 // contractValue resolves a validation-profile rule target (a document
-// property path like "contract.jurisdiction", or a declared
-// dcs:parameterName) to the document's runtime value.
+// property path like "contract.jurisdiction", or a placeholder dcs:label) to
+// the document's runtime value.
 func contractValue(contract map[string]any, target string) (any, bool) {
 	if value, ok := contractSHACLAliasValue(contract, target); ok {
 		return compactJSONLDValue(value), true

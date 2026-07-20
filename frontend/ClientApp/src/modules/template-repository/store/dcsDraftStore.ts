@@ -541,9 +541,9 @@ interface CanonicalDocumentInput {
 function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentData {
   const isContract = input.documentType === 'dcs:Contract'
   const submittedValues = input.semanticConditionValues ?? []
-  // A contract carries its submitted values inline on the requirement field
-  // each one targets (dcs:parameterValue) — own fields and composed
-  // sub-template fields alike; a template declares fields with no values.
+  // A contract carries its submitted values inline on the placeholder each one
+  // targets (dcs:value) — own placeholders and composed sub-template
+  // placeholders alike; a template declares placeholders with no values.
   const contractData = isContract ? applyInlineSemanticValues(input.contractData, submittedValues) : input.contractData
   const subTemplateSnapshots = isContract
     ? applyInlineSemanticValuesToSnapshots(input.subTemplateSnapshots ?? [], submittedValues)

@@ -162,7 +162,7 @@ function resolveFieldId(
 
 /**
  * Converts JSON-LD DcsContentSegment[] into UI Segment[].
- * Resolves DcsPlaceholder.dcs:bindsTo['@id'] (fieldId) via semanticConditions.
+ * Resolves each content placeholder reference (its @id) via semanticConditions.
  */
 export function parseSegmentsFromContent(content: DcsContentSegment[], conditions: SemanticCondition[]): Segment[] {
   const segments: Segment[] = []
@@ -250,7 +250,7 @@ export function stringToContent(text: string, conditions: SemanticCondition[]): 
 }
 
 /**
- * Returns the set of conditionIds referenced in a DcsContentSegment[] via dcs:bindsTo fieldIds.
+ * Returns the set of conditionIds referenced in a DcsContentSegment[] via placeholder @ids.
  */
 export function conditionIdsInContent(content: DcsContentSegment[], conditions: SemanticCondition[]): Set<string> {
   const set = new Set<string>()
