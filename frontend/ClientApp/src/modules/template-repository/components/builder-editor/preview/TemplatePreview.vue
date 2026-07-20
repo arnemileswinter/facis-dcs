@@ -81,10 +81,12 @@ const clauseContent = computed((): DcsContentSegment[] => {
   return content['@list']
 })
 
-const clauseSemanticConditions = computed(() => {
-  if (!isMergedBlockId(props.blockId ?? '')) return props.semanticConditions
-  return subTemplateSemanticConditions.value
-})
+// Under ADR-15 every placeholder is a self-contained top-level node wired by
+// @id, so a clause always resolves against the top-level conditions. A
+// flattened clause's compound (::) block id does not mean its field lives in a
+// sub-template — a received peer contract has no sub-template snapshot to
+// consult (and never fetches the originating template).
+const clauseSemanticConditions = computed(() => props.semanticConditions)
 
 const subTemplate = computed((): SubTemplateSnapshot | undefined => {
   const b = block.value
