@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// The BDD venv's requests/urllib3 pairing emits a RequestsDependencyWarning on
+// every import, flooding the e2e output. Silence Python warnings once here — the
+// config is loaded by every worker, and every python subprocess spreads
+// process.env — instead of per-execFileSync call.
+process.env.PYTHONWARNINGS ??= 'ignore'
+
 /**
  * E2E suite against a running DCS instance (default: the BDD kind cluster's
  * instance A). The dev server proxies /api to E2E_DCS_API_TARGET with the
