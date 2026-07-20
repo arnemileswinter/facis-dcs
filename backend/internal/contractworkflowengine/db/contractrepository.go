@@ -137,10 +137,14 @@ type ContractProcessData struct {
 	State           string     `db:"state"`
 	CreatedBy       string     `db:"created_by"`
 	UpdatedAt       time.Time  `db:"updated_at"`
-	StartDate       *time.Time `db:"start_date"`
-	ExpDate         *time.Time `db:"exp_date"`
-	ExpPolicy       *string    `db:"exp_policy"`
-	ExpNoticePeriod *int       `db:"exp_notice_period"`
+	// ContentUpdatedAt moves only when contract_data actually changes, so the
+	// optimistic-lock guard distinguishes a real concurrent content edit from a
+	// benign write that merely nudged updated_at.
+	ContentUpdatedAt time.Time  `db:"content_updated_at"`
+	StartDate        *time.Time `db:"start_date"`
+	ExpDate          *time.Time `db:"exp_date"`
+	ExpPolicy        *string    `db:"exp_policy"`
+	ExpNoticePeriod  *int       `db:"exp_notice_period"`
 }
 
 type ContractUpdateData struct {

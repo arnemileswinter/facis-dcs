@@ -72,9 +72,12 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		return err
 	}
 
-	// Optimistic concurrency: reject if the caller's view of the contract is
-	// older than what's stored (see package doc / ADR-0007).
-	if cmd.UpdatedAt.Unix() < processData.UpdatedAt.Unix() {
+	// Optimistic concurrency (lost-update guard, ADR-0007): reject only if the
+	// contract's CONTENT changed after the caller's view — compare against
+	// content_updated_at, which moves solely on a real contract_data edit, not on
+	// benign writes (a state transition or a background artifact write) that nudge
+	// updated_at without changing content and would otherwise false-trip this.
+	if cmd.UpdatedAt.Unix() < processData.ContentUpdatedAt.Unix() {
 		if localPeer != cmd.CauserDID {
 			return errors.New("contract was updated elsewhere, please force synchronisation and reload")
 		}
