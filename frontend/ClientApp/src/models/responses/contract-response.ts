@@ -65,6 +65,10 @@ export interface ContractDeployResponse {
   payload: unknown
 }
 
+export interface ContractOfferResponse {
+  did: string
+}
+
 export interface ContractReviewResponse {
   did: string
 }
