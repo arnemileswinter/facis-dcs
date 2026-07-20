@@ -205,19 +205,11 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 		return nil, fmt.Errorf("extract embedded JSON-LD: %w", err)
 	}
 
-	// The "no changes" guard compares the two payloads by their URDNA2015 graph
-	// hash — deterministic regardless of serialization, so the verbatim old and
-	// new attachments compare on the same canonical graph basis.
-	oldNQuads, err := NormalizePayload(oldPayload)
-	if err != nil {
-		return nil, err
-	}
-	newNQuads, err := NormalizePayload(newPayload)
-	if err != nil {
-		return nil, err
-	}
-	oldHash := sha256.Sum256(oldNQuads)
-	newHash := sha256.Sum256(newNQuads)
+	// Hash the verbatim bytes — the same content-address CompilePDF renders, so the
+	// backlink + FileID match a fresh compile, and the "no changes" guard compares
+	// the exact old vs new attachment bytes.
+	oldHash := sha256.Sum256(oldPayload)
+	newHash := sha256.Sum256(newPayload)
 	oldHashHex := hex.EncodeToString(oldHash[:])
 	newHashHex := hex.EncodeToString(newHash[:])
 

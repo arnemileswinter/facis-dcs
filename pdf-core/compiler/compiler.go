@@ -29,16 +29,14 @@ var liberationSansTTF []byte
 var CanonicalCompiledAt = time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 
 func CompilePDF(ctx context.Context, payload []byte, compiledAt time.Time) ([]byte, error) {
-	// The FileID is the URDNA2015 graph hash of the payload — deterministic
-	// regardless of serialization. The render model is extracted directly from the
-	// payload's @list-ordered documentStructure (no json-gold expand/compact,
-	// which reorders rich content non-deterministically). The attachment is
-	// embedded VERBATIM below.
-	nquads, err := NormalizePayload(payload)
-	if err != nil {
-		return nil, err
-	}
-	sum := sha256.Sum256(nquads)
+	// The FileID and the rendered "Payload hash" backlink are the sha256 of the
+	// EXACT verbatim embedded bytes — a content-address any verifier recomputes
+	// from the attachment. Under the verbatim boundary the embed bytes are fixed,
+	// so A's render and B's recompile derive the identical value. (URDNA2015 graph
+	// hashing is NOT used for this: blank-node labeling is not byte-deterministic,
+	// which made the self-referential hash diverge A↔B.) The render model is
+	// extracted directly from the payload's @list-ordered documentStructure.
+	sum := sha256.Sum256(payload)
 	hashHex := hex.EncodeToString(sum[:])
 
 	doc, err := extractDocumentModel(payload, hashHex)

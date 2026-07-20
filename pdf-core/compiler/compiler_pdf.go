@@ -88,7 +88,7 @@ func renderPDF(ctx context.Context, doc documentModel) ([]byte, error) {
 		// C2PA manifest store attachment per C2PA 2.4 Appendix A.4 for PDF embedding.
 		pdfObject{ID: ids.c2paFileSpecID, Data: []byte(fmt.Sprintf("<< /Type /Filespec /F (content_credential.c2pa) /UF (content_credential.c2pa) /AFRelationship /C2PA_Manifest /Desc (Embedded C2PA manifest store) /EF << /F %d 0 R >> >>", ids.c2paEmbeddedID))},
 		pdfObject{ID: ids.embeddedFileID, Data: streamObject(doc.EmbeddedPayload, fmt.Sprintf("<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /ModDate (D:20260604000000Z) /CheckSum <%s> >> >>", len(doc.EmbeddedPayload), len(doc.EmbeddedPayload), doc.PayloadHash[:32]))},
-		// CanonicalJSON holds the original JSON-LD bytes; PayloadHash is SHA-256 of URDNA2015 N-Quads.
+		// PayloadHash is the sha256 of the verbatim embedded payload bytes (a content-address).
 		pdfObject{ID: ids.fileSpecID, Data: []byte(fmt.Sprintf("<< /Type /Filespec /F (contract.jsonld) /UF (contract.jsonld) /AFRelationship /Source /Desc (Embedded canonical JSON-LD payload) /EF << /F %d 0 R >> >>", ids.embeddedFileID))},
 		pdfObject{ID: ids.metadataID, Data: streamObject(xmpMetadata, fmt.Sprintf("<< /Type /Metadata /Subtype /XML /Length %d >>", len(xmpMetadata)))},
 	)
