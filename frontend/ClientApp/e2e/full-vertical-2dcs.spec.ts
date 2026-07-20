@@ -53,6 +53,11 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
 // A failed run must exit cleanly: close instance B's browser context in
 // afterEach so a mid-test failure can't leave the second DCS session (and the
 // suite) wedged. The python subprocesses (veraPDF etc.) carry their own timeout.
+// This monolithic 10-stage vertical takes minutes; a retry re-runs the whole
+// thing to the same failure and just doubles CI wall-clock, so opt this file out
+// of the CI retry (the small unit-level specs keep it).
+test.describe.configure({ retries: 0 })
+
 let bInstance: Awaited<ReturnType<typeof openInstanceB>> | undefined
 test.afterEach(async () => {
   await bInstance?.context.close().catch(() => {})
