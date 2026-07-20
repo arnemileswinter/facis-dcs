@@ -33,6 +33,10 @@ spec:
               port: http
             initialDelaySeconds: 90
             periodSeconds: 10
+            # Tomcat serving the DSS landing page can take several seconds under
+            # load; the 1s probe default times out ("context deadline exceeded")
+            # and flaps the pod NotReady mid-signing.
+            timeoutSeconds: 5
             failureThreshold: 30
           {{- with .Values.resources }}
           resources:
