@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
@@ -190,15 +191,16 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return nil // already up to date — idempotent re-delivery
 	}
 
-	// A pure state transition appends to the existing PDF to preserve the C2PA
-	// chain; a local genesis render or a local content edit starts from a freshly
-	// rendered PDF. A content change on a PEER-RECEIVED contract (a counteroffer
-	// edit) must also amend the stored base — that base is the counterparty's own
-	// PDF, so amending it chains their manifest as an ingredient and the C2PA
-	// provenance grows across the negotiation instead of resetting (ADR-13).
+	// The C2PA chain must grow monotonically across the negotiation on both
+	// parties (ADR-13). A pure state transition, a peer-received counter-offer
+	// edit, and any local content edit once the contract has left DRAFT all amend
+	// the stored PDF (pdfCore.Update chains the prior manifest as an ingredient)
+	// so provenance accrues instead of resetting. Only a genesis render or a local
+	// DRAFT-phase edit — before any provenance is worth preserving — starts fresh.
 	peerReceived := contract.Origin != "" && contract.Origin != s.LocalPeer
+	inNegotiation := string(contract.State) != contractstate.Draft.String()
 	var basePDF []byte
-	if pdfState.IPFSCID != "" && (!contentChanged || peerReceived) {
+	if pdfState.IPFSCID != "" && (!contentChanged || peerReceived || inNegotiation) {
 		ipfsResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
 		if err != nil || len(ipfsResult.Data) == 0 {
 			return fmt.Errorf("fetch PDF from IPFS %s for contract %s: %w", pdfState.IPFSCID, cweEvt.DID, err)

@@ -235,12 +235,32 @@ function manifestHistoryUrl(inst: Instance, contractDid: string): string {
  * length. Call on BOTH instances across a negotiation exchange.
  */
 export async function assertManifestChainGrew(inst: Instance, contractDid: string, prevCount: number): Promise<number> {
-  const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
-  expect(resp.ok(), `C2PA manifest history HTTP ${resp.status()} for ${contractDid} on ${inst.origin}`).toBeTruthy()
-  const chain = (await resp.json()) as unknown[]
-  expect(Array.isArray(chain), `manifest history is a chain list on ${inst.origin}`).toBeTruthy()
-  expect(chain.length, `C2PA manifest chain on ${inst.origin} should grow past ${prevCount}`).toBeGreaterThan(prevCount)
-  return chain.length
+  // The new PDF and its grown C2PA chain are produced by the event-driven
+  // background regenerator AFTER the negotiate/sign call returns, and the peer's
+  // copy replicates asynchronously over the PDF exchange. Until the regen lands
+  // the export route reports "being regenerated" (backend exportcontract.go), so
+  // poll the manifest history until the chain grows past prevCount, tolerating
+  // the transient not-ready response.
+  const deadline = Date.now() + 45_000
+  let lastStatus = 0
+  let lastLen = -1
+  while (Date.now() < deadline) {
+    const resp = await inst.page.request.get(manifestHistoryUrl(inst, contractDid))
+    lastStatus = resp.status()
+    if (resp.ok()) {
+      const chain = (await resp.json()) as unknown[]
+      if (Array.isArray(chain)) {
+        lastLen = chain.length
+        if (chain.length > prevCount) return chain.length
+      }
+    }
+    await inst.page.waitForTimeout(1500)
+  }
+  expect(
+    lastLen,
+    `C2PA manifest chain on ${inst.origin} should grow past ${prevCount} within 45s (last HTTP ${lastStatus}, last length ${lastLen})`,
+  ).toBeGreaterThan(prevCount)
+  return lastLen
 }
 
 /** Current length of the contract's C2PA manifest chain on an instance (0 if
