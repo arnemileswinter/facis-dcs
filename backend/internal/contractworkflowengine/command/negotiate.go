@@ -130,12 +130,14 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// Changing the content is what makes the background regenerator produce and
 	// ship a new PDF, growing the C2PA chain on both parties. The change request is
 	// still recorded above for the negotiation audit trail (DCS-IR-CWE-03).
+	// A change request is either free-text (a comment / redline note kept only
+	// for the negotiation audit trail — stored raw above) or a structured
+	// ChangeRequest carrying a contract_data redline. Only a structured redline
+	// is applied immediately and re-shipped as a PDF; a free-text note (which
+	// does not decode into the struct) has nothing to apply, so it is skipped.
 	if cmd.ChangeRequest != nil {
 		var change negotiationmerging.ChangeRequest
-		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err != nil {
-			return fmt.Errorf("could not decode change request: %w", err)
-		}
-		if change.ContractData != nil {
+		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
 			proposed := datatype.JSON(*change.ContractData)
 			normalized, err := validation.NormalizeContractDataForPersistence(&proposed, cmd.DID, true)
 			if err != nil {
