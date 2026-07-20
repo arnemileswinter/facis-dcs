@@ -1,25 +1,27 @@
 import { expect, test } from './dcs-test'
 import {
-  apiAuthHeaders,
   assertManifestChainGrew,
+  assertNotYetSignable,
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
-  contractUpdatedAt,
   counterOffer,
   createContractViaUi,
+  deployContract,
   instanceA,
   manifestChainLength,
+  offerToCounterparty,
   openInstanceB,
   publishShapeOnInstance,
   registerTemplateOn,
   resolveDidWeb,
   saveArtifact,
+  settleToApprovedOn,
   signOnInstance,
   submitReviewApproveTemplateOn,
   verifyArtifact,
 } from './multi-dcs-helpers'
-import { E2E_API_BASE, E2E_FRONTEND_ORIGIN } from '../playwright.config'
+import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
 
 /**
  * The normative two-instance negotiation vertical: instance A (originator) and
@@ -114,15 +116,9 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   let aChain = 0
   let bChain = 0
   await test.step('Stage 5 [SRS §2.2, DCS-NFR-BR-08, ADR-13]: propose to B; B replicates to OFFERED', async () => {
-    // Offer is a Contract Creator transition; establish that session so the raw
-    // retrieve/offer carry the bearer, then echo the optimistic-lock updated_at.
-    const auth = await apiAuthHeaders(a, 'Contract Creator', '/ui/contracts/new')
-    const updatedAt = await contractUpdatedAt(a, contractDid, auth)
-    const offered = await a.page.request.post(`${E2E_API_BASE}/contract/offer`, {
-      data: { did: contractDid, updated_at: updatedAt },
-      headers: auth,
-    })
-    expect(offered.ok(), `offer ${offered.status()}: ${await offered.text()}`).toBeTruthy()
+    // A's Contract Creator clicks "Offer to counterparty" (DRAFT -> OFFERED),
+    // which ships the PDF to the trusted peer.
+    await offerToCounterparty(a, contractDid)
 
     await assertReceivedInState(b, contractDid, 'OFFERED')
     await verifyArtifact(b, contractDid, { lifecycle: 'draft', save: '01-offer-B' })
@@ -157,21 +153,16 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // review → approve flow on each instance (not a fabricated /contract/settle
   // route). Signing is refused before APPROVED (ACCEPTED = signing gate); the
   // extrinsic lifecycle flips proposed → agreed on both sides.
-  // NOTE (rework pending): this step still calls /contract/settle + /signature/apply,
-  // which are NOT design routes — being reworked to the submit→approve + viewer
-  // sign flow per the coordinator's stage-7/8 map.
   await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle', async () => {
-    const early = await b.page.request.post(`${E2E_API_BASE}/signature/apply`, {
-      data: { did: contractDid },
-    })
-    expect(early.ok(), 'a pre-settle signature attempt must be refused').toBeFalsy()
+    // The signing gate holds pre-settle: B's signer cannot sign an unapproved
+    // contract — the Secure Contract Viewer's signing list does not offer it.
+    await assertNotYetSignable(b, contractDid)
 
-    const settle = await a.page.request.post(`${E2E_API_BASE}/contract/settle`, {
-      data: { did: contractDid },
-    })
-    expect(settle.ok(), `settle ${settle.status()}: ${await settle.text()}`).toBeTruthy()
-    await assertReceivedInState(a, contractDid, 'ACCEPTED')
-    await assertReceivedInState(b, contractDid, 'ACCEPTED')
+    // Settle = consolidate to APPROVED via the real submit → review → approve UI
+    // (no /contract/settle route; APPROVED is the settled state, not "ACCEPTED").
+    await settleToApprovedOn(a, contractDid)
+    await assertReceivedInState(a, contractDid, 'APPROVED')
+    await assertReceivedInState(b, contractDid, 'APPROVED')
     await saveArtifact(a, contractDid, '07-settle-A')
     await saveArtifact(b, contractDid, '07-settle-B')
   })
@@ -200,10 +191,8 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // target, receipt + async KPIs checked vs policy, and the full audit trail on
   // both instances.
   await test.step('Stages 9-10 [UC-05, DCS-FR-SM-10, DCS-FR-CWE-09/-31, §2.2.5]: deploy, receipt, KPI, audit', async () => {
-    const deployed = await a.page.request.post(`${E2E_API_BASE}/contract/deploy`, {
-      data: { did: contractDid },
-    })
-    expect(deployed.ok(), `deploy ${deployed.status()}: ${await deployed.text()}`).toBeTruthy()
+    // A's Contract Manager clicks "Deploy" (SIGNED -> ACTIVE) on the signed contract.
+    await deployContract(a, contractDid)
 
     await a.gotoAs('Auditor', '/ui/audit')
     await a.page.getByLabel('Scope').selectOption('contracts')

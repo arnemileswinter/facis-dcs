@@ -566,3 +566,94 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   await inst.page.getByRole('button', { name: 'Change Proposal' }).click()
   await proposed
 }
+
+/**
+ * Stage 5 — A transmits the DRAFT contract to its counterparty through the real
+ * UI: the Contract Creator's "Offer to counterparty" action on the contract view
+ * (DRAFT -> OFFERED). command/offer.go gates this on the ContractCreator role and
+ * EventOffer, which the state machine allows only from DRAFT (SRS DCS-IR-CWE-01;
+ * §1.2 offer→acceptance). The transition ships the PDF to the trusted peer.
+ */
+export async function offerToCounterparty(inst: Instance, contractDid: string): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/view/${contractDid}`)
+  const offered = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/offer') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Offer to counterparty' }).click()
+  await offered
+}
+
+/**
+ * Stage 7 pre-settle gate — asserts a contract is not yet signable on an instance.
+ * ADR-2 allows EventSign only from APPROVED, so before the contract is approved
+ * the Secure Contract Viewer's signing list must not offer it. This is the real
+ * UI gate a signer hits (there is no /signature/apply route to POST against).
+ */
+export async function assertNotYetSignable(inst: Instance, contractDid: string): Promise<void> {
+  await inst.gotoAs('Contract Signer', '/ui/signing')
+  await expect(inst.page.getByRole('heading', { name: /Signing/ })).toBeVisible()
+  await expect(inst.page.getByRole('row').filter({ hasText: contractDid })).toHaveCount(0)
+}
+
+/**
+ * Stage 7 settle — drives an instance's contract from an open negotiation round
+ * to APPROVED through the real UI, the SRS consolidation path (there is no
+ * /contract/settle route; ACCEPTED is not a contract state). Accepts the
+ * outstanding change request (NegotiationList Show → Accept → /contract/respond),
+ * submits the merged round (NEGOTIATION → SUBMITTED), reviews it (SUBMITTED →
+ * REVIEWED), and approves it (REVIEWED → APPROVED, EventApprove). Mirrors the
+ * proven single-instance submit→review→approve sequence.
+ */
+export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+  // Accept the outstanding change request so no open decision blocks Submit.
+  await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+  const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
+  if (await showBtn.isVisible().catch(() => false)) {
+    await showBtn.click()
+    const responded = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
+    )
+    await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await confirmModalOn(inst, 'Confirm')
+    await responded
+  }
+
+  // Submit the merged round: NEGOTIATION -> SUBMITTED.
+  const submitted = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await submitted
+
+  // Review: SUBMITTED -> REVIEWED.
+  await inst.gotoAs('Contract Reviewer', `/ui/contracts/review/${contractDid}`)
+  const forwarded = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await confirmModalOn(inst, 'Submit')
+  await forwarded
+
+  // Approve: REVIEWED -> APPROVED.
+  await inst.gotoAs('Contract Approver', `/ui/contracts/approve/${contractDid}`)
+  const approved = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await confirmModalOn(inst, 'Confirm')
+  await approved
+}
+
+/**
+ * Stage 9 — the Contract Manager deploys the fully-signed contract to the target
+ * system through the real UI: the "Deploy" action in ContractManagerActions
+ * (SIGNED -> ACTIVE, EventDeploy), gated on the Manager role and SIGNED state.
+ */
+export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
+  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const deployed = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST' && r.ok(),
+  )
+  await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
+  await deployed
+}
