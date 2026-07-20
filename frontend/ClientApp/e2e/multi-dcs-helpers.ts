@@ -165,7 +165,12 @@ export async function verifyArtifact(
   const pdfPath = await exportContractPdf(inst, contractDid)
   const args = [path.join(here, 'verify_artifact.py'), pdfPath]
   if (opts.lifecycle) args.push('--lifecycle', opts.lifecycle)
-  execFileSync(python, args, { cwd: repoRoot, stdio: 'pipe' })
+  execFileSync(python, args, {
+    cwd: repoRoot,
+    stdio: 'pipe',
+    timeout: 120_000,
+    env: { ...process.env, PYTHONWARNINGS: 'ignore' },
+  })
   if (opts.save) persistArtifact(pdfPath, opts.save)
 }
 
@@ -202,7 +207,7 @@ function persistArtifact(pdfPath: string, label: string): void {
       '--dump-jsonld',
       path.join(artifactDir, `${label}.jsonld`),
     ],
-    { cwd: repoRoot, stdio: 'pipe' },
+    { cwd: repoRoot, stdio: 'pipe', timeout: 120_000, env: { ...process.env, PYTHONWARNINGS: 'ignore' } },
   )
 }
 
@@ -546,6 +551,22 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
  * integration once the negotiate → settle flow is wired end to end.
  */
 export async function counterOffer(inst: Instance, contractDid: string, opts: { value: string }): Promise<void> {
+  // The "Change Proposal" control only renders in NEGOTIATION; a freshly OFFERED
+  // contract (a received offer, or one just re-shipped by the counterparty) must
+  // first transition Offered --Submit--> Negotiation. Do it via the authenticated
+  // API only when actually OFFERED, so an in-negotiation contract is not advanced.
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  const retrieve = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  const current = (await retrieve.json()) as { state?: string; updated_at?: string }
+  if (current.state === 'OFFERED') {
+    const submitted = await inst.page.request.post(`${inst.apiBase}/contract/submit`, {
+      headers: auth,
+      data: { did: contractDid, updated_at: current.updated_at },
+    })
+    expect(submitted.ok(), `submit->negotiation ${submitted.status()}: ${await submitted.text()}`).toBeTruthy()
+  }
   await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
   const firstValue = inst.page.locator('input[type="text"], input[type="number"]').first()
   await expect(firstValue).toBeVisible({ timeout: 30_000 })
@@ -553,6 +574,6 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   const proposed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/negotiate') && r.request().method() === 'POST' && r.ok(),
   )
-  await inst.page.getByRole('button', { name: /Negotiate|Propose/ }).click()
+  await inst.page.getByRole('button', { name: 'Change Proposal' }).click()
   await proposed
 }

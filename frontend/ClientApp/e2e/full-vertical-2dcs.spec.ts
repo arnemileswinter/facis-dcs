@@ -48,10 +48,20 @@ import { E2E_API_BASE, E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * endpoint by design, so the vertical asserts trust by observing replication
  * succeed, not by driving a trust stage.
  */
+// A failed run must exit cleanly: close instance B's browser context in
+// afterEach so a mid-test failure can't leave the second DCS session (and the
+// suite) wedged. The python subprocesses (veraPDF etc.) carry their own timeout.
+let bInstance: Awaited<ReturnType<typeof openInstanceB>> | undefined
+test.afterEach(async () => {
+  await bInstance?.context.close().catch(() => {})
+  bInstance = undefined
+})
+
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
   test.setTimeout(900_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
+  bInstance = b
 
   const unique = Date.now()
   const shapeName = `e2e-payment-shape-${unique}`
