@@ -180,11 +180,13 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 // seedSignatureFields adds one dcs:SignatureField per participating DCS
 // instance to the contract document, its dcs:signatoryName set to that
 // instance's DID — the value pdf-core renders as the AcroForm field's /T name,
-// which the wallet-driven signing ceremony targets (ADR-12). It is merge-aware
-// and idempotent: an instance that already has a field — from a template or an
-// earlier negotiation pass — is left untouched, so re-running never duplicates.
-// It reports whether the document changed so the caller only persists real
-// additions.
+// which the wallet-driven signing ceremony targets (ADR-12). An explicit
+// declaration wins: a contract that already declares any signature fields is
+// signed against exactly those and is left untouched, so an authored
+// multi-signatory contract is never augmented. Otherwise it auto-seeds one
+// field per instance and is idempotent — re-running over its own output adds
+// nothing. It reports whether the document changed so the caller only persists
+// real additions.
 func seedSignatureFields(raw datatype.JSON, instanceDIDs []string) (datatype.JSON, bool, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
