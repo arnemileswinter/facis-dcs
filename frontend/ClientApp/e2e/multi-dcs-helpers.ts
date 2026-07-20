@@ -411,15 +411,20 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   await editor.getByPlaceholder('Clause title').fill('Payment terms')
   await editor.locator('select').first().selectOption({ label: 'Payment Amount' })
   await editor.locator('.clause-editor').first().click()
-  // Author an INLINE, fillable placeholder for Payment Amount: typing "{{" opens
-  // the requirement-field picker (ClauseTextEditor), and the chosen field becomes
-  // a {{condition.param}} segment that renders as an editable PreviewParamInput at
-  // contract time. Without an inline placeholder the field exists only as an ODRL
-  // constraint boundary and nothing is negotiable in the Negotiate view.
-  await inst.page.keyboard.type('The provider invoices the agreed payment amount of ')
-  await inst.page.keyboard.type('{{')
-  await inst.page.getByRole('button', { name: /Payment Amount/ }).click()
-  await inst.page.keyboard.type('.')
+  await inst.page.keyboard.type('The provider invoices the agreed payment amount.')
+  // Place an INLINE, fillable placeholder for Payment Amount by clicking its
+  // building block in the "Available requirements" panel — RuleParamRow's click
+  // fires insertPlaceholderFromPanel, which deterministically writes the
+  // {{condition.param}} token into the clause. (Typing "{{" relies on a
+  // contenteditable dropdown that does not fire under Playwright, so the
+  // placeholder never landed and the contract carried no negotiable input.) Only
+  // an inline placeholder renders an editable PreviewParamInput at contract time;
+  // a field used solely as an ODRL constraint boundary renders nothing.
+  await editor.getByRole('listitem').filter({ hasText: 'Payment Amount' }).first().click()
+  // Guard: the inline placeholder span must have landed in the clause editor
+  // (ClauseTextEditor renders it as a span with data-parameter-name), else the
+  // contract has no negotiable value and Stage 6 would fail silently later.
+  await expect(editor.locator('[data-parameter-name]')).toHaveCount(1)
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
