@@ -420,7 +420,19 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   // placeholder never landed and the contract carried no negotiable input.) Only
   // an inline placeholder renders an editable PreviewParamInput at contract time;
   // a field used solely as an ODRL constraint boundary renders nothing.
-  await editor.getByRole('listitem').filter({ hasText: 'Payment Amount' }).first().click()
+  //
+  // The click MUST hit RuleParamRow (the leaf <li>, the row also showing
+  // "required") — the enclosing condition <li> carries the same "Payment Amount"
+  // text but has no click handler. Scope to the Available-requirements section and
+  // exclude any <li> that itself contains an <li> (hasNot), leaving only the leaf
+  // param row, so we hit neither the condition heading, the field <select>, nor
+  // the ODRL constraint's "Payment Amount".
+  const availableRequirements = editor.locator('section').filter({ hasText: 'Available requirements' })
+  await availableRequirements
+    .getByRole('listitem')
+    .filter({ hasText: 'Payment Amount' })
+    .filter({ hasNot: inst.page.getByRole('listitem') })
+    .click()
   // Guard: the inline placeholder span must have landed in the clause editor
   // (ClauseTextEditor renders it as a span with data-parameter-name), else the
   // contract has no negotiable value and Stage 6 would fail silently later.
@@ -605,10 +617,12 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
     .or(inst.page.getByText('Contract Content', { exact: true }))
     .first()
     .click()
-  const amount = inst.page
-    .getByRole('spinbutton', { name: /amount/i })
-    .or(inst.page.getByRole('textbox', { name: /amount/i }))
-    .first()
+  // PreviewParamInput renders the decimal field as <input type="text"
+  // aria-label="Payment Amount"> (role textbox, not spinbutton): the reconstructed
+  // param resolves its label from the seeded ontology field (dcst:...#field-
+  // contract-payment-amount is a host-stable w3id IRI, so it matches on both
+  // instances -> uiMetadata.label "Payment Amount"), never the parameterName.
+  const amount = inst.page.getByRole('textbox', { name: 'Payment Amount' }).first()
   await expect(amount).toBeVisible({ timeout: 30_000 })
   await amount.fill(opts.value)
   const proposed = inst.page.waitForResponse(
