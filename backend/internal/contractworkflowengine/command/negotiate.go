@@ -88,13 +88,21 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 		return err
 	}
 
-	isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
-	if err != nil {
-		return fmt.Errorf("could not validate negotiator: %w", err)
-	}
-
-	if !isValidNegotiator {
-		return ErrNotAParty
+	// Authorization splits on who owns the contract (SRS §4 Contract Negotiation
+	// & Review: the Responder reviews an offered contract and may accept,
+	// negotiate, or refuse it). For an INBOUND offer (Origin != localPeer) this
+	// instance is the Responder/counterparty, and its right to negotiate derives
+	// from being the designated counterparty — not from a local negotiator-task
+	// assignment. Local negotiator RBAC governs only contracts this instance
+	// itself authored (Origin == localPeer).
+	if processData.Origin == localPeer {
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
+		if err != nil {
+			return fmt.Errorf("could not validate negotiator: %w", err)
+		}
+		if !isValidNegotiator {
+			return ErrNotAParty
+		}
 	}
 
 	negotiators, err := h.NTRepo.ReadNegotiatorsForDID(ctx, tx, cmd.DID)
@@ -134,6 +142,20 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	if changed {
 		if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{DID: cmd.DID, ContractData: &seeded}); err != nil {
 			return fmt.Errorf("could not persist seeded signature fields: %w", err)
+		}
+	}
+
+	// The Responder choosing to negotiate an offered contract starts the
+	// negotiation phase (SRS §4; transition.go Offered -> Negotiation via
+	// EventNegotiate). Later redlines happen within NEGOTIATION (a self-loop) and
+	// leave the state unchanged.
+	currentState := contractstate.ContractState(processData.State)
+	if currentState == contractstate.Offered {
+		if err := contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation); err != nil {
+			return err
+		}
+		if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Negotiation.String()); err != nil {
+			return fmt.Errorf("could not persist negotiation state: %w", err)
 		}
 	}
 

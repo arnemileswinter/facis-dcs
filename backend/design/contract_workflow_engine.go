@@ -772,6 +772,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Scope("Contract Negotiator")
 			Scope("Contract Reviewer")
 			Scope("Sys. Contract Reviewer")
+			// The Responder negotiates an inbound offer through the role that
+			// manages its received contracts (SRS §4 Contract Negotiation &
+			// Review); per-contract authorization for an inbound offer is the
+			// counterparty gate in command/negotiate.go, not local RBAC.
+			Scope("Contract Manager")
 		})
 
 		Payload(ContractNegotiationRequest)
