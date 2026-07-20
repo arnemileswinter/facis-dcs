@@ -20,9 +20,11 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/contractworkflowengine/negotiationmerging"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -119,6 +121,34 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	_, err = h.NRepo.Create(ctx, tx, data, negotiators)
 	if err != nil {
 		return fmt.Errorf("could not create negotiation: %w", err)
+	}
+
+	// Ship-proposal-as-PDF-exchange (Arne 2026-07-20): a counter-offer applies its
+	// redline to contract_data immediately, so the negotiated PDF re-renders with
+	// the proposed value and re-ships to the peer over the PDF exchange (ADR-13) —
+	// the peer reviews the redline in the received document and agrees at settle.
+	// Changing the content is what makes the background regenerator produce and
+	// ship a new PDF, growing the C2PA chain on both parties. The change request is
+	// still recorded above for the negotiation audit trail (DCS-IR-CWE-03).
+	if cmd.ChangeRequest != nil {
+		var change negotiationmerging.ChangeRequest
+		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err != nil {
+			return fmt.Errorf("could not decode change request: %w", err)
+		}
+		if change.ContractData != nil {
+			proposed := datatype.JSON(*change.ContractData)
+			normalized, err := validation.NormalizeContractDataForPersistence(&proposed, cmd.DID, true)
+			if err != nil {
+				return fmt.Errorf("proposed contract data validation failed: %w", err)
+			}
+			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
+				DID:             cmd.DID,
+				ContractData:    normalized,
+				ContractVersion: processData.ContractVersion + 1,
+			}); err != nil {
+				return fmt.Errorf("could not apply proposed change to contract data: %w", err)
+			}
+		}
 	}
 
 	err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)

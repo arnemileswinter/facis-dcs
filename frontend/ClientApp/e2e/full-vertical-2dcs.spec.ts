@@ -5,11 +5,11 @@ import {
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
+  counterOffer,
   createContractViaUi,
   deployContract,
   instanceA,
   manifestChainLength,
-  negotiateRound,
   offerToCounterparty,
   openInstanceB,
   publishShapeOnInstance,
@@ -139,18 +139,18 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // adjustment ships a new PDF and the C2PA ingredient chain grows by one on BOTH
   // parties (the counterparty's provenance is chained, not reset).
   await test.step('Stage 6 [DCS-FR-CWE-18, DCS-IR-CWE-03/-04, DCS-OR-C2PA-002]: negotiation ping-pong 20000 -> 10000 -> 15000', async () => {
-    // B redlines 20000 -> 10000 and A agrees + merges it (SRS §4: a new version
-    // is created when an adjustment is agreed by both parties). The merge
-    // regenerates and re-ships the PDF, so the C2PA chain grows on both sides.
-    await negotiateRound(b, a, contractDid, '10000')
+    // B redlines 20000 -> 10000: the counter-offer applies the value to
+    // contract_data immediately, so the negotiated PDF re-renders with the redline
+    // and re-ships to A over the PDF exchange (the C2PA chain grows on both).
+    await counterOffer(b, contractDid, { value: '10000' })
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     await saveArtifact(b, contractDid, '02-counter-10k-B')
     await saveArtifact(a, contractDid, '02-counter-10k-A')
 
-    // A redlines 10000 -> 15000 and B agrees + merges it — the round-trip runs
-    // the other direction, and the chain grows again on both.
-    await negotiateRound(a, b, contractDid, '15000')
+    // A counters 10000 -> 15000: the redline runs the other direction and ships
+    // back, growing the chain again on both instances.
+    await counterOffer(a, contractDid, { value: '15000' })
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
     await saveArtifact(a, contractDid, '03-counter-15k-A')

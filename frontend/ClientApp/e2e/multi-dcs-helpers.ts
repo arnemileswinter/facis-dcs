@@ -593,54 +593,6 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   await proposed
 }
 
-/**
- * Completes one negotiation round on the instance that AGREES to the peer's
- * outstanding counter-offer. Per SRS §4 a new version is created only when an
- * adjustment is agreed by BOTH parties, so a bare proposal produces no new PDF:
- * this instance accepts the peer's proposed redline (respond) and submits it,
- * which merges the change into contract_data, bumps the version, and stays in
- * NEGOTIATION for the next round (submit.go merge branch). The merge regenerates
- * the PDF and re-ships it, so the C2PA chain grows on both parties. The peer's
- * proposal replicates asynchronously, so poll for its change request to surface
- * before accepting. The counterparty drives this as Contract Manager (its
- * inbound-contract role); the conflict-of-interest guard (FR-CWE-07) is met
- * because the agreeing party is the other organisation than the proposer.
- */
-export async function agreeAndMergeOn(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
-  const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
-  await expect(showBtn).toBeVisible({ timeout: 45_000 })
-  await showBtn.click()
-  const responded = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
-    { timeout: 30_000 },
-  )
-  await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-  await confirmModalOn(inst, 'Confirm')
-  await responded
-
-  const submitted = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
-    { timeout: 30_000 },
-  )
-  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
-  await submitted
-}
-
-/**
- * One full SRS negotiation round: the proposer redlines a new value and the
- * accepter (the other party) agrees and merges it, producing a new contract
- * version + PDF exchange (the C2PA chain grows by one on both instances).
- */
-export async function negotiateRound(
-  proposer: Instance,
-  accepter: Instance,
-  contractDid: string,
-  value: string,
-): Promise<void> {
-  await counterOffer(proposer, contractDid, { value })
-  await agreeAndMergeOn(accepter, contractDid)
-}
 
 /**
  * Stage 5 — A transmits the DRAFT contract to its counterparty through the real
