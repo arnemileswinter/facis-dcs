@@ -145,7 +145,21 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)
 		}
-		payloadSum := sha256.Sum256(cmd.Payload)
+		// Hash the contract_data AS PERSISTED, not the shipped bytes: Postgres
+		// normalizes JSONB on write, and the PDF export readiness gate (and the
+		// local regenerator) recompute this hash from the stored contract_data.
+		// Hashing the shipped bytes leaves the two permanently unequal, so export
+		// would wait forever for a regeneration that never runs for a received
+		// contract — the carried-over PDF must be servable straight away.
+		persisted, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.ContractIRI)
+		if err != nil {
+			return fmt.Errorf("could not re-read persisted contract data for %s: %w", cmd.ContractIRI, err)
+		}
+		var persistedData []byte
+		if persisted.ContractData != nil {
+			persistedData = []byte(*persisted.ContractData)
+		}
+		payloadSum := sha256.Sum256(persistedData)
 		if err := h.CRepo.UpdatePDFState(ctx, tx, cmd.ContractIRI, db.ContractPDFState{
 			IPFSCID:     stored.Identifier.Value,
 			C2PAState:   c2paState,
