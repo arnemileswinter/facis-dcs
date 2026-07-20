@@ -129,6 +129,10 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 	if err != nil {
 		return nil, "", fmt.Errorf("pdf-core download: flatten composed structure: %w", err)
 	}
+	jsonld, err = inlinePlaceholderRenderText(jsonld)
+	if err != nil {
+		return nil, "", fmt.Errorf("pdf-core download: inline placeholder text: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/render", bytes.NewReader(jsonld))
 	if err != nil {
@@ -167,6 +171,10 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 	jsonld, err = flattenComposedStructure(jsonld)
 	if err != nil {
 		return nil, "", fmt.Errorf("pdf-core update: flatten composed structure: %w", err)
+	}
+	jsonld, err = inlinePlaceholderRenderText(jsonld)
+	if err != nil {
+		return nil, "", fmt.Errorf("pdf-core update: inline placeholder text: %w", err)
 	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

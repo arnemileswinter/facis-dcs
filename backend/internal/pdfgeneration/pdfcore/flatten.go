@@ -113,6 +113,99 @@ func flattenComposedStructure(payload []byte) ([]byte, error) {
 	return flattened, nil
 }
 
+// inlinePlaceholderRenderText makes a document renderable by pdf-core, whose
+// schema knows only documentStructure: a clause references a placeholder by a
+// bare {"@id"} node, but the label to show (and the filled value, if any) live
+// on the typed placeholder in the top-level dcs:contractData registry (and in
+// composed sub-templates' registries). This copies dcs:label and dcs:value onto
+// each in-content reference so pdf-core resolves the visible text without the
+// registry. It runs after flattening, so inlined sub-template clauses are
+// covered too.
+func inlinePlaceholderRenderText(payload []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	registry := placeholderRegistry(doc)
+	if len(registry) == 0 {
+		return payload, nil
+	}
+	structure, ok := doc["dcs:documentStructure"].(map[string]any)
+	if !ok {
+		return payload, nil
+	}
+	blocks, _, ok := structureLists(structure)
+	if !ok {
+		return payload, nil
+	}
+	changed := false
+	for _, rawBlock := range blocks {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, ok := listValue(block["dcs:content"])
+		if !ok {
+			continue
+		}
+		for _, rawSegment := range content {
+			segment, ok := rawSegment.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := stringValue(segment["@id"])
+			node, known := registry[id]
+			if id == "" || !known {
+				continue
+			}
+			if label := node["dcs:label"]; label != nil {
+				segment["dcs:label"] = label
+			}
+			if value, present := node["dcs:value"]; present {
+				segment["dcs:value"] = value
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return payload, nil
+	}
+	enriched, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode placeholder-inlined document: %w", err)
+	}
+	return enriched, nil
+}
+
+// placeholderRegistry indexes the document's placeholders by @id, from the
+// top-level dcs:contractData and every composed sub-template's own.
+func placeholderRegistry(doc map[string]any) map[string]map[string]any {
+	registry := map[string]map[string]any{}
+	index := func(list any) {
+		items, _ := listValue(list)
+		for _, raw := range items {
+			node, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if id := stringValue(node["@id"]); id != "" {
+				registry[id] = node
+			}
+		}
+	}
+	index(doc["dcs:contractData"])
+	for _, raw := range subTemplateSnapshots(doc) {
+		snapshot, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if template, ok := snapshot["dcs:template"].(map[string]any); ok {
+			index(template["dcs:contractData"])
+		}
+	}
+	return registry
+}
+
 func structureLists(structure map[string]any) (blocks []any, layout []any, ok bool) {
 	blocks, bok := listValue(structure["dcs:blocks"])
 	layout, lok := listValue(structure["dcs:layout"])
