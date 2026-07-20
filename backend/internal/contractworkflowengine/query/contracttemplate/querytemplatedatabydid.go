@@ -101,6 +101,7 @@ func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, t
 	}
 	templateDataMap["derivedFromTemplate"] = provenance
 	materializeRuleParties(templateDataMap)
+	liftSubTemplatePlaceholders(templateDataMap)
 
 	contractData, err := datatype.NewJSON(templateDataMap)
 	if err != nil {
@@ -108,6 +109,53 @@ func ConvertTemplateDataToContractData(raw *datatype.JSON, templateDID string, t
 	}
 
 	return validation.NormalizeContractData(&contractData, false)
+}
+
+// liftSubTemplatePlaceholders copies every composed sub-template's placeholder
+// nodes (dcs:metadata.dcs:subTemplates[].dcs:template.dcs:contractData) into the
+// derived contract's top-level dcs:contractData, so the document is
+// self-contained: a clause flattened from a sub-template resolves its typed
+// placeholder by @id at the top level, with zero sub-template chasing by render
+// or pdf-core. Existing top-level @ids win (values already filled).
+func liftSubTemplatePlaceholders(doc map[string]interface{}) {
+	top, _ := doc["dcs:contractData"].([]interface{})
+	seen := map[string]bool{}
+	for _, raw := range top {
+		if node, ok := raw.(map[string]interface{}); ok {
+			if id, _ := node["@id"].(string); id != "" {
+				seen[id] = true
+			}
+		}
+	}
+	metadata, ok := doc["dcs:metadata"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	snapshots, _ := metadata["dcs:subTemplates"].([]interface{})
+	for _, rawSnapshot := range snapshots {
+		snapshot, ok := rawSnapshot.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		template, ok := snapshot["dcs:template"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		placeholders, _ := template["dcs:contractData"].([]interface{})
+		for _, rawPlaceholder := range placeholders {
+			node, ok := rawPlaceholder.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id, _ := node["@id"].(string)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			top = append(top, node)
+		}
+	}
+	doc["dcs:contractData"] = top
 }
 
 // materializeRuleParties ensures every role-derived party IRI referenced as

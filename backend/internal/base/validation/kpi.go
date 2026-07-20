@@ -7,8 +7,8 @@ import (
 
 // EvaluateKPIViolation reports whether a target-reported KPI value violates
 // an obligation the contract's own ODRL policies declare for it
-// (DCS-FR-CWE-09/-31). The metric binds to the RequirementFields whose
-// dcs:parameterName equals it (case-insensitive); every constraint whose
+// (DCS-FR-CWE-09/-31). The metric binds to the placeholders whose dcs:label
+// equals it (case-insensitive); every constraint whose
 // odrl:leftOperand references a bound field is evaluated with the reported
 // value as the actual value, under the same rule semantics as the content
 // audit (a Prohibition is violated when satisfied).
@@ -32,7 +32,7 @@ func EvaluateKPIViolation(ctx context.Context, contractDocument any, metric, val
 	fieldIndex := expandedODRLFieldIndex(root)
 	boundFields := map[string]bool{}
 	for fieldID, info := range fieldIndex {
-		if strings.EqualFold(info.parameterName, metric) {
+		if strings.EqualFold(info.label, metric) {
 			boundFields[fieldID] = true
 		}
 	}
