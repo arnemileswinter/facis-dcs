@@ -60,7 +60,7 @@ test.afterEach(async () => {
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  test.setTimeout(900_000)
+  test.setTimeout(480_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b

@@ -85,8 +85,9 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
 
   const ceremonyStarted = inst.page.waitForResponse(
     (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
-  const preparedDownload = inst.page.waitForEvent('download')
+  const preparedDownload = inst.page.waitForEvent('download', { timeout: 30_000 })
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
   const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
@@ -106,7 +107,7 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   })
 
   await inst.page.locator('input[type="file"]').setInputFiles(signedPath)
-  await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 120_000 })
+  await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
 }
 
 /**
@@ -168,7 +169,7 @@ export async function verifyArtifact(
   execFileSync(python, args, {
     cwd: repoRoot,
     stdio: 'pipe',
-    timeout: 120_000,
+    timeout: 60_000,
     env: { ...process.env, PYTHONWARNINGS: 'ignore' },
   })
   if (opts.save) persistArtifact(pdfPath, opts.save)
@@ -178,7 +179,10 @@ export async function verifyArtifact(
  *  Export PDF download) and returns the local path to the downloaded bytes. */
 async function exportContractPdf(inst: Instance, contractDid: string): Promise<string> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
-  const download = inst.page.waitForEvent('download', { timeout: 90_000 })
+  // IPFS-backed export: the signed hops fetch the frozen PDF from IPFS, which on
+  // a loaded stack legitimately approaches ~45s — kept above the 30s download cap
+  // so a real export isn't cut off, while still failing a genuine hang fast.
+  const download = inst.page.waitForEvent('download', { timeout: 45_000 })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   // Save under a .pdf name: veraPDF (run by verify_artifact.py) refuses to
   // process a file without a .pdf extension, and Playwright's download.path()
@@ -207,7 +211,7 @@ function persistArtifact(pdfPath: string, label: string): void {
       '--dump-jsonld',
       path.join(artifactDir, `${label}.jsonld`),
     ],
-    { cwd: repoRoot, stdio: 'pipe', timeout: 120_000, env: { ...process.env, PYTHONWARNINGS: 'ignore' } },
+    { cwd: repoRoot, stdio: 'pipe', timeout: 60_000, env: { ...process.env, PYTHONWARNINGS: 'ignore' } },
   )
 }
 
@@ -562,6 +566,7 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   await firstValue.fill(opts.value)
   const proposed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/negotiate') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Change Proposal' }).click()
   await proposed
@@ -578,6 +583,7 @@ export async function offerToCounterparty(inst: Instance, contractDid: string): 
   await inst.gotoAs('Contract Creator', `/ui/contracts/view/${contractDid}`)
   const offered = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/offer') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Offer to counterparty' }).click()
   await offered
@@ -612,6 +618,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     await showBtn.click()
     const responded = inst.page.waitForResponse(
       (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
+      { timeout: 30_000 },
     )
     await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
     await confirmModalOn(inst, 'Confirm')
@@ -621,6 +628,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   // Submit the merged round: NEGOTIATION -> SUBMITTED.
   const submitted = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
   await submitted
@@ -629,6 +637,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   await inst.gotoAs('Contract Reviewer', `/ui/contracts/review/${contractDid}`)
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
   await confirmModalOn(inst, 'Submit')
@@ -638,6 +647,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   await inst.gotoAs('Contract Approver', `/ui/contracts/approve/${contractDid}`)
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
   await confirmModalOn(inst, 'Confirm')
@@ -653,6 +663,7 @@ export async function deployContract(inst: Instance, contractDid: string): Promi
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const deployed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
   await deployed
