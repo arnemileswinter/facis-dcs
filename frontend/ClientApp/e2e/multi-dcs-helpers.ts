@@ -411,7 +411,15 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   await editor.getByPlaceholder('Clause title').fill('Payment terms')
   await editor.locator('select').first().selectOption({ label: 'Payment Amount' })
   await editor.locator('.clause-editor').first().click()
-  await inst.page.keyboard.type('The provider invoices the agreed payment amount.')
+  // Author an INLINE, fillable placeholder for Payment Amount: typing "{{" opens
+  // the requirement-field picker (ClauseTextEditor), and the chosen field becomes
+  // a {{condition.param}} segment that renders as an editable PreviewParamInput at
+  // contract time. Without an inline placeholder the field exists only as an ODRL
+  // constraint boundary and nothing is negotiable in the Negotiate view.
+  await inst.page.keyboard.type('The provider invoices the agreed payment amount of ')
+  await inst.page.keyboard.type('{{')
+  await inst.page.getByRole('button', { name: /Payment Amount/ }).click()
+  await inst.page.keyboard.type('.')
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
