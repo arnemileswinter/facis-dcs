@@ -9,9 +9,11 @@ process.env.PYTHONWARNINGS ??= 'ignore'
 /**
  * E2E suite against a running DCS instance (default: the BDD kind cluster's
  * instance A). The dev server proxies /api to E2E_DCS_API_TARGET with the
- * instance's API base path, and global-setup mints role tokens through the
+ * instance's API base path, and each test mints its role tokens through the
  * instance's real OID4VP headless login (reusing the BDD suite's
  * AuthService), so specs drive the UI exactly as an authenticated user.
+ * Fixtures are authored by clicking through the real UI (no raw-HTTP seed);
+ * a spec that needs one builds it in a beforeAll (see lifecycle-helpers).
  *
  * Requirements: the target DCS instance is up (make -C tests/bdd kind_up)
  * and the BDD venv exists (~/.dcs-bdd-venv, created by the BDD Makefile).
@@ -59,15 +61,14 @@ const apiTargetB = new URL(E2E_API_BASE_B)
 
 export default defineConfig({
   testDir: './e2e',
-  globalSetup: './e2e/global-setup',
   // Generous per-test budget: tests run fully parallel against one shared
   // kind-cluster backend, so an individual test can slow down under load
   // (the hub register-version flow renders ~100KB schema documents).
   timeout: 90_000,
   expect: { timeout: 15_000 },
-  // Every test mints its own OID4VP session and the seeded fixtures are
-  // read-only for the specs, so tests within a file are as independent as
-  // tests across files — run them all in parallel.
+  // Every test mints its own OID4VP session, and a file that needs a fixture
+  // authors its own in a beforeAll, so tests within a file are as independent
+  // as tests across files — run them all in parallel.
   fullyParallel: true,
   // One shared kind-cluster backend and one vite dev server serve every
   // worker — beyond ~6 local workers, page loads start starving instead of
