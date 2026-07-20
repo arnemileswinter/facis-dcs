@@ -175,7 +175,12 @@ async function exportContractPdf(inst: Instance, contractDid: string): Promise<s
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const download = inst.page.waitForEvent('download', { timeout: 90_000 })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
-  return (await (await download).path())!
+  // Save under a .pdf name: veraPDF (run by verify_artifact.py) refuses to
+  // process a file without a .pdf extension, and Playwright's download.path()
+  // is an extensionless temp file.
+  const out = path.join(tmpdir(), `export-${contractDid}-${Date.now()}.pdf`)
+  await (await download).saveAs(out)
+  return out
 }
 
 /**
