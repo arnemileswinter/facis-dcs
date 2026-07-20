@@ -732,7 +732,33 @@ func renderXMPMetadata(remoteManifestURL string) []byte {
 	if remoteManifestURL != "" {
 		provenanceDescription = "  <rdf:Description rdf:about=\"\"\n" +
 			"    xmlns:dcterms=\"http://purl.org/dc/terms/\"\n" +
-			"    dcterms:provenance=\"" + remoteManifestURL + "\"/>\n"
+			"    dcterms:provenance=\"" + remoteManifestURL + "\"/>\n" +
+			// ISO 19005-3:2012 clause 6.6.2.3.2: dcterms is not a predefined XMP
+			// schema, so it must be declared as a PDF/A extension schema.
+			"  <rdf:Description rdf:about=\"\"\n" +
+			"    xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\"\n" +
+			"    xmlns:pdfaSchema=\"http://www.aiim.org/pdfa/ns/schema#\"\n" +
+			"    xmlns:pdfaProperty=\"http://www.aiim.org/pdfa/ns/property#\">\n" +
+			"    <pdfaExtension:schemas>\n" +
+			"      <rdf:Bag>\n" +
+			"        <rdf:li rdf:parseType=\"Resource\">\n" +
+			"          <pdfaSchema:schema>Dublin Core Terms</pdfaSchema:schema>\n" +
+			"          <pdfaSchema:namespaceURI>http://purl.org/dc/terms/</pdfaSchema:namespaceURI>\n" +
+			"          <pdfaSchema:prefix>dcterms</pdfaSchema:prefix>\n" +
+			"          <pdfaSchema:property>\n" +
+			"            <rdf:Seq>\n" +
+			"              <rdf:li rdf:parseType=\"Resource\">\n" +
+			"                <pdfaProperty:name>provenance</pdfaProperty:name>\n" +
+			"                <pdfaProperty:valueType>Text</pdfaProperty:valueType>\n" +
+			"                <pdfaProperty:category>external</pdfaProperty:category>\n" +
+			"                <pdfaProperty:description>Remote C2PA manifest URL</pdfaProperty:description>\n" +
+			"              </rdf:li>\n" +
+			"            </rdf:Seq>\n" +
+			"          </pdfaSchema:property>\n" +
+			"        </rdf:li>\n" +
+			"      </rdf:Bag>\n" +
+			"    </pdfaExtension:schemas>\n" +
+			"  </rdf:Description>\n"
 	}
 	xmp := "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
 		"<?xpacket begin=\"\xef\xbb\xbf\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
