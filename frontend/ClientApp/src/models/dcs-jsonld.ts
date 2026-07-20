@@ -26,16 +26,36 @@ export interface DcsContractMetadata {
   'dcs:subTemplates'?: DcsSubTemplateSnapshot[]
 }
 
+/** An xsd datatype a placeholder resolves to (from its SHACL sh:datatype). */
+export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
+
+/**
+ * A typed, self-contained slot. The full node lives in the document's top-level
+ * dcs:contractData registry, carrying its datatype straight from the SHACL
+ * shape; a clause and an ODRL operand both reference it by @id. The filled value
+ * rides inline on the same node (dcs:value).
+ */
 export interface DcsPlaceholder {
+  '@id': string
   '@type': 'dcs:Placeholder'
-  /** Machine binding: the requirement field this slot fills. Never rendered in prose. */
-  'dcs:bindsTo': JsonLdReference
-  /** Human representation shown in prose in place of the unfilled value — a
-   *  plain label the filler reads, never a raw IRI. */
+  /** Human representation shown in prose in place of the unfilled value. */
   'dcs:label': string
+  /** The input type, resolved from the shape's sh:datatype. */
+  'dcs:datatype': XsdDatatype
+  /** The SHACL shape the datatype and constraint were resolved from. */
+  'dcs:shape'?: JsonLdReference
+  'dcs:required'?: boolean
+  /** The filled runtime value; absent on a template (the declaration). */
+  'dcs:value'?: string | number | boolean
+  /** Value constraint (options/pattern/min/max) carried inline so the slot is
+   *  self-contained — render picks a select/text input without ontology lookup. */
+  'dcs:valueConstraint'?: import('@/modules/template-repository/models/contract-template').SemanticValueConstraint
 }
 
-export type DcsContentSegment = string | DcsPlaceholder
+/** A clause references a placeholder by @id — a bare {"@id"} node in content. */
+export type DcsPlaceholderRef = JsonLdReference
+
+export type DcsContentSegment = string | DcsPlaceholderRef
 
 export interface DcsSection {
   '@type': 'dcs:Section'
@@ -85,35 +105,6 @@ export interface DcsDocumentStructure {
   '@type': 'dcs:DocumentStructure'
   'dcs:blocks': { '@list': DcsBlock[] }
   'dcs:layout': DcsLayoutNode[]
-}
-
-export interface DcsRequirementField {
-  '@id': string
-  '@type': 'dcs:RequirementField'
-  'dcs:parameterName': string
-  /** Optional: the served RequirementField shape requires only dcs:parameterName. */
-  'dcs:domainField'?: JsonLdReference
-  'dcs:valueType'?: string
-  'dcs:required': boolean
-  /**
-   * The submitted runtime value, carried inline on the field an ODRL
-   * constraint names as its odrl:leftOperand. Absent on a template (the
-   * declaration), filled at contract time.
-   */
-  'dcs:parameterValue'?: string | number | boolean
-  /** The document block a placeholder bound to this field renders into. */
-  'dcs:blockId'?: string
-}
-
-export interface DcsDataRequirement {
-  '@id': string
-  '@type': 'dcs:DataRequirement'
-  'dcs:conditionId': string
-  'dcs:name': string
-  'dcs:schemaVersion': 'v1'
-  'dcs:entityType'?: string
-  'dcs:entityRole'?: string
-  'dcs:fields': DcsRequirementField[]
 }
 
 export interface DcsContractField {
@@ -228,7 +219,8 @@ export interface DcsDocumentData {
   '@id'?: string
   'dcs:metadata': DcsTemplateMetadata | DcsContractMetadata
   'dcs:documentStructure': DcsDocumentStructure
-  'dcs:contractData': DcsDataRequirement[]
+  /** Flat, self-contained registry of the document's typed placeholder nodes. */
+  'dcs:contractData': DcsPlaceholder[]
   'dcs:policies': OdrlSet
 }
 
@@ -267,7 +259,7 @@ export function isDcsApprovedTemplate(block: DcsBlock): block is DcsApprovedTemp
   return block['@type'] === 'dcs:ApprovedTemplate'
 }
 
-export function isDcsPlaceholder(seg: DcsContentSegment): seg is DcsPlaceholder {
+export function isDcsPlaceholder(seg: DcsContentSegment): seg is DcsPlaceholderRef {
   return typeof seg !== 'string'
 }
 

@@ -61,7 +61,9 @@ const segments = computed<PreviewSegment[]>(() => {
         conditionId: seg.conditionId,
         parameterName: seg.parameterName,
         paramType,
-        label: param ? semanticParameterLabel(param) : seg.parameterName,
+        // The placeholder's own label (resolved into displayText) — never the
+        // empty machine parameterName, so the input always has an accessible name.
+        label: param ? semanticParameterLabel(param) : seg.displayText || seg.parameterName,
         value: findSemanticValue(seg.conditionId, seg.parameterName),
         valueConstraint: param?.valueConstraint,
         isInvalid: !!findVerificationError(seg.conditionId, seg.parameterName),

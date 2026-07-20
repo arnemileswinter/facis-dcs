@@ -35,7 +35,7 @@ function clauseConditionIds(clause: DcsClause, semanticConditions: SemanticCondi
   if (typeof content === 'string') return []
   const fieldIds = new Set<string>()
   for (const seg of content['@list']) {
-    if (typeof seg !== 'string') fieldIds.add(seg['dcs:bindsTo']['@id'])
+    if (typeof seg !== 'string') fieldIds.add(seg['@id'])
   }
   const conditionIds = new Set<string>()
   for (const cond of semanticConditions) {
