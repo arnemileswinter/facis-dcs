@@ -582,9 +582,22 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   // its "Change Proposal" (/contract/negotiate) opens negotiation directly
   // (Offered --EventNegotiate--> Negotiation; SRS DCS-IR-CWE-03/DCS-FR-CWE-18).
   await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
-  const firstValue = inst.page.locator('input[type="text"], input[type="number"]').first()
-  await expect(firstValue).toBeVisible({ timeout: 30_000 })
-  await firstValue.fill(opts.value)
+  // The negotiable requirement-field value inputs live under the Contract Content
+  // tab (NegotiateContractView renders them via TemplatePreview). Editing the
+  // Payment Amount field THERE is what flips changedContractData, so the change
+  // request carries the full contract_data the backend applies + re-ships — a
+  // metadata-field edit would only set changedName and change nothing visible.
+  await inst.page
+    .getByRole('tab', { name: /content/i })
+    .or(inst.page.getByText('Contract Content', { exact: true }))
+    .first()
+    .click()
+  const amount = inst.page
+    .getByRole('spinbutton', { name: /amount/i })
+    .or(inst.page.getByRole('textbox', { name: /amount/i }))
+    .first()
+  await expect(amount).toBeVisible({ timeout: 30_000 })
+  await amount.fill(opts.value)
   const proposed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/negotiate') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
