@@ -102,10 +102,12 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   // response the app actually received is both faithful and deterministic.
   // Armed before the click because the document is only prepared once the wallet
   // leg completes, further down, after complete_signing_webhook.py runs.
-  const preparedResponse = inst.page.waitForResponse(
-    (r) => r.url().includes('/signature/prepare') && r.ok(),
-    { timeout: 180_000 },
-  )
+  // Match ANY prepare response, not only an ok one: filtering on r.ok() made a
+  // rejected prepare (422) indistinguishable from no prepare at all, so the
+  // failure reported a missing response instead of the refusal it actually got.
+  const preparedResponse = inst.page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
+    timeout: 180_000,
+  })
   // What the VIEWER itself saw, so a stall reports whether its poll ran at all
   // and what it got, rather than only that no prepare arrived.
   const viewerCalls: string[] = []
@@ -153,6 +155,10 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
       `${e.message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
     )
   })
+  expect(
+    prepared.ok(),
+    `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
+  ).toBeTruthy()
   const preparedBytes = await prepared.body()
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   fs.writeFileSync(preparedPath, preparedBytes)

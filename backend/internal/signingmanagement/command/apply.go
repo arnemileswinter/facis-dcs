@@ -347,6 +347,16 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if signedCount == 0 {
 			var missing []string
 			for _, f := range requiredFields {
+				// A peer DCS's slot is signed in the peer's own deployment and
+				// its signature arrives over the PDF exchange (ADR-13), so its
+				// ceremony evidence never exists in this database. Demanding it
+				// here made federated signing impossible: neither side could
+				// ever place the first signature. Locally held fields — the
+				// single-instance multi-signer flow, which names fields per
+				// signatory rather than per party DCS — are unaffected.
+				if isPeerPartyField(data.Responsible, h.IssuerDID, f) {
+					continue
+				}
 				c, err := h.CeremonyRepo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, f)
 				if err != nil {
 					return nil, fmt.Errorf("could not resolve ceremony for field %q: %w", f, err)
@@ -955,4 +965,17 @@ func replaceNodeIRI(current any, old, new string) {
 			replaceNodeIRI(nested, old, new)
 		}
 	}
+}
+
+// isPeerPartyField reports whether a declared signature field belongs to the
+// counterparty DCS rather than this instance. Fields are named by the signing
+// party's DID (dcs:signatoryName), so a field naming the other party is one
+// this deployment can never hold ceremony evidence for. A field that is not a
+// party DID at all (the single-instance multi-signer flow names fields per
+// signatory) is never treated as remote.
+func isPeerPartyField(resp *db.Responsible, localDID, field string) bool {
+	if resp == nil || localDID == "" || field == "" || field == localDID {
+		return false
+	}
+	return field == resp.Counterparty || field == resp.Creator
 }
