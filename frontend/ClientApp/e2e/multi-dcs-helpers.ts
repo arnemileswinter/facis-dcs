@@ -87,11 +87,18 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  // Armed before the click, but the document is only prepared and downloaded
-  // once the wallet leg has completed — which happens further down, after
-  // complete_signing_webhook.py runs. This wait therefore has to span the whole
-  // asynchronous ceremony, not a click-to-download round trip.
-  const preparedDownload = inst.page.waitForEvent('download', { timeout: 180_000 })
+  // Take the to-be-signed PDF from the app's OWN prepare response rather than
+  // the browser download event. The ceremony still runs entirely through the UI
+  // — this only changes how the bytes are observed. The download event proved
+  // unreliable here: /signature/prepare answered 200 with the full PDF and the
+  // app called its download helper, yet no download ever fired. Reading the
+  // response the app actually received is both faithful and deterministic.
+  // Armed before the click because the document is only prepared once the wallet
+  // leg completes, further down, after complete_signing_webhook.py runs.
+  const preparedResponse = inst.page.waitForResponse(
+    (r) => r.url().includes('/signature/prepare') && r.ok(),
+    { timeout: 180_000 },
+  )
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
   const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
@@ -102,7 +109,10 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
-  const preparedPath = (await (await preparedDownload).path())!
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
+  const preparedBytes = await (await preparedResponse).body()
+  expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
+  fs.writeFileSync(preparedPath, preparedBytes)
   const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
