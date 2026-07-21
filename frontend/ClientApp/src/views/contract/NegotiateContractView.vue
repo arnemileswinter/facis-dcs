@@ -254,10 +254,8 @@ watch(
     hasOpenDecisions: hasOpenDecisions.value,
     compareChangesData: !!compareChangesData.value,
     contractVersion: contract.value?.contract_version,
-    negotiations: contract.value?.negotiations?.map((n) => ({
-      v: n.contract_version,
-      decs: n.negotiation_decisions?.map((d) => d.decision),
-    })),
+    store: contractContentValuesStore.semanticConditionValues,
+    snapshot: contractSemanticConditionValueSnapshot.value,
   }),
   (s) => console.log('[SUBMIT-GATE]', JSON.stringify(s)),
   { immediate: true, deep: true },
