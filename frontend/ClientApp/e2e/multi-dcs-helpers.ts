@@ -173,7 +173,16 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
+  // Assert the submit itself, with its body: the viewer swallows a failed submit
+  // into an on-page message, so waiting only for the SIGNED badge reports a
+  // missing element rather than why the DCS refused the signature.
+  const submitted = inst.page.waitForResponse((r) => r.url().includes('/signature/submit'), { timeout: 120_000 })
   await inst.page.locator('input[type="file"]').setInputFiles(signedPath)
+  const submitResponse = await submitted
+  expect(
+    submitResponse.ok(),
+    `submit signature on ${inst.origin}: HTTP ${submitResponse.status()} ${await submitResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
 }
 
