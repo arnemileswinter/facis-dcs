@@ -677,6 +677,12 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
     await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    // Wait for the contract to actually be loaded before probing for decisions.
+    // Submit only renders once contract.state is known, and isVisible() below
+    // does NOT auto-wait — probing straight after navigation reported "no open
+    // decisions" while the fetch was still in flight, silently skipping the
+    // accept and leaving the round unresolvable.
+    await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
     const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
     if (!(await showBtn.isVisible().catch(() => false))) break
     await showBtn.click()
