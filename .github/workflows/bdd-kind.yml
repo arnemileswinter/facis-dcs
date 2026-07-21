@@ -290,9 +290,14 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
-          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
-            -c digital-contracting-service --tail=400 --prefix || true
-          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=200 --prefix || true
+          # Per-deployment so both instances (dcs + dcs2) are captured whole and a
+          # large tail keeps the export/regeneration diagnostics that fire near the
+          # end of a run inside the window.
+          for dep in $(kubectl get deploy -n dcs-bdd -o name | grep -E 'digital-contracting-service$'); do
+            echo "===== logs $dep ====="
+            kubectl logs -n dcs-bdd "$dep" -c digital-contracting-service --tail=2000 --prefix || true
+          done
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=400 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=100 || true
 
       - name: Teardown kind cluster

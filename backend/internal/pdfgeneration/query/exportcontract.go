@@ -40,6 +40,7 @@ type ExportContractPdfHandler struct {
 
 func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContractPdfQry) (io.ReadCloser, error) {
 	deadline := time.Now().Add(pdfExportWaitTimeout)
+	logged := false
 	for {
 		// Re-read the contract each poll: a command committed after export began
 		// (a late negotiate re-seed, a state transition) changes contract_data and
@@ -76,11 +77,18 @@ func (h *ExportContractPdfHandler) Handle(ctx context.Context, qry ExportContrac
 			return h.fetch(qry.DID, pdfState.IPFSCID)
 		}
 
-		if time.Now().After(deadline) {
-			log.Printf("pdfgeneration: export %s timed out waiting for regeneration: cid=%q c2pa(pdf=%q want=%q match=%t) payload(pdf=%q want=%q match=%t)",
-				qry.DID, pdfState.IPFSCID,
+		// Log the blocking condition on the first unsatisfied poll (survives a
+		// tail-limited log dump, unlike a line emitted only at the 60s deadline)
+		// and again if it never clears.
+		timedOut := time.Now().After(deadline)
+		if !logged || timedOut {
+			log.Printf("pdfgeneration: export %s waiting for regeneration (timedOut=%t): cid=%q c2pa(pdf=%q want=%q match=%t) payload(pdf=%q want=%q match=%t)",
+				qry.DID, timedOut, pdfState.IPFSCID,
 				pdfState.C2PAState, currentC2PAState, pdfState.C2PAState == currentC2PAState,
 				pdfState.PayloadHash, currentPayloadHash, pdfState.PayloadHash == currentPayloadHash)
+			logged = true
+		}
+		if timedOut {
 			return nil, fmt.Errorf("contract %s PDF is being regenerated after the latest change; retry shortly", qry.DID)
 		}
 		select {
