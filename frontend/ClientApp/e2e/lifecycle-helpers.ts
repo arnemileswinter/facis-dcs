@@ -324,15 +324,15 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       .first()
     await expect(amount).toBeVisible({ timeout: 15_000 })
     await amount.fill('250')
-    // Persist the edit — Submit is disabled while the draft has unsaved changes.
-    const updated = page.waitForResponse((r) => r.url().includes('/contract/update') && r.ok())
-    await page.getByRole('button', { name: 'Update', exact: true }).click()
-    await updated
+    await amount.blur()
+    // Submit saves the draft then submits (no separate Update — that navigates
+    // away); it appears for a draft and only disables while a save is in flight.
+    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    await expect(submit).toBeEnabled({ timeout: 15_000 })
     const submitted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST',
     )
-    await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled()
-    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await submit.click()
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })

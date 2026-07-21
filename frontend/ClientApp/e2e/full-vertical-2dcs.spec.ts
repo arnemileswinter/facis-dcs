@@ -1,6 +1,5 @@
 import { expect, test } from './dcs-test'
 import {
-  acceptCounterOfferOn,
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
@@ -156,11 +155,6 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
     await saveArtifact(a, contractDid, '03-counter-15k-A')
     await saveArtifact(b, contractDid, '03-counter-15k-B')
-
-    // B accepts A's 15000 counter: the negotiation converges to agreement, which
-    // closes the round on both parties so the contract can be settled (without
-    // an acceptance the proposer's own round stays open and Submit is disabled).
-    await acceptCounterOfferOn(b, contractDid)
   })
 
   // ---- Stage 7 [DCS-IR-CWE-10 approved contracts forwarded into signing;
