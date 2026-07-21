@@ -505,6 +505,12 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		summaries := make([]json.RawMessage, 0, len(requiredFields))
 		for _, f := range requiredFields {
 			c := fieldCeremonies[f]
+			if c == nil {
+				// A peer DCS's field: its ceremony evidence lives in the peer's
+				// own deployment, which embeds that field's summary when it
+				// signs its own copy. We can only summarise ceremonies we hold.
+				continue
+			}
 			fieldKB := ""
 			if c.KbSdHash != nil {
 				fieldKB = *c.KbSdHash
