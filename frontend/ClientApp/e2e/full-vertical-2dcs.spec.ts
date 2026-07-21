@@ -66,7 +66,10 @@ test.afterEach(async () => {
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  test.setTimeout(900_000)
+  // Ten stages across two instances, including two full wallet signing
+  // ceremonies in Stage 8 — the earlier 15min budget left no headroom once the
+  // ceremony waits were sized to span the wallet leg.
+  test.setTimeout(1_500_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b

@@ -87,7 +87,11 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  const preparedDownload = inst.page.waitForEvent('download', { timeout: 30_000 })
+  // Armed before the click, but the document is only prepared and downloaded
+  // once the wallet leg has completed — which happens further down, after
+  // complete_signing_webhook.py runs. This wait therefore has to span the whole
+  // asynchronous ceremony, not a click-to-download round trip.
+  const preparedDownload = inst.page.waitForEvent('download', { timeout: 180_000 })
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
   const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
