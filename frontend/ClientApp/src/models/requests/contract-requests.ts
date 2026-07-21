@@ -110,3 +110,8 @@ export interface ContractDeployRequest {
   did: string
   updated_at: string
 }
+
+export interface ContractOfferRequest {
+  did: string
+  updated_at: string
+}

@@ -1,9 +1,11 @@
 package compiler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -83,6 +85,48 @@ func placeholderFillValue(item ContentItem, fields map[string]string) string {
 	return fields[id]
 }
 
+// inlinedPlaceholderText reports whether a content item is a DCS-inlined
+// placeholder reference — a node carrying a dcs:label the DCS copied from the
+// top-level dcs:Placeholder registry — and returns its filling. The value is
+// read with json.Number so a numeric filling keeps its exact source token
+// (e.g. 15000 stays "15000"), making the render a deterministic function of the
+// bytes. An empty string with ok=true means an unfilled placeholder (empty slot).
+func inlinedPlaceholderText(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || raw[0] != '{' {
+		return "", false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var obj map[string]any
+	if dec.Decode(&obj) != nil {
+		return "", false
+	}
+	if _, labelled := obj["label"]; !labelled {
+		return "", false
+	}
+	value, present := obj["value"]
+	if !present {
+		return "", true
+	}
+	return scalarText(value), true
+}
+
+// scalarText renders a JSON scalar to its deterministic display text.
+func scalarText(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case json.Number:
+		return t.String()
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
 func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSegment {
 	// Value objects: typed literal or plain string.
 	if item.Value != "" {
@@ -99,6 +143,20 @@ func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSeg
 	if item.Datatype == "Placeholder" || item.Datatype == "dcs:Placeholder" {
 		if v := placeholderFillValue(item, fields); v != "" {
 			return clauseSegment{Type: "prose", Text: v}
+		}
+		return clauseSegment{Type: "prose", Text: "_____"}
+	}
+
+	// Clean ADR-15 placeholder reference: the clause references a top-level
+	// dcs:Placeholder by @id, and the DCS has copied the placeholder's dcs:label
+	// (always) and its dcs:value (once filled) onto this node so the renderer
+	// resolves the visible text without chasing the registry. Render the filled
+	// value, or the empty slot when unfilled — never the @id. This is a pure,
+	// ordered function of the segment bytes, so a recompile from the embedded
+	// payload reproduces the same visible text.
+	if value, ok := inlinedPlaceholderText(item.Raw); ok {
+		if value != "" {
+			return clauseSegment{Type: "prose", Text: value}
 		}
 		return clauseSegment{Type: "prose", Text: "_____"}
 	}
@@ -377,7 +435,6 @@ var listValuedTerms = map[string]bool{
 	"children":        true,
 	"content":         true,
 	"signatureFields": true,
-	"subTemplates":    true,
 	"contractData":    true,
 	"fields":          true,
 }

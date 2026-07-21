@@ -1,6 +1,9 @@
 import { ref } from 'vue'
 import { useErrorStore } from '@/stores/error-store'
 
+/** How long a finished export's object URL is kept alive after the click. */
+const REVOKE_DELAY_MS = 60_000
+
 /**
  * Shared download-with-feedback for the Export PDF / Export bundle buttons:
  * a failed export surfaces the server's error as a toast instead of dying
@@ -19,8 +22,15 @@ export function useDocumentExport() {
       const a = document.createElement('a')
       a.href = url
       a.download = filename
+      // The anchor must be in the document and the object URL must outlive the
+      // click: the browser starts the download asynchronously, so revoking the
+      // URL on the same tick can abort a multi-hundred-KB export before it ever
+      // begins — the export silently produces no file at all.
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS)
     } catch (err: unknown) {
       errorStore.add(`Export failed: ${await exportErrorMessage(err)}`)
     } finally {

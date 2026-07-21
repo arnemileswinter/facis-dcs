@@ -57,6 +57,10 @@ async function assertPdfExport(page: Page, kind: 'template' | 'contract', did: s
   const token = await page.evaluate(() => window.localStorage.getItem('access_token'))
   const resp = await page.request.get(`/api/pdf/export/${kind}/${encodeURIComponent(did)}`, {
     headers: { Authorization: `Bearer ${token}` },
+    // The export blocks until the async regenerator catches up to the latest
+    // change (server-side ceiling 60s); outwait it rather than hit Playwright's
+    // 30s request default and mask the HTTP status this assert exists to read.
+    timeout: 90_000,
   })
   expect(resp.ok(), `export ${kind} PDF at "${step}": HTTP ${resp.status()} ${await resp.text().catch(() => '')}`).toBe(
     true,
@@ -141,6 +145,13 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     await editor.locator('.clause-editor').first().click()
     await page.keyboard.type('The provider invoices the agreed payment amount.')
 
+    // Insert the Payment Amount placeholder into the clause prose by clicking its
+    // building block: without it the clause binds the field but carries no
+    // negotiable value, so the derived contract renders no input to fill and
+    // approve rejects the still-open contract.
+    await editor.getByRole('listitem').filter({ hasText: 'Payment Amount' }).first().click()
+    await expect(editor.locator('[data-parameter-name]')).toHaveCount(1)
+
     const ruleSelect = (label: string) =>
       editor.locator('label.form-control').filter({ hasText: label }).locator('select')
     // A Permission bounded by the payment-amount field: at template time the
@@ -189,21 +200,16 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       .getByRole('textbox')
       .fill('Contract template composed for the full vertical.')
 
-    // Pin the approved component as a sub-template snapshot (Details tab picker).
-    await page.getByText('Component Templates', { exact: true }).click()
-    await page.getByPlaceholder('Search templates…').fill(componentName)
-    await page.getByRole('button', { name: componentName }).click()
-    await expect(page.getByText('No component templates selected yet.')).toBeHidden()
-
-    // Reference it in the document outline (Builder tab).
+    // Inline the approved component into the document outline (flatten-on-compose).
     await page.getByRole('tab', { name: /Builder/ }).click()
     await page
       .getByRole('button', { name: /add.*block/i })
       .first()
       .click()
     const modal = page.getByRole('dialog')
-    await expect(modal.getByText('Approved sub-templates:')).toBeVisible()
-    await modal.getByText(componentName).first().click()
+    await expect(modal.getByText('Components (inlined on add):')).toBeVisible()
+    await modal.getByPlaceholder('Search components').fill(componentName)
+    await modal.getByRole('button', { name: new RegExp(componentName) }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
 
     const created = page.waitForResponse(
@@ -255,15 +261,29 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       .or(page.getByText('Contract Content', { exact: true }))
       .first()
       .click()
-    // The component's clause renders its prose (composed sub-template clauses
-    // are immutable at contract time — the ODRL rule and its field rode along
-    // from the component).
+    // The component's clause renders its prose (its ODRL rule and its field were
+    // inlined into the template at compose time and rode along into the contract).
     await expect(page.getByText(/The provider invoices the agreed payment amount/).first()).toBeVisible()
+
+    // The Payment Amount placeholder is a required top-level field; approve
+    // enforces closedness (ValidateContractClosed), so fill it in the Content
+    // tab before persisting, or the contract stays open and approve returns 400.
+    // The value must satisfy this template's own ODRL constraint (at most 500) —
+    // submitContract silently returns when verifySemanticValues fails, so a
+    // violating value blocks submit with no request and no visible error.
+    const amount = page
+      .getByRole('spinbutton', { name: /amount/i })
+      .or(page.getByRole('textbox', { name: /amount/i }))
+      .first()
+    await expect(amount).toBeVisible({ timeout: 15_000 })
+    await amount.fill('250')
+    await amount.blur()
 
     const updated = page.waitForRequest((r) => r.url().includes('/contract/update') && r.method() === 'PUT')
     await page.getByRole('button', { name: 'Update', exact: true }).click()
     const payload = JSON.stringify((await updated).postDataJSON())
     expect(payload, 'the clause and its machine-readable meaning ride along').toContain('Payment terms')
+    expect(payload, 'the filled payment amount rides along into contract_data').toContain('250')
     await assertPdfExport(page, 'contract', contractDid, 'contract DRAFT')
   })
 
