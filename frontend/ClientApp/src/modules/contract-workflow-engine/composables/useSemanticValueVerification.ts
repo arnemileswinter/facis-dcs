@@ -112,10 +112,9 @@ export function useSemanticValueVerification() {
           if (!p.isRequired) return
           const parameterName = p.parameterName
           const isValueExist = semanticConditionValues.find(
-            (conditionValue) =>
-              conditionValue.blockId === clause['@id'] &&
-              conditionValue.conditionId === cId &&
-              conditionValue.parameterName === parameterName,
+            // A value is keyed by its placeholder @id (conditionId), not the
+            // referencing block — see PreviewClauseBlock / applyInlineSemanticValues.
+            (conditionValue) => conditionValue.conditionId === cId && conditionValue.parameterName === parameterName,
           )
           if (!isValueExist) {
             errors.push({

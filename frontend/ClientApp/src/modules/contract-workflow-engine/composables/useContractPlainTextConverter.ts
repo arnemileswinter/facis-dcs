@@ -150,10 +150,8 @@ function writeClauseBlock(cxt: ContractContext, clause: DcsClause, writer: Plain
       writer.addText(seg.value)
     } else if (isPlaceholder(seg)) {
       const parameterValue = cxt.semanticConditionValues.find(
-        (item) =>
-          item.blockId === clause['@id'] &&
-          item.conditionId === seg.conditionId &&
-          item.parameterName === seg.parameterName,
+        // A value is keyed by its placeholder @id (conditionId), not the block.
+        (item) => item.conditionId === seg.conditionId && item.parameterName === seg.parameterName,
       )?.parameterValue
       writer.addText(parameterValue == null ? DEFAULT_PLACEHOLDER_TEXT : String(parameterValue))
     } else if (isNewline(seg)) {
