@@ -1,7 +1,6 @@
 package command
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -15,7 +14,6 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/ipfs"
-	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -168,23 +166,6 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 			PayloadHash: hex.EncodeToString(payloadSum[:]),
 		}); err != nil {
 			return fmt.Errorf("could not record carried-over PDF state: %w", err)
-		}
-
-		// A signed artifact from the peer is the only evidence this instance can
-		// have that the peer signed: its signature record lives in its own
-		// deployment. Record its declared slot as signed so the local activation
-		// gate (deploy requires EVERY declared field signed) can see a federated
-		// contract as complete — it is satisfied by a verified artifact, not by
-		// trusting the peer's word.
-		if bytes.Contains(cmd.Pdf, []byte("/ByteRange")) {
-			for _, field := range validation.RequiredSignatureFields(persistedData) {
-				if field != cmd.Counterparty {
-					continue
-				}
-				if err := h.CRepo.RecordPeerSignedField(ctx, tx, cmd.ContractIRI, field, cmd.Counterparty); err != nil {
-					return fmt.Errorf("could not record peer signature on %s: %w", field, err)
-				}
-			}
 		}
 	}
 

@@ -618,23 +618,3 @@ func createRemoteQuery(data db.Contract) (*string, []interface{}, error) {
 
 	return &fullQuery, params, nil
 }
-
-// RecordPeerSignedField records a counterparty's signature on its declared slot,
-// evidenced by a signed artifact received and content-verified from that peer.
-func (r *PostgresContractRepo) RecordPeerSignedField(ctx context.Context, tx *sqlx.Tx, did, fieldName, signerDID string) error {
-	var exists bool
-	if err := tx.GetContext(ctx, &exists, `
-        SELECT EXISTS(
-            SELECT 1 FROM contract_signatures
-            WHERE contract_did=$1 AND field_name=$2 AND status='SIGNED'
-        )`, did, fieldName); err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-        INSERT INTO contract_signatures (contract_did, signer_did, credential_type, status, field_name)
-        VALUES ($1, $2, 'AES', 'SIGNED', $3)`, did, signerDID, fieldName)
-	return err
-}

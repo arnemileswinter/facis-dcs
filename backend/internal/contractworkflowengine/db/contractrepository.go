@@ -258,13 +258,6 @@ type ContractRepo interface {
 	// them against the contract document's declared signatureFields
 	// (DCS-FR-SM-07/-17, DCS-NFR-BR-03).
 	ReadSignedSignatureFieldNames(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
-
-	// RecordPeerSignedField records that a counterparty's declared signature
-	// slot is signed, evidenced by a signed artifact this instance received and
-	// content-verified from that peer. The peer's own signature record lives in
-	// its deployment, so without this the local activation gate can never see a
-	// federated contract as fully signed. Idempotent across re-ships.
-	RecordPeerSignedField(ctx context.Context, tx *sqlx.Tx, did, fieldName, signerDID string) error
 	ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
 	ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)

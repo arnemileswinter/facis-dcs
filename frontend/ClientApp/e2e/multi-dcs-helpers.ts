@@ -90,8 +90,10 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
   await expect(inst.page.getByText('Verified', { exact: true })).toBeVisible()
 
+  // Match ANY ceremony-start response, then assert: an r.ok() filter turns a
+  // refusal into "no response at all", which has cost several runs already.
   const ceremonyStarted = inst.page.waitForResponse(
-    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
   // Take the to-be-signed PDF from the app's OWN prepare response rather than
@@ -121,7 +123,12 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   inst.page.on('pageerror', (e) => viewerErrors.push(`pageerror: ${e.message.slice(0, 200)}`))
 
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
-  const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
+  const ceremonyResponse = await ceremonyStarted
+  expect(
+    ceremonyResponse.ok(),
+    `start signing ceremony on ${inst.origin}: HTTP ${ceremonyResponse.status()} ${await ceremonyResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.ceremony_id], {

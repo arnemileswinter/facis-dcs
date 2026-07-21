@@ -1383,10 +1383,15 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		DeploymentRepo: s.DeploymentRepo,
 		Target:         s.TargetClient,
 	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:         req.Did,
 		UpdatedAt:   updatedAt,
 		RequestedBy: middleware.GetParticipantID(ctx),
+		LocalPeer:   localPeer,
 	})
 	if err != nil {
 		return nil, mapContractCommandError(err)
