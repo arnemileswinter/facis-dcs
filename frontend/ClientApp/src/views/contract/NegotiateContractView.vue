@@ -241,6 +241,28 @@ const hasOpenDecisions = computed(
     ) ?? false,
 )
 
+// TEMP-INSTRUMENT: log what disables the Submit button on the negotiate view.
+watch(
+  () => ({
+    state: contract.value?.state,
+    isCreator: isCreator.value,
+    isReviewer: isReviewer.value,
+    hasChangeRequest: hasChangeRequest.value,
+    changedName: changedName.value,
+    changedDescription: changedDescription.value,
+    changedContractData: changedContractData.value,
+    hasOpenDecisions: hasOpenDecisions.value,
+    compareChangesData: !!compareChangesData.value,
+    contractVersion: contract.value?.contract_version,
+    negotiations: contract.value?.negotiations?.map((n) => ({
+      v: n.contract_version,
+      decs: n.negotiation_decisions?.map((d) => d.decision),
+    })),
+  }),
+  (s) => console.log('[SUBMIT-GATE]', JSON.stringify(s)),
+  { immediate: true, deep: true },
+)
+
 onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract' })
 })
