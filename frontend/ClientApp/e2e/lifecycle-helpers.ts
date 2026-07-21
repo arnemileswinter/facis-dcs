@@ -296,7 +296,7 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
   const contractTemplateName = `SCV Contract ${unique}`
 
   const componentDid = await test.step('create component template with a semantic clause', () =>
-    authorPaymentComponent(page, loginAs, componentName, false))
+    authorPaymentComponent(page, loginAs, componentName, true))
   await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
 
   const contractTemplateDid = await test.step('create contract template from approved component', () =>

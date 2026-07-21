@@ -666,7 +666,7 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
  * Without it the proposer's own round stays open and its Submit is disabled.
  */
 export async function acceptCounterOfferOn(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  await inst.gotoAs('Contract Reviewer', `/ui/contracts/negotiate/${contractDid}`)
   const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
   await expect(showBtn).toBeVisible({ timeout: 30_000 })
   await showBtn.click()
