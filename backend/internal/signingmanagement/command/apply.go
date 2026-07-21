@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -347,6 +348,16 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if signedCount == 0 {
 			var missing []string
 			for _, f := range requiredFields {
+				// A peer DCS's slot is signed in the peer's own deployment and
+				// its signature arrives over the PDF exchange (ADR-13), so its
+				// ceremony evidence never exists in this database. Demanding it
+				// here made federated signing impossible: neither side could
+				// ever place the first signature. Locally held fields — the
+				// single-instance multi-signer flow, which names fields per
+				// signatory rather than per party DCS — are unaffected.
+				if isPeerPartyField(data.Responsible, h.IssuerDID, f) {
+					continue
+				}
 				c, err := h.CeremonyRepo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, f)
 				if err != nil {
 					return nil, fmt.Errorf("could not resolve ceremony for field %q: %w", f, err)
@@ -440,7 +451,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// exportcontract.go/verifycontract.go never need to touch it again for the
 	// SIGNED/ACTIVE C2PA state (DCS-OR-C2PA-004, DCS-FR-SM-16).
 	rendererVersion := ""
-	if signedCount == 0 {
+	if signedCount == 0 && !carriesPAdESSignature(basePDF) {
 		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, *data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)
 		if err != nil {
 			return nil, fmt.Errorf("stamp active lifecycle assertion before signing: %w", err)
@@ -448,9 +459,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		basePDF = stampedPDF
 		rendererVersion = rv
 	}
-	// A PDF that already carries a PAdES signature is never stamped again —
-	// it was stamped before the FIRST signature, and any later mutation
-	// besides an incremental signature is an illegal modification.
+	// A PDF that already carries a PAdES signature is never stamped again — it
+	// was stamped before the FIRST signature, and any later mutation besides an
+	// incremental signature is an illegal modification. signedCount alone does
+	// not express that across a federation: the counterparty's database holds
+	// no record of the originator's signature, so it would re-stamp an already
+	// signed artifact and attach a C2PA manifest after the fact, which breaks
+	// PDF/A-3 clause 6.8 (an embedded file no longer associated with the
+	// document). The artifact itself is the reliable witness.
 
 	contentSum := sha256.Sum256(*data.ContractData)
 	contentHash := hex.EncodeToString(contentSum[:])
@@ -488,13 +504,19 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if err != nil {
 			return nil, fmt.Errorf("issue signing-summary VC: %w", err)
 		}
-	case signedCount == 0:
+	case signedCount == 0 && !carriesPAdESSignature(basePDF):
 		// First signature on a multi-signer contract: embed EVERY declared
 		// field's summary VC as a JSON array, so no later signer needs a
 		// post-signature attachment (all-ceremonies-before-first-signature).
 		summaries := make([]json.RawMessage, 0, len(requiredFields))
 		for _, f := range requiredFields {
 			c := fieldCeremonies[f]
+			if c == nil {
+				// A peer DCS's field: its ceremony evidence lives in the peer's
+				// own deployment, which embeds that field's summary when it
+				// signs its own copy. We can only summarise ceremonies we hold.
+				continue
+			}
 			fieldKB := ""
 			if c.KbSdHash != nil {
 				fieldKB = *c.KbSdHash
@@ -955,4 +977,30 @@ func replaceNodeIRI(current any, old, new string) {
 			replaceNodeIRI(nested, old, new)
 		}
 	}
+}
+
+// isPeerPartyField reports whether a declared signature field belongs to the
+// counterparty DCS rather than this instance. Fields are named by the signing
+// party's DID (dcs:signatoryName), so a field naming the other party is one
+// this deployment can never hold ceremony evidence for. A field that is not a
+// party DID at all (the single-instance multi-signer flow names fields per
+// signatory) is never treated as remote.
+func isPeerPartyField(resp *db.Responsible, localDID, field string) bool {
+	if resp == nil || localDID == "" || field == "" || field == localDID {
+		return false
+	}
+	return field == resp.Counterparty || field == resp.Creator
+}
+
+// carriesPAdESSignature reports whether pdf already holds a PAdES signature,
+// detected by the signature dictionary's /ByteRange.
+//
+// signedCount counts only signatures recorded in THIS instance's database, so
+// across a federation it is 0 on the counterparty even when the artifact it
+// received already carries the originator's signature. Embedding evidence then
+// mutates an already-signed document — the very thing the multi-signer flow
+// avoids, since an attachment added after a PAdES signature trips diff analysis
+// and breaks PDF/A conformance. The artifact itself is the reliable witness.
+func carriesPAdESSignature(pdf []byte) bool {
+	return bytes.Contains(pdf, []byte("/ByteRange"))
 }

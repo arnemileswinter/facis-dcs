@@ -222,3 +222,12 @@ nodeExporter:
   enabled: false
 kubeStateMetrics:
   enabled: false
+
+# Signature VALIDATION for instance B. Without a DSS_URL the instance has no
+# validator and SubmitSignature refuses every externally-produced signature, so
+# the counterparty could never accept a signed contract. DSS is a stateless
+# validator, so B validates against instance A's deployment rather than running
+# a second heavy Java service on the same runner (enabled:false = deploy none).
+dss:
+  enabled: false
+  url: http://dcs-dss:8080

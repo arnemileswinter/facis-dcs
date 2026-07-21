@@ -79,11 +79,17 @@ spec:
           env:
             - name: DCS_SYSTEM_TOKEN
               value: {{ .Values.systemToken | default "dcs-dev-system-token" | quote }}
-            {{- if .Values.dss }}{{- if .Values.dss.enabled }}
+            {{- if .Values.dss }}{{- if or .Values.dss.enabled .Values.dss.url }}
             # EU DSS for signature VALIDATION (DCS-FR-SM-18) and the
             # wallet-driven /signature/submit acceptance path (ADR-12). The DCS
             # validates a signature the SIGNATORY produced with their wallet/QTSP
             # or a desktop PAdES signer; it holds no contract-signing key.
+            #
+            # dss.url points at the DSS to VALIDATE against; dss.enabled deploys
+            # one. They are independent: an instance may validate against an
+            # existing DSS (its own deployment, or a shared one) without running
+            # a second copy. Without a DSS_URL the instance has no validator and
+            # refuses every externally-produced signature.
             - name: DSS_URL
               value: {{ .Values.dss.url | default (printf "http://%s-dss:8080" .Release.Name) | quote }}
             {{- end }}{{- end }}

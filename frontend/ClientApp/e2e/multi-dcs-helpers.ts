@@ -47,6 +47,13 @@ function makeInstance(page: Page, context: BrowserContext, origin: string, apiBa
     async gotoAs(role, url) {
       await applySession(context, page, origin, mintSession(role, apiBase))
       await page.goto(url)
+      // Two instances mean two browser contexts, and Chromium throttles timers
+      // in pages it considers hidden. The signing ceremony dialog advances on a
+      // 2.5s setInterval poll, so a backgrounded instance stops progressing:
+      // the wallet leg verifies server-side while the viewer never notices and
+      // never fetches the to-be-signed document. Keep the instance we are
+      // driving in the foreground.
+      await page.bringToFront()
     },
   }
 }
@@ -83,13 +90,45 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
   await expect(inst.page.getByText('Verified', { exact: true })).toBeVisible()
 
+  // Match ANY ceremony-start response, then assert: an r.ok() filter turns a
+  // refusal into "no response at all", which has cost several runs already.
   const ceremonyStarted = inst.page.waitForResponse(
-    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
-  const preparedDownload = inst.page.waitForEvent('download', { timeout: 30_000 })
+  // Take the to-be-signed PDF from the app's OWN prepare response rather than
+  // the browser download event. The ceremony still runs entirely through the UI
+  // — this only changes how the bytes are observed. The download event proved
+  // unreliable here: /signature/prepare answered 200 with the full PDF and the
+  // app called its download helper, yet no download ever fired. Reading the
+  // response the app actually received is both faithful and deterministic.
+  // Armed before the click because the document is only prepared once the wallet
+  // leg completes, further down, after complete_signing_webhook.py runs.
+  // Match ANY prepare response, not only an ok one: filtering on r.ok() made a
+  // rejected prepare (422) indistinguishable from no prepare at all, so the
+  // failure reported a missing response instead of the refusal it actually got.
+  const preparedResponse = inst.page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
+    timeout: 180_000,
+  })
+  // What the VIEWER itself saw, so a stall reports whether its poll ran at all
+  // and what it got, rather than only that no prepare arrived.
+  const viewerCalls: string[] = []
+  inst.page.on('response', (r) => {
+    if (/\/signature\/(request|prepare)/.test(r.url())) viewerCalls.push(`${r.status()} ${r.request().method()} ${r.url().split('/api')[1] ?? r.url()}`)
+  })
+  const viewerErrors: string[] = []
+  inst.page.on('console', (m) => {
+    if (m.type() === 'error') viewerErrors.push(m.text().slice(0, 200))
+  })
+  inst.page.on('pageerror', (e) => viewerErrors.push(`pageerror: ${e.message.slice(0, 200)}`))
+
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
-  const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
+  const ceremonyResponse = await ceremonyStarted
+  expect(
+    ceremonyResponse.ok(),
+    `start signing ceremony on ${inst.origin}: HTTP ${ceremonyResponse.status()} ${await ceremonyResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.ceremony_id], {
@@ -98,7 +137,42 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
-  const preparedPath = (await (await preparedDownload).path())!
+  // The viewer only fetches the to-be-signed PDF once its poll sees the ceremony
+  // verified; a rejected ceremony makes applySignature return silently, with no
+  // error and no request. Assert the wallet leg landed so that failure reports
+  // the actual ceremony status instead of stalling on a missing response.
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  await expect
+    .poll(
+      async () => {
+        const r = await inst.page.request.get(
+          `${inst.apiBase}/signature/request/${encodeURIComponent(ceremony.ceremony_id)}`,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
+        )
+        if (!r.ok()) return `HTTP ${r.status()}`
+        return ((await r.json()) as { status?: string }).status ?? 'unknown'
+      },
+      { timeout: 90_000, message: `signing ceremony on ${inst.origin} never reached "verified"` },
+    )
+    .toBe('verified')
+
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
+  const prepared = await preparedResponse.catch((e: Error) => {
+    throw new Error(
+      `${e.message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+    )
+  })
+  expect(
+    prepared.ok(),
+    `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
+  ).toBeTruthy()
+  // /signature/prepare answers a JSON envelope carrying the PDF base64-encoded
+  // (the viewer decodes it into the blob it hands the signatory), so decode it
+  // the same way rather than treating the body as raw PDF bytes.
+  const preparedEnvelope = (await prepared.json()) as { document: string }
+  const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
+  expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
+  fs.writeFileSync(preparedPath, preparedBytes)
   const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
@@ -106,7 +180,16 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
+  // Assert the submit itself, with its body: the viewer swallows a failed submit
+  // into an on-page message, so waiting only for the SIGNED badge reports a
+  // missing element rather than why the DCS refused the signature.
+  const submitted = inst.page.waitForResponse((r) => r.url().includes('/signature/submit'), { timeout: 120_000 })
   await inst.page.locator('input[type="file"]').setInputFiles(signedPath)
+  const submitResponse = await submitted
+  expect(
+    submitResponse.ok(),
+    `submit signature on ${inst.origin}: HTTP ${submitResponse.status()} ${await submitResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
 }
 
@@ -776,10 +859,16 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  // Match ANY deploy response, then assert: filtering on r.ok() made a refusal
+  // indistinguishable from no request at all.
   const deployed = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
-  await deployed
+  const deployResponse = await deployed
+  expect(
+    deployResponse.ok(),
+    `deploy contract on ${inst.origin}: HTTP ${deployResponse.status()} ${await deployResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
 }

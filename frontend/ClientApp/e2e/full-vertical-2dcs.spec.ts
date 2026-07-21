@@ -66,7 +66,10 @@ test.afterEach(async () => {
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  test.setTimeout(900_000)
+  // Ten stages across two instances, including two full wallet signing
+  // ceremonies in Stage 8 — the earlier 15min budget left no headroom once the
+  // ceremony waits were sized to span the wallet leg.
+  test.setTimeout(1_500_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
@@ -198,10 +201,16 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // veraPDF PDF/A-3a PASS, c2patool valid, DSS validates both as AES + PAdES-B-T.
   await test.step('Stage 8 [DCS-IR-SM-03, DCS-IR-SI-04, ADR-12]: both sign; double-signed artifact verifies', async () => {
     await signOnInstance(a, contractDid, 'Instance A Signatory')
-    await assertReceivedInState(b, contractDid, 'SIGNED')
+    // A's signature ships to B, but only the ARTIFACT replicates: the intrinsic
+    // state is each instance's own RBAC progress, which a re-ship deliberately
+    // does not clobber, so B stays APPROVED until B itself signs. What must be
+    // observable on B is that the signed PDF arrived and its provenance grew.
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
     await saveArtifact(a, contractDid, '08-signed-A')
     await saveArtifact(b, contractDid, '08-signed-B')
     await signOnInstance(b, contractDid, 'Instance B Signatory')
+    await assertReceivedInState(a, contractDid, 'SIGNED')
+    await assertReceivedInState(b, contractDid, 'SIGNED')
     await verifyArtifact(a, contractDid, { lifecycle: 'active', save: '09-double-signed-A' })
     await verifyArtifact(b, contractDid, { lifecycle: 'active', save: '09-double-signed-B' })
   })
