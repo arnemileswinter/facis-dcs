@@ -25,6 +25,7 @@ import { buildContractDocument } from '@/modules/template-repository/store/dcsDr
 import { useDcsDraftStore } from '@/modules/template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { getLocalDIDFile } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
@@ -240,11 +241,16 @@ const submitContract = async () => {
 // acceptance never lands here. Counting every row therefore deadlocked the
 // federated round: the peer's pending decision disabled our Submit forever, and
 // responding to it matched no row (the respond updates WHERE negotiator = us).
+// Identifies which negotiation decisions are OURS: decisions are keyed by the
+// party's DCS instance did:web, not by the logged-in user's issuer (that is the
+// signatory's organization and never matches a party).
+const localInstanceDid = ref('')
+
 const hasOpenDecisions = computed(
   () =>
     contract.value?.negotiations?.some((negotiation) =>
       negotiation.negotiation_decisions.some(
-        (decision) => !decision.decision && decision.negotiator === issuer.value,
+        (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
       ),
     ) ?? false,
 )
@@ -269,8 +275,10 @@ watch(
   { immediate: true, deep: true },
 )
 
-onMounted(() => {
+onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract' })
+  // Our own party identity, used to tell our pending decisions from the peer's.
+  localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
 })
 
 onUnmounted(() => {

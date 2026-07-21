@@ -8,6 +8,7 @@ import { useContractContentValuesStore } from '@/modules/contract-workflow-engin
 import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useDcsDraftStore } from '@/modules/template-repository/store/dcsDraftStore'
 import { ROUTES } from '@/router/router'
+import { getLocalDIDFile } from '@/services/did-service'
 import {
   type ProvenanceEntry,
   type SignatureContract,
@@ -16,7 +17,6 @@ import {
   type SignatureValidateResult,
   type SignatureVerifyResult,
 } from '@/services/signature-management-service'
-import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
 
 // QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
@@ -27,7 +27,7 @@ const router = useRouter()
 const did = computed(() => (Array.isArray(route.params.did) ? route.params.did[0] : route.params.did) ?? '')
 
 const { isSigner, isManager } = useContractPermissions()
-const authStore = useAuthStore()
+const localInstanceDid = ref('')
 
 // Render the real contract content (clauses/terms) the same way the contract
 // views do: preprocess the JSON-LD into the draft store and hand it to TemplatePreview.
@@ -93,17 +93,21 @@ const signatureFieldName = computed<string>(() => {
   const names = (fields ?? [])
     .map((field) => field['dcs:signatoryName'])
     .filter((name): name is string => typeof name === 'string')
-  // Sign OUR OWN slot. Taking the first declared field made the counterparty
+  // Sign OUR OWN slot, identified by this DCS instance's did:web — NOT the
+  // logged-in user's issuer, which is the signatory's organization and never
+  // matches a party slot. Taking the first declared field made the counterparty
   // start a ceremony for the originator's slot, and the ceremony refuses a PoA
-  // that authorizes anyone but the party being signed for, so the counterparty
-  // could never sign a two-party contract. Fall back to the sole field for a
+  // authorizing anyone but the party being signed for, so the counterparty could
+  // never sign a two-party contract. Fall back to the sole field of a
   // single-signature contract, which declares no per-party slots.
-  const own = names.find((name) => name === authStore.user?.issuer)
+  const own = names.find((name) => name === localInstanceDid.value)
   return own ?? names[0] ?? ''
 })
 
 onMounted(async () => {
   try {
+    // This instance's own did:web identifies which signature slot is ours.
+    localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
     const detail = await signatureManagementService.retrieveById(did.value)
     contract.value = detail.contract
     envelope.value = detail.signature_envelope
