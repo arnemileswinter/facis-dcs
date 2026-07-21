@@ -21,6 +21,7 @@ export function resolveValueOptions(constraint?: SemanticValueConstraint): reado
       value,
       label: option?.label ?? value,
       symbol: option?.symbol,
+      iri: option?.iri,
     }
   })
 }

@@ -1,3 +1,4 @@
+import { compactOdrlIdentifier } from '@template-repository/utils/odrl-vocabulary'
 import { ONTOLOGY_DOMAIN_FIELDS } from '@/modules/template-repository/utils/ontology-domain-fields'
 import type { SemanticValueConstraint } from '@/modules/template-repository/models/contract-template'
 
@@ -40,9 +41,11 @@ export function resolveValueConstraintOptions(
 export function resolveConstraintForLeftOperand(leftOperand: string): SemanticValueConstraint | undefined {
   const fieldConstraint = ONTOLOGY_DOMAIN_FIELDS.find((field) => field.ontologyId === leftOperand)?.valueConstraint
   if (fieldConstraint) return fieldConstraint
-
+  const normalizedLeftOperand = compactOdrlIdentifier(leftOperand)
   return ONTOLOGY_DOMAIN_FIELDS.find((field) =>
-    field.valueConstraint?.odrlLeftOperands?.some((operand) => operand === leftOperand),
+    field.valueConstraint?.odrlLeftOperands?.some(
+      (operand) => compactOdrlIdentifier(operand) === normalizedLeftOperand,
+    ),
   )?.valueConstraint
 }
 

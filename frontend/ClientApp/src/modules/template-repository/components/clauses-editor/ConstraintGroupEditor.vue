@@ -167,7 +167,6 @@ function resetFixedOperand(child: AtomicDraft) {
         </select>
         <select
           v-else-if="!child.rightSource"
-          :value="selectedOptionValues(child)"
           multiple
           class="select-bordered select h-20 min-w-40 select-xs"
           @change="setMultipleOptions(child, $event)"

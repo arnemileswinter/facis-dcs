@@ -12,6 +12,11 @@ export interface OdrlTerm {
   id: string
   label: string
 }
+export const ODRL_NAMESPACE = 'http://www.w3.org/ns/odrl/2/'
+
+export function compactOdrlIdentifier(identifier: string): string {
+  return identifier.startsWith(ODRL_NAMESPACE) ? `odrl:${identifier.slice(ODRL_NAMESPACE.length)}` : identifier
+}
 
 /** Rule deontic types (ODRL IM: Permission enables, Prohibition disables, Duty obliges). */
 export const ODRL_RULE_TYPES: { type: 'odrl:Permission' | 'odrl:Prohibition' | 'odrl:Duty'; label: string }[] = [

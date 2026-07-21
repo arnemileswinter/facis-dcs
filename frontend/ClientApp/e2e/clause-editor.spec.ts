@@ -147,10 +147,10 @@ test('the builder emits a logical (or) constraint when constraints are combined 
     const row = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
     await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addSpatial('DE')
-  await addSpatial('FR')
+  await addSpatial('Germany (DEU)')
+  await addSpatial('Austria (AUT)')
   await editor.locator('select[title="How the constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -197,10 +197,10 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
     const row = duty.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
     await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addDutyRegion('DE')
-  await addDutyRegion('FR')
+  await addDutyRegion('Germany (DEU)')
+  await addDutyRegion('Austria (AUT)')
   await duty.locator('select[title="How the duty\'s constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -265,10 +265,10 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
     const row = group.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
     await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addGroupRegion('DE')
-  await addGroupRegion('FR')
+  await addGroupRegion('Germany (DEU)')
+  await addGroupRegion('Austria (AUT)')
   await group.locator('select[title="How this group combines"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
