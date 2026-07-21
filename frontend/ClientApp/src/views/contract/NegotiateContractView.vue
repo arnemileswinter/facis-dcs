@@ -234,10 +234,18 @@ const submitContract = async () => {
   }
 }
 
+// Only THIS party's undecided decisions may block Submit. A negotiation
+// replicates to both instances carrying a decision row per negotiator, but each
+// instance resolves its own row in its own database — the counterparty's
+// acceptance never lands here. Counting every row therefore deadlocked the
+// federated round: the peer's pending decision disabled our Submit forever, and
+// responding to it matched no row (the respond updates WHERE negotiator = us).
 const hasOpenDecisions = computed(
   () =>
     contract.value?.negotiations?.some((negotiation) =>
-      negotiation.negotiation_decisions.some((decision) => !decision.decision),
+      negotiation.negotiation_decisions.some(
+        (decision) => !decision.decision && decision.negotiator === issuer.value,
+      ),
     ) ?? false,
 )
 
