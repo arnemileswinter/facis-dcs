@@ -673,10 +673,14 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
  * proven single-instance submit→review→approve sequence.
  */
 export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
-  // Accept the outstanding change request so no open decision blocks Submit.
-  await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-  const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
-  if (await showBtn.isVisible().catch(() => false)) {
+  // Accept EVERY outstanding change request: a multi-round ping-pong leaves more
+  // than one open decision, and any single unresolved one keeps hasOpenDecisions
+  // true, which disables Submit. Reload between rounds so the compare view that
+  // "Show" opens (itself a Submit blocker) clears before the next decision.
+  for (let round = 0; round < 10; round++) {
+    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
+    if (!(await showBtn.isVisible().catch(() => false))) break
     await showBtn.click()
     const responded = inst.page.waitForResponse(
       (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),

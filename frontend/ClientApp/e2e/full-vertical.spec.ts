@@ -145,6 +145,13 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     await editor.locator('.clause-editor').first().click()
     await page.keyboard.type('The provider invoices the agreed payment amount.')
 
+    // Insert the Payment Amount placeholder into the clause prose by clicking its
+    // building block: without it the clause binds the field but carries no
+    // negotiable value, so the derived contract renders no input to fill and
+    // approve rejects the still-open contract.
+    await editor.getByRole('listitem').filter({ hasText: 'Payment Amount' }).first().click()
+    await expect(editor.locator('[data-parameter-name]')).toHaveCount(1)
+
     const ruleSelect = (label: string) =>
       editor.locator('label.form-control').filter({ hasText: label }).locator('select')
     // A Permission bounded by the payment-amount field: at template time the
