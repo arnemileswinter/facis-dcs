@@ -47,6 +47,13 @@ function makeInstance(page: Page, context: BrowserContext, origin: string, apiBa
     async gotoAs(role, url) {
       await applySession(context, page, origin, mintSession(role, apiBase))
       await page.goto(url)
+      // Two instances mean two browser contexts, and Chromium throttles timers
+      // in pages it considers hidden. The signing ceremony dialog advances on a
+      // 2.5s setInterval poll, so a backgrounded instance stops progressing:
+      // the wallet leg verifies server-side while the viewer never notices and
+      // never fetches the to-be-signed document. Keep the instance we are
+      // driving in the foreground.
+      await page.bringToFront()
     },
   }
 }
