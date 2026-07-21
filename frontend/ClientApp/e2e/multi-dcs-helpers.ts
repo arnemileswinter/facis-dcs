@@ -472,7 +472,12 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
   await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
-  await constraint.locator('input[placeholder="value"]').fill('500')
+  // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
+  // 15000). Carried over from the single-instance component (which fills 250),
+  // 500 made every negotiated value violate the contract's own ODRL rule, so the
+  // reviewer's Approve stayed disabled on !verificationResult.isValid and the
+  // settle could never complete.
+  await constraint.locator('input[placeholder="value"]').fill('50000')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
