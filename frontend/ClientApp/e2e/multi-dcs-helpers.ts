@@ -109,6 +109,25 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
+  // The viewer only fetches the to-be-signed PDF once its poll sees the ceremony
+  // verified; a rejected ceremony makes applySignature return silently, with no
+  // error and no request. Assert the wallet leg landed so that failure reports
+  // the actual ceremony status instead of stalling on a missing response.
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  await expect
+    .poll(
+      async () => {
+        const r = await inst.page.request.get(
+          `${inst.apiBase}/signature/request/${encodeURIComponent(ceremony.ceremony_id)}`,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
+        )
+        if (!r.ok()) return `HTTP ${r.status()}`
+        return ((await r.json()) as { status?: string }).status ?? 'unknown'
+      },
+      { timeout: 90_000, message: `signing ceremony on ${inst.origin} never reached "verified"` },
+    )
+    .toBe('verified')
+
   const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
   const preparedBytes = await (await preparedResponse).body()
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
