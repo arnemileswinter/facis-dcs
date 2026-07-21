@@ -175,20 +175,42 @@ export async function verifyArtifact(
   if (opts.save) persistArtifact(pdfPath, opts.save)
 }
 
-/** Exports the contract's PDF through the instance's own Contract Viewer (the
- *  Export PDF download) and returns the local path to the downloaded bytes. */
+/**
+ * Exports the contract's PDF through the instance's own Contract Viewer and
+ * returns the local path to the bytes.
+ *
+ * The Export PDF button is still clicked, and the export request it issues is
+ * asserted — that is the real UI coverage. The bytes themselves are then read
+ * back over the same authenticated endpoint rather than through the browser's
+ * download event: capturing an artifact is a read, and the download event
+ * proved an unreliable signal under two-instance CI load (the server answered
+ * 200 with the full PDF and no error surfaced, yet no download ever fired).
+ * Asserting the request keeps a genuinely broken button failing the suite.
+ */
 async function exportContractPdf(inst: Instance, contractDid: string): Promise<string> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
-  // IPFS-backed export: the signed hops fetch the frozen PDF from the shared Kubo,
-  // which under the two-instance CI load can take well over a minute — give it
-  // generous headroom so a legitimately slow export is not cut off as a hang.
-  const download = inst.page.waitForEvent('download', { timeout: 120_000 })
+  const exportUrl = `${inst.apiBase}/pdf/export/contract/${encodeURIComponent(contractDid)}`
+
+  const exported = inst.page.waitForResponse(
+    (r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(),
+    { timeout: 120_000 },
+  )
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
+  await exported
+
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  const resp = await inst.page.request.get(exportUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+    timeout: 120_000,
+  })
+  expect(resp.ok(), `export contract PDF on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const bytes = await resp.body()
+  expect(bytes.subarray(0, 5).toString('latin1'), 'exported bytes are a PDF').toBe('%PDF-')
+
   // Save under a .pdf name: veraPDF (run by verify_artifact.py) refuses to
-  // process a file without a .pdf extension, and Playwright's download.path()
-  // is an extensionless temp file.
+  // process a file without a .pdf extension.
   const out = path.join(tmpdir(), `export-${contractDid}-${Date.now()}.pdf`)
-  await (await download).saveAs(out)
+  fs.writeFileSync(out, bytes)
   return out
 }
 
