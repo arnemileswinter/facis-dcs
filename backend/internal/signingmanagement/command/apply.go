@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -498,7 +499,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if err != nil {
 			return nil, fmt.Errorf("issue signing-summary VC: %w", err)
 		}
-	case signedCount == 0:
+	case signedCount == 0 && !carriesPAdESSignature(basePDF):
 		// First signature on a multi-signer contract: embed EVERY declared
 		// field's summary VC as a JSON array, so no later signer needs a
 		// post-signature attachment (all-ceremonies-before-first-signature).
@@ -984,4 +985,17 @@ func isPeerPartyField(resp *db.Responsible, localDID, field string) bool {
 		return false
 	}
 	return field == resp.Counterparty || field == resp.Creator
+}
+
+// carriesPAdESSignature reports whether pdf already holds a PAdES signature,
+// detected by the signature dictionary's /ByteRange.
+//
+// signedCount counts only signatures recorded in THIS instance's database, so
+// across a federation it is 0 on the counterparty even when the artifact it
+// received already carries the originator's signature. Embedding evidence then
+// mutates an already-signed document — the very thing the multi-signer flow
+// avoids, since an attachment added after a PAdES signature trips diff analysis
+// and breaks PDF/A conformance. The artifact itself is the reliable witness.
+func carriesPAdESSignature(pdf []byte) bool {
+	return bytes.Contains(pdf, []byte("/ByteRange"))
 }
