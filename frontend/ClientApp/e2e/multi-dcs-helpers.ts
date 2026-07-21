@@ -159,7 +159,11 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     prepared.ok(),
     `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
   ).toBeTruthy()
-  const preparedBytes = await prepared.body()
+  // /signature/prepare answers a JSON envelope carrying the PDF base64-encoded
+  // (the viewer decodes it into the blob it hands the signatory), so decode it
+  // the same way rather than treating the body as raw PDF bytes.
+  const preparedEnvelope = (await prepared.json()) as { document: string }
+  const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   fs.writeFileSync(preparedPath, preparedBytes)
   const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
