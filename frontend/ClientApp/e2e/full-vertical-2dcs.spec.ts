@@ -1,5 +1,6 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOpenDecisionsOn,
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
@@ -167,6 +168,12 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // The signing gate holds pre-settle: B's signer cannot sign an unapproved
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
+
+    // Mutual agreement first: the ping-pong ended with A's 15000 counter, so B
+    // still owes a decision on it. That undecided record replicates to A's copy
+    // too, and any open decision disables Submit — so A cannot consolidate until
+    // B has accepted. This IS the settle handshake, not test scaffolding.
+    await acceptOpenDecisionsOn(b, contractDid)
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI
     // (no /contract/settle route; APPROVED is the settled state, not "ACCEPTED").

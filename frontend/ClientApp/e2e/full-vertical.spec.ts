@@ -268,19 +268,22 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     // The Payment Amount placeholder is a required top-level field; approve
     // enforces closedness (ValidateContractClosed), so fill it in the Content
     // tab before persisting, or the contract stays open and approve returns 400.
+    // The value must satisfy this template's own ODRL constraint (at most 500) —
+    // submitContract silently returns when verifySemanticValues fails, so a
+    // violating value blocks submit with no request and no visible error.
     const amount = page
       .getByRole('spinbutton', { name: /amount/i })
       .or(page.getByRole('textbox', { name: /amount/i }))
       .first()
     await expect(amount).toBeVisible({ timeout: 15_000 })
-    await amount.fill('15000')
+    await amount.fill('250')
     await amount.blur()
 
     const updated = page.waitForRequest((r) => r.url().includes('/contract/update') && r.method() === 'PUT')
     await page.getByRole('button', { name: 'Update', exact: true }).click()
     const payload = JSON.stringify((await updated).postDataJSON())
     expect(payload, 'the clause and its machine-readable meaning ride along').toContain('Payment terms')
-    expect(payload, 'the filled payment amount rides along into contract_data').toContain('15000')
+    expect(payload, 'the filled payment amount rides along into contract_data').toContain('250')
     await assertPdfExport(page, 'contract', contractDid, 'contract DRAFT')
   })
 

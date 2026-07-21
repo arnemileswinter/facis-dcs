@@ -664,19 +664,17 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 }
 
 /**
- * Stage 7 settle — drives an instance's contract from an open negotiation round
- * to APPROVED through the real UI, the SRS consolidation path (there is no
- * /contract/settle route; ACCEPTED is not a contract state). Accepts the
- * outstanding change request (NegotiationList Show → Accept → /contract/respond),
- * submits the merged round (NEGOTIATION → SUBMITTED), reviews it (SUBMITTED →
- * REVIEWED), and approves it (REVIEWED → APPROVED, EventApprove). Mirrors the
- * proven single-instance submit→review→approve sequence.
+ * Accepts every outstanding change request on this instance (NegotiationList
+ * Show → Accept → /contract/respond) until none remain.
+ *
+ * hasOpenDecisions counts EVERY undecided decision on the contract, including
+ * the counterparty's, and that record replicates to both copies. So after the
+ * final counter the offering side cannot submit until the RECEIVING side has
+ * decided — settling is a mutual agreement, not a unilateral one. Reload between
+ * rounds so the compare view "Show" opens (itself a Submit blocker) clears
+ * before the next decision.
  */
-export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
-  // Accept EVERY outstanding change request: a multi-round ping-pong leaves more
-  // than one open decision, and any single unresolved one keeps hasOpenDecisions
-  // true, which disables Submit. Reload between rounds so the compare view that
-  // "Show" opens (itself a Submit blocker) clears before the next decision.
+export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
     await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
@@ -690,6 +688,19 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     await confirmModalOn(inst, 'Confirm')
     await responded
   }
+}
+
+/**
+ * Stage 7 settle — drives an instance's contract from an open negotiation round
+ * to APPROVED through the real UI, the SRS consolidation path (there is no
+ * /contract/settle route; ACCEPTED is not a contract state). Accepts the
+ * outstanding change request (NegotiationList Show → Accept → /contract/respond),
+ * submits the merged round (NEGOTIATION → SUBMITTED), reviews it (SUBMITTED →
+ * REVIEWED), and approves it (REVIEWED → APPROVED, EventApprove). Mirrors the
+ * proven single-instance submit→review→approve sequence.
+ */
+export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+  await acceptOpenDecisionsOn(inst, contractDid)
 
   // Reload so the compare view that "Show" opened (which disables Submit) and
   // the now-resolved decision clear, then submit the merged round
