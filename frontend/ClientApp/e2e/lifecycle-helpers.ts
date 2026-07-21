@@ -308,9 +308,22 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
   const contractDid = await test.step('create contract from registered template', () =>
     deriveLocalContract(page, loginAs, contractTemplateName))
 
-  await test.step('submit contract into negotiation', async () => {
+  await test.step('fill the required Payment Amount and submit into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
+    // The Payment Amount placeholder is a required top-level field; approve
+    // enforces closedness, so fill it (under the Content tab) before submitting.
+    await page
+      .getByRole('tab', { name: /content/i })
+      .or(page.getByText('Contract Content', { exact: true }))
+      .first()
+      .click()
+    const amount = page
+      .getByRole('spinbutton', { name: /amount/i })
+      .or(page.getByRole('textbox', { name: /amount/i }))
+      .first()
+    await expect(amount).toBeVisible({ timeout: 15_000 })
+    await amount.fill('250')
     const submitted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST',
     )

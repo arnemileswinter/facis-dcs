@@ -660,6 +660,26 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 }
 
 /**
+ * The counterparty accepts the outstanding redline through the Negotiate UI
+ * (NegotiationList Show → Accept → /contract/respond), converging the
+ * negotiation to agreement — the SRS precondition for settling toward signing.
+ * Without it the proposer's own round stays open and its Submit is disabled.
+ */
+export async function acceptCounterOfferOn(inst: Instance, contractDid: string): Promise<void> {
+  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
+  await expect(showBtn).toBeVisible({ timeout: 30_000 })
+  await showBtn.click()
+  const responded = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
+  )
+  await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+  await confirmModalOn(inst, 'Confirm')
+  await responded
+}
+
+/**
  * Stage 7 settle — drives an instance's contract from an open negotiation round
  * to APPROVED through the real UI, the SRS consolidation path (there is no
  * /contract/settle route; ACCEPTED is not a contract state). Accepts the
