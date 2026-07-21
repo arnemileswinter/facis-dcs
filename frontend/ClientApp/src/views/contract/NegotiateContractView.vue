@@ -381,9 +381,15 @@ const currentContractData = computed<ContractData | undefined>(() => {
 })
 
 const hasActiveNegotiations = computed(() => {
+  // A negotiation needs surfacing while it still carries an undecided decision
+  // (that decision blocks Submit) OR it targets the current version. Keying on
+  // the version alone hid the list once a counter's immediate redline bumped the
+  // contract version, deadlocking the round: Submit disabled, no list to resolve.
   return (
     contract.value?.negotiations?.some(
-      (negotiation) => negotiation.contract_version === contract.value?.contract_version,
+      (negotiation) =>
+        negotiation.contract_version === contract.value?.contract_version ||
+        negotiation.negotiation_decisions.some((decision) => !decision.decision),
     ) ?? false
   )
 })
