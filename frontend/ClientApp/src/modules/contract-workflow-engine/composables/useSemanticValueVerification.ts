@@ -35,11 +35,18 @@ export function hasConditionParameterForValue(
   blocks: DcsBlock[],
   semanticConditions: SemanticCondition[],
 ): boolean {
-  const block = blocks.find((b) => b['@id'] === conditionValue.blockId)
-  if (block?.['@type'] !== 'dcs:Clause') return false
-  const clause = block
-  const condIds = clauseConditionIds(clause, semanticConditions)
-  if (!condIds.includes(conditionValue.conditionId)) return false
+  // A filled value is keyed by its placeholder @id (conditionId), not by the
+  // referencing block — its blockId is intentionally empty. It stays valid as
+  // long as some clause references that placeholder and the matching condition
+  // declares the parameter. Looking the block up by blockId (== '') matched
+  // nothing, so the cleanup watcher dropped every value, emptied the store and
+  // flipped changedContractData true, disabling Submit.
+  const referenced = blocks.some(
+    (block) =>
+      block['@type'] === 'dcs:Clause' &&
+      clauseConditionIds(block, semanticConditions).includes(conditionValue.conditionId),
+  )
+  if (!referenced) return false
 
   const matchedCondition = semanticConditions.find((condition) => condition.conditionId === conditionValue.conditionId)
   if (!matchedCondition) return false
