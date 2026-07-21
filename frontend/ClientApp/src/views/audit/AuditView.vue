@@ -4,6 +4,7 @@ import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
+import { downloadBlob as saveBlob } from '@/utils/download-blob'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
@@ -255,15 +256,7 @@ function setAllTableFilters(key: TableFilterKey, enabled: boolean): void {
 }
 
 function downloadBlob(content: BlobPart, contentType: string, filename: string): void {
-  const blob = new Blob([content], { type: contentType })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  saveBlob(new Blob([content], { type: contentType }), filename)
 }
 
 function selectFinding(finding: AuditFinding): void {

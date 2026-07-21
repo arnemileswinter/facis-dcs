@@ -16,6 +16,7 @@ import {
   type SignatureValidateResult,
   type SignatureVerifyResult,
 } from '@/services/signature-management-service'
+import { downloadBlob } from '@/utils/download-blob'
 
 // QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
 const CREDENTIAL_TYPE = 'AES'
@@ -151,15 +152,6 @@ function message(e: unknown): string {
 }
 
 const documentFilename = computed(() => `${contract.value?.name ?? did.value}-to-sign.pdf`)
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  URL.revokeObjectURL(url)
-}
 
 function downloadAgain() {
   if (preparedDocument.value) downloadBlob(preparedDocument.value, documentFilename.value)
