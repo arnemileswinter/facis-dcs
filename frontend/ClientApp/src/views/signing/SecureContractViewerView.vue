@@ -16,6 +16,7 @@ import {
   type SignatureValidateResult,
   type SignatureVerifyResult,
 } from '@/services/signature-management-service'
+import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
 
 // QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
@@ -26,6 +27,7 @@ const router = useRouter()
 const did = computed(() => (Array.isArray(route.params.did) ? route.params.did[0] : route.params.did) ?? '')
 
 const { isSigner, isManager } = useContractPermissions()
+const authStore = useAuthStore()
 
 // Render the real contract content (clauses/terms) the same way the contract
 // views do: preprocess the JSON-LD into the draft store and hand it to TemplatePreview.
@@ -88,8 +90,16 @@ const executed = computed(() => done.value.validate && signed.value)
 const signatureFieldName = computed<string>(() => {
   const cd = contract.value?.contract_data as Record<string, unknown> | undefined
   const fields = cd?.['dcs:signatureFields'] as Record<string, unknown>[] | undefined
-  const name = fields?.[0]?.['dcs:signatoryName']
-  return typeof name === 'string' ? name : ''
+  const names = (fields ?? [])
+    .map((field) => field['dcs:signatoryName'])
+    .filter((name): name is string => typeof name === 'string')
+  // Sign OUR OWN slot. Taking the first declared field made the counterparty
+  // start a ceremony for the originator's slot, and the ceremony refuses a PoA
+  // that authorizes anyone but the party being signed for, so the counterparty
+  // could never sign a two-party contract. Fall back to the sole field for a
+  // single-signature contract, which declares no per-party slots.
+  const own = names.find((name) => name === authStore.user?.issuer)
+  return own ?? names[0] ?? ''
 })
 
 onMounted(async () => {
