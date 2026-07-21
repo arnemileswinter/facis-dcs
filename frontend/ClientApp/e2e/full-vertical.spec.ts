@@ -57,6 +57,10 @@ async function assertPdfExport(page: Page, kind: 'template' | 'contract', did: s
   const token = await page.evaluate(() => window.localStorage.getItem('access_token'))
   const resp = await page.request.get(`/api/pdf/export/${kind}/${encodeURIComponent(did)}`, {
     headers: { Authorization: `Bearer ${token}` },
+    // The export blocks until the async regenerator catches up to the latest
+    // change (server-side ceiling 60s); outwait it rather than hit Playwright's
+    // 30s request default and mask the HTTP status this assert exists to read.
+    timeout: 90_000,
   })
   expect(resp.ok(), `export ${kind} PDF at "${step}": HTTP ${resp.status()} ${await resp.text().catch(() => '')}`).toBe(
     true,

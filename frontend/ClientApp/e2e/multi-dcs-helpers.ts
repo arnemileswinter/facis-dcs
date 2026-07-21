@@ -336,6 +336,10 @@ async function assertPdfExportOn(
   const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
   const resp = await inst.page.request.get(`${inst.apiBase}/pdf/export/${kind}/${encodeURIComponent(did)}`, {
     headers: { Authorization: `Bearer ${token}` },
+    // The export blocks until the async regenerator catches up to the latest
+    // change (server-side ceiling 60s); outwait it rather than hit Playwright's
+    // 30s request default and mask the HTTP status this assert exists to read.
+    timeout: 90_000,
   })
   expect(resp.ok(), `export ${kind} PDF at "${step}" on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
   const bytes = await resp.body()
