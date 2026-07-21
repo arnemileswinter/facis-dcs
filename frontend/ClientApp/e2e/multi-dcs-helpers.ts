@@ -852,10 +852,16 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  // Match ANY deploy response, then assert: filtering on r.ok() made a refusal
+  // indistinguishable from no request at all.
   const deployed = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
-  await deployed
+  const deployResponse = await deployed
+  expect(
+    deployResponse.ok(),
+    `deploy contract on ${inst.origin}: HTTP ${deployResponse.status()} ${await deployResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
 }
