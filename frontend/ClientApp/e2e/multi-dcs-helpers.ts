@@ -683,12 +683,17 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     await responded
   }
 
-  // Submit the merged round: NEGOTIATION -> SUBMITTED.
+  // Reload so the compare view that "Show" opened (which disables Submit) and
+  // the now-resolved decision clear, then submit the merged round
+  // (NEGOTIATION -> SUBMITTED) once Submit is enabled.
+  await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+  const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
+  await expect(submit).toBeEnabled({ timeout: 30_000 })
   const submitted = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await submit.click()
   await submitted
 
   // Review: SUBMITTED -> REVIEWED.

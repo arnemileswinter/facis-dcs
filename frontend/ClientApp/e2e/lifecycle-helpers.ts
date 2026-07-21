@@ -339,10 +339,25 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    // Resolve any outstanding decision (Show opens a compare view that disables
+    // Submit), then reload so that state clears before submitting.
+    const showBtn = page.getByRole('button', { name: 'Show' }).first()
+    if (await showBtn.isVisible().catch(() => false)) {
+      await showBtn.click()
+      const responded = page.waitForResponse(
+        (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
+      )
+      await page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await confirmModal(page, 'Confirm')
+      await responded
+      await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    }
+    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await submit.click()
     await accepted
   })
 
