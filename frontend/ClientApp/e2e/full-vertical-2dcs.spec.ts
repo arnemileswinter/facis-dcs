@@ -177,7 +177,11 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI
     // (no /contract/settle route; APPROVED is the settled state, not "ACCEPTED").
+    // Each instance runs its OWN submit → review → approve: the intrinsic state
+    // is local RBAC, so A approving says nothing about B's copy — B's reviewer
+    // and approver still have to act, and the signing gate is per instance.
     await settleToApprovedOn(a, contractDid)
+    await settleToApprovedOn(b, contractDid)
     await assertReceivedInState(a, contractDid, 'APPROVED')
     await assertReceivedInState(b, contractDid, 'APPROVED')
     await saveArtifact(a, contractDid, '07-settle-A')
