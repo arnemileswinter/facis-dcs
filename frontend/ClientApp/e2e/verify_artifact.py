@@ -65,9 +65,25 @@ def _verapdf(pdf_path: str) -> None:
         check=False, capture_output=True, text=True, timeout=300,
     )
     if "PASS" not in completed.stdout:
+        # The terse text format reports only PASS/FAIL, which says nothing about
+        # WHICH clause the artifact violates. Re-run for the failed-rule detail
+        # so a conformance regression is actionable rather than just "FAIL 3a".
+        detail = subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{artifacts_dir}:/data", _VERAPDF_IMAGE,
+             "-f", "3a", "--format", "xml", f"/data/{name}"],
+            check=False, capture_output=True, text=True, timeout=300,
+        )
+        failed = []
+        for line in detail.stdout.splitlines():
+            stripped = line.strip()
+            if "<rule" in stripped and 'status="failed"' in stripped:
+                failed.append(stripped[:300])
+            elif "<description>" in stripped or "<errorMessage>" in stripped:
+                failed.append(stripped[:300])
         raise SystemExit(
             f"veraPDF PDF/A-3a validation FAILED for {name}\n"
-            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}\n"
+            f"failed rules:\n  " + ("\n  ".join(failed[:40]) or "(no rule detail parsed)")
         )
 
 
