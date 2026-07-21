@@ -179,10 +179,10 @@ export async function verifyArtifact(
  *  Export PDF download) and returns the local path to the downloaded bytes. */
 async function exportContractPdf(inst: Instance, contractDid: string): Promise<string> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
-  // IPFS-backed export: the signed hops fetch the frozen PDF from IPFS, which on
-  // a loaded stack legitimately approaches ~45s — kept above the 30s download cap
-  // so a real export isn't cut off, while still failing a genuine hang fast.
-  const download = inst.page.waitForEvent('download', { timeout: 45_000 })
+  // IPFS-backed export: the signed hops fetch the frozen PDF from the shared Kubo,
+  // which under the two-instance CI load can take well over a minute — give it
+  // generous headroom so a legitimately slow export is not cut off as a hang.
+  const download = inst.page.waitForEvent('download', { timeout: 120_000 })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   // Save under a .pdf name: veraPDF (run by verify_artifact.py) refuses to
   // process a file without a .pdf extension, and Playwright's download.path()
