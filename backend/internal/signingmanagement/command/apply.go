@@ -451,7 +451,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// exportcontract.go/verifycontract.go never need to touch it again for the
 	// SIGNED/ACTIVE C2PA state (DCS-OR-C2PA-004, DCS-FR-SM-16).
 	rendererVersion := ""
-	if signedCount == 0 {
+	if signedCount == 0 && !carriesPAdESSignature(basePDF) {
 		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, *data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)
 		if err != nil {
 			return nil, fmt.Errorf("stamp active lifecycle assertion before signing: %w", err)
@@ -459,9 +459,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		basePDF = stampedPDF
 		rendererVersion = rv
 	}
-	// A PDF that already carries a PAdES signature is never stamped again —
-	// it was stamped before the FIRST signature, and any later mutation
-	// besides an incremental signature is an illegal modification.
+	// A PDF that already carries a PAdES signature is never stamped again — it
+	// was stamped before the FIRST signature, and any later mutation besides an
+	// incremental signature is an illegal modification. signedCount alone does
+	// not express that across a federation: the counterparty's database holds
+	// no record of the originator's signature, so it would re-stamp an already
+	// signed artifact and attach a C2PA manifest after the fact, which breaks
+	// PDF/A-3 clause 6.8 (an embedded file no longer associated with the
+	// document). The artifact itself is the reliable witness.
 
 	contentSum := sha256.Sum256(*data.ContractData)
 	contentHash := hex.EncodeToString(contentSum[:])
