@@ -106,6 +106,18 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     (r) => r.url().includes('/signature/prepare') && r.ok(),
     { timeout: 180_000 },
   )
+  // What the VIEWER itself saw, so a stall reports whether its poll ran at all
+  // and what it got, rather than only that no prepare arrived.
+  const viewerCalls: string[] = []
+  inst.page.on('response', (r) => {
+    if (/\/signature\/(request|prepare)/.test(r.url())) viewerCalls.push(`${r.status()} ${r.request().method()} ${r.url().split('/api')[1] ?? r.url()}`)
+  })
+  const viewerErrors: string[] = []
+  inst.page.on('console', (m) => {
+    if (m.type() === 'error') viewerErrors.push(m.text().slice(0, 200))
+  })
+  inst.page.on('pageerror', (e) => viewerErrors.push(`pageerror: ${e.message.slice(0, 200)}`))
+
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
   const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
@@ -136,7 +148,12 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     .toBe('verified')
 
   const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
-  const preparedBytes = await (await preparedResponse).body()
+  const prepared = await preparedResponse.catch((e: Error) => {
+    throw new Error(
+      `${e.message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+    )
+  })
+  const preparedBytes = await prepared.body()
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   fs.writeFileSync(preparedPath, preparedBytes)
   const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
