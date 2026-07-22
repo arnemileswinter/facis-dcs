@@ -121,18 +121,21 @@ export const ODRL_CONTEXT_OPERANDS: OdrlTerm[] = [
 
 /** The full ODRL 2.2 Constraint operator vocabulary (relational + set + type). */
 export const ODRL_OPERATORS: OdrlTerm[] = [
-  { id: 'odrl:eq', label: 'must equal' },
-  { id: 'odrl:neq', label: 'must not equal' },
-  { id: 'odrl:gt', label: 'must be greater than' },
-  { id: 'odrl:gteq', label: 'must be at least' },
-  { id: 'odrl:lt', label: 'must be less than' },
-  { id: 'odrl:lteq', label: 'must be at most' },
-  { id: 'odrl:isA', label: 'must be a (class)' },
-  { id: 'odrl:isPartOf', label: 'must be part of' },
-  { id: 'odrl:hasPart', label: 'must contain' },
-  { id: 'odrl:isAnyOf', label: 'must be one of' },
-  { id: 'odrl:isNoneOf', label: 'must not be one of' },
-  { id: 'odrl:isAllOf', label: 'must be all of' },
+  { id: 'odrl:eq', label: 'equal to' },
+  { id: 'odrl:neq', label: 'not equal to' },
+
+  { id: 'odrl:gt', label: 'greater than' },
+  { id: 'odrl:gteq', label: 'greater than or equal to' },
+  { id: 'odrl:lt', label: 'less than' },
+  { id: 'odrl:lteq', label: 'less than or equal to' },
+
+  { id: 'odrl:isA', label: 'is a' },
+  { id: 'odrl:hasPart', label: 'has part' },
+  { id: 'odrl:isPartOf', label: 'is part of' },
+
+  { id: 'odrl:isAllOf', label: 'is all of' },
+  { id: 'odrl:isAnyOf', label: 'is any of' },
+  { id: 'odrl:isNoneOf', label: 'is none of' },
 ]
 
 /** The IRIs of the context operands, so the enforcer knows an operand is

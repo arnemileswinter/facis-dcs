@@ -27,8 +27,10 @@ const SH = 'http://www.w3.org/ns/shacl#'
 
 class OntologyGraph {
   private bySubject = new Map<string, Quad[]>()
+  private readonly quads: Quad[]
 
   constructor(quads: Quad[]) {
+    this.quads = quads
     for (const quad of quads) {
       const key = quad.subject.value
       const list = this.bySubject.get(key)
@@ -66,6 +68,10 @@ class OntologyGraph {
 
   subjects(): string[] {
     return [...this.bySubject.keys()]
+  }
+
+  allQuads(): readonly Quad[] {
+    return this.quads
   }
 }
 
@@ -117,14 +123,25 @@ function formatOntologyLabel(value: string): string {
 
 function parseValueOptions(graph: OntologyGraph): ReadonlyMap<string, SemanticValueOption> {
   const options = new Map<string, SemanticValueOption>()
-  for (const subject of graph.subjects()) {
+  for (const subject of graph.subjectsOfType(`${SKOS}Concept`)) {
     const value = graph.first(subject, `${SKOS}notation`)
     if (!value) continue
-    options.set(value, {
+    const catalogIri = graph.first(subject, `${SKOS}inScheme`)
+    const catalog = catalogIri
+      ? {
+          iri: catalogIri,
+          label:
+            graph.first(catalogIri, `${SKOS}prefLabel`) ||
+            graph.first(catalogIri, `${RDFS}label`) ||
+            formatOntologyLabel(localName(catalogIri)),
+        }
+      : undefined
+    options.set(subject, {
       value,
       label: graph.first(subject, `${SKOS}prefLabel`) || undefined,
       symbol: graph.first(subject, `${DCS}valueSymbol`) || undefined,
       iri: subject,
+      catalog,
     })
   }
   return options
@@ -134,14 +151,32 @@ function parseValueConstraints(graph: OntologyGraph): ReadonlyMap<string, Semant
   const valueOptions = parseValueOptions(graph)
   const constraints = new Map<string, SemanticValueConstraint>()
   for (const subject of graph.subjectsOfType(`${DCS}ValueConstraint`)) {
-    const allowedValues = graph.values(subject, `${DCS}allowedValue`)
+    const declaredAllowedValues = graph.values(subject, `${DCS}allowedValue`)
+    const valueCatalogIri = graph.first(subject, `${DCS}valueCatalog`)
+    const valueCatalog = valueCatalogIri
+      ? {
+          iri: valueCatalogIri,
+          label:
+            graph.first(valueCatalogIri, `${SKOS}prefLabel`) ||
+            graph.first(valueCatalogIri, `${RDFS}label`) ||
+            formatOntologyLabel(localName(valueCatalogIri)),
+        }
+      : undefined
+    const catalogOptions = [...valueOptions.values()].filter((option) => option.catalog?.iri === valueCatalogIri)
+    const selectedOptions = declaredAllowedValues.length
+      ? catalogOptions.filter((option) =>
+          declaredAllowedValues.some((allowed) => allowed === option.value || allowed === option.iri),
+        )
+      : catalogOptions
     constraints.set(subject, {
+      iri: subject,
       format: (graph.first(subject, `${DCS}format`) || undefined) as SemanticValueConstraint['format'],
       pattern: graph.first(subject, `${DCS}pattern`) || undefined,
-      allowedValues,
-      valueOptions: allowedValues
-        .map((value) => valueOptions.get(value))
-        .filter((option): option is SemanticValueOption => !!option),
+      allowedValues: declaredAllowedValues.length
+        ? declaredAllowedValues
+        : selectedOptions.map((option) => option.value),
+      valueOptions: selectedOptions,
+      valueCatalog,
       allowedValuesRef: graph.first(subject, `${DCS}allowedValuesRef`) || undefined,
       odrlLeftOperands: graph.values(subject, `${DCS}odrlLeftOperand`),
       min: graph.firstNumber(subject, `${DCS}minInclusive`),
@@ -189,12 +224,15 @@ function cloneConstraint(constraint?: SemanticValueConstraint): SemanticValueCon
     ...constraint,
     allowedValues: constraint.allowedValues ? [...constraint.allowedValues] : undefined,
     valueOptions: constraint.valueOptions ? constraint.valueOptions.map((option) => ({ ...option })) : undefined,
+    valueCatalog: constraint.valueCatalog ? { ...constraint.valueCatalog } : undefined,
     odrlLeftOperands: constraint.odrlLeftOperands ? [...constraint.odrlLeftOperands] : undefined,
   }
 }
 
-function parseOntologyDomainFields(graph: OntologyGraph): DomainFieldDefinition[] {
-  const constraints = parseValueConstraints(graph)
+function parseOntologyDomainFields(
+  graph: OntologyGraph,
+  constraints = parseValueConstraints(graph),
+): DomainFieldDefinition[] {
   const classLabels = parseClassLabels(graph)
 
   return graph
@@ -318,31 +356,42 @@ function parseShapesAssets(graph: OntologyGraph): HubAsset[] {
  * assets. Registering a schema in the hub — including an imported Gaia-X
  * profile — makes its objects pickable, with no hardcoded schema name.
  */
-async function loadHub(): Promise<{ fields: DomainFieldDefinition[]; assets: HubAsset[] }> {
+async function loadHub(): Promise<{
+  fields: DomainFieldDefinition[]
+  assets: HubAsset[]
+  constraints: SemanticValueConstraint[]
+}> {
   const inventory = await fetchJson<SchemaListEntry[]>('/api/semantic/schema/list')
-  const perSource = await Promise.all(
+  const loadedSources = await Promise.all(
     inventory
       .filter((entry) => entry.kind === 'ontology' || entry.kind === 'shapes')
       .map(async (entry) => {
         const source = { name: entry.name, kind: entry.kind }
         try {
           const graph = await loadSchemaGraph(entry.kind, entry.name)
-          if (entry.kind === 'ontology') {
-            return {
-              fields: parseOntologyDomainFields(graph).map((field) => ({ ...field, source })),
-              assets: [] as HubAsset[],
-            }
-          }
-          return {
-            fields: [] as DomainFieldDefinition[],
-            assets: parseShapesAssets(graph).map((a) => ({ ...a, source })),
-          }
+          return { source, graph }
         } catch {
           // A single malformed schema must not blank the whole picker.
-          return { fields: [] as DomainFieldDefinition[], assets: [] as HubAsset[] }
+          return null
         }
       }),
   )
+  const sources = loadedSources.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+  const ontologySources = sources.filter((entry) => entry.source.kind === 'ontology')
+  const ontologyGraph = new OntologyGraph(ontologySources.flatMap((entry) => [...entry.graph.allQuads()]))
+  const constraints = parseValueConstraints(ontologyGraph)
+  const perSource = sources.map(({ source, graph }) => {
+    if (source.kind === 'ontology') {
+      return {
+        fields: parseOntologyDomainFields(graph, constraints).map((field) => ({ ...field, source })),
+        assets: [] as HubAsset[],
+      }
+    }
+    return {
+      fields: [] as DomainFieldDefinition[],
+      assets: parseShapesAssets(graph).map((asset) => ({ ...asset, source })),
+    }
+  })
 
   const bySource = (a?: { name: string }, b?: { name: string }) => (a?.name ?? '').localeCompare(b?.name ?? '')
   const fieldsById = new Map<string, DomainFieldDefinition>()
@@ -356,9 +405,11 @@ async function loadHub(): Promise<{ fields: DomainFieldDefinition[]; assets: Hub
   return {
     fields: [...fieldsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
     assets: [...assetsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
+    constraints: [...constraints.values()],
   }
 }
 
 const hub = await loadHub()
 export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = hub.fields
 export const ONTOLOGY_ASSETS: readonly HubAsset[] = hub.assets
+export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = hub.constraints

@@ -1,5 +1,5 @@
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
+import type { Page } from '@playwright/test'
 
 type LoginAs = (role: DcsRole) => Promise<void>
 
@@ -256,7 +256,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
   const topRow = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await topRow.locator('select').nth(0).selectOption({ label: 'purpose' })
   await topRow.locator('select').nth(1).selectOption({ label: 'must equal' })
-  await topRow.locator('input[placeholder="value"]').fill('research')
+  await topRow.locator('select').nth(3).selectOption({ label: 'Research (RESEARCH)' })
 
   await editor.getByRole('button', { name: '+ group' }).click()
   const group = editor.locator('.border-dashed').last()

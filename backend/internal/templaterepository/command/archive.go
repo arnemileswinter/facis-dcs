@@ -76,13 +76,12 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 	}
 
 	evt := templateevents.ArchiveEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		ArchivedBy:     cmd.ArchivedBy,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:        cmd.DID,
+		Version:    processData.Version,
+		ArchivedBy: cmd.ArchivedBy,
+		OccurredAt: time.Now().UTC(),
+		HolderDID:  cmd.HolderDID,
+		UserRoles:  cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

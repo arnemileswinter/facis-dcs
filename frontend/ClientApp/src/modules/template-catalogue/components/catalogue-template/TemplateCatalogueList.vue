@@ -52,7 +52,7 @@ watch(
     </li>
     <TemplateCatalogueListItem
       v-for="template in sortedTemplates"
-      :key="`${template.did}|${template.document_number}|${template.version}`"
+      :key="`${template.did}|${template.version}`"
       :template="template"
       :templates="props.templates"
     />

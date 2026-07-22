@@ -82,14 +82,13 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	}
 
 	evt := templateevents.RejectEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		RejectedBy:     cmd.RejectedBy,
-		Reason:         cmd.Reason,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:        cmd.DID,
+		Version:    processData.Version,
+		RejectedBy: cmd.RejectedBy,
+		Reason:     cmd.Reason,
+		OccurredAt: time.Now().UTC(),
+		HolderDID:  cmd.HolderDID,
+		UserRoles:  cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

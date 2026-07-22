@@ -8,7 +8,6 @@ var TemplateCatalogueItem = Type("TemplateCatalogueItem", func() {
 	Description("Template catalogue item returned to the client")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -47,7 +46,6 @@ var TemplateCatalogueSearchRequest = Type("TemplateCatalogueSearchRequest", func
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -71,7 +69,6 @@ var TemplateCatalogueRetrieveByIDResponse = Type("TemplateCatalogueRetrieveByIDR
 	Description("Template catalogue detail response")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("document_number", String, "The number of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -166,7 +163,6 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		HTTP(func() {
 			GET("/catalogue/template/search")
 			Param("did")
-			Param("document_number")
 			Param("version")
 			Param("name")
 			Param("description")

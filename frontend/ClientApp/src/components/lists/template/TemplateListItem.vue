@@ -72,7 +72,6 @@ function getTemplateLink(template: PartialContractTemplate): string {
         </h2>
         <div class="flex flex-col">
           <div v-if="template.version">Version: {{ template.version }}</div>
-          <div v-if="template.document_number">Document number: {{ template.document_number }}</div>
         </div>
         <div class="flex min-w-0 justify-between">
           <div>Creation date: {{ new Date(template.created_at).toLocaleDateString() }}</div>

@@ -84,14 +84,13 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	evt := templateevents.ApproveEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		ApprovedBy:     cmd.ApprovedBy,
-		DecisionNotes:  cmd.DecisionNotes,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:           cmd.DID,
+		Version:       processData.Version,
+		ApprovedBy:    cmd.ApprovedBy,
+		DecisionNotes: cmd.DecisionNotes,
+		OccurredAt:    time.Now().UTC(),
+		HolderDID:     cmd.HolderDID,
+		UserRoles:     cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

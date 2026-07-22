@@ -99,15 +99,14 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.CreateCmd{
-		DID:            *did,
-		CreatedBy:      middleware.GetParticipantID(ctx),
-		HolderDID:      middleware.GetHolderDID(ctx),
-		TemplateType:   templateType,
-		Name:           req.Name,
-		Description:    req.Description,
-		DocumentNumber: req.DocumentNumber,
-		TemplateData:   &templateData,
-		UserRoles:      middleware.GetUserRoles(ctx),
+		DID:          *did,
+		CreatedBy:    middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		TemplateType: templateType,
+		Name:         req.Name,
+		Description:  req.Description,
+		TemplateData: &templateData,
+		UserRoles:    middleware.GetUserRoles(ctx),
 	}
 	createHandler := command.Creator{
 		DB:     s.DB,
@@ -227,16 +226,15 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.UpdateCmd{
-		DID:            req.Did,
-		DocumentNumber: req.DocumentNumber,
-		UpdatedAt:      updatedAt,
-		TemplateType:   templateType,
-		Name:           req.Name,
-		Description:    req.Description,
-		TemplateData:   &metaData,
-		UpdatedBy:      middleware.GetParticipantID(ctx),
-		HolderDID:      middleware.GetHolderDID(ctx),
-		UserRoles:      middleware.GetUserRoles(ctx),
+		DID:          req.Did,
+		UpdatedAt:    updatedAt,
+		TemplateType: templateType,
+		Name:         req.Name,
+		Description:  req.Description,
+		TemplateData: &metaData,
+		UpdatedBy:    middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 	}
 	handler := command.Updater{
 		DB:     s.DB,
@@ -254,7 +252,7 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 	}, nil
 }
 
-// update metadata or status.
+// update metadata.
 func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *templaterepository.ContractTemplateUpdateManageRequest) (res *templaterepository.ContractTemplateUpdateManageResponse, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
@@ -270,15 +268,6 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
-	var state *contracttemplatestate.ContractTemplateState
-	if req.State != nil {
-		ts, err := contracttemplatestate.NewContractTemplateState(*req.State)
-		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
-		}
-		state = &ts
-	}
-
 	var templateType *contracttemplatetype.ContractTemplateType
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
@@ -289,23 +278,19 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	}
 
 	cmd := command.UpdateManageCmd{
-		DID:            req.Did,
-		DocumentNumber: req.DocumentNumber,
-		State:          state,
-		UpdatedAt:      updatedAt,
-		TemplateType:   templateType,
-		Name:           req.Name,
-		Description:    req.Description,
-		TemplateData:   &metaData,
-		UpdatedBy:      middleware.GetParticipantID(ctx),
-		HolderDID:      middleware.GetHolderDID(ctx),
-		UserRoles:      middleware.GetUserRoles(ctx),
+		DID:          req.Did,
+		UpdatedAt:    updatedAt,
+		TemplateType: templateType,
+		Name:         req.Name,
+		Description:  req.Description,
+		TemplateData: &metaData,
+		UpdatedBy:    middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 	}
 	handler := command.UpdateManager{
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
-		ATRepo: s.ATRepo,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
@@ -339,17 +324,16 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	}
 
 	qry := contracttemplate.GetAllMetadataByFilterQry{
-		RetrievedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:      middleware.GetHolderDID(ctx),
-		UserRoles:      middleware.GetUserRoles(ctx),
-		DID:            base.DerefString(req.Did),
-		DocumentNumber: base.DerefString(req.DocumentNumber),
-		Version:        base.DerefInt(req.Version),
-		State:          state,
-		Name:           base.DerefString(req.Name),
-		Description:    base.DerefString(req.Description),
-		TemplateData:   base.DerefString(req.TemplateData),
-		Pagination:     pagination,
+		RetrievedBy:  middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:          base.DerefString(req.Did),
+		Version:      base.DerefInt(req.Version),
+		State:        state,
+		Name:         base.DerefString(req.Name),
+		Description:  base.DerefString(req.Description),
+		TemplateData: base.DerefString(req.TemplateData),
+		Pagination:   pagination,
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     s.DB,
@@ -363,15 +347,14 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	var contractTemplates []*templaterepository.ContractTemplateSearchResponse
 	for _, item := range result {
 		contractTemplates = append(contractTemplates, &templaterepository.ContractTemplateSearchResponse{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			State:          item.State.String(),
-			TemplateType:   item.TemplateType.String(),
-			Name:           item.Name,
-			Description:    item.Description,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      item.UpdatedAt.Format(time.RFC3339),
+			Did:          item.DID,
+			Version:      item.Version,
+			State:        item.State.String(),
+			TemplateType: item.TemplateType.String(),
+			Name:         item.Name,
+			Description:  item.Description,
+			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -402,17 +385,16 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 	for _, item := range result {
 
 		contractTemplates = append(contractTemplates, &templaterepository.ContractTemplateHistoryRetrieveByIDResponse{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			State:          item.State.String(),
-			Name:           item.Name,
-			Description:    item.Description,
-			CreatedBy:      item.CreatedBy,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      item.UpdatedAt.Format(time.RFC3339),
-			TemplateData:   item.TemplateData,
-			TemplateType:   item.TemplateType.String(),
+			Did:          item.DID,
+			Version:      item.Version,
+			State:        item.State.String(),
+			Name:         item.Name,
+			Description:  item.Description,
+			CreatedBy:    item.CreatedBy,
+			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
+			TemplateData: item.TemplateData,
+			TemplateType: item.TemplateType.String(),
 		})
 	}
 
@@ -450,41 +432,38 @@ func (s *templateRepositorysrvc) Retrieve(ctx context.Context, req *templaterepo
 	var contractTemplates []*templaterepository.ContractTemplateItem
 	for _, item := range result.ContractTemplates {
 		contractTemplates = append(contractTemplates, &templaterepository.ContractTemplateItem{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			State:          item.State.String(),
-			TemplateType:   item.TemplateType.String(),
-			Name:           item.Name,
-			Description:    item.Description,
-			CreatedBy:      item.CreatedBy,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      item.UpdatedAt.Format(time.RFC3339),
-			LatestDid:      item.LatestDID,
+			Did:          item.DID,
+			Version:      item.Version,
+			State:        item.State.String(),
+			TemplateType: item.TemplateType.String(),
+			Name:         item.Name,
+			Description:  item.Description,
+			CreatedBy:    item.CreatedBy,
+			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
+			LatestDid:    item.LatestDID,
 		})
 	}
 
 	var reviewTasks []*templaterepository.ReviewTaskItem
 	for _, item := range result.ReviewerTasks {
 		reviewTasks = append(reviewTasks, &templaterepository.ReviewTaskItem{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			Reviewer:       item.Reviewer,
-			State:          item.State.String(),
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
+			Did:       item.DID,
+			Version:   item.Version,
+			Reviewer:  item.Reviewer,
+			State:     item.State.String(),
+			CreatedAt: item.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
 	var approvalTasks []*templaterepository.ApprovalTaskItem
 	for _, item := range result.ApprovalTasks {
 		approvalTasks = append(approvalTasks, &templaterepository.ApprovalTaskItem{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			State:          item.State.String(),
-			Approver:       item.Approver,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
+			Did:       item.DID,
+			Version:   item.Version,
+			State:     item.State.String(),
+			Approver:  item.Approver,
+			CreatedAt: item.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -516,34 +495,32 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		return nil, templaterepository.MakeInternalError(err)
 	}
 	templateJSONLD, err := semanticmapper.BuildTemplateJSONLD(db.ContractTemplate{
-		DID:            contractTemplate.DID,
-		DocumentNumber: contractTemplate.DocumentNumber,
-		Version:        contractTemplate.Version,
-		State:          contractTemplate.State.String(),
-		TemplateType:   contractTemplate.TemplateType.String(),
-		Name:           contractTemplate.Name,
-		Description:    contractTemplate.Description,
-		CreatedBy:      contractTemplate.CreatedBy,
-		CreatedAt:      contractTemplate.CreatedAt,
-		UpdatedAt:      contractTemplate.UpdatedAt,
-		TemplateData:   contractTemplate.TemplateData,
+		DID:          contractTemplate.DID,
+		Version:      contractTemplate.Version,
+		State:        contractTemplate.State.String(),
+		TemplateType: contractTemplate.TemplateType.String(),
+		Name:         contractTemplate.Name,
+		Description:  contractTemplate.Description,
+		CreatedBy:    contractTemplate.CreatedBy,
+		CreatedAt:    contractTemplate.CreatedAt,
+		UpdatedAt:    contractTemplate.UpdatedAt,
+		TemplateData: contractTemplate.TemplateData,
 	})
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
 	return &templaterepository.ContractTemplateRetrieveByIDResponse{
-		Did:            contractTemplate.DID,
-		DocumentNumber: contractTemplate.DocumentNumber,
-		Version:        contractTemplate.Version,
-		State:          contractTemplate.State.String(),
-		TemplateType:   contractTemplate.TemplateType.String(),
-		Name:           contractTemplate.Name,
-		Description:    contractTemplate.Description,
-		CreatedBy:      contractTemplate.CreatedBy,
-		CreatedAt:      contractTemplate.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:      contractTemplate.UpdatedAt.Format(time.RFC3339),
-		TemplateData:   templateJSONLD,
+		Did:          contractTemplate.DID,
+		Version:      contractTemplate.Version,
+		State:        contractTemplate.State.String(),
+		TemplateType: contractTemplate.TemplateType.String(),
+		Name:         contractTemplate.Name,
+		Description:  contractTemplate.Description,
+		CreatedBy:    contractTemplate.CreatedBy,
+		CreatedAt:    contractTemplate.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    contractTemplate.UpdatedAt.Format(time.RFC3339),
+		TemplateData: templateJSONLD,
 	}, nil
 }
 

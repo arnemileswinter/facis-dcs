@@ -31,7 +31,6 @@ export interface ContractTemplateUpdateManageResponse {
 
 interface ContractTemplateSearchResponseItem {
   did: string
-  document_number?: string
   version: string
   state: ContractTemplateState
   template_type: TemplateType
@@ -52,7 +51,6 @@ export interface ContractTemplateRetrieveResponse {
 
 export interface ContractTemplateRetrieveByIdResponse {
   did: string
-  document_number?: string
   version: number
   state: ContractTemplateState
   template_type: TemplateType

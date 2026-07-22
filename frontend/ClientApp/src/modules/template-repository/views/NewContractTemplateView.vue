@@ -65,7 +65,6 @@ watch(
             templateType: template.template_type,
             state: template.state,
             version: template.version ?? null,
-            document_number: template.document_number ?? null,
             updated_at: template.updated_at ?? null,
             responsible: template.responsible ?? null,
           })

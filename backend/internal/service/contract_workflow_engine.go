@@ -1350,17 +1350,16 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 	var contractTemplates []*contractworkflowengine.ApprovedContractTemplateRetrieveResponse
 	for _, item := range result {
 		contractTemplates = append(contractTemplates, &contractworkflowengine.ApprovedContractTemplateRetrieveResponse{
-			Did:            item.DID,
-			DocumentNumber: item.DocumentNumber,
-			Version:        item.Version,
-			State:          item.State.String(),
-			TemplateType:   item.TemplateType.String(),
-			Name:           item.Name,
-			Description:    item.Description,
-			CreatedBy:      item.CreatedBy,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      item.UpdatedAt.Format(time.RFC3339),
-			Responsible:    item.Responsible,
+			Did:          item.DID,
+			Version:      item.Version,
+			State:        item.State.String(),
+			TemplateType: item.TemplateType.String(),
+			Name:         item.Name,
+			Description:  item.Description,
+			CreatedBy:    item.CreatedBy,
+			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
+			Responsible:  item.Responsible,
 		})
 	}
 

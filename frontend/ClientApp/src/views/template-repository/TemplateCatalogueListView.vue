@@ -75,7 +75,6 @@ function goNext() {
                   </div>
                 </h2>
                 <div class="flex flex-col justify-between gap-2">
-                  <div v-if="item.document_number">Document number: {{ item.document_number }}</div>
                   <div v-if="item.version">Version: {{ item.version }}</div>
                 </div>
                 <div class="flex min-w-0 justify-between">

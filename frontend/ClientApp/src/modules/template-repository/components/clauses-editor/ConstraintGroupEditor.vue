@@ -11,7 +11,11 @@ import {
 } from '@template-repository/components/clauses-editor/constraint-draft'
 import { ODRL_CONTEXT_OPERANDS, ODRL_OPERATORS } from '@template-repository/utils/odrl-vocabulary'
 import { resolveConstraintForLeftOperand } from '@template-repository/utils/value-constraint-catalog'
-import { formatValueOption, resolveValueOptions } from '@template-repository/utils/value-option-catalog'
+import {
+  formatValueOption,
+  groupValueOptions,
+  resolveValueOptions,
+} from '@template-repository/utils/value-option-catalog'
 
 /**
  * Authors one ODRL constraint group — a combinator over child nodes, each an
@@ -56,6 +60,10 @@ function valueOptionsFor(child: AtomicDraft) {
   return resolveValueOptions(resolveConstraintForLeftOperand(child.leftOperand))
 }
 
+function valueOptionGroupsFor(child: AtomicDraft) {
+  return groupValueOptions(valueOptionsFor(child))
+}
+
 function optionOperand(optionValue: string, child: AtomicDraft): OperandDraftValue {
   const option = valueOptionsFor(child).find((item) => item.value === optionValue || item.iri === optionValue)
   if (option?.iri) return { '@id': option.iri }
@@ -81,9 +89,14 @@ function setSingleOption(child: AtomicDraft, event: Event) {
   child.value = ''
 }
 
-function setMultipleOptions(child: AtomicDraft, event: Event) {
-  const select = event.target as HTMLSelectElement
-  child.values = Array.from(select.selectedOptions).map((option) => optionOperand(option.value, child))
+function toggleOption(child: AtomicDraft, optionValue: string) {
+  const selected = new Set(selectedOptionValues(child))
+  if (selected.has(optionValue)) selected.delete(optionValue)
+  else selected.add(optionValue)
+  child.values = valueOptionsFor(child)
+    .map((option) => option.iri ?? option.value)
+    .filter((value) => selected.has(value))
+    .map((value) => optionOperand(value, child))
   child.value = ''
 }
 
@@ -162,24 +175,39 @@ function resetFixedOperand(child: AtomicDraft) {
             :value="option.iri ?? option.value"
             :selected="fixedValueFor(child) === (option.iri ?? option.value)"
           >
-            {{ formatValueOption(option.value, valueOptionsFor(child)) }}
+            {{ formatValueOption(option.iri ?? option.value, valueOptionsFor(child)) }}
           </option>
         </select>
-        <select
-          v-else-if="!child.rightSource"
-          multiple
-          class="select-bordered select h-20 min-w-40 select-xs"
-          @change="setMultipleOptions(child, $event)"
-        >
-          <option
-            v-for="option in valueOptionsFor(child)"
-            :key="option.iri ?? option.value"
-            :value="option.iri ?? option.value"
-            :selected="selectedOptionValues(child).includes(option.iri ?? option.value)"
+        <details v-else-if="!child.rightSource" data-testid="constraint-value-multiselect" class="dropdown max-w-full">
+          <summary class="btn min-w-36 btn-outline btn-xs">
+            {{ child.values.length ? `${child.values.length} selected` : 'choose values' }}
+          </summary>
+          <div
+            class="dropdown-content z-10 mt-1 max-h-64 w-64 max-w-[calc(100vw-2rem)] overflow-auto rounded-box border border-base-content/10 bg-base-100 p-2 shadow"
           >
-            {{ formatValueOption(option.value, valueOptionsFor(child)) }}
-          </option>
-        </select>
+            <fieldset v-for="catalog in valueOptionGroupsFor(child)" :key="catalog.iri || 'values'">
+              <legend v-if="catalog.label" class="px-2 py-1 text-xs font-semibold opacity-70">
+                {{ catalog.label }}
+              </legend>
+              <label
+                v-for="option in catalog.options"
+                :key="option.iri ?? option.value"
+                class="flex min-h-8 items-center gap-2 rounded px-2 hover:bg-base-200"
+              >
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm checkbox-primary"
+                  :value="option.iri ?? option.value"
+                  :checked="selectedOptionValues(child).includes(option.iri ?? option.value)"
+                  @change="toggleOption(child, option.iri ?? option.value)"
+                />
+                <span class="text-sm">
+                  {{ formatValueOption(option.iri ?? option.value, valueOptionsFor(child)) }}
+                </span>
+              </label>
+            </fieldset>
+          </div>
+        </details>
         <button type="button" class="btn btn-ghost btn-xs" @click="removeChild(i)">✕</button>
       </div>
     </template>

@@ -124,9 +124,6 @@ onUnmounted(() => stateFilterStore.reset())
               <div class="badge badge-secondary">{{ task.state }}</div>
             </h2>
             <div class="flex justify-between">
-              <div v-if="task.type === 'template' && task.document_number">
-                Document number: {{ task.document_number }}
-              </div>
               <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
               <div v-else-if="task.type === 'contract' && task.contract_version">
                 Version: {{ task.contract_version }}

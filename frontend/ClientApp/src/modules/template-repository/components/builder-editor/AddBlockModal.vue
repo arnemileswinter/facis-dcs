@@ -111,8 +111,6 @@ async function handleAddComponent(template: ContractTemplate) {
   if (ctx === null) return
   const full = await contractTemplateService.retrieveById({
     did: template.did,
-    version: template.version,
-    document_number: template.document_number,
   })
   if (!full) return
   draftStore.inlineComponent(full, ctx.parentBlockId, ctx.insertIndex)
@@ -171,7 +169,7 @@ function handleAddClause(clauseBlockId: string) {
           <div class="flex max-h-64 flex-col gap-2 overflow-y-auto">
             <button
               v-for="t in componentTemplates"
-              :key="`${t.did}-${t.version}-${t.document_number}`"
+              :key="`${t.did}-${t.version}`"
               type="button"
               class="flex min-h-11 cursor-pointer flex-col justify-center rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-left transition-colors select-none hover:bg-base-200"
               @click="handleAddComponent(t)"

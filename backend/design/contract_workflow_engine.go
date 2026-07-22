@@ -550,7 +550,6 @@ var ApprovedContractTemplateRetrieveRequest = Type("ApprovedContractTemplateRetr
 
 var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRetrieveResponse", func() {
 	Attribute("did", String, "DID of the contract template")
-	Attribute("document_number", String, "Document number")
 	Attribute("version", Int, "Version")
 	Attribute("state", String, "State")
 	Attribute("template_type", String, "The type of the template")

@@ -40,7 +40,11 @@ import type {
   SemanticParameterOperator,
   TemplateTypeValue,
 } from '@template-repository/models/contract-template'
-import type { AddBlockOptions, AddBlockPayload, TemplateDraftState } from '@template-repository/models/template-draft-store'
+import type {
+  AddBlockOptions,
+  AddBlockPayload,
+  TemplateDraftState,
+} from '@template-repository/models/template-draft-store'
 
 const storeId = 'dcsDraft'
 
@@ -51,7 +55,6 @@ export interface LoadDocumentMeta {
   templateType?: TemplateTypeValue
   state?: ContractTemplateState | null
   version?: number | null
-  document_number?: string | null
   updated_at?: string | null
   created_by?: string
   responsible?: ContractTemplateResponsible | null
@@ -121,9 +124,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       if (!this.did || !this.updated_at) return null
       return {
         did: this.did,
-        state: this.state,
         updated_at: this.updated_at,
-        document_number: this.document_number ?? undefined,
         template_type: this.templateType,
         name: this.name,
         description: this.description,
@@ -151,7 +152,6 @@ export const useDcsDraftStore = defineStore(storeId, {
           templateType: templateType !== TemplateType.component ? templateType : derivedTemplateType,
           state: meta.state ?? undefined,
           version: meta.version ?? null,
-          document_number: meta.document_number ?? null,
           updated_at: meta.updated_at ?? null,
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
@@ -174,7 +174,6 @@ export const useDcsDraftStore = defineStore(storeId, {
         templateType,
         state: meta.state ?? undefined,
         version: meta.version ?? null,
-        document_number: meta.document_number ?? null,
         updated_at: meta.updated_at ?? null,
         created_by: meta.created_by ?? '',
         responsible: meta.responsible ?? null,
@@ -277,9 +276,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       const documentId = this.documentIri ?? this.did ?? undefined
       // A condition maps 1:1 to a placeholder (@id == conditionId in the
       // reconstructed view-model); replace that node and its policies.
-      const oldFieldIds = new Set(
-        this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']),
-      )
+      const oldFieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
       if (oldFieldIds.size === 0) return
       const placeholders = payload.parameters.map((p) => semanticParamToPlaceholder(conditionId, p, documentId))
       this.contractData = [...this.contractData.filter((ph) => ph['@id'] !== conditionId), ...placeholders]
@@ -289,9 +286,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       )
     },
     deleteSemanticCondition(conditionId: string): void {
-      const fieldIds = new Set(
-        this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']),
-      )
+      const fieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
       if (fieldIds.size === 0) return
 
       // Remove placeholder references from clause blocks
@@ -386,9 +381,6 @@ export const useDcsDraftStore = defineStore(storeId, {
     },
     updateDescription(description: string): void {
       this.description = description
-    },
-    updateDocumentNumber(documentNumber: string): void {
-      this.document_number = documentNumber || null
     },
     reset(overrides?: Partial<TemplateDraftState>) {
       Object.assign(this, getInitialState())
@@ -623,7 +615,10 @@ function inlineComponentDocument(component: DcsTemplateData, documentId?: string
   for (const rule of policies) if (rule['@id']) remap(rule['@id'])
 
   const rewrittenBlocks = blocks.map((block) => ({ ...block, '@id': remap(block['@id']) }))
-  const rewrittenPlaceholders = placeholders.map((placeholder) => ({ ...placeholder, '@id': remap(placeholder['@id']) }))
+  const rewrittenPlaceholders = placeholders.map((placeholder) => ({
+    ...placeholder,
+    '@id': remap(placeholder['@id']),
+  }))
   rewriteContentRefs(rewrittenBlocks, idMap)
 
   const root = layout.find((node) => node['dcs:isRoot'])
@@ -675,7 +670,10 @@ function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   return next
 }
 
-function remapDutyIds(duty: import('@/models/dcs-jsonld').OdrlDuty, idMap: Map<string, string>): import('@/models/dcs-jsonld').OdrlDuty {
+function remapDutyIds(
+  duty: import('@/models/dcs-jsonld').OdrlDuty,
+  idMap: Map<string, string>,
+): import('@/models/dcs-jsonld').OdrlDuty {
   const next = { ...duty }
   if (next['@id']) next['@id'] = idMap.get(next['@id']) ?? next['@id']
   if (next['odrl:constraint']) {
@@ -890,7 +888,6 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   customMetaData: [],
   templateType: TemplateType.component,
   state: undefined,
-  document_number: null,
   version: null,
   updated_at: null,
   created_by: '',
@@ -976,14 +973,13 @@ function placeholderFromField(id: string, parameterName: string, domainFieldIri:
     'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
     'dcs:required': true,
-    ...(domainField?.valueConstraint ? { 'dcs:valueConstraint': cloneValueConstraint(domainField.valueConstraint) } : {}),
+    ...(domainField?.valueConstraint
+      ? { 'dcs:valueConstraint': cloneValueConstraint(domainField.valueConstraint) }
+      : {}),
   }
 }
 
-function proseBlockForField(
-  blocks: readonly DcsBlock[],
-  fieldId: string,
-): JsonLdReference {
+function proseBlockForField(blocks: readonly DcsBlock[], fieldId: string): JsonLdReference {
   for (const block of blocks) {
     if (!isDcsClause(block)) continue
     const content = block['dcs:content']

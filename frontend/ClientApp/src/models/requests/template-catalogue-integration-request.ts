@@ -10,7 +10,6 @@ export interface TemplateCatalogueRetrieveByIdRequest {
 
 export interface TemplateCatalogueSearchRequest {
   did?: string
-  document_number?: string
   version?: number
   name?: string
   description?: string

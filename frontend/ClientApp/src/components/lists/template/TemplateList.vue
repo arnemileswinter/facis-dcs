@@ -108,7 +108,7 @@ onUnmounted(() => stateFilterStore.reset())
     </li>
     <TemplateListItem
       v-for="template in filteredTemplates"
-      :key="`${template.did}|${template.document_number}|${template.version}`"
+      :key="`${template.did}|${template.version}`"
       :template="template"
     />
     <li v-if="isRepositoryEmpty" class="flex flex-col items-start gap-2 px-4 py-8">
