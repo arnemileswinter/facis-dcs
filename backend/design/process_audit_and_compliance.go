@@ -56,6 +56,15 @@ var PACComplianceRisk = Type("PACComplianceRisk", func() {
 	Required("did", "risk_type", "detail", "detected_at")
 })
 
+var PACIncidentFinding = Type("PACIncidentFinding", func() {
+	Description("A single non-compliance finding submitted as part of an incident report (DCS-IR-PACM-04)")
+
+	Attribute("risk_type", String, "Machine-readable risk class (e.g. MISSING_APPROVAL)")
+	Attribute("detail", String, "Human-readable description of the finding")
+
+	Required("risk_type", "detail")
+})
+
 var PACMonitorResponse = Type("PACMonitorResponse", func() {
 	Description("Continuous-monitoring snapshot of policy adherence (DCS-IR-PACM-03)")
 
@@ -65,10 +74,10 @@ var PACMonitorResponse = Type("PACMonitorResponse", func() {
 	Required("checked_at", "risks")
 })
 
-
-// The publishable head of an audit-trail checkpoint (ADR-16): hashes, counts
-// and a trusted timestamp only — nothing derived from the entries it commits
-// to, so it is safe to hand to an external notary such as an ORCE flow.
+// PACCheckpointHead is the publishable head of an audit-trail checkpoint
+// (ADR-16): hashes, counts and a trusted timestamp only — nothing derived from
+// the entries it commits to, so it is safe to hand to an external notary such
+// as an ORCE flow.
 var PACCheckpointHead = Type("PACCheckpointHead", func() {
 	Description("Publishable head of an audit-trail Merkle checkpoint")
 
@@ -83,7 +92,8 @@ var PACCheckpointHead = Type("PACCheckpointHead", func() {
 	Required("seq", "root", "leaf_count", "created_at")
 })
 
-// Evidence that one audit entry is committed to by a timestamped root.
+// PACCheckpointProof is evidence that one audit entry is committed to by a
+// timestamped root.
 var PACCheckpointProof = Type("PACCheckpointProof", func() {
 	Description("Merkle inclusion proof tying one audit entry to a checkpoint")
 
@@ -189,10 +199,19 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
+			Attribute("contract_did", String, "Contract DID the findings are linked to")
+			Attribute("template_did", String, "Template DID the findings are linked to")
+			Attribute("findings", ArrayOf(PACIncidentFinding), "Non-compliance findings raised by this report")
 		})
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
 		HTTP(func() {
 			POST("/pac/report")
 			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
 		Result(Any)
 	})

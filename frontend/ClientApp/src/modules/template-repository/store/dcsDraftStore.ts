@@ -1,7 +1,8 @@
+import { defineStore } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
 import { DCS_ODRL_PROFILE_IRI, DEFAULT_FIELD_CONSTRAINT_ACTION } from '@template-repository/utils/sla-ontology-catalog'
-import { defineStore } from 'pinia'
+import { applyInlineSemanticValues } from '@contract-workflow-engine/utils/semantic-condition-values'
 import {
   type DcsBlock,
   type DcsContentSegment,
@@ -22,7 +23,6 @@ import {
   type OdrlRule,
   type OdrlSet,
 } from '@/models/dcs-jsonld'
-import { applyInlineSemanticValues } from '@/modules/contract-workflow-engine/utils/semantic-condition-values'
 import type { SemanticConditionValue } from '@/models/contract-data'
 import type { ContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
@@ -40,7 +40,11 @@ import type {
   SemanticParameterOperator,
   TemplateTypeValue,
 } from '@template-repository/models/contract-template'
-import type { AddBlockOptions, AddBlockPayload, TemplateDraftState } from '@template-repository/models/template-draft-store'
+import type {
+  AddBlockOptions,
+  AddBlockPayload,
+  TemplateDraftState,
+} from '@template-repository/models/template-draft-store'
 
 const storeId = 'dcsDraft'
 
@@ -277,9 +281,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       const documentId = this.documentIri ?? this.did ?? undefined
       // A condition maps 1:1 to a placeholder (@id == conditionId in the
       // reconstructed view-model); replace that node and its policies.
-      const oldFieldIds = new Set(
-        this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']),
-      )
+      const oldFieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
       if (oldFieldIds.size === 0) return
       const placeholders = payload.parameters.map((p) => semanticParamToPlaceholder(conditionId, p, documentId))
       this.contractData = [...this.contractData.filter((ph) => ph['@id'] !== conditionId), ...placeholders]
@@ -289,9 +291,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       )
     },
     deleteSemanticCondition(conditionId: string): void {
-      const fieldIds = new Set(
-        this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']),
-      )
+      const fieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
       if (fieldIds.size === 0) return
 
       // Remove placeholder references from clause blocks
@@ -623,7 +623,10 @@ function inlineComponentDocument(component: DcsTemplateData, documentId?: string
   for (const rule of policies) if (rule['@id']) remap(rule['@id'])
 
   const rewrittenBlocks = blocks.map((block) => ({ ...block, '@id': remap(block['@id']) }))
-  const rewrittenPlaceholders = placeholders.map((placeholder) => ({ ...placeholder, '@id': remap(placeholder['@id']) }))
+  const rewrittenPlaceholders = placeholders.map((placeholder) => ({
+    ...placeholder,
+    '@id': remap(placeholder['@id']),
+  }))
   rewriteContentRefs(rewrittenBlocks, idMap)
 
   const root = layout.find((node) => node['dcs:isRoot'])
@@ -675,7 +678,10 @@ function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   return next
 }
 
-function remapDutyIds(duty: import('@/models/dcs-jsonld').OdrlDuty, idMap: Map<string, string>): import('@/models/dcs-jsonld').OdrlDuty {
+function remapDutyIds(
+  duty: import('@/models/dcs-jsonld').OdrlDuty,
+  idMap: Map<string, string>,
+): import('@/models/dcs-jsonld').OdrlDuty {
   const next = { ...duty }
   if (next['@id']) next['@id'] = idMap.get(next['@id']) ?? next['@id']
   if (next['odrl:constraint']) {
@@ -976,14 +982,13 @@ function placeholderFromField(id: string, parameterName: string, domainFieldIri:
     'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
     'dcs:required': true,
-    ...(domainField?.valueConstraint ? { 'dcs:valueConstraint': cloneValueConstraint(domainField.valueConstraint) } : {}),
+    ...(domainField?.valueConstraint
+      ? { 'dcs:valueConstraint': cloneValueConstraint(domainField.valueConstraint) }
+      : {}),
   }
 }
 
-function proseBlockForField(
-  blocks: readonly DcsBlock[],
-  fieldId: string,
-): JsonLdReference {
+function proseBlockForField(blocks: readonly DcsBlock[], fieldId: string): JsonLdReference {
   for (const block of blocks) {
     if (!isDcsClause(block)) continue
     const content = block['dcs:content']

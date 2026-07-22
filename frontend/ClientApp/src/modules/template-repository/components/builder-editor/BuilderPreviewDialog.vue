@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import { storeToRefs } from 'pinia'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { storeToRefs } from 'pinia'
 
 const uiStore = useTemplateEditorUiStore()
 const draftStore = useDcsDraftStore()
@@ -44,11 +44,7 @@ function close() {
               style="aspect-ratio: 210 / 297"
             >
               <div :class="previewContainerClasses">
-                <TemplatePreview
-                  :layout="layout"
-                  :blocks="blocks"
-                  :semantic-conditions="semanticConditions"
-                />
+                <TemplatePreview :layout="layout" :blocks="blocks" :semantic-conditions="semanticConditions" />
               </div>
             </div>
           </div>
