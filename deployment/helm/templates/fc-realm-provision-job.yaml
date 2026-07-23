@@ -131,7 +131,13 @@ spec:
               # so retry until it actually answers.
               echo "Waiting for $KC_BASE_URL ..."
               for i in $(seq 1 60); do
-                if curl -sf -o /dev/null "$KC_BASE_URL/realms/master/.well-known/openid-configuration"; then
+                # KC_PROXY_HEADERS=xforwarded + master realm's default
+                # sslRequired=EXTERNAL means Keycloak 403s any request that
+                # lacks this header, even the read-only well-known endpoint —
+                # confirmed live against IONOS's fc-keycloak (curl -sf without
+                # it returns 403, never 200, so this loop never detects "up"
+                # and the Job always fails via BackoffLimitExceeded).
+                if curl -sf -o /dev/null -H "X-Forwarded-Proto: https" "$KC_BASE_URL/realms/master/.well-known/openid-configuration"; then
                   echo "Keycloak is up."
                   break
                 fi

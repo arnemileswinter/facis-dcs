@@ -68,17 +68,6 @@ import (
 	"goa.design/clue/log"
 )
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-	return false
-}
-
 // computeListenURL derives the HTTP listen address from the same flags/env
 // var handleHTTPServer's caller used to compute inline just before binding.
 // Hoisted out so a bootstrap server (see startBootstrapServer) can claim the
@@ -265,9 +254,6 @@ func main() {
 	}()
 
 	didFilePath := os.Getenv("DCS_DID")
-	if didFilePath == "" || !fileExists(didFilePath) {
-		log.Printf(ctx, "DCS_DID configuration or file is missing")
-	}
 
 	didSigner, err := hsmClient.Signer(hsm.KeyLabelDID())
 	if err != nil {
