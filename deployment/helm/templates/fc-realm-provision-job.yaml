@@ -1,65 +1,28 @@
 {{- if and .Values.fcservice.enabled .Values.fcservice.realmProvision.enabled }}
-# Vendored fc-service's own boot-time `--import-realm` hits a confirmed,
-# unresolved upstream Keycloak bug for realm files of this size (silent exit
-# partway through import, no error at any log level — see
-# keycloak/keycloak#37745). We disable --import-realm (see values' fcservice.
-# keycloak.args) and do the same import via the Admin REST API instead, which
-# doesn't hit the bug. Also assigns the SCHEMA_*/ASSET_* realm roles
-# fc-service-server's controllers require (confirmed via
-# SchemaControllerTest.java) that fc-realm.json's import doesn't include, and
-# patches the two env vars fc-service's own templates hardcode to an
-# unreachable https URL (SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI /
-# SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI — both appended
-# after `.Values.env` in their templates, so values-level overrides lose).
+# fc-service's own boot-time `--import-realm` hits a confirmed, unresolved
+# upstream Keycloak bug for realm files of this size (silent exit partway
+# through import, no error at any log level — see keycloak/keycloak#37745).
+# We disable --import-realm (see values' fcservice.keycloak.args) and do the
+# same import via the Admin REST API instead, which doesn't hit the bug.
+# Also assigns the SCHEMA_*/ASSET_* realm roles fc-service-server's
+# controllers require (confirmed via SchemaControllerTest.java) that
+# fc-realm.json's import doesn't include.
+#
+# No k8s API access needed (no custom ServiceAccount/RBAC either) — this
+# used to also patch fc-service's/fc-demo-portal's issuer env vars via the
+# k8s API, working around the OLD vendored fc-service chart hardcoding them
+# to an unreachable URL after `.Values.env` (values-level overrides lost).
+# charts/federated-catalogue (our own chart, replacing the vendored one)
+# computes the correct issuer directly from values instead, so that patch
+# step became actively harmful: it kept overwriting the chart's already-
+# correct value with a stale internal-only one, 401ing every DCS→FC call
+# again after every sync (confirmed live).
+#
 # Idempotent; runs on every install/upgrade. No --wait on the helm invocation
 # (see tests/bdd/Makefile's kind_deploy) — Helm hooks don't gate on
 # Deployment readiness, so this isn't blocked by fc-service/fc-demo-portal
 # not yet being Ready (matches the same reasoning as hsm-provision-job.yaml's
 # devCertChain deadlock note).
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
-  labels:
-    {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-1"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
-  labels:
-    {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-1"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-rules:
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
-  labels:
-    {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-1"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
----
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -78,7 +41,6 @@ spec:
         {{- include "digital-contracting-service.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: fc-realm-provision
     spec:
-      serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
       restartPolicy: OnFailure
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -99,20 +61,6 @@ spec:
               value: {{ .Values.fcservice.keycloak.realm | quote }}
             - name: FC_CLIENT_UUID
               value: {{ .Values.fcservice.realmProvision.serviceAccountUserID | quote }}
-            - name: FC_DEPLOYMENT
-              value: "fc-service"
-            - name: FC_CONTAINER
-              value: "fcservice"
-            - name: PORTAL_DEPLOYMENT
-              value: "fc-demo-portal"
-            - name: PORTAL_CONTAINER
-              value: "fc-demo-portal"
-            - name: ISSUER_URI
-              value: {{ printf "http://%s:8080/auth/realms/%s" .Values.fcservice.realmProvision.keycloakHost .Values.fcservice.keycloak.realm | quote }}
-            - name: K8S_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
           volumeMounts:
             - name: realm-config
               mountPath: /realm
@@ -122,9 +70,6 @@ spec:
             - -c
             - |
               set -eu
-              K8S_HOST="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
-              CA_PATH="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-              SA_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
 
               # fc-keycloak takes a while to come up (Quarkus augmentation);
               # helm runs this hook without waiting for Deployment readiness,
@@ -190,40 +135,6 @@ spec:
                 -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
                 "$KC_BASE_URL/admin/realms/$REALM/users/$FC_CLIENT_UUID/role-mappings/realm" \
                 --data "$ROLE_REPS"
-
-              # fc-service's/fc-demo-portal's own templates hardcode these two
-              # env vars pointing at https://{hosts.keycloak}/... (unreachable —
-              # cluster-internal, no TLS listener) after `.Values.env`, so
-              # values-level overrides can't win; patch the live Deployments.
-              patch_env() {
-                local deployment="$1" container="$2" env_name="$3" env_value="$4"
-                local payload
-                payload="$(jq -n --arg c "$container" --arg n "$env_name" --arg v "$env_value" \
-                  '{spec:{template:{spec:{containers:[{name:$c,env:[{name:$n,value:$v}]}]}}}}')"
-                curl -sf -X PATCH \
-                  --cacert "$CA_PATH" -H "Authorization: Bearer ${SA_TOKEN}" \
-                  -H "Content-Type: application/strategic-merge-patch+json" \
-                  --data "$payload" \
-                  "$K8S_HOST/apis/apps/v1/namespaces/$K8S_NAMESPACE/deployments/$deployment" > /dev/null
-                echo "Patched $deployment/$container env $env_name."
-              }
-
-              patch_env "$FC_DEPLOYMENT" "$FC_CONTAINER" \
-                "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI" "$ISSUER_URI"
-              {{- /* fc-demo-portal is disabled in BDD (values.bdd.yml's
-                   fcservice.portal.enabled: false — no test exercises its
-                   demo UI) — patching a Deployment that doesn't exist 404s
-                   and (via set -eu) kills the whole script, confirmed live.
-                   Base values.yaml sets portal.enabled: true explicitly (not
-                   left unset) so this if actually sees the override — see
-                   values.yaml's comment on why a `default true` here would
-                   NOT have worked (sprig's default() also treats false as
-                   "unset", confirmed live: it silently ignored the BDD
-                   override). */}}
-              {{- if .Values.fcservice.portal.enabled }}
-              patch_env "$PORTAL_DEPLOYMENT" "$PORTAL_CONTAINER" \
-                "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI" "$ISSUER_URI"
-              {{- end }}
 
               echo "fc-realm-provision done."
       volumes:

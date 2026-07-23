@@ -49,8 +49,23 @@ spec:
             - name: KC_PROXY_HEADERS
               value: "xforwarded"
             {{- if .Values.hostname }}
+            # A full URL (scheme+host+path), not a bare hostname: Keycloak's
+            # hostname-v2 provider only takes hostname/port from a bare
+            # value and still infers SCHEME from the actual request (via
+            # X-Forwarded-Proto when KC_PROXY_HEADERS trusts it, else the
+            # raw connection) — confirmed live, this produced two different
+            # `iss` claims for the exact same realm depending on whether the
+            # token was requested through the external https ingress or
+            # directly over plain http from inside the cluster (DCS's own
+            # client_credentials call, no proxy headers), which fc-service's
+            # fixed https-only issuer check then rejected as a mismatch
+            # (401). A full URL fixes scheme+host unconditionally. It must
+            # also carry the relative path explicitly — confirmed live,
+            # switching to a full-URL KC_HOSTNAME stops Keycloak from
+            # auto-appending KC_HTTP_RELATIVE_PATH to the issuer, dropping
+            # "/auth" and 401ing all over again.
             - name: KC_HOSTNAME
-              value: {{ .Values.hostname | quote }}
+              value: {{ printf "https://%s/%s" .Values.hostname (trimAll "/" .Values.route.path) | trimSuffix "/" | quote }}
             {{- end }}
             - name: KC_HOSTNAME_STRICT
               value: "false"
