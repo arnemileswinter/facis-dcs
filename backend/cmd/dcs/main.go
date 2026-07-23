@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -76,6 +77,94 @@ func fileExists(path string) bool {
 		return false
 	}
 	return false
+}
+
+// computeListenURL derives the HTTP listen address from the same flags/env
+// var handleHTTPServer's caller used to compute inline just before binding.
+// Hoisted out so a bootstrap server (see startBootstrapServer) can claim the
+// same address immediately at process start, before the PKCS#11 token is
+// necessarily provisioned.
+func computeListenURL(ctx context.Context, hostF, domainF, httpPortF string, secureF bool) *url.URL {
+	if hostF != "local" {
+		log.Fatal(ctx, fmt.Errorf("invalid host argument: %q (valid hosts: local)", hostF))
+	}
+	address := "http://0.0.0.0:8991"
+	if os.Getenv("DCS_BACKEND_PORT") != "" {
+		address = fmt.Sprintf("http://0.0.0.0:%s", os.Getenv("DCS_BACKEND_PORT"))
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		log.Fatalf(ctx, err, "invalid URL %#v\n", address)
+	}
+	if secureF {
+		u.Scheme = "https"
+	}
+	if domainF != "" {
+		u.Host = domainF
+	}
+	if httpPortF != "" {
+		h, _, err := net.SplitHostPort(u.Host)
+		if err != nil {
+			log.Fatalf(ctx, err, "invalid URL %#v\n", u.Host)
+		}
+		u.Host = net.JoinHostPort(h, httpPortF)
+	} else if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Host, "80")
+	}
+	return u
+}
+
+// startBootstrapServer claims the service's listen address immediately at
+// process start and answers 503 (with a short explanation) to every request
+// until it's shut down. Exists so the pod is Ready (per Kubernetes — no
+// readinessProbe is configured, so "container running" is sufficient) the
+// moment the process starts, rather than only once hsm.Open succeeds:
+// hsm.Open needs the PKCS#11 token that hsm-provision-job.yaml's post-install
+// hook creates, and that hook only runs once the whole release is Healthy —
+// a circular wait if this pod can't report healthy until the hook has
+// already run. DCS-IR-HI-01 (no software fallback for signing) is unchanged:
+// this only defers *when* the real handlers start serving, not what key
+// material they end up using.
+func startBootstrapServer(ctx context.Context, u *url.URL) *http.Server {
+	srv := &http.Server{
+		Addr: u.Host,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("starting up: waiting for PKCS#11 signing key material to be provisioned\n"))
+		}),
+		ReadHeaderTimeout: time.Second * 60,
+	}
+	go func() {
+		log.Printf(ctx, "bootstrap HTTP server listening on %q (waiting for HSM)", u.Host)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Errorf(ctx, err, "bootstrap HTTP server error")
+		}
+	}()
+	return srv
+}
+
+// openHSMWithRetry retries hsm.Open until it succeeds, instead of the
+// immediate log.Fatalf every other HSM/config error in main() uses. This is
+// the one call in the chain that's expected to fail transiently at fresh
+// install/upgrade (see startBootstrapServer's comment) — hsm-provision.sh
+// creates the token and all five keys in one run, so once Open succeeds the
+// downstream hsmClient.Signer(label) calls are not expected to need the same
+// treatment.
+func openHSMWithRetry(ctx context.Context) *hsm.HSM {
+	const interval = 5 * time.Second
+	attempt := 0
+	for {
+		attempt++
+		hsmClient, err := hsm.Open(hsm.ConfigFromEnv())
+		if err == nil {
+			return hsmClient
+		}
+		if attempt == 1 || attempt%12 == 0 { // log immediately, then once/minute
+			log.Printf(ctx, "waiting for PKCS#11 token (attempt %d): %v", attempt, err)
+		}
+		time.Sleep(interval)
+	}
 }
 
 func main() {
@@ -160,12 +249,15 @@ func main() {
 
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: db})
 
-	// Open the PKCS#11 token that holds every private key (DCS-IR-HI-01). A
-	// wrong module path/token/PIN is fatal: there is no software fallback.
-	hsmClient, err := hsm.Open(hsm.ConfigFromEnv())
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not open PKCS#11 token")
-	}
+	// Open the PKCS#11 token that holds every private key (DCS-IR-HI-01) — no
+	// software fallback once open, but opening itself is retried rather than
+	// immediately fatal: a fresh install/upgrade's hsm-provision Job may not
+	// have run yet (see openHSMWithRetry's doc comment). The bootstrap server
+	// claims the listen address now so the pod can report healthy while this
+	// retries; handleHTTPServer takes over the same address once ready.
+	listenURL := computeListenURL(ctx, *hostF, *domainF, *httpPortF, *secureF)
+	bootstrapSrv := startBootstrapServer(ctx, listenURL)
+	hsmClient := openHSMWithRetry(ctx)
 	defer func() {
 		if err := hsmClient.Close(); err != nil {
 			log.Errorf(ctx, err, "Could not close PKCS#11 token")
@@ -639,41 +731,13 @@ func main() {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 
-	address := "http://0.0.0.0:8991"
-	if os.Getenv("DCS_BACKEND_PORT") != "" {
-		address = fmt.Sprintf("http://0.0.0.0:%s", os.Getenv("DCS_BACKEND_PORT"))
+	// Hand off from the bootstrap server (up since before hsm.Open) to the
+	// real one on the same address — safe to do serially since Shutdown
+	// blocks until the listener's actually released.
+	if err := bootstrapSrv.Shutdown(ctx); err != nil {
+		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
-
-	// Start the servers and send errors (if any) to the error channel.
-	switch *hostF {
-	case "local":
-		{
-			addr := address
-			u, err := url.Parse(addr)
-			if err != nil {
-				log.Fatalf(ctx, err, "invalid URL %#v\n", addr)
-			}
-			if *secureF {
-				u.Scheme = "https"
-			}
-			if *domainF != "" {
-				u.Host = *domainF
-			}
-			if *httpPortF != "" {
-				h, _, err := net.SplitHostPort(u.Host)
-				if err != nil {
-					log.Fatalf(ctx, err, "invalid URL %#v\n", u.Host)
-				}
-				u.Host = net.JoinHostPort(h, *httpPortF)
-			} else if u.Port() == "" {
-				u.Host = net.JoinHostPort(u.Host, "80")
-			}
-			handleHTTPServer(ctx, u, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, webhookPlatform, &wg, errc, *dbgF)
-		}
-
-	default:
-		log.Fatal(ctx, fmt.Errorf("invalid host argument: %q (valid hosts: local)", *hostF))
-	}
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, webhookPlatform, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

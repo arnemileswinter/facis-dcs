@@ -42,28 +42,6 @@ spec:
       hostNetwork: true
       dnsPolicy: {{ default "ClusterFirstWithHostNet" .Values.dnsPolicy }}
       {{- end }}
-      {{- if .Values.pkcs11.provisioning.enabled }}
-      initContainers:
-        # Block startup until the provisioning Job (post-install hook) has
-        # created the SoftHSM2 token in the shared volume, so the backend never
-        # opens the PKCS#11 module before its keys exist.
-        - name: wait-for-hsm-token
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
-            - |
-              export SOFTHSM2_CONF={{ .Values.pkcs11.provisioning.tokenDir }}/softhsm2.conf
-              until softhsm2-util --show-slots 2>/dev/null | grep -q "Label:[[:space:]]*{{ .Values.pkcs11.tokenLabel }}"; do
-                echo "Waiting for SoftHSM2 token '{{ .Values.pkcs11.tokenLabel }}'..."
-                sleep 3
-              done
-              echo "SoftHSM2 token '{{ .Values.pkcs11.tokenLabel }}' is ready."
-          volumeMounts:
-            - name: hsm-token
-              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
-      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}
@@ -363,9 +341,11 @@ spec:
           secret:
             secretName: {{ include "digital-contracting-service.identitySecretName" . | quote }}
             # Published by the hsm-provision post-install hook AFTER the pod is
-            # scheduled. optional lets the pod schedule (the wait-for-hsm-token
-            # initContainer already gates the app until provisioning completes);
-            # required would FailedMount → BackOff before init even runs.
+            # scheduled — the app itself now retries hsm.Open in the background
+            # and serves a 503 bootstrap response until key material exists
+            # (see cmd/dcs/main.go openHSMWithRetry), so it must be able to
+            # start before this secret exists. required would FailedMount →
+            # BackOff before the container even starts.
             optional: true
       {{- end }}
       {{- if .Values.signing.tsaTrustCertSecret }}
