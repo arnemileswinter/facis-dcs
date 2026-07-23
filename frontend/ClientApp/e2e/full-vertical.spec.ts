@@ -44,7 +44,11 @@ async function completeParticipantDialog(page: Page): Promise<void> {
 
 /** Waits until the template detail view finished loading (name populated). */
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
-  await expect(page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name)
+  // The default 15s is tight while the e2e runner also hosts the second DCS
+  // stack — this step was flaky, passing only on retry.
+  await expect(page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name, {
+    timeout: 45_000,
+  })
 }
 
 /**

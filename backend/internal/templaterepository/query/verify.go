@@ -190,6 +190,11 @@ func buildCatalogueVerificationPayload(
 		description = *fullTemplate.Description
 	}
 
+	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
+	if err != nil {
+		return nil, fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
+	}
+
 	return fcasset.BuildPayload(fcasset.BuildInput{
 		Issuer:    issuer,
 		ValidFrom: fullTemplate.UpdatedAt,
@@ -199,6 +204,8 @@ func buildCatalogueVerificationPayload(
 			processData.State,
 			name,
 			description,
+			fullTemplate.TemplateType,
 		),
+		TemplateDataString: templateDataString,
 	})
 }

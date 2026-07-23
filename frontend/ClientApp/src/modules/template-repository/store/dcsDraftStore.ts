@@ -1,7 +1,8 @@
+import { defineStore } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
 import { DCS_ODRL_PROFILE_IRI, DEFAULT_FIELD_CONSTRAINT_ACTION } from '@template-repository/utils/sla-ontology-catalog'
-import { defineStore } from 'pinia'
+import { applyInlineSemanticValues } from '@contract-workflow-engine/utils/semantic-condition-values'
 import {
   type DcsBlock,
   type DcsContentSegment,
@@ -22,7 +23,6 @@ import {
   type OdrlRule,
   type OdrlSet,
 } from '@/models/dcs-jsonld'
-import { applyInlineSemanticValues } from '@/modules/contract-workflow-engine/utils/semantic-condition-values'
 import type { SemanticConditionValue } from '@/models/contract-data'
 import type { ContractTemplate } from '@/models/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
@@ -695,12 +695,12 @@ function remapConstraintIds(node: OdrlConstraintNode, idMap: Map<string, string>
     }
     return next
   }
-  const next = { ...node } as Record<string, unknown>
+  const next = { ...node }
   for (const op of ['odrl:and', 'odrl:or', 'odrl:xone', 'odrl:andSequence'] as const) {
     const group = node[op]
     if (group) next[op] = { '@list': group['@list'].map((child) => remapConstraintIds(child, idMap)) }
   }
-  return next as OdrlConstraintNode
+  return next
 }
 
 // ---- Layout helpers ----

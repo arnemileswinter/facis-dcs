@@ -40,8 +40,26 @@ func EventBusTopic() string {
 	return "dcs"
 }
 
-func GlobalAuditTrailName() string {
-	return "GLOBAL_AUDIT_TRAIL"
+// AuditCheckpointTimestampRetry is how often checkpoints that were anchored
+// while the TSA was unreachable are retried. Roots are immutable, so attaching
+// the timestamp later costs nothing but this delay.
+func AuditCheckpointTimestampRetry() time.Duration {
+	return 30 * time.Second
+}
+
+// OutboxAnchorMaxAttempts is how often an audit event is retried before it is
+// dead-lettered. Generous, because most anchoring failures are transient (the
+// TSA or the IPFS store being briefly unavailable) and dead-lettering an event
+// means it never enters the tamper-evident trail.
+func OutboxAnchorMaxAttempts() int {
+	return 50
+}
+
+// AuditCheckpointReadLimit bounds how many checkpoints a full-trail read walks
+// back through, so the read stays within a request deadline once the log has
+// real history.
+func AuditCheckpointReadLimit() int {
+	return 500
 }
 
 func LoginAttemptsThresholdInDuration() int {

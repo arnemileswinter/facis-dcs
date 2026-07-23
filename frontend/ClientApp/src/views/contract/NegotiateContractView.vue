@@ -2,29 +2,30 @@
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useTemplateRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
-import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
-import { useDocumentExport } from '@/composables/useDocumentExport'
-import WorkflowStageBanner from '@/core/components/WorkflowStageBanner.vue'
-import { useScrollStore } from '@/core/store/scroll'
-import { contractStory, toBannerActions } from '@/core/workflow-story'
-import AuditView from '@/modules/contract-workflow-engine/components/AuditView.vue'
-import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
-import ContractHistoryDiffView from '@/modules/contract-workflow-engine/components/ContractHistoryDiffView.vue'
-import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
-import { useContractPermissions } from '@/modules/contract-workflow-engine/composables/useContractPermissions'
-import { useSemanticValueVerification } from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
-import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
-import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
+import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
+import { useScrollStore } from '@core/store/scroll'
+import { contractStory, toBannerActions } from '@core/workflow-story'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import AuditView from '@contract-workflow-engine/components/AuditView.vue'
+import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
+import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import { useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import {
   collectDeclaredRequirements,
   fromDocumentSemanticValues,
-} from '@/modules/contract-workflow-engine/utils/semantic-condition-values'
-import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import { buildContractDocument } from '@/modules/template-repository/store/dcsDraftStore'
-import { useDcsDraftStore } from '@/modules/template-repository/store/dcsDraftStore'
-import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
+} from '@contract-workflow-engine/utils/semantic-condition-values'
+import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
+import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { getLocalDIDFile } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
@@ -32,8 +33,8 @@ import { ContractState } from '@/types/contract-state'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractData, SemanticConditionValue } from '@/models/contract-data'
-import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
 import type { UserRole } from '@/types/user-role'
+import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
 const navStore = useNavStore()
@@ -163,11 +164,7 @@ watch(
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(
-          conditionValue,
-          dcsDraftStore.blocks,
-          dcsDraftStore.semanticConditions,
-        ),
+        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -234,10 +231,28 @@ const submitContract = async () => {
   }
 }
 
+// Only THIS party's undecided decisions may block Submit. A negotiation
+// replicates to both instances carrying a decision row per negotiator, but each
+// instance resolves its own row in its own database — the counterparty's
+// acceptance never lands here. Counting every row therefore deadlocked the
+// federated round: the peer's pending decision disabled our Submit forever, and
+// responding to it matched no row (the respond updates WHERE negotiator = us).
+// Identifies which negotiation decisions are OURS: decisions are keyed by the
+// party's DCS instance did:web, not by the logged-in user's issuer (that is the
+// signatory's organization and never matches a party).
+const localInstanceDid = ref('')
+
+// A change request we authored ourselves is excluded: FR-CWE-07 refuses an
+// accept by its own author, so it would disable Submit with a decision this
+// user can never resolve. The backend submit gate skips the same rows.
 const hasOpenDecisions = computed(
   () =>
-    contract.value?.negotiations?.some((negotiation) =>
-      negotiation.negotiation_decisions.some((decision) => !decision.decision),
+    contract.value?.negotiations?.some(
+      (negotiation) =>
+        negotiation.created_by !== issuer.value &&
+        negotiation.negotiation_decisions.some(
+          (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
+        ),
     ) ?? false,
 )
 
@@ -261,8 +276,10 @@ watch(
   { immediate: true, deep: true },
 )
 
-onMounted(() => {
+onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract' })
+  // Our own party identity, used to tell our pending decisions from the peer's.
+  localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
 })
 
 onUnmounted(() => {
@@ -430,13 +447,13 @@ const exportPDF = async () => {
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">Negotiate Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Negotiate Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <a
                 v-for="tab in tabs"
                 :key="tab.id"
                 role="tab"
-                class="tab"
+                class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
@@ -519,7 +536,11 @@ const exportPDF = async () => {
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
-        <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <!-- Needs the loaded contract's DID; until it arrives exportPDF can only
+             return silently, so the click looks like it did nothing. -->
+        <button class="btn btn-outline md:w-32" :disabled="exporting || !contract" @click="exportPDF">
+          Export PDF
+        </button>
         <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn flex-1 btn-primary"

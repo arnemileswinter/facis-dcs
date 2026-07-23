@@ -1313,14 +1313,13 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 			continue
 		}
 		history = append(history, &contractworkflowengine.ContractAuditResponse{
-			ID:               entry.ID,
-			Component:        entry.Component,
-			EventType:        entry.EventType,
-			EventData:        entry.EventData,
-			Did:              entry.DID,
-			CreatedAt:        entry.CreatedAt.String(),
-			GlobalLogPredCid: entry.GlobalLogPredCID,
-			ResLogPredCid:    entry.ResLogPredCID,
+			ID:            entry.ID,
+			Component:     entry.Component,
+			EventType:     entry.EventType,
+			EventData:     entry.EventData,
+			Did:           entry.DID,
+			CreatedAt:     entry.CreatedAt.String(),
+			ResLogPredCid: entry.ResLogPredCID,
 		})
 	}
 
@@ -1382,10 +1381,15 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		DeploymentRepo: s.DeploymentRepo,
 		Target:         s.TargetClient,
 	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:         req.Did,
 		UpdatedAt:   updatedAt,
 		RequestedBy: middleware.GetParticipantID(ctx),
+		LocalPeer:   localPeer,
 	})
 	if err != nil {
 		return nil, mapContractCommandError(err)

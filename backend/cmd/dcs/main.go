@@ -231,10 +231,15 @@ func main() {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
 	authCfg.RequestSigner = requestSigner
+	systemClients, err := loadSystemClients()
+	if err != nil {
+		log.Fatalf(ctx, err, "Invalid system client configuration")
+	}
 	hydraJWTValidator, err := middleware.NewHydraJWTValidator(ctx, middleware.HydraJWTConfig{
 		PublicIssuerURL:   authCfg.Hydra.PublicIssuerURL(),
 		InternalIssuerURL: authCfg.Hydra.InternalIssuerURL(),
 		ClientID:          authCfg.Hydra.ClientID(),
+		SystemClients:     systemClients,
 	})
 	if err != nil {
 		log.Fatalf(ctx, err, "Failed to initialize Hydra JWT validator")
@@ -305,7 +310,7 @@ func main() {
 		ARepo:        &aRepo,
 		TSAClient:    tsaClient,
 	}
-	err = outboxProcessor.Start(ctx, did)
+	err = outboxProcessor.Start(ctx)
 	if err != nil {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}

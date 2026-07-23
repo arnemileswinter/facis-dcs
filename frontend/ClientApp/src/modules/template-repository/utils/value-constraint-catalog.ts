@@ -1,9 +1,6 @@
 import { compactOdrlIdentifier } from '@template-repository/utils/odrl-vocabulary'
-import {
-  ONTOLOGY_DOMAIN_FIELDS,
-  ONTOLOGY_VALUE_CONSTRAINTS,
-} from '@/modules/template-repository/utils/ontology-domain-fields'
-import type { SemanticValueConstraint } from '@/modules/template-repository/models/contract-template'
+import { ONTOLOGY_DOMAIN_FIELDS, ONTOLOGY_VALUE_CONSTRAINTS } from '@template-repository/utils/ontology-domain-fields'
+import type { SemanticValueConstraint } from '@template-repository/models/contract-template'
 
 export function resolveAllowedValues(constraint?: SemanticValueConstraint): readonly string[] {
   if (!constraint) return []

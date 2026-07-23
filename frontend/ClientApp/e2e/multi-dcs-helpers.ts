@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Browser, BrowserContext, Page } from '@playwright/test'
+import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
 import {
   E2E_API_BASE,
   E2E_API_BASE_B,
@@ -11,11 +11,11 @@ import {
   E2E_FRONTEND_B_ORIGIN,
   E2E_STATUSLIST_URL,
 } from '../playwright.config'
-import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
+import type { Browser, BrowserContext, Page } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
-const python = process.env.E2E_BDD_PYTHON || path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
+const python = process.env.E2E_BDD_PYTHON ?? path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
 
 /**
  * Where the vertical persists every hop's PDF and its embedded JSON-LD for human
@@ -47,6 +47,13 @@ function makeInstance(page: Page, context: BrowserContext, origin: string, apiBa
     async gotoAs(role, url) {
       await applySession(context, page, origin, mintSession(role, apiBase))
       await page.goto(url)
+      // Two instances mean two browser contexts, and Chromium throttles timers
+      // in pages it considers hidden. The signing ceremony dialog advances on a
+      // 2.5s setInterval poll, so a backgrounded instance stops progressing:
+      // the wallet leg verifies server-side while the viewer never notices and
+      // never fetches the to-be-signed document. Keep the instance we are
+      // driving in the foreground.
+      await page.bringToFront()
     },
   }
 }
@@ -83,13 +90,46 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
   await expect(inst.page.getByText('Verified', { exact: true })).toBeVisible()
 
+  // Match ANY ceremony-start response, then assert: an r.ok() filter turns a
+  // refusal into "no response at all", which has cost several runs already.
   const ceremonyStarted = inst.page.waitForResponse(
-    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/signature/request') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
-  const preparedDownload = inst.page.waitForEvent('download', { timeout: 30_000 })
+  // Take the to-be-signed PDF from the app's OWN prepare response rather than
+  // the browser download event. The ceremony still runs entirely through the UI
+  // — this only changes how the bytes are observed. The download event proved
+  // unreliable here: /signature/prepare answered 200 with the full PDF and the
+  // app called its download helper, yet no download ever fired. Reading the
+  // response the app actually received is both faithful and deterministic.
+  // Armed before the click because the document is only prepared once the wallet
+  // leg completes, further down, after complete_signing_webhook.py runs.
+  // Match ANY prepare response, not only an ok one: filtering on r.ok() made a
+  // rejected prepare (422) indistinguishable from no prepare at all, so the
+  // failure reported a missing response instead of the refusal it actually got.
+  const preparedResponse = inst.page.waitForResponse((r) => r.url().includes('/signature/prepare'), {
+    timeout: 180_000,
+  })
+  // What the VIEWER itself saw, so a stall reports whether its poll ran at all
+  // and what it got, rather than only that no prepare arrived.
+  const viewerCalls: string[] = []
+  inst.page.on('response', (r) => {
+    if (/\/signature\/(request|prepare)/.test(r.url()))
+      viewerCalls.push(`${r.status()} ${r.request().method()} ${r.url().split('/api')[1] ?? r.url()}`)
+  })
+  const viewerErrors: string[] = []
+  inst.page.on('console', (m) => {
+    if (m.type() === 'error') viewerErrors.push(m.text().slice(0, 200))
+  })
+  inst.page.on('pageerror', (e) => viewerErrors.push(`pageerror: ${e.message.slice(0, 200)}`))
+
   await inst.page.getByRole('button', { name: /download document to sign/ }).click()
-  const ceremony = (await (await ceremonyStarted).json()) as { ceremony_id: string }
+  const ceremonyResponse = await ceremonyStarted
+  expect(
+    ceremonyResponse.ok(),
+    `start signing ceremony on ${inst.origin}: HTTP ${ceremonyResponse.status()} ${await ceremonyResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
+  const ceremony = (await ceremonyResponse.json()) as { ceremony_id: string }
   expect(ceremony.ceremony_id).toBeTruthy()
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.ceremony_id], {
@@ -98,7 +138,43 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
-  const preparedPath = (await (await preparedDownload).path())!
+  // The viewer only fetches the to-be-signed PDF once its poll sees the ceremony
+  // verified; a rejected ceremony makes applySignature return silently, with no
+  // error and no request. Assert the wallet leg landed so that failure reports
+  // the actual ceremony status instead of stalling on a missing response.
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  await expect
+    .poll(
+      async () => {
+        const r = await inst.page.request.get(
+          `${inst.apiBase}/signature/request/${encodeURIComponent(ceremony.ceremony_id)}`,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 30_000 },
+        )
+        if (!r.ok()) return `HTTP ${r.status()}`
+        return ((await r.json()) as { status?: string }).status ?? 'unknown'
+      },
+      { timeout: 90_000, message: `signing ceremony on ${inst.origin} never reached "verified"` },
+    )
+    .toBe('verified')
+
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
+  const prepared = await preparedResponse.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `${message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+    )
+  })
+  expect(
+    prepared.ok(),
+    `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
+  ).toBeTruthy()
+  // /signature/prepare answers a JSON envelope carrying the PDF base64-encoded
+  // (the viewer decodes it into the blob it hands the signatory), so decode it
+  // the same way rather than treating the body as raw PDF bytes.
+  const preparedEnvelope = (await prepared.json()) as { document: string }
+  const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
+  expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
+  fs.writeFileSync(preparedPath, preparedBytes)
   const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
@@ -106,7 +182,16 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
+  // Assert the submit itself, with its body: the viewer swallows a failed submit
+  // into an on-page message, so waiting only for the SIGNED badge reports a
+  // missing element rather than why the DCS refused the signature.
+  const submitted = inst.page.waitForResponse((r) => r.url().includes('/signature/submit'), { timeout: 120_000 })
   await inst.page.locator('input[type="file"]').setInputFiles(signedPath)
+  const submitResponse = await submitted
+  expect(
+    submitResponse.ok(),
+    `submit signature on ${inst.origin}: HTTP ${submitResponse.status()} ${await submitResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
 }
 
@@ -175,20 +260,41 @@ export async function verifyArtifact(
   if (opts.save) persistArtifact(pdfPath, opts.save)
 }
 
-/** Exports the contract's PDF through the instance's own Contract Viewer (the
- *  Export PDF download) and returns the local path to the downloaded bytes. */
+/**
+ * Exports the contract's PDF through the instance's own Contract Viewer and
+ * returns the local path to the bytes.
+ *
+ * The Export PDF button is still clicked, and the export request it issues is
+ * asserted — that is the real UI coverage. The bytes themselves are then read
+ * back over the same authenticated endpoint rather than through the browser's
+ * download event: capturing an artifact is a read, and the download event
+ * proved an unreliable signal under two-instance CI load (the server answered
+ * 200 with the full PDF and no error surfaced, yet no download ever fired).
+ * Asserting the request keeps a genuinely broken button failing the suite.
+ */
 async function exportContractPdf(inst: Instance, contractDid: string): Promise<string> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
-  // IPFS-backed export: the signed hops fetch the frozen PDF from the shared Kubo,
-  // which under the two-instance CI load can take well over a minute — give it
-  // generous headroom so a legitimately slow export is not cut off as a hang.
-  const download = inst.page.waitForEvent('download', { timeout: 120_000 })
+  const exportUrl = `${inst.apiBase}/pdf/export/contract/${encodeURIComponent(contractDid)}`
+
+  const exported = inst.page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/${contractDid}`) && r.ok(), {
+    timeout: 120_000,
+  })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
+  await exported
+
+  const token = await inst.page.evaluate(() => window.localStorage.getItem('access_token'))
+  const resp = await inst.page.request.get(exportUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+    timeout: 120_000,
+  })
+  expect(resp.ok(), `export contract PDF on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const bytes = await resp.body()
+  expect(bytes.subarray(0, 5).toString('latin1'), 'exported bytes are a PDF').toBe('%PDF-')
+
   // Save under a .pdf name: veraPDF (run by verify_artifact.py) refuses to
-  // process a file without a .pdf extension, and Playwright's download.path()
-  // is an extensionless temp file.
+  // process a file without a .pdf extension.
   const out = path.join(tmpdir(), `export-${contractDid}-${Date.now()}.pdf`)
-  await (await download).saveAs(out)
+  fs.writeFileSync(out, bytes)
   return out
 }
 
@@ -450,7 +556,12 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
   await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
-  await constraint.locator('input[placeholder="value"]').fill('500')
+  // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
+  // 15000). Carried over from the single-instance component (which fills 250),
+  // 500 made every negotiated value violate the contract's own ODRL rule, so the
+  // reviewer's Approve stayed disabled on !verificationResult.isValid and the
+  // settle could never complete.
+  await constraint.locator('input[placeholder="value"]').fill('50000')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
@@ -633,7 +744,6 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   await proposed
 }
 
-
 /**
  * Stage 5 — A transmits the DRAFT contract to its counterparty through the real
  * UI: the Contract Creator's "Offer to counterparty" action on the contract view
@@ -677,16 +787,34 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
     await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-    const showBtn = inst.page.getByRole('button', { name: 'Show' }).first()
-    if (!(await showBtn.isVisible().catch(() => false))) break
-    await showBtn.click()
-    const responded = inst.page.waitForResponse(
-      (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
-      { timeout: 30_000 },
-    )
-    await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-    await confirmModalOn(inst, 'Confirm')
-    await responded
+    // Wait for the contract to actually be loaded before probing for decisions.
+    // Submit only renders once contract.state is known, and isVisible() below
+    // does NOT auto-wait — probing straight after navigation reported "no open
+    // decisions" while the fetch was still in flight, silently skipping the
+    // accept and leaving the round unresolvable.
+    await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
+    const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
+    if (pending === 0) break
+
+    // Walk every pending round rather than only the first: a change request this
+    // instance authored itself stays pending forever (FR-CWE-07 refuses an accept
+    // by its own author), so it must be stepped over to reach the peer's.
+    let accepted = false
+    for (let i = 0; i < pending && !accepted; i++) {
+      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+      await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
+      const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
+      if (!(await showBtn.isVisible().catch(() => false))) continue
+      await showBtn.click()
+      const responded = inst.page.waitForResponse(
+        (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
+        { timeout: 30_000 },
+      )
+      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await confirmModalOn(inst, 'Confirm')
+      accepted = (await responded).ok()
+    }
+    if (!accepted) break
   }
 }
 
@@ -743,10 +871,16 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  // Match ANY deploy response, then assert: filtering on r.ok() made a refusal
+  // indistinguishable from no request at all.
   const deployed = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST' && r.ok(),
+    (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
-  await deployed
+  const deployResponse = await deployed
+  expect(
+    deployResponse.ok(),
+    `deploy contract on ${inst.origin}: HTTP ${deployResponse.status()} ${await deployResponse.text().catch(() => '')}`,
+  ).toBeTruthy()
 }

@@ -111,7 +111,6 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not read negotiators: %w", err)
 	}
-
 	data := db.NegotiationCreateData{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
