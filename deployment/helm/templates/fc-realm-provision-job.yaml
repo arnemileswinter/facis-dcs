@@ -98,7 +98,7 @@ spec:
             - name: REALM
               value: {{ .Values.fcservice.keycloak.realm | quote }}
             - name: FC_CLIENT_UUID
-              value: {{ .Values.fcservice.realmProvision.clientUUID | quote }}
+              value: {{ .Values.fcservice.realmProvision.serviceAccountUserID | quote }}
             - name: FC_DEPLOYMENT
               value: "fc-service"
             - name: FC_CONTAINER
@@ -210,8 +210,20 @@ spec:
 
               patch_env "$FC_DEPLOYMENT" "$FC_CONTAINER" \
                 "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI" "$ISSUER_URI"
+              {{- /* fc-demo-portal is disabled in BDD (values.bdd.yml's
+                   fcservice.portal.enabled: false — no test exercises its
+                   demo UI) — patching a Deployment that doesn't exist 404s
+                   and (via set -eu) kills the whole script, confirmed live.
+                   Base values.yaml sets portal.enabled: true explicitly (not
+                   left unset) so this if actually sees the override — see
+                   values.yaml's comment on why a `default true` here would
+                   NOT have worked (sprig's default() also treats false as
+                   "unset", confirmed live: it silently ignored the BDD
+                   override). */}}
+              {{- if .Values.fcservice.portal.enabled }}
               patch_env "$PORTAL_DEPLOYMENT" "$PORTAL_CONTAINER" \
                 "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI" "$ISSUER_URI"
+              {{- end }}
 
               echo "fc-realm-provision done."
       volumes:

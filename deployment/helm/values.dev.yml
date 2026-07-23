@@ -97,10 +97,10 @@ nats:
     type: NodePort
     nodePort: 30422
 
-# No local Federated Catalogue in dev — the old local subchart
-# (federated-catalogue+neo4j+keycloak) is gone, replaced by Chart.yaml's
-# vendored fc-service dependency (disabled here; see values.*.yml on the
-# IONOS-style environments for how to wire it up if a dev instance needs it).
+# No local Federated Catalogue in dev — our own local federated-catalogue/
+# keycloak/fuseki/fc-postgres charts (see Chart.yaml) are disabled here; see
+# values.*.yml on the IONOS-style environments for how to wire them up if a
+# dev instance needs it.
 # A dangling apiURL would crash-loop the backend (DCS's blocking
 # fcschemas.SyncWithRetry at startup), same failure IONOS hit.
 federatedCatalogue:

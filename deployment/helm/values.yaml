@@ -267,11 +267,14 @@ statuslistService:
 #   - federatedCatalogue.*: how THIS DCS backend calls out to an FC instance
 #     (its own env vars, independent of where that instance runs — could be
 #     fcservice below, or a remote instance like OSC-testbed pointing at IONOS).
-#   - fcservice.*: whether/how to deploy the FC instance itself, vendored
-#     verbatim from eclipse-xfsc/federated-catalogue's published chart (see
-#     Chart.yaml). Its own self-contained stack (Postgres, Keycloak, Fuseki) —
-#     see charts/fc-service-*.tgz (fetched by `helm dependency build`) for all
-#     configurable fields, or deployment/helm/values.*.yml for our overrides.
+#   - fcservice.*/fcKeycloakApp.*/fcFuseki.*/fcPostgres.*: whether/how to
+#     deploy the FC instance itself — our OWN local charts (charts/federated-
+#     catalogue, charts/keycloak, charts/fuseki, charts/fc-postgres; see
+#     Chart.yaml's dependencies and each chart's values.yaml for every
+#     configurable field). Fuseki is the graph store (not neo4j — neo4j's
+#     n10s plugin crash-loops on patch-version image drift, see
+#     charts/fuseki/values.yaml); fc-postgres backs both fc-service and its
+#     Keycloak.
 federatedCatalogue:
   enabled: false
   # URL the DCS backend uses to reach the Federated Catalogue API
@@ -291,6 +294,19 @@ fcservice:
   enabled: false
   route:
     path: ""
+  # Explicit true (not left unset) so fc-realm-provision-job.yaml's
+  # {{ if .Values.fcservice.portal.enabled }} can be overridden to false —
+  # sprig's `default` treats `false` as "unset" too, so a bare `| default
+  # true` there would silently ignore an override to false (confirmed live:
+  # values.bdd.yml's portal.enabled: false rendered as if it were true).
+  portal:
+    enabled: true
+  # Public hostname of the owned Keycloak (see fcKeycloakApp.hostname below —
+  # values.yaml cannot self-reference, keep these two in sync manually).
+  # Empty = fc-service builds its JWT issuer URL from the in-cluster Service
+  # instead (fine for kind/no-ingress environments, wrong for real ingress).
+  keycloak:
+    hostname: ""
   # Realm import via Admin API (see fc-realm-provision-job.yaml) — boot-time
   # --import-realm hits a confirmed unresolved upstream Keycloak bug for
   # realm files this size (keycloak/keycloak#37745).
@@ -299,12 +315,40 @@ fcservice:
     keycloakHost: "fc-keycloak-http"
     adminUser: "admin"
     adminPassword: "admin"
-    # Fixed, deterministic id/secret embedded in fc-realm.json's own
-    # `federated-catalogue` client representation (chart content, not
-    # server-generated) — same across every environment using this chart
-    # version, not a per-deploy secret. See fc-keycloak-client-secret.yaml.
-    clientUUID: "52c9c697-c860-4edd-bde4-5e03904fdb44"
+    # Fixed, deterministic id of the `service-account-federated-catalogue`
+    # USER (charts/keycloak/files/fc-realm.json's `users[0].id` — every
+    # client also gets an implicit service-account user, a distinct Keycloak
+    # entity from the client itself). Confirmed live: the client's OWN id
+    # (52c9c697-c860-4edd-bde4-5e03904fdb44, used as client-role containerId
+    # throughout the same file) is NOT this user's id and 404s the
+    # role-mappings call — every run of the Job failed on role assignment
+    # until this was corrected. Not server-generated, same across every
+    # environment using this chart version, not a per-deploy secret.
+    serviceAccountUserID: "25b4615a-b7e1-4554-be7d-85f50b2151cf"
     clientSecret: "**********"
+
+# Owned Keycloak backing fcservice above (see charts/keycloak). hostname MUST
+# be a real, externally reachable https URL for wallet/browser OIDC flows on
+# environments with real ingress (e.g. IONOS) — see docs/deployment-osc-testbed.md.
+# Keep in sync with fcservice.keycloak.hostname above.
+fcKeycloakApp:
+  hostname: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+
+# Owned Fuseki graph store backing fcservice above (see charts/fuseki).
+fcFuseki:
+  persistence:
+    enabled: false
+
+# Owned Postgres backing fcservice + fcKeycloakApp above (see charts/fc-postgres).
+fcPostgres:
+  persistence:
+    enabled: false
 
 # PDF-Core: C2PA-aware PDF compiler and verifier (DCS-OR-C2PA-*)
 pdfCore:

@@ -81,8 +81,8 @@ postgresql:
 # needed by Hydra when NOT running in dev mode and by FC for its OAuth2
 # client-credentials flow — B's own Hydra (below) runs with config.dev: true
 # (self-issues tokens, no external IdP), so Federated Catalogue is not needed.
-# (Old keycloak/neo4j subcharts this used to also disable are gone entirely
-# now — see Chart.yaml's fc-service dependency.)
+# (Our own local keycloak/fuseki/fc-postgres charts this would also disable
+# stay off by default too — see Chart.yaml's federated-catalogue dependency.)
 federatedCatalogue:
   enabled: false
 

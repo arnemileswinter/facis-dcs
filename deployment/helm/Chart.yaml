@@ -26,11 +26,26 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/dss"
     condition: dss.enabled
-  - name: fc-service
-    version: "0.4.0"
-    repository: "oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/catalogue"
+  - name: federated-catalogue
+    version: "0.1.0"
+    repository: "file://charts/federated-catalogue"
     condition: fcservice.enabled
     alias: fcservice
+  - name: keycloak
+    version: "0.1.0"
+    repository: "file://charts/keycloak"
+    condition: fcservice.enabled
+    alias: fcKeycloakApp
+  - name: fuseki
+    version: "0.1.0"
+    repository: "file://charts/fuseki"
+    condition: fcservice.enabled
+    alias: fcFuseki
+  - name: fc-postgres
+    version: "0.1.0"
+    repository: "file://charts/fc-postgres"
+    condition: fcservice.enabled
+    alias: fcPostgres
   - name: ipfs
     version: "0.1.0"
     repository: "file://charts/ipfs"

@@ -176,13 +176,13 @@ hydra:
       scope: ""
       token_endpoint_auth_method: client_secret_post
 
-# No BDD scenario exercises Federated Catalogue (grep confirms zero feature/step
-# references) — disabled rather than pointed at the old local subchart's
-# dcs-federated-catalogue/dcs-keycloak services, which no longer exist (see
-# Chart.yaml's fc-service dependency, replacing the removed local
-# federated-catalogue+neo4j+keycloak subcharts). A dangling apiURL would crash-loop
-# the backend the same way it did on IONOS (DCS-cmd/dcs's blocking
-# fcschemas.SyncWithRetry at startup).
+# The FC must run in the BDD kind scenario too (features/02, template_archive
+# and others exercise it against a real fc-service — see
+# tests/bdd/scripts/run_bdd_helm.sh's wait_for_fc_verification). Deployed via
+# our own local charts/federated-catalogue + charts/keycloak + charts/fuseki +
+# charts/fc-postgres (see Chart.yaml), scaled down for a fast/ephemeral KIND
+# cluster. No portal here — nothing in BDD exercises its demo UI, and one
+# less crash-prone eager-OIDC-discovery Deployment to wait on.
 # --- DCS backend's own outbound config for calling Federated Catalogue ---
 # (independent of where FC actually runs — here it's fcservice below).
 federatedCatalogue:
@@ -195,86 +195,38 @@ federatedCatalogue:
 fcKeycloak:
   realmURL: "http://fc-keycloak-http:8080/auth/realms/federated-catalogue-realm"
 
-# Vendored verbatim from eclipse-xfsc/federated-catalogue (see Chart.yaml) —
-# same config verified working on IONOS (docs/deployment-ionos-fc-outage.md),
-# scaled down for a fast/ephemeral KIND cluster. No portal here — nothing in
-# BDD exercises its demo UI, and one less crash-prone eager-OIDC-discovery
-# Deployment to wait on.
 fcservice:
   enabled: true
   realmProvision:
     enabled: true
-  keycloak:
-    realm: federated-catalogue-realm
-    hostname:
-      hostname: "fc-keycloak-http"
-    ingress:
-      enabled: false
-    resources:
-      requests:
-        cpu: 100m
-        memory: 512Mi
-      limits:
-        cpu: "1"
-        memory: 1Gi
-    # Boot-time --import-realm hits a confirmed unresolved upstream Keycloak
-    # bug (keycloak/keycloak#37745) — imported via Admin API instead, see
-    # fc-realm-provision-job.yaml (fcservice.realmProvision.enabled above).
-    args:
-      - start
-    extraEnv: |-
-      - name: KEYCLOAK_ADMIN
-        value: admin
-      - name: KEYCLOAK_ADMIN_PASSWORD
-        value: admin
-      - name: KC_PROXY_HEADERS
-        value: xforwarded
-      - name: KC_HOSTNAME
-        value: "{{ .Values.hostname.hostname }}"
-      - name: KC_HOSTNAME_STRICT
-        value: "false"
-      # Single replica — the chart's default clustered cache (ispn + JGroups
-      # jdbc-ping) is unneeded complexity.
-      - name: KC_CACHE
-        value: "local"
-  hosts:
-    keycloak: "fc-keycloak-http"
-  ingress:
-    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
   portal:
-    replicaCount: 0
-    ingress:
-      enabled: false
-  env:
-    - name: DATASTORE_FILE_PATH
-      value: /var/lib/fc-service/filestore
-    - name: FEDERATED_CATALOGUE_VERIFICATION_SIGNATURES
-      value: "false"
-    - name: GRAPHSTORE_IMPL
-      value: fuseki
-    - name: GRAPHSTORE_FUSEKI_URI
-      value: http://fc-fuseki:3030/ds
-    # Spring Data Neo4j autoconfigures a health indicator regardless of
-    # GRAPHSTORE_IMPL — without disabling it, /actuator/health stays DOWN
-    # forever (confirmed on IONOS) since no neo4j is deployed here at all.
-    - name: MANAGEMENT_HEALTH_NEO4J_ENABLED
-      value: "false"
-    - name: KEYCLOAK_AUTH_SERVER_URL
-      value: http://fc-keycloak-http:8080/auth
-    - name: KEYCLOAK_CREDENTIALS_SECRET
-      valueFrom:
-        secretKeyRef:
-          name: fc-keycloak-client-secret
-          key: keycloak_client_secret
-    - name: SPRING_DATASOURCE_URL
-      value: jdbc:postgresql://fc-postgres:5432/postgres
-    - name: SPRING_DATASOURCE_USERNAME
-      value: keycloak
-    - name: SPRING_DATASOURCE_PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: fc-postgres
-          key: password
+    enabled: false
+
+fcKeycloakApp:
+  # Empty, not "fc-keycloak-http" — a non-empty hostname makes
+  # charts/federated-catalogue's deployment.yaml build the issuer URL as
+  # https://<hostname>/auth (issuerScheme defaults to "https"), but nothing
+  # terminates TLS in front of Keycloak inside a plain kind cluster, so
+  # Keycloak's own actually-issued token iss claim (inferred from the real
+  # unproxied http request, KC_HOSTNAME_STRICT=false) wouldn't match — the
+  # exact issuer-mismatch 401 bug this whole rewrite exists to fix, just
+  # reintroduced for BDD. Empty falls back to the internal Service URL on
+  # both sides consistently (see deployment.yaml's $keycloakIssuerUrl).
+  hostname: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 # SoftHSM2 software token holding every private key (DCS-IR-HI-01), provisioned
 # in-cluster with all five ECDSA P-256 keys and the C2PA x5chain. hsm.Open is

@@ -171,14 +171,17 @@ fi
 wait_for_dcs_http
 echo "DCS is reachable at $DCS_HEALTH_URL"
 
-# The Federated Catalogue's /verification endpoint needs Neo4j and its
+# The Federated Catalogue's /verification endpoint needs its Fuseki-backed
 # schema cache warm before it answers within the DCS client timeout;
 # template registration flows (features/02, template_archive) fail with
 # gateway timeouts when the suite starts against a cold FC. Warm it with
 # real verification requests through a temporary port-forward until one
 # completes, however it completes.
 wait_for_fc_verification() {
-  local fc_deploy="${HELM_RELEASE}-federated-catalogue"
+  # Fixed name, not release-prefixed — see charts/federated-catalogue's
+  # deployment.yaml (matches fc-realm-provision-job.yaml's own hardcoded
+  # Deployment name and ingress.yaml's hardcoded Service name).
+  local fc_deploy="fc-service"
   if ! "$KUBECTL_BIN" -n "$K8S_NAMESPACE" get "deployment/$fc_deploy" >/dev/null 2>&1; then
     return 0
   fi
