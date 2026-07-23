@@ -80,13 +80,10 @@ postgresql:
 # leaving apiURL empty skips FC entirely, no hard fail). Keycloak is only
 # needed by Hydra when NOT running in dev mode and by FC for its OAuth2
 # client-credentials flow — B's own Hydra (below) runs with config.dev: true
-# (self-issues tokens, no external IdP), so neither Keycloak nor Neo4j
-# (required only by the FC graph store) is needed.
+# (self-issues tokens, no external IdP), so Federated Catalogue is not needed.
+# (Old keycloak/neo4j subcharts this used to also disable are gone entirely
+# now — see Chart.yaml's fc-service dependency.)
 federatedCatalogue:
-  enabled: false
-keycloak:
-  enabled: false
-neo4j:
   enabled: false
 
 nats:

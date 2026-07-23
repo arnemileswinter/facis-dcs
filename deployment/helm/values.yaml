@@ -291,6 +291,20 @@ fcservice:
   enabled: false
   route:
     path: ""
+  # Realm import via Admin API (see fc-realm-provision-job.yaml) — boot-time
+  # --import-realm hits a confirmed unresolved upstream Keycloak bug for
+  # realm files this size (keycloak/keycloak#37745).
+  realmProvision:
+    enabled: false
+    keycloakHost: "fc-keycloak-http"
+    adminUser: "admin"
+    adminPassword: "admin"
+    # Fixed, deterministic id/secret embedded in fc-realm.json's own
+    # `federated-catalogue` client representation (chart content, not
+    # server-generated) — same across every environment using this chart
+    # version, not a per-deploy secret. See fc-keycloak-client-secret.yaml.
+    clientUUID: "52c9c697-c860-4edd-bde4-5e03904fdb44"
+    clientSecret: "**********"
 
 # PDF-Core: C2PA-aware PDF compiler and verifier (DCS-OR-C2PA-*)
 pdfCore:

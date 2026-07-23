@@ -63,27 +63,6 @@ postgresql:
     type: NodePort
     nodePort: 31513
 
-keycloak:
-  enabled: true
-  service:
-    type: NodePort
-    port: 8080
-    nodePort: 30010
-  auth:
-    adminUser: admin
-    adminPassword: admin
-  realm:
-    import: true
-  extraEnv:
-    - name: KC_HOSTNAME
-      value: "localhost"
-    - name: KC_HOSTNAME_PORT
-      value: "30010"
-    - name: KC_HOSTNAME_STRICT_HTTPS
-      value: "false"
-    - name: KC_HTTP_ENABLED
-      value: "true"
-
 hydra:
   enabled: true
   service:
@@ -118,33 +97,14 @@ nats:
     type: NodePort
     nodePort: 30122
 
-neo4j:
-  enabled: true
-  persistence:
-    enabled: false
-  service:
-    type: NodePort
-    nodePortHttp: 31373
-    nodePortBolt: 32287
-
-# XFSC Federated Catalogue (requires neo4j, keycloak, postgresql with "fc" database)
-# See charts/federated-catalogue/values.yaml for all configurable fields.
+# No local Federated Catalogue in dev — the old local subchart
+# (federated-catalogue+neo4j+keycloak) is gone, replaced by Chart.yaml's
+# vendored fc-service dependency (disabled here; see values.*.yml on the
+# IONOS-style environments for how to wire it up if a dev instance needs it).
+# A dangling apiURL would crash-loop the backend (DCS's blocking
+# fcschemas.SyncWithRetry at startup), same failure IONOS hit.
 federatedCatalogue:
-  enabled: true
-  service:
-    type: NodePort
-    nodePort: 31081
-  keycloak:
-    hostname: "localhost:30010"
-    issuerScheme: "http"
-  oauth:
-    clientID: "dcs-fc-client"
-  # Allow POSTing self-descriptions without signature verification in dev
-  verificationVpSignature: false
-  verificationVcSignature: false
-
-fcKeycloak:
-  realmURL: "http://localhost:30010/realms/gaia-x"
+  enabled: false
 # Not used when replicaCount=0, but kept as documentation for the backend .env.
 signing:
   issuerDID: "did:web:localhost"
