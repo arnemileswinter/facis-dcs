@@ -14,3 +14,4 @@ from . import dcs_real_signing_vertical_orce_steps  # noqa: F401
 from . import multi_signer_steps  # noqa: F401
 from . import dcs_oid4vp_document_retrieval_steps  # noqa: F401
 from . import poa_at_signing_steps  # noqa: F401
+from . import dcs_signing_acceptance_hardening_steps  # noqa: F401
