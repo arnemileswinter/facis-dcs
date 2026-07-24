@@ -186,14 +186,23 @@ def issue_access_credential(
     issuer_did: str = DEFAULT_ISSUER_DID,
     aud: str = DEFAULT_KB_AUD,
     nonce: str = DEFAULT_KB_NONCE,
+    statuslist_service_base: str | None = None,
+    statuslist_tenant: str | None = None,
 ) -> str:
-    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time)."""
+    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time).
+    statuslist_service_base/statuslist_tenant default to
+    issue_stored_credential's own defaults when unset — pass
+    BDD_CREDENTIAL_TENANT explicitly for a presentation the BDD/CI status-list
+    provisioning actually seeds (the "default" tenant is not guaranteed to
+    be, see ensure_statuslist_for_dev.py)."""
     issued_sd_jwt = issue_stored_credential(
         organization=organization,
         roles=roles,
         issuer_private=issuer_private,
         wallet_private=wallet_private,
         issuer_did=issuer_did,
+        statuslist_service_base=statuslist_service_base,
+        statuslist_tenant=statuslist_tenant,
     )
     return attach_key_binding(
         issued_sd_jwt=issued_sd_jwt,

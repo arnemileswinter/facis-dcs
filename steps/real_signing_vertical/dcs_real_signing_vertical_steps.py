@@ -122,20 +122,28 @@ def _fetch_pending_nonce(context, ceremony_id: str) -> str:
 
 def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str) -> str:
     """Build a Power of Attorney SD-JWT VC + KB-JWT presentation authorizing
-    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03)."""
+    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03).
+    Uses BDD_CREDENTIAL_TENANT — the SAME status-list tenant
+    AuthService.build_vp_token issues the login/role credential against and
+    ensure_statuslist_for_dev.py seeds — not issue_stored_credential's
+    "default" tenant, which the BDD/CI stack does not reliably provision."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.issuer import DEFAULT_ISSUER_DID, issue_access_credential  # noqa: PLC0415
+    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
 
     import os  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
+    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     return issue_access_credential(
         organization=organization,
         roles=roles,
         issuer_private=keys.issuer_private,
         wallet_private=keys.wallet_private,
         issuer_did=issuer_did,
+        statuslist_service_base=status_base,
+        statuslist_tenant=BDD_CREDENTIAL_TENANT,
         aud=aud,
         nonce=nonce,
     )
