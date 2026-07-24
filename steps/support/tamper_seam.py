@@ -18,7 +18,7 @@ overwritten in place; the seam is instead:
      `context.db` test-DB connection (see environment.py) — a direct
      Postgres connection is already an accepted test-only seam in this
      codebase (also used, read-only, by steps/peer_trust/
-     dcs_trust_pdp_steps.py's `sync_fails` polling under ADR-18), preferred
+     dcs_trust_pdp_steps.py's `sync_fails` polling under ADR-19), preferred
      here over a second kubectl-exec-into-postgres seam.
 
 This is a genuine black-box test target afterwards: the verify/validate

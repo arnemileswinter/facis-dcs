@@ -17,7 +17,7 @@ type DIDSrv struct {
 
 // NewDIDService takes the already-built (and signed) agreement credential
 // bytes (federation.BuildAgreementCredential, built once at startup with the
-// HSM VC signer — ADR-18) and the embedded federation rules document
+// HSM VC signer — ADR-19) and the embedded federation rules document
 // (federation.Rules()), so this request handler stays a pure read of
 // precomputed state.
 func NewDIDService(didDocument identity.DIDDocument, agreementCredential, federationRules []byte) (didservice.Service, error) {
@@ -33,7 +33,7 @@ func (s DIDSrv) GetServiceDID(ctx context.Context) (res any, err error) {
 }
 
 // GetAgreementCredential serves this instance's self-signed federation
-// agreement credential (ADR-18).
+// agreement credential (ADR-19).
 func (s DIDSrv) GetAgreementCredential(ctx context.Context) (res any, err error) {
 	var content map[string]interface{}
 	if err := json.Unmarshal(s.AgreementCredential, &content); err != nil {
@@ -43,7 +43,7 @@ func (s DIDSrv) GetAgreementCredential(ctx context.Context) (res any, err error)
 }
 
 // GetFederationRules serves the federation rules document embedded in this
-// instance's binary (ADR-18); its content hash is the value the agreement
+// instance's binary (ADR-19); its content hash is the value the agreement
 // credential's termsOfUse.hash names.
 func (s DIDSrv) GetFederationRules(ctx context.Context) (res []byte, err error) {
 	return s.FederationRules, nil

@@ -1,5 +1,5 @@
-"""BDD steps for the federation agreement credential (ADR-18,
-docs/adr-18-federation-agreement-credential.md, requirement slug
+"""BDD steps for the federation agreement credential (ADR-19,
+docs/adr-19-federation-agreement-credential.md, requirement slug
 `fed-agreement`): the self-signed W3C Verifiable Credential every instance
 publishes at GET /.well-known/dcs-agreement-credential.json, next to its
 did.json, naming the federation rules it has bound itself to.
@@ -295,7 +295,7 @@ def step_then_credential_proof_verifies(context):
     assert len(methods) >= 2, (
         "Expected did.json to publish at least two verificationMethod entries — the first for "
         "the eIDAS/JAdES signing key (identity.DIDDocument), a second dedicated to the agreement "
-        f"credential's VC key (ADR-18) — got {len(methods)}: {methods}"
+        f"credential's VC key (ADR-19) — got {len(methods)}: {methods}"
     )
     assert method_id == methods[1].get("id"), (
         f"Expected proof.verificationMethod ({method_id!r}) to reference did.json's SECOND "
@@ -351,5 +351,5 @@ def step_then_same_rules_hash_both_instances(context):
     assert hash_a, f"instance A's credential carries no termsOfUse.hash: {resp_a.json()}"
     assert hash_a == hash_b, (
         f"Expected both instances of the same build to embed the identical federation rules hash "
-        f"(go:embed, ADR-18) — instance A: {hash_a!r}, instance B: {hash_b!r}"
+        f"(go:embed, ADR-19) — instance A: {hash_a!r}, instance B: {hash_b!r}"
     )

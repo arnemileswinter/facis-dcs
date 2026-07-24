@@ -37,7 +37,7 @@ extraEnv:
     value: "true"
   - name: AUTH_INSECURE_COOKIES
     value: "true"
-  # Federation trust gate (ADR-18): shares instance A's ORCE (no own orce
+  # Federation trust gate (ADR-19): shares instance A's ORCE (no own orce
   # release, see the header comment), so both point their local policy
   # endpoint at the same bootstrap 200-OK Node-RED flow.
   - name: DCS_TRUST_PDP_URL
@@ -128,7 +128,7 @@ ingress:
           pathType: Prefix
         - path: /.well-known/did.json
           pathType: Prefix
-        # Federation trust gate (ADR-18): same did:web-hostname-based routing
+        # Federation trust gate (ADR-19): same did:web-hostname-based routing
         # as did.json above (see values.bdd.yml's own comment).
         - path: /.well-known/dcs-agreement-credential.json
           pathType: Prefix

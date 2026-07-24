@@ -37,7 +37,7 @@ type SyncSignature struct {
 type SyncRepository interface {
 	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx) ([]SyncFail, error)
 	// CreateOrUpdateSyncFailEntry upserts a sync_fails entry for did.
-	// isGateFailure marks this particular attempt as caused by the ADR-18
+	// isGateFailure marks this particular attempt as caused by the ADR-19
 	// trust gate's agreement-credential check (as opposed to e.g. the PDF not
 	// being stored yet); shouldRecordIncident reports whether THIS call is
 	// the first one to observe a gate failure for this entry — true at most

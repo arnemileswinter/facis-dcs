@@ -99,7 +99,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("shipping a contract PDF to the same peer is not allowed"))
 	}
 
-	// Federation trust gate (ADR-18): the peer's self-signed agreement
+	// Federation trust gate (ADR-19): the peer's self-signed agreement
 	// credential must verify against its own did.json's dedicated VC key and
 	// name this instance's own embedded federation rules hash (layer 3a), and
 	// this instance's own local policy endpoint must allow the interaction

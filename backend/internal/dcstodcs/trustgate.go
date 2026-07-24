@@ -20,7 +20,7 @@ import (
 
 // Direction names which side of an interaction the trust gate is being
 // consulted for, carried verbatim in the policy-endpoint request body
-// (ADR-18).
+// (ADR-19).
 type Direction string
 
 const (
@@ -31,7 +31,7 @@ const (
 // GateFailureKind distinguishes the agreement-credential check (layer 3a,
 // whose failure is retried via sync_fails on the outbound path) from the
 // policy-endpoint check (layer 3b, whose failure is always terminal — never
-// retried), per ADR-18's architect decision.
+// retried), per ADR-19's architect decision.
 type GateFailureKind int
 
 const (
@@ -40,7 +40,7 @@ const (
 )
 
 // GateError is returned by TrustGate.Check on any rejection, naming which of
-// the two ADR-18 layers rejected the interaction and the peer involved (so a
+// the two ADR-19 layers rejected the interaction and the peer involved (so a
 // caller can anchor an incident report without threading the peer DID
 // through separately).
 type GateError struct {
@@ -55,12 +55,12 @@ func (e *GateError) Unwrap() error { return e.Err }
 // pdpTimeout bounds every HTTP call the trust gate makes (policy-endpoint
 // consult and agreement-credential/did.json fetch): http.DefaultClient has no
 // timeout, so a policy endpoint or peer that accepts the connection and then
-// never responds (ADR-18 AC10's "silent" fail-closed simulation, or a
+// never responds (ADR-19 AC10's "silent" fail-closed simulation, or a
 // genuinely wedged peer) would otherwise hang the ship/receive attempt
 // indefinitely instead of denying — fail-closed requires eventually failing.
 const pdpTimeout = 10 * time.Second
 
-// TrustGate implements ADR-18's federation trust gate — the third and final
+// TrustGate implements ADR-19's federation trust gate — the third and final
 // trust layer: layer 3a (the peer's self-signed agreement credential must
 // verify against its own did.json's dedicated VC key and name this instance's
 // own embedded federation rules hash) and layer 3b (this instance's own local
@@ -202,7 +202,7 @@ func (g *TrustGate) consultPolicyEndpoint(ctx context.Context, peerDID string, c
 }
 
 // RecordDenialIncident persists one trust-gate rejection into the audit
-// trail (ADR-18: "raises an incident in the audit trail"), regardless of
+// trail (ADR-19: "raises an incident in the audit trail"), regardless of
 // which of the two layers (agreement credential or policy endpoint) denied
 // the interaction — used by both the inbound (PostPdf) and outbound
 // (shipContractPDF) call sites.
@@ -216,7 +216,7 @@ func RecordDenialIncident(ctx context.Context, db *sqlx.DB, contractDID string, 
 // (contract DID, peer DID, direction) was already recorded — a terminal
 // policy-endpoint denial
 // (PolicyFailure) can be reached more than once for the same underlying
-// interaction (ADR-18 AC10: Offer and PDF_REGENERATED both firing a ship
+// interaction (ADR-19 AC10: Offer and PDF_REGENERATED both firing a ship
 // attempt for the same offer, milliseconds apart), and only the first must
 // raise an incident.
 func RecordDenialIncidentTxDeduped(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, contractDID string, direction Direction, gateErr *GateError) error {

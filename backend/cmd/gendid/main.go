@@ -69,7 +69,7 @@ func main() {
 	jwk["alg"] = "ES256"
 	jwk["x5c"] = []string{base64.StdEncoding.EncodeToString(certDER)}
 
-	// The federation agreement credential (ADR-18) is signed by a SEPARATE
+	// The federation agreement credential (ADR-19) is signed by a SEPARATE
 	// HSM key, published here as its own verificationMethod so a verifier can
 	// tell the eIDAS/JAdES identity key (verificationMethod[0], above) apart
 	// from the VC signing key.

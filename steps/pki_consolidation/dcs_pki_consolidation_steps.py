@@ -253,9 +253,9 @@ def step_then_cose_alg_is_es256(context):
 # accepted precedent of direct-DB test seams also used by exp_date-backdating
 # (steps/template_management/contract_state_machine_steps.py) and, on the
 # read-only assertion side, the `sync_fails` polling in
-# steps/peer_trust/dcs_trust_pdp_steps.py (ADR-18). The peer-trust package's
+# steps/peer_trust/dcs_trust_pdp_steps.py (ADR-19). The peer-trust package's
 # OWN former DB-seeding seam (`_seed_trusted_peer`, an `INSERT INTO
-# trusted_peers`) was removed when that package moved to ADR-18's
+# trusted_peers`) was removed when that package moved to ADR-19's
 # agreement-credential/PDP model — trust is no longer a seedable DB row. The
 # Then assertions on /signature/validate are the requirement-accurate,
 # load-bearing part.

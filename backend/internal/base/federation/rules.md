@@ -1,7 +1,7 @@
 # DCS Federation Rules
 
 These are the rules every DCS instance agrees to before it exchanges
-contracts with another instance (see [ADR-18](../../../../docs/adr-18-federation-agreement-credential.md)).
+contracts with another instance (see [ADR-19](../../../../docs/adr-19-federation-agreement-credential.md)).
 An instance's agreement to them is embedded in the source it runs: the
 document is compiled into the binary, and its hash is what every peer's
 agreement credential names.

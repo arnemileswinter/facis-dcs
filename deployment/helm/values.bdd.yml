@@ -39,7 +39,7 @@ extraEnv:
     value: "true"
   - name: AUTH_INSECURE_COOKIES
     value: "true"
-  # Federation trust gate (ADR-18): the local policy endpoint every inbound
+  # Federation trust gate (ADR-19): the local policy endpoint every inbound
   # and outbound interaction is consulted against, fail-closed. Points at the
   # bootstrap 200-OK Node-RED flow (deployment/helm/charts/orce/flows/
   # trust-pdp-flow.json), shared with instance B (values.bdd2.yml has no own
@@ -102,7 +102,7 @@ ingress:
         # /.well-known prefix for OIDC discovery, and the longer path wins.
         - path: /.well-known/did.json
           pathType: Prefix
-        # Federation trust gate (ADR-18): the agreement credential and the
+        # Federation trust gate (ADR-19): the agreement credential and the
         # rules document it names both resolve via the same did:web-hostname
         # logic as did.json (identity.FetchDIDDocumentFromHostname's sibling
         # in dcstodcs/trustgate.go) — routed at the origin root for the same

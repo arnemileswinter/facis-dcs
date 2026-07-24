@@ -9,7 +9,7 @@
 // signature proving possession of the private key (Sign/Verify), used
 // instead of a shared token since there is no common auth authority across
 // operators; and (3) the federation trust gate — a self-signed agreement
-// credential plus a local policy endpoint (see dcstodcs.TrustGate, ADR-18) —
+// credential plus a local policy endpoint (see dcstodcs.TrustGate, ADR-19) —
 // which is deliberately not part of this package.
 package identity
 

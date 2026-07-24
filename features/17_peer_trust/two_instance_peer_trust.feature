@@ -1,22 +1,22 @@
 # Two-instance peer trust: the federation agreement credential + local
 # policy endpoint (PDP), and cross-instance replication.
 #
-# ADR-18 (docs/adr-18-federation-agreement-credential.md) replaces the third
+# ADR-19 (docs/adr-19-federation-agreement-credential.md) replaces the third
 # trust layer this file used to describe as a static `trusted_peers`
 # allowlist with two layers: (3a) each peer's self-signed agreement
 # credential (W3C VC, published at
 # GET /.well-known/dcs-agreement-credential.json) and (3b) a local,
 # per-instance policy endpoint (PDP) consulted on every inbound/outbound
 # interaction, fail-closed. The `trusted_peers` table, its `DCS_TRUSTED_PEERS`
-# seeding, and `CheckForUntrustedPeers` are to be removed entirely (ADR-18
+# seeding, and `CheckForUntrustedPeers` are to be removed entirely (ADR-19
 # decision item 4) — as of this writing that removal has not landed yet
 # (backend/internal/service/dcs_to_dcs.go's PostPdf still calls the OLD
-# CheckForUntrustedPeers), so every ADR-18 scenario below is expected to fail
+# CheckForUntrustedPeers), so every ADR-19 scenario below is expected to fail
 # red; that is the point of writing them ahead of the implementation.
 #
 # The untrusted-peer single-instance-testable scenarios use a syntactically
 # distinct did:web identity that resolves, hostname-wise, to THIS SAME
-# instance's own dev key and (per ADR-18) its own
+# instance's own dev key and (per ADR-19) its own
 # /.well-known/dcs-agreement-credential.json — see
 # steps/peer_trust/dcs_peer_trust_steps.py for why this is honest evidence
 # specifically for the agreement-credential/PDP gate, not just "any"

@@ -1,15 +1,15 @@
 """BDD steps for two-instance peer trust (features/17_peer_trust; SRS
 NFR-BR-08, DCS-FR-CWE-01/-15) AND for the federation agreement credential /
-PDP gate (ADR-18, docs/adr-18-federation-agreement-credential.md, requirement
+PDP gate (ADR-19, docs/adr-19-federation-agreement-credential.md, requirement
 slug `fed-agreement`).
 
-ADR-18 replaces the third trust layer this module used to exercise — the
+ADR-19 replaces the third trust layer this module used to exercise — the
 static `trusted_peers` allowlist table, which this file used to seed directly
 via an `INSERT INTO trusted_peers` test seam (`_seed_trusted_peer`, removed) —
 with an agreement-credential check (layer 3a) plus a local, per-instance
 policy endpoint (PDP, layer 3b), fail-closed. The
 `trusted_peers` table, its `DCS_TRUSTED_PEERS` seeding, and
-`CheckForUntrustedPeers` are to be removed entirely (ADR-18 decision item 4);
+`CheckForUntrustedPeers` are to be removed entirely (ADR-19 decision item 4);
 until that removal actually lands, `backend/internal/service/dcs_to_dcs.go`'s
 `PostPdf` still calls the old `CheckForUntrustedPeers` first, so the
 peer-identity Given step below only produces a cryptographically valid
@@ -33,7 +33,7 @@ the matching public key.
 That means a did:web identifier of the shape
 `<this-instance's-own-did:web-id>:<arbitrary-suffix>` resolves, hostname-wise,
 to THIS SAME running instance's own `/.well-known/did.json` (AND, per
-ADR-18, its own `/.well-known/dcs-agreement-credential.json`) and dev private
+ADR-19, its own `/.well-known/dcs-agreement-credential.json`) and dev private
 key — so signing with that key produces a genuinely valid signature for that
 synthetic identifier, without needing a second real DCS process. Crucially
 the synthetic identifier is a DIFFERENT STRING than the instance's real DID
@@ -165,7 +165,7 @@ def _orce_synthetic_peer_credentials(context):
 
 
 def _orce_mismatch_peer_did() -> str:
-    """DID of the SECOND orce trust-PDP static synthetic peer (ADR-18 AC5):
+    """DID of the SECOND orce trust-PDP static synthetic peer (ADR-19 AC5):
     a genuinely, validly signed agreement credential (unlike
     _orce_synthetic_peer_did's route, which 404s) but naming a deliberately
     WRONG termsOfUse.hash — a real rules-hash mismatch, not a same-build
@@ -232,7 +232,7 @@ def _minimal_remote_contract_payload(from_peer_did: str, contract_did: str) -> d
 def step_given_peer_identity(context):
     """Produces a synthetic but cryptographically genuine did:web peer
     identity (see module docstring) with NO trust decision baked in — under
-    ADR-18 that decision is made by the agreement-credential check (layer
+    ADR-19 that decision is made by the agreement-credential check (layer
     3a) and the PDP (layer 3b), each exercised by its own dedicated Given
     step (this file's "...publishes no agreement credential..." below;
     steps/peer_trust/dcs_trust_pdp_steps.py's PDP-stub Givens)."""
@@ -267,7 +267,7 @@ def step_given_local_contract(context, name):
 
 # ---------------------------------------------------------------------------
 # When / Then: POST /peer/contracts/pdf (post_pdf, the CURRENT DCS-to-DCS
-# receiving endpoint — ADR-18 AC4, AC7 inbound, AC8, AC9).
+# receiving endpoint — ADR-19 AC4, AC7 inbound, AC8, AC9).
 # ---------------------------------------------------------------------------
 
 
@@ -302,19 +302,19 @@ def step_when_peer_ships_pdf(context, name):
 def step_then_pdf_rejected_agreement_credential(context):
     resp = context.requests_response
     assert resp.status_code != 200, (
-        f"Expected PostPdf to reject a peer with no valid agreement credential (ADR-18), got 200: "
+        f"Expected PostPdf to reject a peer with no valid agreement credential (ADR-19), got 200: "
         f"{resp.text}"
     )
     assert "agreement credential" in resp.text.lower() or "agreement_credential" in resp.text.lower(), (
         "Expected the rejection to name the missing/invalid agreement credential specifically — "
-        "not a different failure that happens to also be non-200 (today, before ADR-18's gate is "
+        "not a different failure that happens to also be non-200 (today, before ADR-19's gate is "
         "implemented, PostPdf still rejects this synthetic peer via the OLD trusted_peers "
         f"allowlist check instead — see CheckForUntrustedPeers) — got {resp.status_code}: {resp.text}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Outbound trigger (ADR-18 AC6, AC7 outbound): offering a contract to a peer
+# Outbound trigger (ADR-19 AC6, AC7 outbound): offering a contract to a peer
 # counterparty fires shipContractPDF (dcstodcs.DCSToDCSSynchronizer) once the
 # regenerated PDF lands — the trust gate must be consulted THERE too, before
 # a real ship attempt is made, per the ADR's mermaid diagram (S0->S2->S3->S5).
@@ -425,15 +425,15 @@ def step_when_create_contract_raw_peer_did(context):
 
 
 def _assert_rejected_for_trust_reason(context):
-    """NOTE (ADR-18): this helper predates the agreement-credential/PDP model
+    """NOTE (ADR-19): this helper predates the agreement-credential/PDP model
     and is kept only for the (currently orphaned — see module docstring)
     post_sync/peer-action Then steps below, which target an endpoint shape
     that no longer exists in the Goa design (backend/design/dcs_to_dcs.go
     only has post_pdf/get_provenance now; fixing that ADR-13 drift is out of
-    this ADR-18 BDD pass's scope). The wording below accepts either the OLD
+    this ADR-19 BDD pass's scope). The wording below accepts either the OLD
     allowlist rejection message or the NEW agreement-credential/policy-gate
     wording, so it does not itself go stale the day CheckForUntrustedPeers is
-    actually removed per ADR-18 decision item 4.
+    actually removed per ADR-19 decision item 4.
     """
     resp = context.requests_response
     assert resp.status_code != 200, (
@@ -443,7 +443,7 @@ def _assert_rejected_for_trust_reason(context):
     body_text = resp.text.lower()
     assert any(marker in body_text for marker in ("trust", "untrusted", "allow", "polic", "agreement credential")), (
         "Expected the rejection to name the trust gate (allowlist today, agreement-credential/PDP "
-        "under ADR-18) as the reason — not a different failure that happens to also be non-200 "
+        "under ADR-19) as the reason — not a different failure that happens to also be non-200 "
         "(e.g. PostPdf's unrelated same-peer guard, a decode/validation error, or a "
         f"transition-table rejection) — got {resp.status_code}: {resp.text}"
     )
@@ -546,7 +546,7 @@ def _as_instance(context, base_url):
 
 @given("instance A and instance B are both running and trust each other")
 def step_given_two_instances_running(context):
-    # "trust each other" is, under ADR-18, a property of each instance's OWN
+    # "trust each other" is, under ADR-19, a property of each instance's OWN
     # PDP endpoint (fail-closed authority) plus a matching agreement
     # credential — not a pre-seeded DCS_TRUSTED_PEERS allowlist. The current
     # two-instance runner (tests/bdd/Makefile kind_deploy_b, dev-stack2.sh)
@@ -578,7 +578,7 @@ def step_given_two_instances_running(context):
 
 @given("the counterparty is a synthetic peer whose agreement credential names a different rules hash")
 def step_given_counterparty_synthetic_peer_mismatched_hash(context):
-    """ADR-18 AC5: overrides context.peer_did_b with the SECOND orce static
+    """ADR-19 AC5: overrides context.peer_did_b with the SECOND orce static
     synthetic peer (_orce_mismatch_peer_did/_orce_mismatch_peer_credentials)
     — a validly signed agreement credential naming a deliberately WRONG
     termsOfUse.hash, a real rules-hash mismatch rather than requiring a
@@ -600,7 +600,7 @@ def step_given_counterparty_synthetic_peer_mismatched_hash(context):
 
 @given("the default trust-PDP Node-RED flow is wired on both instances")
 def step_given_default_pdp_flow_wired(context):
-    """ADR-18 AC11: the shipped default is DCS_TRUST_PDP_URL pointing at the
+    """ADR-19 AC11: the shipped default is DCS_TRUST_PDP_URL pointing at the
     orce chart's Node-RED (deployment/helm/charts/orce/flows/trust-pdp-flow.json,
     now present), answering a bare 200 OK. This Given step's own env-var gate
     stays (the coordinator sets BDD_TRUST_PDP_DEFAULT_FLOW_WIRED=1 once both
@@ -612,14 +612,14 @@ def step_given_default_pdp_flow_wired(context):
         "This scenario requires the default trust-PDP Node-RED flow "
         "(deployment/helm/charts/orce/flows/, DCS_TRUST_PDP_URL=http://dcs-orce:1880/<route>) to "
         "be wired into both instances' deployments. That flow file and the DCS_TRUST_PDP_URL env "
-        "wiring do not exist yet (ADR-18 implementation-state table: pending). Set "
+        "wiring do not exist yet (ADR-19 implementation-state table: pending). Set "
         "BDD_TRUST_PDP_DEFAULT_FLOW_WIRED=1 only once they do — open infrastructure point."
     )
 
 
 @given("the counterparty is a synthetic peer with no valid agreement credential")
 def step_given_counterparty_synthetic_peer_no_credential(context):
-    """ADR-18 AC6 (sender-side refusal to ship): overrides context.peer_did_b
+    """ADR-19 AC6 (sender-side refusal to ship): overrides context.peer_did_b
     — normally instance B's real DID, set by step_given_two_instances_running
     — with the orce trust-PDP flow's synthetic-peer identity (see
     _orce_synthetic_peer_did/_orce_synthetic_peer_credentials in this
@@ -706,8 +706,8 @@ def step_then_a_refuses_to_ship_cross_instance(context):
     cursor.close()
     assert row is not None, (
         f"Expected a sync_fails retry entry for cross-instance contract {c_did} after instance A "
-        "refused to ship towards a peer with an invalid/mismatched agreement credential (ADR-18 "
-        "AC5/AC6), got none — today (before ADR-18's agreement-credential check exists) the ship is "
+        "refused to ship towards a peer with an invalid/mismatched agreement credential (ADR-19 "
+        "AC5/AC6), got none — today (before ADR-19's agreement-credential check exists) the ship is "
         "instead attempted unconditionally via the OLD trusted_peers/CheckForUntrustedPeers path"
     )
 
@@ -730,7 +730,7 @@ def step_then_a_incident_recorded(context):
             time.sleep(2)
     assert len(matching) == 1, (
         f"Expected exactly one incident report in instance A's own audit trail, scoped to contract "
-        f"{c_did}, for its refusal to ship (ADR-18 AC5/AC6), got {len(matching)}: {matching}"
+        f"{c_did}, for its refusal to ship (ADR-19 AC5/AC6), got {len(matching)}: {matching}"
     )
 
 

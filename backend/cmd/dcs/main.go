@@ -404,7 +404,7 @@ func main() {
 	}(cepSubClient)
 
 	syncRepo := pq2.PostgresSyncRepository{}
-	// Federation trust gate (ADR-18): agreement credential verification + the
+	// Federation trust gate (ADR-19): agreement credential verification + the
 	// local policy endpoint, consulted on both the outbound (shipContractPDF,
 	// here) and inbound (PostPdf, service.NewDcsToDcs below) paths.
 	trustGate := dcstodcs2.TrustGate{PDPURL: os.Getenv("DCS_TRUST_PDP_URL")}
@@ -553,7 +553,7 @@ func main() {
 	}
 
 	// Build and sign this instance's federation agreement credential once at
-	// startup (ADR-18): issuer = this instance's own DID, termsOfUse names the
+	// startup (ADR-19): issuer = this instance's own DID, termsOfUse names the
 	// embedded federation rules document by its public policy URL and hash.
 	rulesPolicyURL := federation.RulesPolicyURL(os.Getenv("DCS_PUBLIC_URL"))
 	agreementCredential, err := federation.BuildAgreementCredential(ctx, vcSigner, issuerDID, rulesPolicyURL)
@@ -744,4 +744,3 @@ func main() {
 	wg.Wait()
 	log.Printf(ctx, "exited")
 }
-

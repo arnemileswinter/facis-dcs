@@ -1,5 +1,5 @@
-"""BDD steps for the local trust policy endpoint (PDP) gate (ADR-18,
-docs/adr-18-federation-agreement-credential.md, requirement slug
+"""BDD steps for the local trust policy endpoint (PDP) gate (ADR-19,
+docs/adr-19-federation-agreement-credential.md, requirement slug
 `fed-agreement`, AC7-AC10).
 
 Per the ADR: "The trust gate POSTs {peerDID, agreementCredential, direction,
@@ -8,7 +8,7 @@ including an unconfigured URL or an unreachable endpoint — denies and raises
 an incident in the audit trail (fail-closed)." This is consulted on BOTH the
 outbound ship path (dcstodcs.DCSToDCSSynchronizer.shipContractPDF) and the
 inbound receive path (dcstodcs service PostPdf) — neither calls it yet
-(ADR-18's implementation-state table marks the PDP gate itself "pending"),
+(ADR-19's implementation-state table marks the PDP gate itself "pending"),
 so every scenario here is expected to fail red.
 
 Unified terminal semantics (architect decision): every PDP failure mode —
@@ -201,7 +201,7 @@ def _count_trust_gate_incidents(context, peer_did=None, contract_did=None, api_b
     querymonitor.go): PAC_TRUST_GATE_DENIAL, anchored per-contract when a
     contractDID is known, or globally (no resource DID) when the denial
     happened before any contract context existed. This event-type name is an
-    assumption for the implementer to confirm/correct — ADR-18 only commits
+    assumption for the implementer to confirm/correct — ADR-19 only commits
     to "raises an incident in the audit trail", not a concrete event type.
     """
     entries = _pac_audit_entries(context, api_base=api_base)

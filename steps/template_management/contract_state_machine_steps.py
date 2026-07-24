@@ -491,7 +491,7 @@ def step_given_expiry_date_in_past(context, name):
     precedent of a direct context.db seam for a precondition the API itself
     has no fast path to establish, also used (read-only, for assertions
     rather than seeding) by steps/peer_trust/dcs_trust_pdp_steps.py's
-    `sync_fails` polling (ADR-18).
+    `sync_fails` polling (ADR-19).
 
     This step does NOT itself flip the contract's `state` to EXPIRED — that
     remains the job of the already-running expiry cron

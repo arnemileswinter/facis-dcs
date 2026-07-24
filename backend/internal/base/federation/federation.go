@@ -1,5 +1,5 @@
 // Package federation holds the rules a DCS instance agrees to before it
-// exchanges contracts with another instance (ADR-18): the rules document is
+// exchanges contracts with another instance (ADR-19): the rules document is
 // compiled into the binary via go:embed, so acceptance of it is bound to the
 // software version — two instances of the same build embed byte-identical
 // rules and therefore compute the identical hash; a tampered or differently

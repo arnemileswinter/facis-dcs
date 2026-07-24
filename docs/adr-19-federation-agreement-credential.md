@@ -1,4 +1,4 @@
-# ADR-18: Federation trust is layered — identity (eIDAS/did:web), rule acceptance (agreement credential), and a local policy endpoint
+# ADR-19: Federation trust is layered — identity (eIDAS/did:web), rule acceptance (agreement credential), and a local policy endpoint
 
 ## Status
 

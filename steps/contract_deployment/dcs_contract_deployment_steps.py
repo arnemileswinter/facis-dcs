@@ -52,7 +52,7 @@ test (archived must not be treated as inactive) from the deploy mechanism,
 which the other scenarios exercise directly. This mirrors the accepted
 precedent of direct-DB seams for preconditions/assertions the API has no
 fast/existing path to establish or observe (steps/peer_trust/
-dcs_trust_pdp_steps.py's read-only `sync_fails` polling — ADR-18 — and
+dcs_trust_pdp_steps.py's read-only `sync_fails` polling — ADR-19 — and
 steps/template_management/contract_state_machine_steps's exp_date
 backdate).
 

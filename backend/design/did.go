@@ -5,7 +5,7 @@ import (
 )
 
 var _ = Service("DIDService", func() {
-	Description("Returns the DID document for contracts, templates, and the service itself, plus the federation agreement credential and rules document (ADR-18)")
+	Description("Returns the DID document for contracts, templates, and the service itself, plus the federation agreement credential and rules document (ADR-19)")
 
 	Method("GetServiceDID", func() {
 		Description("Returns the service's own DID document (domain-level, no path)")
@@ -25,7 +25,7 @@ var _ = Service("DIDService", func() {
 	})
 
 	Method("GetAgreementCredential", func() {
-		Description("Returns this instance's self-signed federation agreement credential (ADR-18): a W3C Verifiable Credential naming the embedded federation rules by policy ID and hash")
+		Description("Returns this instance's self-signed federation agreement credential (ADR-19): a W3C Verifiable Credential naming the embedded federation rules by policy ID and hash")
 
 		Result(Any)
 		Error("internal_error", ErrorResult, "Internal server error")
@@ -42,7 +42,7 @@ var _ = Service("DIDService", func() {
 	})
 
 	Method("GetFederationRules", func() {
-		Description("Serves the federation rules document embedded in this instance's binary (ADR-18); its content hash is the value the agreement credential's termsOfUse.hash names")
+		Description("Serves the federation rules document embedded in this instance's binary (ADR-19); its content hash is the value the agreement credential's termsOfUse.hash names")
 
 		Result(Bytes)
 		Error("internal_error", ErrorResult, "Internal server error")

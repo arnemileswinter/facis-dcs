@@ -132,7 +132,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 	if req.Counterparty != nil {
 		counterparty = *req.Counterparty
 	}
-	// A counterparty is not vetted at creation time (ADR-18): the federation
+	// A counterparty is not vetted at creation time (ADR-19): the federation
 	// trust gate — agreement credential + local policy endpoint — is
 	// consulted once, on the actual ship attempt (dcstodcs.DCSToDCSSynchronizer.
 	// shipContractPDF), so a denial surfaces as a sync_fails/incident there,

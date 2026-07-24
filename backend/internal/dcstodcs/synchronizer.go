@@ -3,7 +3,7 @@
 // and ships the contract's PDF — the self-contained wire format carrying the
 // machine-readable JSON-LD, the C2PA provenance chain, and any signatures — to
 // the counterparty peer, gating every ship on the federation trust gate
-// (trustgate.go: agreement credential + local policy endpoint, ADR-18) and
+// (trustgate.go: agreement credential + local policy endpoint, ADR-19) and
 // retrying failed ships from the sync_fails table. A signed contract
 // additionally carries the JAdES (DCS-FR-SM-02). No contract state or task
 // ledger crosses the boundary: each DCS runs its own workflow/RBAC (ADR-13).
@@ -218,7 +218,7 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
-		// Unified terminal semantics (ADR-18): a policy-endpoint denial —
+		// Unified terminal semantics (ADR-19): a policy-endpoint denial —
 		// non-2xx, unset DCS_TRUST_PDP_URL, or unreachable — never gets a
 		// sync_fails retry entry, so every attempt is a genuinely new
 		// interaction, not a retry of the same denial: exactly one incident
@@ -239,7 +239,7 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 // clearSyncFailWithIncident deletes any sync_fails retry entry for did and
 // records the terminal policy-endpoint denial incident in the same
-// transaction (ADR-18 AC10) — deduped per (did, peer, direction), since a
+// transaction (ADR-19 AC10) — deduped per (did, peer, direction), since a
 // single offer's Offer and PDF_REGENERATED events each independently trigger
 // a ship attempt a few hundred ms apart and both can hit the same denial.
 func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, did string, gateErr *GateError) error {

@@ -38,7 +38,7 @@ type Signer interface {
 }
 
 // BuildAgreementCredential builds and signs this instance's self-signed
-// federation agreement credential (ADR-18): a W3C Verifiable Credential
+// federation agreement credential (ADR-19): a W3C Verifiable Credential
 // whose issuer is the instance's own DID and whose termsOfUse names the
 // embedded federation rules by policyId (rulesURL) and hash (Hash()).
 func BuildAgreementCredential(ctx context.Context, signer Signer, issuerDID, rulesURL string) (json.RawMessage, error) {

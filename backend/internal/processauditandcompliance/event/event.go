@@ -144,7 +144,7 @@ func (e IncidentReportEvent) GetDID() string {
 	return e.DID
 }
 
-// TrustGateDenialEvent anchors one federation trust-gate rejection (ADR-18):
+// TrustGateDenialEvent anchors one federation trust-gate rejection (ADR-19):
 // either the agreement-credential check (layer 3a: missing, unsigned, or a
 // federation-rules hash mismatch) or the local policy-endpoint check (layer
 // 3b: a non-2xx response, an unset DCS_TRUST_PDP_URL, or an unreachable
