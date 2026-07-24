@@ -53,11 +53,16 @@ def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce
     from dcs_wallet.issuer import DEFAULT_ISSUER_DID, sign_credential_sd_jwt, sign_key_binding_jwt
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt
+    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status
 
     keys = AuthService.load_wallet_keys()
     holder_key = keys.wallet_private
     holder_public = public_jwk(holder_key)
     subject_did = did_jwk_from_public_jwk(holder_public)
+
+    # A real status claim (ADR-20): VerifyPID's status-list check is no longer
+    # skipped, so a PID presentation with none would be rejected outright.
+    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
 
     now = int(time.time())
     issued = sign_credential_sd_jwt(
@@ -68,6 +73,10 @@ def build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonce
             "iat": now - 3600,
             "exp": now + 3600,
             "cnf": {"jwk": cnf_jwk(holder_public)},
+            "status": build_credential_status(
+                sub=subject_did, organization=given_name, roles=[family_name],
+                service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+            ),
         },
         selective_claims={"given_name": given_name, "family_name": family_name},
         issuer_private=keys.issuer_private,
@@ -91,7 +100,14 @@ def main() -> None:
     # resolved from its did:web document — the same public DID trust anchor the
     # testWallet self-issues under and every peer resolves against.
     poa_organization = requests.get(did_document_url(base_url), timeout=30).json()["id"]
-    given_name, family_name = "E2E Vertical Signer", "E2E-Testperson"
+    # given_name MUST match E2E_SIGNATORY passed to sign_prepared_pdf.py's
+    # ensure_signing_material for the SAME ceremony — the DCS's cert-subject
+    # to PID name-match gate (ADR-20) checks these two against each other.
+    # family_name mirrors ensure_signing_material's own default
+    # ("BDD-Testperson") so callers that don't override either script need no
+    # special-casing.
+    given_name = os.getenv("E2E_SIGNATORY", "E2E Vertical Signer")
+    family_name = os.getenv("E2E_SIGNATORY_FAMILY_NAME", "BDD-Testperson")
 
     request_uri = resolve_request_uri(wallet_uri)
     session = requests.Session()

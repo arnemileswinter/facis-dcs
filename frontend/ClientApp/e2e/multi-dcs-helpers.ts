@@ -140,7 +140,15 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.wallet_uri], {
     cwd: repoRoot,
-    env: { ...process.env, STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL, BDD_DCS_BASE_URL: inst.apiBase },
+    // E2E_SIGNATORY must match what's passed to sign_prepared_pdf.py below —
+    // the DCS's cert-subject to PID name-match gate (ADR-20) checks the two
+    // against each other.
+    env: {
+      ...process.env,
+      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      BDD_DCS_BASE_URL: inst.apiBase,
+      E2E_SIGNATORY: signatory,
+    },
     stdio: 'pipe',
   })
 

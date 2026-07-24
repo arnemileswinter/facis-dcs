@@ -17,7 +17,6 @@ export interface SignatureContractDetail {
   contract: SignatureContract
   // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
-  key_version?: number
 }
 
 export interface SignatureEnvelope {
