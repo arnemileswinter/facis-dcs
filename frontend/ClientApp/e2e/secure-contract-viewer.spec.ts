@@ -10,7 +10,7 @@ import { buildApprovedContract, gotoAs } from './lifecycle-helpers'
  */
 
 test('secure contract viewer shows the real contract content and guides the signer', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  test.setTimeout(90_000)
   page.setDefaultTimeout(15_000)
   page.on('console', (m) => {
     if (m.text().includes('SUBMIT-GATE')) console.log(m.text())

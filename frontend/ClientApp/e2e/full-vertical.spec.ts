@@ -119,7 +119,7 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
 }
 
 test('full vertical through the real UI', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  test.setTimeout(180_000)
   page.setDefaultTimeout(15_000)
 
   const unique = Date.now()
