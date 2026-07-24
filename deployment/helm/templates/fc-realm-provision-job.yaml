@@ -123,10 +123,18 @@ spec:
                 echo "Realm imported."
               fi
 
-              # fc-service-server's controllers require the SCHEMA_*/ASSET_*
-              # roles of the `federated-catalogue` CLIENT (already defined in
-              # fc-realm.json) mapped onto the service account user — its
-              # seed data leaves it with only uma_protection.
+              # DCS is the only caller of this service account (its own
+              # boot-time schema sync + template/asset publishing) — grant
+              # every functional `federated-catalogue` CLIENT role fc-realm.
+              # json defines (uma_protection excluded, that one's Keycloak-
+              # internal, added separately below). Narrowing this to just
+              # SCHEMA_*/ASSET_* once caused schema listing (SCHEMA_READ) to
+              # work but asset publishing to still 403 — fc-service-server's
+              # controllers don't all gate on the same uppercase permission-
+              # style roles, some also check the kebab-case composite roles
+              # (asset-creator etc.) or ADMIN_ALL, and DCS has no use for
+              # holding anything back from its own catalogue integration
+              # (confirmed live).
               TOKEN="$(admin_token)"
               FC_CLIENT_KC_ID="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
                 "$KC_BASE_URL/admin/realms/$REALM/clients?clientId=$FC_CLIENT_ID" \
@@ -135,7 +143,7 @@ spec:
               TOKEN="$(admin_token)"
               ROLE_REPS="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
                 "$KC_BASE_URL/admin/realms/$REALM/clients/$FC_CLIENT_KC_ID/roles" \
-                | jq -c '[.[] | select(.name | test("^(SCHEMA_|ASSET_)"))]')"
+                | jq -c '[.[] | select(.name != "uma_protection")]')"
 
               echo "Assigning $FC_CLIENT_ID client roles to service-account-federated-catalogue..."
               curl -sf -o /dev/null -X POST -H "X-Forwarded-Proto: https" \

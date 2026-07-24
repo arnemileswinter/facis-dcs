@@ -13,6 +13,7 @@ import (
 
 	"digital-contracting-service/internal/base/validation"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -201,8 +202,9 @@ func buildCatalogueVerificationPayload(
 	}
 
 	return fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:    issuer,
-		ValidFrom: fullTemplate.UpdatedAt,
+		Issuer:     issuer,
+		SubjectIRI: base.ResourceIRI("template", did),
+		ValidFrom:  fullTemplate.UpdatedAt,
 		Subject: fcasset.CatalogueSubjectFromRepository(
 			did,
 			processData.Version,

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -27,6 +28,12 @@ type PublishCmd struct {
 	UpdatedAt   time.Time
 	PublishedBy string
 	HolderDID   string
+	// InstanceDID is this DCS deployment's own did:web (signing.issuerDID) —
+	// the FC-facing publisher identity. A federated catalogue's Participant
+	// concept is an organization/deployment, not the individual employee who
+	// clicked publish, so this — not HolderDID — is what's asserted as the
+	// asset's issuer to FC.
+	InstanceDID string
 	UserRoles   userrole.UserRoles
 }
 
@@ -126,8 +133,8 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 }
 
 func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
-	if cmd.HolderDID == "" {
-		return fmt.Errorf("holder did is empty")
+	if cmd.InstanceDID == "" {
+		return fmt.Errorf("instance did is empty")
 	}
 
 	name := ""
@@ -145,8 +152,9 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:    cmd.HolderDID,
-		ValidFrom: fullTemplate.UpdatedAt,
+		Issuer:     cmd.InstanceDID,
+		SubjectIRI: base.ResourceIRI("template", cmd.DID),
+		ValidFrom:  fullTemplate.UpdatedAt,
 		Subject: fcasset.CatalogueSubjectFromRepository(
 			cmd.DID,
 			processData.Version,

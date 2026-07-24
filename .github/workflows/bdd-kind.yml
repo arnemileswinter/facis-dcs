@@ -119,7 +119,11 @@ jobs:
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
           kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-hsm-provision --tail=100 || true
           kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
-          kubectl logs -n dcs-bdd deployment/fc-service --tail=200 || true
+          # Grepped, not tailed: fc-service logs thousands of DEBUG lines
+          # over a full BDD run, so a plain --tail=N from the end reliably
+          # misses an early failure. WARN/ERROR (permission denials, auth
+          # failures) survive the whole run's volume this way instead.
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
 
       - name: Generate coverage XML and summary
         if: always()
@@ -302,7 +306,7 @@ jobs:
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=400 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=100 || true
           kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
-          kubectl logs -n dcs-bdd deployment/fc-service --tail=200 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=-1 | grep -E 'WARN|ERROR|extracted roles|Completed [45]' || true
 
       - name: Teardown kind cluster
         if: always()
