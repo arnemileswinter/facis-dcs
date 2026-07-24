@@ -655,6 +655,10 @@ export async function registerTemplateOn(inst: Instance, did: string, name: stri
     (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
   )
   await inst.page.getByRole('button', { name: 'Register', exact: true }).click()
+  // Register goes through the shared ConfirmationModal ("Proceed with
+  // registration?") before it actually submits — the click above only opens
+  // it.
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await registered
 }
 

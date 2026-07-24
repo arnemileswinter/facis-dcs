@@ -205,6 +205,10 @@ async function registerContractTemplate(page: Page, loginAs: LoginAs, did: strin
     (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
   )
   await page.getByRole('button', { name: 'Register', exact: true }).click()
+  // Register goes through the shared ConfirmationModal ("Proceed with
+  // registration?") before it actually submits — the click above only opens
+  // it.
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await registered
 }
 
