@@ -118,6 +118,8 @@ jobs:
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=dss --tail=100 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=200 || true
           kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-hsm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=200 || true
 
       - name: Generate coverage XML and summary
         if: always()
@@ -299,6 +301,8 @@ jobs:
           done
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=400 --prefix || true
           kubectl logs deployment/dcs-keycloak -n dcs-bdd --tail=100 || true
+          kubectl logs -n dcs-bdd job/dcs-digital-contracting-service-fc-realm-provision --tail=100 || true
+          kubectl logs -n dcs-bdd deployment/fc-service --tail=200 || true
 
       - name: Teardown kind cluster
         if: always()

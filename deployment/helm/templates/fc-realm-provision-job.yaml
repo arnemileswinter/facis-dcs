@@ -4,9 +4,16 @@
 # through import, no error at any log level — see keycloak/keycloak#37745).
 # We disable --import-realm (see values' fcservice.keycloak.args) and do the
 # same import via the Admin REST API instead, which doesn't hit the bug.
-# Also assigns the SCHEMA_*/ASSET_* realm roles fc-service-server's
-# controllers require (confirmed via SchemaControllerTest.java) that
-# fc-realm.json's import doesn't include.
+# Also assigns the SCHEMA_*/ASSET_* CLIENT roles (already defined on the
+# `federated-catalogue` client in fc-realm.json) to the service account user
+# — fc-realm.json's seed data leaves that user with only `uma_protection`.
+# fc-service-server reads roles from resource_access.<KEYCLOAK_RESOURCE>.roles
+# (KEYCLOAK_RESOURCE=federated-catalogue, the classic Keycloak adapter claim
+# shape), not realm_access.roles, so these must be CLIENT role mappings
+# (.../role-mappings/clients/{clientUUID}), not realm role mappings — an
+# earlier version of this Job created same-named ROLES at the realm level and
+# assigned those instead, which never appears in that claim and 403s every
+# `list schemas` call DCS makes (confirmed live).
 #
 # No k8s API access needed (no custom ServiceAccount/RBAC either) — this
 # used to also patch fc-service's/fc-demo-portal's issuer env vars via the
@@ -61,6 +68,8 @@ spec:
               value: {{ .Values.fcservice.keycloak.realm | quote }}
             - name: FC_CLIENT_UUID
               value: {{ .Values.fcservice.realmProvision.serviceAccountUserID | quote }}
+            - name: FC_CLIENT_ID
+              value: {{ .Values.fcservice.keycloak.clientId | quote }}
           volumeMounts:
             - name: realm-config
               mountPath: /realm
@@ -114,26 +123,24 @@ spec:
                 echo "Realm imported."
               fi
 
-              # fc-service-server's controllers require these realm roles
-              # (SchemaControllerTest.java) — fc-realm.json's import doesn't
-              # define them at all.
-              ROLE_IDS=""
-              for ROLE in SCHEMA_READ SCHEMA_CREATE SCHEMA_DELETE ASSET_READ ASSET_CREATE ASSET_DELETE; do
-                TOKEN="$(admin_token)"
-                curl -s -o /dev/null -X POST -H "X-Forwarded-Proto: https" \
-                  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                  "$KC_BASE_URL/admin/realms/$REALM/roles" --data "{\"name\":\"$ROLE\"}" || true
-              done
+              # fc-service-server's controllers require the SCHEMA_*/ASSET_*
+              # roles of the `federated-catalogue` CLIENT (already defined in
+              # fc-realm.json) mapped onto the service account user — its
+              # seed data leaves it with only uma_protection.
+              TOKEN="$(admin_token)"
+              FC_CLIENT_KC_ID="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
+                "$KC_BASE_URL/admin/realms/$REALM/clients?clientId=$FC_CLIENT_ID" \
+                | jq -r '.[0].id')"
 
               TOKEN="$(admin_token)"
               ROLE_REPS="$(curl -sf -H "X-Forwarded-Proto: https" -H "Authorization: Bearer $TOKEN" \
-                "$KC_BASE_URL/admin/realms/$REALM/roles" \
+                "$KC_BASE_URL/admin/realms/$REALM/clients/$FC_CLIENT_KC_ID/roles" \
                 | jq -c '[.[] | select(.name | test("^(SCHEMA_|ASSET_)"))]')"
 
-              echo "Assigning roles to service-account-federated-catalogue..."
+              echo "Assigning $FC_CLIENT_ID client roles to service-account-federated-catalogue..."
               curl -sf -o /dev/null -X POST -H "X-Forwarded-Proto: https" \
                 -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                "$KC_BASE_URL/admin/realms/$REALM/users/$FC_CLIENT_UUID/role-mappings/realm" \
+                "$KC_BASE_URL/admin/realms/$REALM/users/$FC_CLIENT_UUID/role-mappings/clients/$FC_CLIENT_KC_ID" \
                 --data "$ROLE_REPS"
 
               echo "fc-realm-provision done."

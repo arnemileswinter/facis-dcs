@@ -320,6 +320,9 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 		echo "=== HSM PROVISION JOB LOGS (instance A) ==="; \
 		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
 			job/"$(DCS_DEPLOYMENT)"-hsm-provision --tail=100 || true; \
+		echo "=== FC REALM PROVISION JOB LOGS ==="; \
+		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
+			job/"$(DCS_DEPLOYMENT)"-fc-realm-provision --tail=100 || true; \
 		exit 1; \
 	fi
 
