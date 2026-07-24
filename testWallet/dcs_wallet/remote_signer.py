@@ -235,6 +235,8 @@ def sign_pdf(
     field: str = "",
     keys_dir: Path,
     name: str = "contract.pdf",
+    given_name: str | None = None,
+    family_name: str | None = None,
 ) -> bytes:
     """Sign prepared_pdf's AcroForm signature field as the external SCA, signing
     the DTBS with the signatory's own key. field selects which field on a
@@ -243,6 +245,11 @@ def sign_pdf(
     then signDocument) are only deterministic — and so only produce a valid
     signature — over a pre-placed field, so a signable contract declares its
     signature field (pdf-core /T == signatoryName) and prepare renders it.
+
+    given_name/family_name override the certificate subject's GIVEN_NAME/
+    SURNAME (default: derived from `user`, see ensure_signing_material) — pass
+    them to deliberately mint a cert that does NOT match the ceremony's PID
+    (ADR-20 cert↔PID name-match negative test).
     """
     existing = _unsigned_signature_fields(prepared_pdf)
     if not existing:
@@ -257,7 +264,7 @@ def sign_pdf(
     elif field not in existing:
         raise RuntimeError(f"signature field {field!r} is not an unsigned field on the PDF; found {existing!r}")
 
-    signing_jwk, cert_der = ensure_signing_material(user, keys_dir)
+    signing_jwk, cert_der = ensure_signing_material(user, keys_dir, given_name=given_name, family_name=family_name)
     cert_b64 = base64.b64encode(cert_der).decode()
     signing_ms = int(time.time() * 1000)
     params = _pades_params(cert_b64, field, user, signing_ms)

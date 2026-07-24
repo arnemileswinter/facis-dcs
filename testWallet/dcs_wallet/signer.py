@@ -82,10 +82,26 @@ def _wallet_ca(keys_dir: Path) -> tuple[ec.EllipticCurvePrivateKey, x509.Certifi
     return ca_key, ca_cert
 
 
-def ensure_signing_material(user: str, keys_dir: Path) -> tuple[dict[str, Any], bytes]:
+def ensure_signing_material(
+    user: str, keys_dir: Path, *, given_name: str | None = None, family_name: str | None = None,
+) -> tuple[dict[str, Any], bytes]:
     """Return (private signing JWK, leaf cert DER) for `user`, minting both on
     first use. Distinct key per signatory — the crux of sole control.
+
+    given_name/family_name are embedded in the leaf certificate's subject as
+    GIVEN_NAME/SURNAME (eIDAS Annex I; ADR-20's cert-subject to PID name-match
+    gate reads exactly these RDN attributes). Default to (user, "BDD-Testperson")
+    — the established BDD PID convention (given_name=signatory label,
+    family_name=the fixed test-person surname, see
+    dcs_real_signing_vertical_steps._build_pid_presentation) — so every
+    existing caller keeps matching without changes; pass explicit values to
+    mint a signer whose certificate deliberately does NOT match its PID (the
+    negative test), under its own distinct `user` label so it never collides
+    with the matching identity's cached key/cert.
     """
+    given_name = given_name if given_name is not None else user
+    family_name = family_name if family_name is not None else "BDD-Testperson"
+
     sdir = keys_dir / _SIGNING_DIR
     jwk_path = sdir / f"{user}.signing.jwk"
     crt_path = sdir / f"{user}.signing.crt.pem"
@@ -99,9 +115,14 @@ def ensure_signing_material(user: str, keys_dir: Path) -> tuple[dict[str, Any], 
     user_key = _ec_private_from_jwk(jwk)
     ca_key, ca_cert = _wallet_ca(keys_dir)
     now = _dt.datetime.now(_dt.timezone.utc)
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, f"DCS Signatory {user}"),
+        x509.NameAttribute(NameOID.GIVEN_NAME, given_name),
+        x509.NameAttribute(NameOID.SURNAME, family_name),
+    ])
     leaf = (
         x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"DCS Signatory {user}")]))
+        .subject_name(subject)
         .issuer_name(ca_cert.subject)
         .public_key(user_key.public_key())
         .serial_number(x509.random_serial_number())
