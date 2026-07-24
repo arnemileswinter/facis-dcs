@@ -989,8 +989,10 @@ def step_when_sign_cross_instance(context):
     # Reuses the real-signing pack's ceremony machinery verbatim — every URL
     # builder reads context.base_url, which _as_instance swaps to A.
     from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
+        CEREMONY_AUD,
         _build_pid_presentation,
-        _complete_ceremony_via_webhook,
+        _complete_ceremony_via_presentation,
+        _fetch_pending_nonce,
     )
 
     with _as_instance(context, context.base_url_a):
@@ -1008,16 +1010,18 @@ def step_when_sign_cross_instance(context):
         ceremony_id = start.json().get("ceremony_id")
         assert ceremony_id, f"/signature/request response has no ceremony_id: {start.text}"
 
+        nonce = _fetch_pending_nonce(context, ceremony_id)
         given_name, family_name = "PeerRevocation", "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
             given_name=given_name, family_name=family_name,
-            aud="dcs-signature-ceremony", nonce=str(uuid.uuid4()),
+            aud=CEREMONY_AUD, nonce=nonce,
         )
-        webhook = _complete_ceremony_via_webhook(
-            context, ceremony_id, presentation, subject_did, given_name, family_name
+        completion = _complete_ceremony_via_presentation(
+            context, ceremony_id, presentation, subject_did, given_name, family_name,
+            poa_organization="PeerRevocationSigner", nonce=nonce,
         )
-        assert webhook.status_code == 200, (
-            f"ceremony webhook failed on instance A: {webhook.status_code} {webhook.text}"
+        assert completion.status_code == 200, (
+            f"ceremony presentation failed on instance A: {completion.status_code} {completion.text}"
         )
 
         manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_a)

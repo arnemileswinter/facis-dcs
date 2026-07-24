@@ -214,10 +214,6 @@ def signature_request_by_id_url(context, ceremony_id: str) -> str:
     return f"{context.base_url}/signature/request/{ceremony_id}"
 
 
-def signature_request_webhook_url(context) -> str:
-    return f"{context.base_url}/signature/request/webhook"
-
-
 def signature_request_publish_url(context, ceremony_id: str) -> str:
     return f"{context.base_url}/signature/request/{ceremony_id}/publish"
 

@@ -29,6 +29,8 @@ def wallet_sign(
     credential_type="AES",
     base_url=None,
     headers=None,
+    given_name=None,
+    family_name=None,
 ):
     """Run prepare -> sign -> submit and return the final HTTP response.
 
@@ -63,6 +65,8 @@ def wallet_sign(
         dss_url=dss_url,
         field=field,
         keys_dir=AuthService.resolve_wallet_keys_dir(),
+        given_name=given_name,
+        family_name=family_name,
     )
 
     submit_body = dict(

@@ -1,4 +1,4 @@
-"""Real-signing-vertical (PAdES + EUDIPLO ceremony + PID binding,
+"""Real-signing-vertical (PAdES + wallet-driven signing ceremony + PID binding,
 features/22_real_signing_vertical) BDD step definitions.
 
 NOTE: this __init__.py MUST actually

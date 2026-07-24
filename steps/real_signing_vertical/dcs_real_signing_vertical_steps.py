@@ -1,6 +1,6 @@
 """BDD step definitions for the real signing vertical
 (features/22_real_signing_vertical; SRS DCS-FR-SM-08/-14/-16/-18,
-DCS-IR-SI-10, DCS-FR-CWE-04): PAdES signing, the EUDIPLO signing ceremony,
+DCS-IR-SI-10, DCS-FR-CWE-04): PAdES signing, the wallet-driven signing ceremony,
 and PID binding.
 
 --- Binding decisions this pack relies on ---
@@ -9,32 +9,41 @@ and PID binding.
    runner only ever talks to the backend (BDD_DCS_BASE_URL); pdf-core sits
    behind the backend's internal network path (see
    backend/internal/pdfgeneration/pdfcore/client.go). The PAdES scenarios
-   therefore exercise signing indirectly through POST /signature/apply and
-   inspect the PDF bytes the backend serves afterwards via GET
-   /pdf/export/contract/{did} - the same "black-box HTTP only" discipline
-   established throughout this codebase's BDD packs. The pdf-core-level,
-   pyHanko-based cryptographic conformance proof lives in pdf-core's own
-   behave harness (pdf-core/features/), out of scope for this repo-root
-   harness.
+   therefore exercise signing indirectly through the prepare/submit wallet
+   ceremony (ADR-12/ADR-20, no /signature/apply anymore — that transitional
+   DCS-as-signatory path is removed) and inspect the PDF bytes the backend
+   serves afterwards via GET /pdf/export/contract/{did} - the same
+   "black-box HTTP only" discipline established throughout this codebase's
+   BDD packs. The pdf-core-level, pyHanko-based cryptographic conformance
+   proof lives in pdf-core's own behave harness (pdf-core/features/), out of
+   scope for this repo-root harness.
 
 2. The ceremony endpoints POST /signature/request, GET
-   /signature/request/{ceremony_id}, and POST /signature/request/webhook
-   are defined in backend/design/signature_management.go.
+   /signature/request/{ceremony_id}, and POST
+   /signature/request/{ceremony_id}/callback are defined in
+   backend/design/signature_management.go.
 
-3. EUDIPLO itself is never co-deployed or called by this harness. Instead,
-   THIS HARNESS plays the "EUDIPLO test client" role: it POSTs directly to
-   POST /signature/request/webhook with a real, protocol-correct SD-JWT VC
-   + KB-JWT presentation (built with the existing testWallet/dcs_wallet
-   signing primitives - the same library AuthService already uses for the
-   OID4VP login flow, just with PID-shaped claims (vct urn:eudi:pid:1,
-   given_name/family_name) instead of the role-credential shape). The BDD
-   harness calls the webhook the way EUDIPLO itself would - a legitimate
-   stand-in for a co-deployed EUDIPLO instance.
+3. EUDIPLO is not a dependency of this DCS (ADR-20: the remote EUDIPLO PID
+   service was broken and is removed). Ceremony PID+PoA verification is
+   wallet-presented OID4VP: THIS HARNESS plays the wallet, direct_post'ing a
+   real, protocol-correct SD-JWT VC + KB-JWT vp_token — carrying BOTH the PID
+   and the Power of Attorney presentation, keyed by their DCQL credential
+   query ids — straight to the ceremony's own callback
+   (POST /signature/request/{ceremony_id}/callback), the same endpoint the
+   signed-document callback later reuses once the ceremony is published. Both
+   presentations are built with the existing testWallet/dcs_wallet signing
+   primitives, the same library AuthService already uses for the OID4VP login
+   flow, just with PID-shaped claims (vct urn:eudi:pid:1, given_name/
+   family_name) instead of the role-credential shape, and bound to the
+   ceremony's own request nonce (fetched from its pending-stage request
+   object, never invented locally).
 
-4. The webhook's shared-secret header is X-EUDIPLO-Webhook-Secret, env
-   BDD_EUDIPLO_WEBHOOK_SECRET (default "bdd-eudiplo-webhook-secret"). The
-   requirement-accurate claim under test is "a request without the correct
-   shared secret is rejected", independent of the exact header name.
+4. The callback is authenticated by the unguessable ceremony id in the URL,
+   not a shared secret (ADR-12) — there is no separate webhook auth step to
+   test. What IS still tested here: a presentation whose KB-JWT nonce does
+   not match the ceremony's own request nonce is rejected (the same
+   cryptographic binding a shared secret would have gated, without a secret
+   to leak or rotate).
 
 5. Several byte-level PDF assertions (SubFilter, x5chain presence, RFC3161
    timestamp token, ByteRange coverage) use the same "direct-byte-search
@@ -64,8 +73,8 @@ from behave import given, then, when
 
 from steps.support.api_client import (
     signature_request_by_id_url,
+    signature_request_leaf_url,
     signature_request_url,
-    signature_request_webhook_url,
     signature_retrieve_url,
     get_with_headers,
     post_json,
@@ -78,13 +87,58 @@ from steps.template_management.contract_state_machine_steps import (
 )
 
 
-EUDIPLO_WEBHOOK_SECRET_HEADER = "X-EUDIPLO-Webhook-Secret"
+# The ceremony's fixed OID4VP audience/client_id (backend/internal/
+# signingmanagement/pidverify.Audience) and the DCQL credential query ids
+# (backend/internal/auth/oid4vp/pid.go PIDCredentialQueryID, poa.go
+# PoACredentialQueryID) a wallet's combined vp_token is keyed by.
+CEREMONY_AUD = "dcs-signature-ceremony"
+PID_QUERY_ID = "eudi_pid_credential"
+POA_QUERY_ID = "dcs_poa_credential"
 
 
-def _webhook_secret() -> str:
-    import os
+def _fetch_pending_nonce(context, ceremony_id: str) -> str:
+    """GET the ceremony's pending-stage request object and return its request
+    nonce — the real per-ceremony binding target a presentation's KB-JWT must
+    echo, not a value the harness invents locally."""
+    import requests as _requests  # noqa: PLC0415
 
-    return os.getenv("BDD_EUDIPLO_WEBHOOK_SECRET", "bdd-eudiplo-webhook-secret")
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.oid4vp_signing import _decode_jwt_claims  # noqa: PLC0415
+
+    resp = _requests.get(
+        signature_request_leaf_url(context, ceremony_id, "object"),
+        headers={"Accept": "application/oauth-authz-req+jwt"},
+        timeout=context.http_timeout_seconds,
+    )
+    assert resp.status_code == 200, (
+        f"fetch pending ceremony request object failed for {ceremony_id!r}: "
+        f"{resp.status_code} {resp.text}"
+    )
+    claims = _decode_jwt_claims(resp.text.strip())
+    nonce = str(claims.get("nonce") or "").strip()
+    assert nonce, f"pending ceremony request object carries no nonce: {claims}"
+    return nonce
+
+
+def _build_poa_presentation(*, organization: str, roles: list[str], aud: str, nonce: str) -> str:
+    """Build a Power of Attorney SD-JWT VC + KB-JWT presentation authorizing
+    organization, bound to the ceremony's own aud/nonce (UC-14, FR-SM-03)."""
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.issuer import DEFAULT_ISSUER_DID, issue_access_credential  # noqa: PLC0415
+
+    import os  # noqa: PLC0415
+
+    keys = AuthService.load_wallet_keys()
+    issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
+    return issue_access_credential(
+        organization=organization,
+        roles=roles,
+        issuer_private=keys.issuer_private,
+        wallet_private=keys.wallet_private,
+        issuer_did=issuer_did,
+        aud=aud,
+        nonce=nonce,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +160,8 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     must be signed by two distinct identities).
     """
     AuthService._ensure_dcs_wallet_importable()
+    import os  # noqa: PLC0415
+
     from dcs_wallet.issuer import (  # noqa: PLC0415
         DEFAULT_ISSUER_DID,
         sign_credential_sd_jwt,
@@ -113,6 +169,7 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     )
     from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
     from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
+    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
     holder_key = holder_private or keys.wallet_private
@@ -120,6 +177,13 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     subject_did = did_jwk_from_public_jwk(holder_public)
 
     now = int(time.time())
+    # A real status claim (ADR-20): VerifyPID's status-list check is no
+    # longer skipped now that EUDIPLO — which omitted status — is gone, so a
+    # PID presentation with no status claim would be rejected outright. The
+    # seed (given_name/family_name in place of organization/roles) just needs
+    # to be a stable, collision-free per-identity key into the same dev
+    # status-list tenant testWallet/scripts/ensure_statuslist_for_dev.py seeds.
+    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
     visible_claims = {
         "iss": DEFAULT_ISSUER_DID,
         "sub": subject_did,
@@ -127,6 +191,10 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
         "iat": now - 3600,
         "exp": now + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
+        "status": build_credential_status(
+            sub=subject_did, organization=given_name, roles=[family_name],
+            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+        ),
     }
     selective_claims = {"given_name": given_name, "family_name": family_name}
     issued = sign_credential_sd_jwt(
@@ -162,30 +230,46 @@ def _start_ceremony(context, name, field_name, headers):
     return resp
 
 
-def _complete_ceremony_via_webhook(context, ceremony_id, presentation, subject_did, given_name, family_name, *, poa_organization=None, secret=None):
-    payload = {
-        "ceremony_id": ceremony_id,
-        "vp_token": presentation,
-        "pid_claims": {
-            "sub": subject_did,
-            "given_name": given_name,
-            "family_name": family_name,
-        },
-    }
-    if poa_organization is not None:
-        payload["poa_organization"] = poa_organization
-        payload["poa_roles"] = ["signatory"]
-    header_value = _webhook_secret() if secret is None else secret
-    headers = {"Content-Type": "application/json"}
-    if header_value is not None:
-        headers[EUDIPLO_WEBHOOK_SECRET_HEADER] = header_value
-    return post_json(context, signature_request_webhook_url(context), payload, headers=headers)
+def _complete_ceremony_via_presentation(
+    context, ceremony_id, presentation, subject_did, given_name, family_name,
+    *, poa_organization=None, nonce=None,
+):
+    """Complete a ceremony's PID(+PoA) presentation the way a wallet actually
+    does it: direct_post a vp_token — keyed by the PID and PoA DCQL credential
+    query ids — to the ceremony's own callback (ADR-20; this replaces the
+    removed EUDIPLO webhook, see module docstring point 3).
+
+    poa_organization=None omits the PoA credential from vp_token entirely
+    (the "no PoA presented" negative case); any other value builds a PoA
+    credential authorizing that organization (a mismatched one for the
+    "wrong PoA" negative case). subject_did/given_name/family_name are
+    unused by the request itself (the callback derives them by verifying
+    presentation) but kept for symmetry with the old signature so callers
+    changed minimally.
+    """
+    del subject_did, given_name, family_name
+    nonce = nonce or _fetch_pending_nonce(context, ceremony_id)
+    vp_token = {PID_QUERY_ID: [presentation]}
+    if poa_organization:
+        vp_token[POA_QUERY_ID] = [
+            _build_poa_presentation(organization=poa_organization, roles=["signatory"], aud=CEREMONY_AUD, nonce=nonce)
+        ]
+    import json  # noqa: PLC0415
+
+    import requests as _requests  # noqa: PLC0415
+
+    return _requests.post(
+        signature_request_leaf_url(context, ceremony_id, "callback"),
+        data={"state": ceremony_id, "vp_token": json.dumps(vp_token, separators=(",", ":"))},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=context.http_timeout_seconds,
+    )
 
 
 def _run_full_ceremony(context, name, field_name, signatory_name, holder_private=None, poa_organization=None):
-    """Start a ceremony, complete it headlessly via the assumed webhook
-    contract (see module docstring point 3), and stash the presentation +
-    ceremony id on context for later PDF-embedding assertions.
+    """Start a ceremony, complete it headlessly via the wallet's own
+    direct_post presentation (see module docstring point 3), and stash the
+    presentation + ceremony id on context for later PDF-embedding assertions.
 
     field_name is the party the signatory signs as — the participating DCS
     instance DID. poa_organization is the organization the signatory presents a
@@ -203,19 +287,19 @@ def _run_full_ceremony(context, name, field_name, signatory_name, holder_private
     ceremony_id = start_resp.json().get("ceremony_id")
     assert ceremony_id, f"/signature/request response has no ceremony_id: {start_resp.text}"
 
-    nonce = str(uuid.uuid4())
+    nonce = _fetch_pending_nonce(context, ceremony_id)
     given_name, family_name = signatory_name, "BDD-Testperson"
     presentation, issuer_jwt, disclosures, subject_did = _build_pid_presentation(
-        given_name=given_name, family_name=family_name, aud="dcs-signature-ceremony", nonce=nonce,
+        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce,
         holder_private=holder_private,
     )
-    webhook_resp = _complete_ceremony_via_webhook(
+    resp = _complete_ceremony_via_presentation(
         context, ceremony_id, presentation, subject_did, given_name, family_name,
-        poa_organization=poa_organization,
+        poa_organization=poa_organization, nonce=nonce,
     )
-    assert webhook_resp.status_code == 200, (
-        f"POST /signature/request/webhook failed for ceremony '{ceremony_id}': "
-        f"{webhook_resp.status_code} {webhook_resp.text}"
+    assert resp.status_code == 200, (
+        f"ceremony presentation failed for ceremony '{ceremony_id}': "
+        f"{resp.status_code} {resp.text}"
     )
 
     if not hasattr(context, "ceremony_ids"):
@@ -384,15 +468,18 @@ def step_when_start_ceremony_as_role(context, name, field_name, role):
             context.ceremony_ids = {}
         context.ceremony_ids[name] = ceremony_id
 
-        # Build (but do not submit) the PID presentation the webhook steps
-        # need — scenarios that start a ceremony via this low-level step
-        # complete it separately via the webhook steps, which expect
+        # Build (but do not submit) the PID presentation the presentation-
+        # completion steps need — scenarios that start a ceremony via this
+        # low-level step complete it separately via those steps, which expect
         # context.pid_presentations[name] to already be populated (same
-        # contract as _run_full_ceremony, minus the webhook POST itself).
-        nonce = str(uuid.uuid4())
+        # contract as _run_full_ceremony, minus the direct_post itself). Bound
+        # to the ceremony's REAL request nonce, so the "correct" completion
+        # step actually verifies and a deliberately wrong one is a genuine
+        # negative test (ADR-20 nonce binding), not a wrong-secret stand-in.
+        nonce = _fetch_pending_nonce(context, ceremony_id)
         given_name, family_name = field_name, "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-            given_name=given_name, family_name=family_name, aud="dcs-signature-ceremony", nonce=nonce
+            given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce
         )
         if not hasattr(context, "pid_presentations"):
             context.pid_presentations = {}
@@ -402,6 +489,7 @@ def step_when_start_ceremony_as_role(context, name, field_name, role):
             "given_name": given_name,
             "family_name": family_name,
             "field_name": field_name,
+            "nonce": nonce,
         }
 
 
@@ -415,11 +503,11 @@ def step_when_poll_ceremony_status(context, name):
     )
 
 
-@when('the EUDIPLO webhook confirms the presentation for contract "{name}" with the correct shared secret')
-def step_when_webhook_confirms_correct_secret(context, name):
+@when('the wallet presentation confirms the ceremony for contract "{name}" with the correct request nonce')
+def step_when_presentation_confirms_correct_nonce(context, name):
     ceremony_id = context.ceremony_ids[name]
     presentation_info = context.pid_presentations[name]
-    context.requests_response = _complete_ceremony_via_webhook(
+    context.requests_response = _complete_ceremony_via_presentation(
         context,
         ceremony_id,
         presentation_info["presentation"],
@@ -427,21 +515,29 @@ def step_when_webhook_confirms_correct_secret(context, name):
         presentation_info["given_name"],
         presentation_info["family_name"],
         poa_organization=presentation_info["field_name"],
+        nonce=presentation_info["nonce"],
     )
 
 
-@when('a caller posts the EUDIPLO webhook for contract "{name}" with an incorrect shared secret')
-def step_when_webhook_wrong_secret(context, name):
+@when('a caller posts a ceremony presentation for contract "{name}" with an incorrect request nonce')
+def step_when_presentation_wrong_nonce(context, name):
     ceremony_id = context.ceremony_ids[name]
     presentation_info = context.pid_presentations[name]
-    context.requests_response = _complete_ceremony_via_webhook(
+    # Re-bind the SAME PID claims to a nonce the ceremony never issued — the
+    # presentation is otherwise perfectly valid, isolating the nonce check.
+    wrong_nonce = str(uuid.uuid4())
+    presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
+        given_name=presentation_info["given_name"], family_name=presentation_info["family_name"],
+        aud=CEREMONY_AUD, nonce=wrong_nonce,
+    )
+    context.requests_response = _complete_ceremony_via_presentation(
         context,
         ceremony_id,
-        presentation_info["presentation"],
-        presentation_info["subject_did"],
+        presentation,
+        subject_did,
         presentation_info["given_name"],
         presentation_info["family_name"],
-        secret="wrong-secret-value",
+        nonce=wrong_nonce,
     )
 
 
@@ -780,12 +876,12 @@ def step_then_ceremony_status(context, name, status):
     )
 
 
-@then("the webhook request is rejected for the incorrect shared secret")
-def step_then_webhook_rejected(context):
+@then("the ceremony presentation is rejected for the incorrect request nonce")
+def step_then_presentation_nonce_rejected(context):
     resp = context.requests_response
-    assert resp.status_code in (401, 403), (
-        f"Expected POST /signature/request/webhook to reject a request presenting the wrong "
-        f"shared-secret header value, got {resp.status_code}: {resp.text}"
+    assert resp.status_code == 400, (
+        f"Expected the ceremony callback to reject a presentation bound to a nonce the ceremony "
+        f"never issued, got {resp.status_code}: {resp.text}"
     )
 
 

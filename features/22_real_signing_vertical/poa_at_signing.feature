@@ -22,14 +22,14 @@ Feature: Power of Attorney at signing
   Scenario: Signing is blocked when no Power of Attorney is presented at the ceremony
     Given contract "PoA Missing Contract" has reached contract state "APPROVED"
     When a signing ceremony is started for the signing party of contract "PoA Missing Contract"
-    And the ceremony webhook is completed with no Power of Attorney
+    And the ceremony presentation is completed with no Power of Attorney
     Then the signing request is rejected because the Power of Attorney does not authorize this signature
 
   @UC-14
   Scenario: Signing is blocked when the Power of Attorney authorizes a different party
     Given contract "PoA Wrong Contract" has reached contract state "APPROVED"
     When a signing ceremony is started for the signing party of contract "PoA Wrong Contract"
-    And the ceremony webhook is completed with a Power of Attorney for a different party
+    And the ceremony presentation is completed with a Power of Attorney for a different party
     Then the signing request is rejected because the Power of Attorney does not authorize this signature
 
   @DCS-FR-SM-04 @DCS-FR-SM-26
