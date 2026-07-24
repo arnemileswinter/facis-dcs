@@ -285,6 +285,11 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	// Fast-fail for the common case; NOT the consumption guard. The atomic
+	// guard is inside Applier.SubmitSignature (ADR-20): its guarded UPDATE ...
+	// WHERE consumed_at IS NULL and the finalize writes commit or roll back in
+	// ONE transaction, so two concurrent callbacks can never both finalize
+	// even though both may pass this early, non-atomic read.
 	if ceremony.ConsumedAt != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
 	}
@@ -336,14 +341,14 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return nil, mapSignatureCommandError(err)
 	}
 
+	// SubmitSignature already marked the ceremony consumed atomically, in the
+	// same transaction as finalize (ADR-20) — this is a read-only follow-up
+	// for the response, not a second write.
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.CeremonyRepo.MarkCeremonyConsumed(ctx, tx, ceremony.ID); err != nil {
-		return nil, signaturemanagement.MakeInternalError(err)
-	}
 	processData, err := s.CRepo.ReadProcessDataByDID(ctx, tx, ceremony.ContractDID)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)

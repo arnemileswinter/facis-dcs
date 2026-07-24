@@ -107,6 +107,76 @@ func TestAssertValidAES(t *testing.T) {
 	}
 }
 
+func TestAssertValidQES(t *testing.T) {
+	qualified := &Report{Indication: "TOTAL-PASSED", SignedBy: "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane", Qualification: "QESIG"}
+	if err := qualified.AssertValidQES(); err != nil {
+		t.Fatalf("expected a TOTAL-PASSED QESIG signature to be accepted as QES: %v", err)
+	}
+
+	// AES's relaxation does NOT carry over to QES: a trust-chain gap that AES
+	// tolerates must disqualify a QES claim.
+	nonQualifiedChain := &Report{Indication: "INDETERMINATE", SubIndication: "NO_CERTIFICATE_CHAIN_FOUND", SignedBy: "CN=Jane Doe"}
+	if err := nonQualifiedChain.AssertValidQES(); err == nil {
+		t.Fatal("expected an INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND signature to be rejected for QES")
+	}
+
+	// TOTAL-PASSED alone is not enough — an advanced (non-qualified) signature
+	// must not pass the QES gate just because the chain validated.
+	advancedOnly := &Report{Indication: "TOTAL-PASSED", SignedBy: "CN=Jane Doe", Qualification: "ADESIG"}
+	if err := advancedOnly.AssertValidQES(); err == nil {
+		t.Fatal("expected a non-qualified TOTAL-PASSED signature to be rejected for QES")
+	}
+
+	failed := &Report{Indication: "TOTAL-FAILED", SubIndication: "HASH_FAILURE", SignedBy: "CN=x", Qualification: "QESIG"}
+	if err := failed.AssertValidQES(); err == nil {
+		t.Fatal("expected a failed indication to be rejected for QES")
+	}
+}
+
+func TestAssertMeetsLevel(t *testing.T) {
+	qualified := &Report{Indication: "TOTAL-PASSED", SignedBy: "CN=Jane Doe", Qualification: "QESIG"}
+	if err := qualified.AssertMeetsLevel("QES"); err != nil {
+		t.Fatalf("expected QESIG to satisfy a QES requirement: %v", err)
+	}
+
+	nonQualified := &Report{Indication: "INDETERMINATE", SubIndication: "NO_CERTIFICATE_CHAIN_FOUND", SignedBy: "CN=Jane Doe"}
+	if err := nonQualified.AssertMeetsLevel("QES"); err == nil {
+		t.Fatal("expected a non-qualified signature to fail a QES requirement")
+	}
+	if err := nonQualified.AssertMeetsLevel("AES"); err != nil {
+		t.Fatalf("expected the same signature to satisfy an AES requirement: %v", err)
+	}
+	if err := nonQualified.AssertMeetsLevel(""); err != nil {
+		t.Fatalf("expected an unspecified requirement to fall back to the AES gate: %v", err)
+	}
+}
+
+func TestParseSubjectAttributesAndAccessors(t *testing.T) {
+	r := &Report{SignedBy: "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane, SERIALNUMBER=ABC123"}
+	if got := r.SubjectGivenName(); got != "Jane" {
+		t.Fatalf("SubjectGivenName: got %q", got)
+	}
+	if got := r.SubjectSurname(); got != "Doe" {
+		t.Fatalf("SubjectSurname: got %q", got)
+	}
+	if got := r.SubjectSerialNumber(); got != "ABC123" {
+		t.Fatalf("SubjectSerialNumber: got %q", got)
+	}
+
+	// Structured fields (as real DSS diagnostic data reports them) take
+	// precedence over parsing the SignedBy DN string.
+	structured := &Report{SignedBy: "CN=Jane Doe", GivenName: "Structured", Surname: "Fields", SerialNumber: "999"}
+	if got := structured.SubjectGivenName(); got != "Structured" {
+		t.Fatalf("expected structured GivenName to win, got %q", got)
+	}
+	if got := structured.SubjectSurname(); got != "Fields" {
+		t.Fatalf("expected structured Surname to win, got %q", got)
+	}
+	if got := structured.SubjectSerialNumber(); got != "999" {
+		t.Fatalf("expected structured SerialNumber to win, got %q", got)
+	}
+}
+
 func TestValidatePDFHardFailsWhenUnreachable(t *testing.T) {
 	// A configured DSS that cannot be reached is an error, never a silent skip.
 	if _, err := New("http://127.0.0.1:1").ValidatePDF(context.Background(), []byte("x"), "x.pdf"); err == nil {

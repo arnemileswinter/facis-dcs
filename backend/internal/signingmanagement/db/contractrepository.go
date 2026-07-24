@@ -155,6 +155,10 @@ type SignatureRecord struct {
 	// JAdESSignature is the ETSI TS 119 182-1 compact JWS over the JSON-LD
 	// contract representation (DCS-FR-SM-02/-11).
 	JAdESSignature *string `db:"jades_signature"`
+	// CeremonyID is the signing ceremony that produced this signature — the
+	// join key back to the ceremony's recorded signer certificate subject for
+	// the cross-ceremony consistency check (ADR-20).
+	CeremonyID *string `db:"ceremony_id"`
 }
 
 type ContractRepo interface {

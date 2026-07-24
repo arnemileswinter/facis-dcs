@@ -65,6 +65,22 @@ type Report struct {
 	// SigningTime is the claimed/qualified signing time (DCS-FR-SM-18 timestamp
 	// verification).
 	SigningTime string
+	// Qualification is DSS's qualification determination for the signature
+	// (e.g. QESIG for a qualified electronic signature by a natural person,
+	// ADESIG_QC/ADESIG for an advanced signature). It is the QES evidence
+	// AssertValidQES requires TOTAL-PASSED to be paired with — AssertValidAES
+	// never looks at it (ADR-20).
+	Qualification string
+	// SerialNumber is the signing certificate's serial number (sole control
+	// audit trail, DCS-FR-SM-26).
+	SerialNumber string
+	// GivenName/Surname/CommonName are the signing certificate subject's name
+	// attributes, when DSS reports them as structured fields. When DSS reports
+	// only SignedBy as a DN string, ParseSubjectAttributes recovers the same
+	// attributes from it (cert-subject to PID name matching, ADR-20).
+	GivenName  string
+	Surname    string
+	CommonName string
 }
 
 // Passed reports whether the ETSI indication is TOTAL-PASSED.
@@ -108,6 +124,99 @@ func (r *Report) AssertValidAES() error {
 		return fmt.Errorf("dss: signature carries no signing certificate")
 	}
 	return nil
+}
+
+// qualifiedSignatureQualifications are DSS's SignatureQualification values that
+// mean "qualified electronic signature by a natural person" (ETSI TS 119
+// 172-4 QESig) — a qualified certificate on a QSCD, chained to an EU
+// trusted-list CA.
+var qualifiedSignatureQualifications = map[string]bool{
+	"QESIG": true,
+}
+
+// AssertValidQES enforces the DCS's acceptance criteria for a Qualified
+// Electronic Signature (eIDAS Art. 3(12), Annex I): everything AssertValidAES
+// requires, PLUS DSS's TOTAL-PASSED indication (a qualified cert chaining to a
+// trusted-list CA IS required for QES, unlike AES) and a QESig qualification
+// determination (qualified certificate + QSCD, ETSI TS 119 172-4). Unlike
+// AssertValidAES, an INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND result is
+// REJECTED here: a trust-chain gap disqualifies a QES claim even though it is
+// tolerated for AES (ADR-20).
+func (r *Report) AssertValidQES() error {
+	if err := r.AssertValidAES(); err != nil {
+		return err
+	}
+	if !r.Passed() {
+		return fmt.Errorf("dss: QES requires indication TOTAL-PASSED (a qualified cert chaining to a trusted-list CA), got %s/%s", r.Indication, r.SubIndication)
+	}
+	if !qualifiedSignatureQualifications[strings.ToUpper(strings.TrimSpace(r.Qualification))] {
+		return fmt.Errorf("dss: QES requires a QESig qualification determination (qualified certificate + QSCD), got %q", r.Qualification)
+	}
+	return nil
+}
+
+// AssertMeetsLevel enforces the acceptance gate for the required signature
+// level (SM-01 per-contract level enforcement, ADR-20): AssertValidQES for a
+// contract that requires QES, AssertValidAES (the permissive gate, unchanged)
+// for everything else. Applying the wrong gate to a level the contract does
+// not require would either reject a legitimate AES signature against QES
+// criteria it was never meant to satisfy, or accept a QES-required signature
+// on AES's relaxed trust-chain tolerance — this is the single dispatch point
+// that keeps the two gates from being applied to the wrong ceremony.
+func (r *Report) AssertMeetsLevel(required string) error {
+	if strings.EqualFold(strings.TrimSpace(required), "QES") {
+		return r.AssertValidQES()
+	}
+	return r.AssertValidAES()
+}
+
+// ParseSubjectAttributes extracts GIVENNAME/SURNAME/CN/SERIALNUMBER RDN
+// attributes from a certificate subject distinguished name string (DSS's
+// SignedBy, e.g. "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane"). Used as a
+// fallback when DSS does not report GivenName/Surname as structured fields.
+func ParseSubjectAttributes(dn string) map[string]string {
+	attrs := map[string]string{}
+	for _, part := range strings.FieldsFunc(dn, func(r rune) bool { return r == ',' || r == '/' }) {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToUpper(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		attrs[key] = value
+	}
+	return attrs
+}
+
+// SubjectGivenName returns the signing certificate's given name, preferring
+// DSS's structured GivenName field and falling back to parsing SignedBy.
+func (r *Report) SubjectGivenName() string {
+	if strings.TrimSpace(r.GivenName) != "" {
+		return r.GivenName
+	}
+	return ParseSubjectAttributes(r.SignedBy)["GIVENNAME"]
+}
+
+// SubjectSurname returns the signing certificate's surname, preferring DSS's
+// structured Surname field and falling back to parsing SignedBy.
+func (r *Report) SubjectSurname() string {
+	if strings.TrimSpace(r.Surname) != "" {
+		return r.Surname
+	}
+	return ParseSubjectAttributes(r.SignedBy)["SURNAME"]
+}
+
+// SubjectSerialNumber returns the signing certificate's serial number,
+// preferring DSS's structured SerialNumber field and falling back to parsing
+// SignedBy's DN for a SERIALNUMBER RDN.
+func (r *Report) SubjectSerialNumber() string {
+	if strings.TrimSpace(r.SerialNumber) != "" {
+		return r.SerialNumber
+	}
+	return ParseSubjectAttributes(r.SignedBy)["SERIALNUMBER"]
 }
 
 // ValidatePDF submits pdf to POST {base}/services/rest/validation/validateSignature
@@ -209,6 +318,16 @@ func walkReport(node any, report *Report) {
 				setFirst(&report.SignatureFormat, s)
 			case "signingtime":
 				setFirst(&report.SigningTime, s)
+			case "signaturequalification", "qualification":
+				setFirst(&report.Qualification, s)
+			case "serialnumber", "certificateserialnumber":
+				setFirst(&report.SerialNumber, s)
+			case "givenname":
+				setFirst(&report.GivenName, s)
+			case "surname":
+				setFirst(&report.Surname, s)
+			case "commonname":
+				setFirst(&report.CommonName, s)
 			}
 		}
 		for _, val := range v {

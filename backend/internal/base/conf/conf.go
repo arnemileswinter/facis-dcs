@@ -6,6 +6,8 @@ package conf
 
 import (
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -85,4 +87,25 @@ func SyncFailCronJobTimeOut() time.Duration {
 		}
 	}
 	return 5 * time.Minute
+}
+
+// AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
+// enforces cert-subject to PID name matching for an AES-level signature. It
+// is mandatory and non-configurable for QES (eIDAS Annex I requires a
+// qualified certificate to carry the signatory's verified name); for AES it
+// defaults to enforced too — closing exactly the shared/self-signed-key hole
+// the gate exists for — but an operator can relax it with
+// DCS_AES_CERT_NAME_MATCH_REQUIRED=false for a deployment whose AES ceremony
+// legitimately cannot bind a certificate name (documented operator choice,
+// never the default).
+func AESCertNameMatchRequired() bool {
+	v := strings.TrimSpace(os.Getenv("DCS_AES_CERT_NAME_MATCH_REQUIRED"))
+	if v == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(v)
+	if err != nil {
+		return true
+	}
+	return enabled
 }

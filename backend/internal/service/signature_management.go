@@ -45,12 +45,26 @@ func mapSignatureCommandError(err error) error {
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
 		return signaturemanagement.MakeCeremonyRequired(err)
 	}
-	if errors.Is(err, command.ErrSignatureInvalid) {
+	// Every ADR-20 acceptance-gate rejection (document-byte mismatch, nonce
+	// binding, level-below-required, cert/PID mismatch, cert inconsistency,
+	// invalid JAdES) is reported as signature_invalid alongside the original
+	// ErrSignatureInvalid — the frontend distinguishes the specific failure
+	// from the error message today; typed per-cause Goa results are tracked
+	// under item 11's validation-failure view.
+	if errors.Is(err, command.ErrSignatureInvalid) ||
+		errors.Is(err, command.ErrDocumentMismatch) ||
+		errors.Is(err, command.ErrNonceMismatch) ||
+		errors.Is(err, command.ErrLevelBelowRequired) ||
+		errors.Is(err, command.ErrCertPIDMismatch) ||
+		errors.Is(err, command.ErrCertInconsistent) ||
+		errors.Is(err, command.ErrJAdESInvalid) {
 		return signaturemanagement.MakeSignatureInvalid(err)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
 		errors.Is(err, command.ErrUnknownSignatureField) ||
 		errors.Is(err, command.ErrFieldAlreadySigned) ||
+		errors.Is(err, command.ErrCeremonyNotPrepared) ||
+		errors.Is(err, command.ErrCeremonyConsumed) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, db.ErrSignatureNotFound) {
 		return signaturemanagement.MakeBadRequest(err)

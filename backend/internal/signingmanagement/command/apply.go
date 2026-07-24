@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -60,6 +61,45 @@ var ErrSignatureInvalid = errors.New("submitted signature is not valid or does n
 
 // ErrFieldAlreadySigned rejects re-signing an already-signed field.
 var ErrFieldAlreadySigned = errors.New("signature field is already signed")
+
+// ErrCeremonyNotPrepared rejects a submit for a ceremony that was never
+// prepared: submit validates against the bytes pinned at prepare (ADR-20) and
+// applies no signature and derives no fresh bytes of its own, so a ceremony
+// with nothing pinned has nothing to validate against.
+var ErrCeremonyNotPrepared = errors.New("ceremony has no to-be-signed document pinned; call prepare before submit")
+
+// ErrCeremonyConsumed rejects a submit for a ceremony whose signing request
+// was already accepted (ADR-20 atomic consumption): the consume guard and the
+// finalize writes commit in the SAME transaction, so this can only be lost to
+// a genuinely earlier submit, never a race.
+var ErrCeremonyConsumed = errors.New("ceremony signing request has already been consumed")
+
+// ErrDocumentMismatch rejects a submitted PDF whose initial revision (the
+// bytes before the signatory's incremental PAdES update) is not byte-for-byte
+// the document pinned at prepare (ADR-20 TBS byte pinning).
+var ErrDocumentMismatch = errors.New("submitted document does not match the document prepared for signing")
+
+// ErrNonceMismatch rejects a submitted signature that does not echo the
+// ceremony's request nonce, cryptographically bound inside the JAdES
+// signature's covered content (ADR-20 nonce binding).
+var ErrNonceMismatch = errors.New("submitted signature is not bound to the ceremony's request nonce")
+
+// ErrLevelBelowRequired rejects a submitted signature whose achieved AdES
+// level does not meet the contract's declared requirement for the field
+// (ADR-20 level-aware acceptance, SM-01).
+var ErrLevelBelowRequired = errors.New("submitted signature does not meet the contract's required signature level")
+
+// ErrCertPIDMismatch rejects a submitted signature whose certificate subject
+// does not name the ceremony's verified PID (sole control, ADR-20).
+var ErrCertPIDMismatch = errors.New("signing certificate does not identify the ceremony's verified signatory")
+
+// ErrCertInconsistent rejects a submitted signature whose certificate does
+// not match a certificate the SAME signatory already used elsewhere on this
+// contract (ADR-20 cross-ceremony consistency).
+var ErrCertInconsistent = errors.New("signing certificate is inconsistent with this signatory's other signatures on this contract")
+
+// ErrJAdESInvalid rejects a submitted JAdES that fails DSS validation.
+var ErrJAdESInvalid = errors.New("submitted JAdES signature is invalid")
 
 // ApplyCmd carries the inputs for applying a digital signature.
 type ApplyCmd struct {
@@ -151,6 +191,28 @@ func (h *Applier) Prepare(ctx context.Context, cmd ApplyCmd) ([]byte, error) {
 		}
 	}
 
+	// Pin the exact to-be-signed bytes and the finalize metadata derived
+	// alongside them, at EVERY prepare — wallet ceremony and desktop path
+	// alike (ADR-20). SubmitSignature validates against these pinned bytes and
+	// never re-derives them, so a submitted document is only ever compared
+	// against what THIS prepare committed to, not a freshly re-run pipeline.
+	toBeSignedSum := sha256.Sum256(toBeSigned)
+	payloadSum := sha256.Sum256(prepared.jadesPayload)
+	if err := h.CeremonyRepo.PinPreparedBytes(ctx, tx, db.PinnedBytes{
+		CeremonyID:             prepared.ceremony.ID,
+		PreparedPDF:            toBeSigned,
+		PreparedPDFSHA256:      hex.EncodeToString(toBeSignedSum[:]),
+		PinnedPayload:          prepared.jadesPayload,
+		PinnedPayloadSHA256:    hex.EncodeToString(payloadSum[:]),
+		PinnedContentHash:      prepared.contentHash,
+		PinnedRendererVersion:  prepared.rendererVersion,
+		PinnedSignedCount:      prepared.signedCount,
+		PinnedContractVersion:  prepared.contractVersion,
+		RequiredCredentialType: prepared.requiredCredentialType,
+	}); err != nil {
+		return nil, fmt.Errorf("pin prepared signature bytes: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit prepared signature: %w", err)
 	}
@@ -198,57 +260,173 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		}
 	}(tx)
 
-	prepared, err := h.prepare(ctx, tx, cmd.ApplyCmd)
+	// SubmitSignature is a pure validate-and-record step (ADR-20): it never
+	// re-runs prepare() — no re-sealing the agreement, no re-issuing the
+	// summary VC, no re-stamping the C2PA lifecycle. Everything it needs was
+	// computed exactly once, at prepare, and pinned on the ceremony; a
+	// mismatch against those pinned bytes is the whole of the acceptance
+	// check, not a re-derivation to compare against.
+	ceremony, err := resolveCeremony(ctx, tx, h.CeremonyRepo, cmd.ApplyCmd)
 	if err != nil {
 		return err
 	}
-
-	// A submitted PDF may only ADD a signature to the document we prepared — it
-	// may never redefine it. This is deliberately the opposite of the
-	// federation rule (ADR-13, receivepdf.go), where an inbound PDF is
-	// authoritative and replaces the local copy: there the peer owns the
-	// document, here we do. So the machine-readable payload embedded in what
-	// comes back must still be this instance's contract data, and nothing from
-	// the upload is ever written into contract_data.
-	//
-	// Without this the signature would still validate while the artifact said
-	// something else: finalize records contentHash computed from the LOCAL
-	// payload, so a divergent upload would be stored under a hash that attests
-	// a document it does not contain.
-	if err := h.assertSubmittedPayloadIsOurs(ctx, cmd.SignedPDF, prepared.basePDF); err != nil {
-		return err
+	if len(ceremony.PreparedPDF) == 0 || ceremony.PinnedContentHash == nil ||
+		ceremony.PinnedRendererVersion == nil || ceremony.PinnedSignedCount == nil ||
+		ceremony.PinnedContractVersion == nil || ceremony.RequiredCredentialType == nil {
+		return ErrCeremonyNotPrepared
+	}
+	if ceremony.ConsumedAt != nil {
+		return ErrCeremonyConsumed
 	}
 
-	report, err := h.Validator.ValidatePDF(ctx, cmd.SignedPDF, prepared.ceremony.FieldName)
+	// Safety net against staleness between prepare and submit: the contract
+	// must still be in a state signing is valid from, and this field must
+	// still be unsigned. Re-checking is a cheap read, not a re-derivation of
+	// prepare's business logic (sealing, evidence, SHACL/policy gates).
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read process data: %w", err)
+	}
+	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventSign); err != nil {
+		return err
+	}
+	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not load existing signatures: %w", err)
+	}
+	for _, rec := range existingRecords {
+		if rec.Status == "SIGNED" && rec.FieldName != nil && *rec.FieldName == ceremony.FieldName {
+			return fmt.Errorf("%w: %s", ErrFieldAlreadySigned, ceremony.FieldName)
+		}
+	}
+
+	// TBS byte pinning (ADR-20): a submitted PDF may only ADD a PAdES
+	// incremental update to the document prepare committed to — it may never
+	// redefine any byte of it. PAdES signing is itself an incremental update,
+	// so "the same document, plus our own signature" is exactly a byte-prefix
+	// relationship; anything else (tampered visible pages, a substituted
+	// document with only the attachment reused) fails this check outright,
+	// independently of whether the signature itself validates.
+	if !bytes.HasPrefix(cmd.SignedPDF, ceremony.PreparedPDF) {
+		return fmt.Errorf("%w: the submitted PDF's initial revision is not the document prepared for signing", ErrDocumentMismatch)
+	}
+
+	report, err := h.Validator.ValidatePDF(ctx, cmd.SignedPDF, ceremony.FieldName)
 	if err != nil {
 		return fmt.Errorf("validate submitted signature: %w", err)
 	}
-	// AES sole control: the signature must be a cryptographically valid AES. Who
-	// signed is established by the ceremony's verified PID (recorded on the
-	// ceremony), not by matching the certificate subject — no PID-to-certificate
-	// identifier binding is standardised, and AES (eIDAS Art. 26) requires none.
 	if err := report.AssertValidAES(); err != nil {
 		return fmt.Errorf("%w: %v", ErrSignatureInvalid, err)
 	}
+	requiredLevel := strings.ToUpper(strings.TrimSpace(*ceremony.RequiredCredentialType))
+	achievedQES := report.AssertValidQES() == nil
+	if requiredLevel == "QES" && !achievedQES {
+		return fmt.Errorf("%w: contract requires QES for %q, submitted signature is %s/%s (qualification %q)",
+			ErrLevelBelowRequired, ceremony.FieldName, report.Indication, report.SubIndication, report.Qualification)
+	}
+	achievedLevel := "AES"
+	if achievedQES {
+		achievedLevel = "QES"
+	}
 
-	// The signing time is the signatory's, taken from the validated signature
-	// (DCS-FR-SM-18 timestamp) when present.
-	signedAt := prepared.signedAt
+	// Sole control (eIDAS Art. 26c): the certificate must identify the
+	// ceremony's verified PID by name — mandatory for QES (Annex I requires
+	// the qualified cert to carry the signatory's verified name), policy-
+	// configurable for AES (ADR-20; defaults to enforced).
+	pidGiven, pidFamily := pidGivenFamilyName(ceremony.PidClaims)
+	certGiven, certSurname := report.SubjectGivenName(), report.SubjectSurname()
+	nameMatchRequired := requiredLevel == "QES" || conf.AESCertNameMatchRequired()
+	if nameMatchRequired && !namesMatch(pidGiven, pidFamily, certGiven, certSurname) {
+		return fmt.Errorf("%w: PID %q %q vs. certificate %q %q", ErrCertPIDMismatch, pidGiven, pidFamily, certGiven, certSurname)
+	}
+	// Cross-ceremony consistency: this signatory must use the SAME
+	// certificate across every signature they have already placed on this
+	// contract (a mid-contract certificate swap for one signer is exactly the
+	// signal a compromised or shared key would produce).
+	for _, rec := range existingRecords {
+		if rec.SignerDID != cmd.SignerDID || rec.CeremonyID == nil {
+			continue
+		}
+		priorCeremony, err := h.CeremonyRepo.GetCeremonyByID(ctx, tx, *rec.CeremonyID)
+		if err != nil {
+			return fmt.Errorf("could not resolve prior ceremony %s: %w", *rec.CeremonyID, err)
+		}
+		if priorCeremony != nil && priorCeremony.SignerCertSubject != nil &&
+			normalizeName(*priorCeremony.SignerCertSubject) != normalizeName(report.SignedBy) {
+			return fmt.Errorf("%w: prior certificate %q vs. this certificate %q", ErrCertInconsistent, *priorCeremony.SignerCertSubject, report.SignedBy)
+		}
+	}
+
+	// Nonce binding (ADR-20): a wallet-ceremony callback (a published request
+	// with a fresh nonce) requires the JAdES signature over the machine-
+	// readable payload, with the ceremony's request nonce cryptographically
+	// bound inside its protected header — the covered content DSS already
+	// validated the signature over. A holder of just the ceremony URL cannot
+	// forge this without the signatory's own key. The desktop path (never
+	// published, no request nonce) has no nonce to bind; its JAdES, if any,
+	// is still validated below.
+	nonceRequired := ceremony.RequestNonce != nil
+	jades := strings.TrimSpace(cmd.JAdESSignature)
+	if nonceRequired && jades == "" {
+		return fmt.Errorf("%w: a wallet-ceremony signature requires a JAdES over the machine-readable payload to bind the request nonce", ErrNonceMismatch)
+	}
+	if jades != "" {
+		jadesReport, err := h.Validator.ValidatePDF(ctx, []byte(jades), ceremony.FieldName+"-payload.json")
+		if err != nil {
+			return fmt.Errorf("validate submitted JAdES: %w", err)
+		}
+		if err := jadesReport.AssertValidAES(); err != nil {
+			return fmt.Errorf("%w: %v", ErrJAdESInvalid, err)
+		}
+		payload, err := jwsPayloadBytes(jades)
+		if err != nil {
+			return fmt.Errorf("%w: decode JAdES payload: %v", ErrJAdESInvalid, err)
+		}
+		if len(ceremony.PinnedPayload) > 0 && !bytes.Equal(payload, ceremony.PinnedPayload) {
+			return fmt.Errorf("%w: JAdES payload is not the machine-readable document prepared for signing", ErrDocumentMismatch)
+		}
+		if nonceRequired {
+			nonceClaim, err := jwsProtectedHeaderClaim(jades, "nonce")
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrNonceMismatch, err)
+			}
+			if nonceClaim == "" || nonceClaim != *ceremony.RequestNonce {
+				return fmt.Errorf("%w: JAdES carries no matching request nonce", ErrNonceMismatch)
+			}
+		}
+	}
+
+	// Atomic consumption (ADR-20): the guarded UPDATE ... WHERE consumed_at IS
+	// NULL and the finalize writes below commit or roll back TOGETHER, in this
+	// one transaction. Two concurrent submits for the same ceremony can never
+	// both finalize — the second one's guard sees consumed_at already set (by
+	// the first submit's still-uncommitted-but-serialized write, or its
+	// committed one) and this whole transaction rolls back.
+	if err := h.CeremonyRepo.MarkCeremonyConsumed(ctx, tx, ceremony.ID); err != nil {
+		return fmt.Errorf("%w: %v", ErrCeremonyConsumed, err)
+	}
+	if err := h.CeremonyRepo.RecordSignerCertificate(ctx, tx, ceremony.ID, report.SignedBy, report.SubjectSerialNumber()); err != nil {
+		return err
+	}
+
+	signedAt := time.Now().UTC()
 	if t, perr := time.Parse(time.RFC3339, report.SigningTime); perr == nil {
 		signedAt = t.UTC()
 	}
+	applyCmd := cmd.ApplyCmd
+	applyCmd.CredentialType = achievedLevel
 
-	if err := h.finalize(ctx, tx, cmd.ApplyCmd, finalizeInput{
-		ceremony:        prepared.ceremony,
+	if err := h.finalize(ctx, tx, applyCmd, finalizeInput{
+		ceremony:        ceremony,
 		signedPDF:       cmd.SignedPDF,
 		jadesSignature:  cmd.JAdESSignature,
-		contentHash:     prepared.contentHash,
-		rendererVersion: prepared.rendererVersion,
-		signedCount:     prepared.signedCount,
-		vpToken:         prepared.vpToken,
-		kbSDHash:        prepared.kbSDHash,
+		contentHash:     *ceremony.PinnedContentHash,
+		rendererVersion: *ceremony.PinnedRendererVersion,
+		signedCount:     *ceremony.PinnedSignedCount,
+		vpToken:         derefStr(ceremony.VpToken),
+		kbSDHash:        derefStr(ceremony.KbSdHash),
 		signedAt:        signedAt,
-		contractVersion: prepared.contractVersion,
+		contractVersion: *ceremony.PinnedContractVersion,
 	}); err != nil {
 		return err
 	}
@@ -275,6 +453,27 @@ type preparedSignature struct {
 	kbSDHash        string
 	signedAt        time.Time
 	contractVersion int
+	// requiredCredentialType is the contract's declared level requirement for
+	// the ceremony's field (SM-01, ADR-20), pinned so submit gates on it.
+	requiredCredentialType string
+}
+
+// credentialTypeAtLeast reports whether offered meets or exceeds required on
+// the SES < AES < QES scale. Unrecognized values rank as SES (the strictest
+// reading: an unrecognized offered level satisfies nothing but SES).
+func credentialTypeAtLeast(offered, required string) bool {
+	return credentialTypeRank(offered) >= credentialTypeRank(required)
+}
+
+func credentialTypeRank(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "QES":
+		return 2
+	case "AES":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // prepare runs every step up to (but not including) the signature: it enforces
@@ -309,22 +508,20 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// presentation for this signer and contract must exist. Evaluated before
 	// the state-machine transition so a missing ceremony is reported as its own
 	// typed error rather than a state error.
-	// Resolve the ceremony this signature applies to. On a multi-signer
-	// contract several fields may share one signer identity (e.g. one person
-	// signing two roles), so resolving by signer alone is ambiguous —
-	// FieldName disambiguates when provided; otherwise fall back to the
-	// signer's most recent verified ceremony (single-signer flow).
-	var ceremony *db.SignatureCeremony
-	if cmd.FieldName != "" {
-		ceremony, err = h.CeremonyRepo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, cmd.FieldName)
-	} else {
-		ceremony, err = h.CeremonyRepo.FindVerifiedCeremony(ctx, tx, cmd.DID, cmd.SignerDID)
-	}
+	ceremony, err := resolveCeremony(ctx, tx, h.CeremonyRepo, cmd)
 	if err != nil {
-		return nil, fmt.Errorf("could not resolve signing ceremony: %w", err)
+		return nil, err
 	}
-	if ceremony == nil {
-		return nil, ErrCeremonyRequired
+
+	// The contract's OWN declared signature-level requirement for this field
+	// (SM-01 per-contract level enforcement, ADR-20) — pinned below and
+	// enforced at submit regardless of what credential_type the caller here
+	// asked for. Failing fast here too is a UX courtesy, not the gate: the
+	// gate is applying the requirement at submit against the level the
+	// signature ACTUALLY achieved (see SubmitSignature/dss.AssertMeetsLevel).
+	requiredCredentialType := validation.RequiredCredentialType(*data.ContractData, ceremony.FieldName)
+	if !credentialTypeAtLeast(cmd.CredentialType, requiredCredentialType) {
+		return nil, fmt.Errorf("%w: contract requires %s for %q, ceremony requested %s", ErrLevelBelowRequired, requiredCredentialType, ceremony.FieldName, cmd.CredentialType)
 	}
 
 	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventSign); err != nil {
@@ -590,19 +787,43 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	}
 
 	return &preparedSignature{
-		ceremony:        ceremony,
-		basePDF:         basePDF,
-		basePDFHash:     basePDFHash,
-		evidence:        evidence,
-		jadesPayload:    jadesPayload,
-		contentHash:     contentHash,
-		signedCount:     signedCount,
-		rendererVersion: rendererVersion,
-		vpToken:         vpToken,
-		kbSDHash:        kbSDHash,
-		signedAt:        signedAt,
-		contractVersion: data.ContractVersion,
+		ceremony:               ceremony,
+		basePDF:                basePDF,
+		basePDFHash:            basePDFHash,
+		evidence:               evidence,
+		jadesPayload:           jadesPayload,
+		contentHash:            contentHash,
+		signedCount:            signedCount,
+		rendererVersion:        rendererVersion,
+		vpToken:                vpToken,
+		kbSDHash:               kbSDHash,
+		signedAt:               signedAt,
+		contractVersion:        data.ContractVersion,
+		requiredCredentialType: requiredCredentialType,
 	}, nil
+}
+
+// resolveCeremony finds the verified ceremony a signature command applies to.
+// On a multi-signer contract several fields may share one signer identity
+// (e.g. one person signing two roles), so resolving by signer alone is
+// ambiguous — FieldName disambiguates when provided; otherwise it falls back
+// to the signer's most recent verified ceremony (single-signer flow). Shared
+// by prepare() and SubmitSignature so both resolve identically.
+func resolveCeremony(ctx context.Context, tx *sqlx.Tx, repo db.CeremonyRepo, cmd ApplyCmd) (*db.SignatureCeremony, error) {
+	var ceremony *db.SignatureCeremony
+	var err error
+	if cmd.FieldName != "" {
+		ceremony, err = repo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, cmd.FieldName)
+	} else {
+		ceremony, err = repo.FindVerifiedCeremony(ctx, tx, cmd.DID, cmd.SignerDID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve signing ceremony: %w", err)
+	}
+	if ceremony == nil {
+		return nil, ErrCeremonyRequired
+	}
+	return ceremony, nil
 }
 
 // finalizeInput carries the post-signature state the Finalizer persists: the
@@ -1024,33 +1245,87 @@ func carriesPAdESSignature(pdf []byte) bool {
 	return bytes.Contains(pdf, []byte("/ByteRange"))
 }
 
-// assertSubmittedPayloadIsOurs refuses a submitted PDF whose embedded JSON-LD is
-// not the one we handed out to be signed.
-//
-// The comparison is attachment against attachment — the payload embedded in the
-// prepared document versus the payload embedded in what came back — NOT against
-// contract_data. Those two legitimately differ: prepare() seals the offered
-// policy set into an Agreement (sealAgreementForSigning) and persists it, so
-// contract_data moves on while the document the signatory holds keeps the
-// payload it was rendered with. The property that matters is that the signatory
-// signed OUR document, and that is what this checks.
-func (h *Applier) assertSubmittedPayloadIsOurs(ctx context.Context, signedPDF, preparedPDF []byte) error {
-	expected, err := h.PDFCore.ExtractPayload(ctx, preparedPDF)
-	if err != nil {
-		return fmt.Errorf("could not read the machine-readable payload of the prepared document: %w", err)
+// derefStr returns "" for a nil string pointer.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
 	}
-	submitted, err := h.PDFCore.ExtractPayload(ctx, signedPDF)
-	if err != nil {
-		return fmt.Errorf("could not read the machine-readable payload embedded in the submitted PDF: %w", err)
-	}
-	if bytes.Equal(expected, submitted) {
-		return nil
-	}
+	return *s
+}
 
-	expectedSum := sha256.Sum256(expected)
-	submittedSum := sha256.Sum256(submitted)
-	return fmt.Errorf(
-		"%w: the submitted PDF carries a different contract than the one prepared for signing (submitted payload %s, prepared %s)",
-		ErrSignatureInvalid,
-		hex.EncodeToString(submittedSum[:8]), hex.EncodeToString(expectedSum[:8]))
+// pidGivenFamilyName extracts given_name/family_name from the ceremony's
+// stored PID claims (the German EUDI PID's standard claim names; camelCase is
+// accepted as a fallback for other issuer conventions).
+func pidGivenFamilyName(pidClaims []byte) (given, family string) {
+	if len(pidClaims) == 0 {
+		return "", ""
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(pidClaims, &claims); err != nil {
+		return "", ""
+	}
+	given, _ = claims["given_name"].(string)
+	if given == "" {
+		given, _ = claims["givenName"].(string)
+	}
+	family, _ = claims["family_name"].(string)
+	if family == "" {
+		family, _ = claims["familyName"].(string)
+	}
+	return strings.TrimSpace(given), strings.TrimSpace(family)
+}
+
+// normalizeName folds a name for comparison: case-insensitive, whitespace-
+// collapsed. Certificates and PID claims are not guaranteed to agree on
+// capitalization or spacing even when they name the same person.
+func normalizeName(s string) string {
+	return strings.Join(strings.Fields(strings.ToUpper(s)), " ")
+}
+
+// namesMatch reports whether the PID's given/family name and the
+// certificate's given name/surname name the same person (sole control,
+// ADR-20). Both PID fields and at least one certificate field must be
+// present — an empty certificate subject is never treated as a match by
+// omission.
+func namesMatch(pidGiven, pidFamily, certGiven, certSurname string) bool {
+	if pidGiven == "" || pidFamily == "" {
+		return false
+	}
+	if certGiven == "" && certSurname == "" {
+		return false
+	}
+	return normalizeName(pidGiven) == normalizeName(certGiven) && normalizeName(pidFamily) == normalizeName(certSurname)
+}
+
+// jwsPayloadBytes base64url-decodes the payload segment of a compact JWS
+// (JAdES). The signature has already been validated by the time this is
+// called, so the header and payload are known-authentic.
+func jwsPayloadBytes(compact string) ([]byte, error) {
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("expected a compact JWS with three segments")
+	}
+	return base64.RawURLEncoding.DecodeString(parts[1])
+}
+
+// jwsProtectedHeaderClaim reads a string claim from a compact JWS's protected
+// header. Used to recover the nonce a wallet embeds in its JAdES protected
+// header to bind the signature to the ceremony's request nonce (ADR-20) — the
+// header is covered by the JWS signature, so this is only trustworthy AFTER
+// the signature has validated.
+func jwsProtectedHeaderClaim(compact, claim string) (string, error) {
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("expected a compact JWS with three segments")
+	}
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", fmt.Errorf("decode protected header: %w", err)
+	}
+	var header map[string]any
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return "", fmt.Errorf("parse protected header: %w", err)
+	}
+	value, _ := header[claim].(string)
+	return value, nil
 }
