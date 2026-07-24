@@ -8,13 +8,27 @@ removes "PAdES contract signatures" from [ADR-1](adr-1-key-custody.md)'s list of
 DCS key-custody touchpoints. Everything else in ADR-3 (embed-then-sign ordering,
 mandatory PID ceremony, identity binding inside the signed byte range) stands.
 
-**What is built today** (see "Implementation state" below): the DCS-side
-acceptance path — `POST /signature/prepare`, `POST /signature/submit`, the DSS
-sole-control validation gate — and the removal of the eIDAS-invalid
-DCS-signs-via-a-shared-DSS-key detour. **Still transitional:** the original
-`POST /signature/apply`, where the DCS produces the PAdES itself through
-pdf-core's PKCS#11 path, remains the default the signing UI and BDD use; it is
-removed once they migrate to prepare/submit.
+**Acceptance-path clauses superseded by
+[ADR-20](adr-20-signing-acceptance-hardening.md) (2026-07-25):** the "possible
+refinement" framing of to-be-signed byte pinning below (§"Implementation
+state") is retracted — it is now a hard requirement, implemented; the QES
+descope citing "SRS §199" is retracted (SM-01 requires SES/AES/QES,
+selectable per contract); nonce binding, atomic ceremony consumption, the
+cert-subject↔PID sole-control check, and JAdES validation are added to the
+acceptance path this ADR only sketched. See ADR-20 for the acceptance-path
+decision as it now stands. Everything else below — the DCS as OID4VP relying
+party holding no signing key, embed-then-sign, the wallet touch point —
+stands unchanged.
+
+**What is built today** (see "Implementation state" below, corrected
+2026-07-25): the full DCS-side acceptance path — `POST /signature/prepare`,
+`POST /signature/publish`, the Document-Retrieval ceremony, `POST
+/signature/submit`, the hardened DSS sole-control validation gate (ADR-20) —
+and the removal of the eIDAS-invalid DCS-signs-via-a-shared-DSS-key detour.
+**No longer transitional:** the original `POST /signature/apply` (the DCS
+producing the PAdES itself through pdf-core's PKCS#11 path) and the
+`dcs-contract-pades` HSM key are removed; the signing UI and BDD drive the
+ceremony exclusively.
 
 ## Context
 
@@ -132,7 +146,10 @@ URL, and trust the QTSP's issuing CA instead of the dev CA. No DCS code change.
 - A QTSP / RSSP or the CSC/rQES credential-authorization service.
 - Deploying the EUDI reference QTSP/SCA/verifier stack — the test stand-in
   proves DCS conformance without it.
-- QES / qualified certificates (SRS line 199; AES + PoA is the target).
+- Qualified electronic **seals** by a legal person (see ADR-17) — QES by a
+  natural person is in scope and enforced (ADR-20); a QES descope citing "SRS
+  §199" was retracted by ADR-20 as a narrative-section overread, not a formal
+  requirement.
 
 ## Consequences
 
@@ -146,37 +163,34 @@ URL, and trust the QTSP's issuing CA instead of the dev CA. No DCS code change.
   and lifecycle-assertion signatures, the signing-summary VC, OID4VP request
   objects (JAR), and the DCS-to-DCS synchronizer's JAdES transport envelope.
   These are the DCS attesting as itself, not as a contracting party.
-- **Kept until migration (transitional):** the pdf-core PKCS#11 PAdES signer
+- **Removed (completed, was transitional):** the pdf-core PKCS#11 PAdES signer
   (`signer.PDFCoreSigner` → pdf-core `/sign` → `/internal/pades/sign` with the
-  HSM `dcs-contract-pades` key) behind `POST /signature/apply`. This is the
-  DCS-as-signatory shape ADR-12 replaces; it stays only until the signing UI and
-  BDD move to prepare/submit, then it and its HSM key are removed.
+  HSM `dcs-contract-pades` key) behind `POST /signature/apply`. This was the
+  DCS-as-signatory shape ADR-12 replaces; the signing UI and BDD now drive
+  prepare/publish/submit exclusively, and the key is deprovisioned (ADR-20).
 - A verifier who trusts a submit-path signature trusts the **signatory's**
-  certificate, not the DCS's — sole control is provable from the artifact alone.
+  certificate, not the DCS's — sole control is provable from the artifact
+  alone, and ADR-20 hardens exactly how that trust is established.
 
-## Implementation state (2026-07-18)
+## Implementation state (corrected 2026-07-25, see ADR-20)
 
 | Piece | State |
 | --- | --- |
-| DSS validation report → signer identity + `AssertValidAES` sole-control gate | done (`dss/client.go`) |
+| DSS validation report → signer identity + level-aware `AssertValidAES`/`AssertValidQES` sole-control gate | done (`dss/client.go`; level-awareness and cert-name matching added by ADR-20) |
 | `apply.go` split into `prepare()` (to-be-signed) + `finalize()` | done |
-| `Applier.Prepare` (embed evidence, no signing) + `Applier.SubmitSignature` (validate + finalize) | done |
+| `Applier.Prepare` (embed evidence, pin exact bytes, no signing) + `Applier.SubmitSignature` (pure validate + finalize, no re-derivation) | done (ADR-20) |
 | `POST /signature/prepare` + `POST /signature/submit` | done, reachable |
 | DSS-as-DCS-signer detour removed | done |
-| OID4VP Document-Retrieval request object (`oid4vp/request/docretrieval.go`) | done, not yet wired into `startCeremony` (the QR layer over prepare/submit) |
-| Remove transitional `POST /signature/apply` + pdf-core `/sign` + HSM `dcs-contract-pades` | pending UI + BDD migration |
-| Test wallet+QTSP stand-in drives prepare → sign → submit; BDD/Playwright per-signatory-cert assertions | pending |
-
-Between `prepare` and `submit` the contract stays APPROVED (the sealed agreement
-is persisted at prepare, so the signed content is frozen); a dedicated
-`PENDING_SIGNATURE` state and persisting the exact to-be-signed bytes are a
-possible refinement, not required for the acceptance path to be sound.
+| OID4VP Document-Retrieval request object, wired into `publishSignatureRequest`/`signatureRequestObject`, offering both the PDF and the JSON-LD payload | done (ADR-20) |
+| Remove transitional `POST /signature/apply` + pdf-core `/sign` + HSM `dcs-contract-pades` | done (ADR-20) |
+| Test wallet+QTSP stand-in drives prepare → sign → submit via the ceremony; BDD nonce/byte-pin/level/cert-match negative coverage | done for AES; QES happy-path CI provisioning pending (ADR-20 §5); Playwright per-signatory-cert assertions pending |
+| EUDIPLO PID webhook | removed (ADR-20) — PID verification is wallet-presented OID4VP only |
 
 ## SRS coverage
 
 | SRS | Covered by |
 | --- | --- |
-| SM-01 (SES/AES/QES levels; QES descoped) | AdES level asserted from the DSS report |
+| SM-01 (SES/AES/QES levels, selectable per contract — QES descope retracted, see ADR-20) | Per-contract level pinned at prepare, enforced at submit (ADR-20) |
 | SM-02, SM-11 (PAdES + JAdES, same content hash) | `document_digests[]` — one ceremony, both artifacts |
 | SM-03/-04/-05 (identity + PoA validated) | PID/PoA presentation in the ceremony; embedded pre-signature |
 | SM-06 (wallet manages credentials + signs) | the wallet is the signatory across the touch point |
