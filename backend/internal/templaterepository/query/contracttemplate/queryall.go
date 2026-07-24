@@ -1,3 +1,6 @@
+// Package contracttemplate implements read-side CQRS use cases scoped to a
+// single template (as opposed to the parent query package's cross-cutting
+// task queries).
 package contracttemplate
 
 import (
@@ -40,8 +43,8 @@ type MetadataItem struct {
 	CreatedBy      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	*db.Responsible
-	MetaData datatype.JSON
+	MetaData       datatype.JSON
+	LatestDID      *string
 }
 
 type ReviewTaskItem struct {
@@ -146,7 +149,7 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 			CreatedBy:      data.CreatedBy,
 			CreatedAt:      data.CreatedAt,
 			UpdatedAt:      data.UpdatedAt,
-			Responsible:    data.Responsible,
+			LatestDID:      data.LatestDID,
 		}
 		contractTemplatesItems = append(contractTemplatesItems, metadata)
 

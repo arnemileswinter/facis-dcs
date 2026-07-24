@@ -1,35 +1,40 @@
 <script setup lang="ts">
-import ConfirmationModal from '@/components/ConfirmationModal.vue'
-import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
-import type { ContractData } from '@/models/contract-data'
-import type { Contract } from '@/models/contract/contract'
-import AuditView from '@/modules/contract-workflow-engine/components/AuditView.vue'
-import ContractDetailsEditor from '@/modules/contract-workflow-engine/components/ContractDetailsEditor.vue'
-import { useContractDataPreprocess } from '@/modules/contract-workflow-engine/composables/useContractDataPreprocess'
+import { storeToRefs } from 'pinia'
+import { computed, onMounted, onUnmounted, type Ref, ref, useTemplateRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
+import { contractStory, toBannerActions } from '@core/workflow-story'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import AuditView from '@contract-workflow-engine/components/AuditView.vue'
+import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import {
   useSemanticValueVerification,
   type VerificationResult,
-} from '@/modules/contract-workflow-engine/composables/useSemanticValueVerification'
-import type { SemanticConditionValueSetter } from '@/modules/contract-workflow-engine/models/contract-content-values-store'
-import { useContractContentValuesStore } from '@/modules/contract-workflow-engine/store/contractContentValuesStore'
-import { useContractEditorUiStore } from '@/modules/contract-workflow-engine/store/contractEditorUiStore'
-import TemplatePreview from '@/modules/template-repository/components/builder-editor/preview/TemplatePreview.vue'
-import { useTemplateDraftStore } from '@/modules/template-repository/store/templateDraftStore'
-import { useTemplateEditorUiStore } from '@/modules/template-repository/store/templateEditorUiStore'
+} from '@contract-workflow-engine/composables/useSemanticValueVerification'
+import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
-import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch, type Ref } from 'vue'
-import { useRoute } from 'vue-router'
+import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
 const navStore = useNavStore()
 const authStore = useAuthStore()
 
-const templateDraftStore = useTemplateDraftStore()
+const { isApprover } = useContractPermissions()
+
+const dcsDraftStore = useDcsDraftStore()
 const contractEditorUiStore = useContractEditorUiStore()
 const templateEditorUiStore = useTemplateEditorUiStore()
 const { hasConditionParameterForValue } = useSemanticValueVerification()
@@ -55,6 +60,8 @@ const isAuditingAuthorized = computed(
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
+const story = computed(() => contractStory(contract.value?.state))
+
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
@@ -79,20 +86,11 @@ watch(
 )
 
 watch(
-  () => [
-    templateDraftStore.documentBlocks,
-    templateDraftStore.semanticConditions,
-    templateDraftStore.subTemplateSnapshots,
-  ],
+  () => [dcsDraftStore.blocks, dcsDraftStore.semanticConditions],
   () => {
     const invalidValues = contractContentValuesStore.semanticConditionValues.filter(
       (conditionValue) =>
-        !hasConditionParameterForValue(
-          conditionValue,
-          templateDraftStore.documentBlocks,
-          templateDraftStore.semanticConditions,
-          templateDraftStore.subTemplateSnapshots,
-        ),
+        !hasConditionParameterForValue(conditionValue, dcsDraftStore.blocks, dcsDraftStore.semanticConditions),
     )
     contractContentValuesStore.removeSemanticConditionValues(invalidValues)
   },
@@ -106,6 +104,7 @@ const approve = async () => {
       message: 'Confirm approval',
     })
     if (confirmationResult?.isCanceled) return
+    isSubmitting.value = true
     const response = await contractWorkflowService.approve({
       did: contract.value.did,
       updated_at: contract.value.updated_at,
@@ -115,6 +114,8 @@ const approve = async () => {
     }
   } catch (err) {
     console.error('Failed to approve', err)
+  } finally {
+    isSubmitting.value = false
   }
 }
 
@@ -127,6 +128,7 @@ const resubmit = async () => {
     })
     if (confirmationResult?.isCanceled) return
     const comment = confirmationResult?.data
+    isSubmitting.value = true
     const response = await contractWorkflowService.submit({
       did: contract.value.did,
       updated_at: contract.value.updated_at,
@@ -137,6 +139,8 @@ const resubmit = async () => {
     }
   } catch (err) {
     console.error('Failed to resubmit', err)
+  } finally {
+    isSubmitting.value = false
   }
 }
 
@@ -153,6 +157,7 @@ const reject = async () => {
       console.error('Reason is required for rejection')
       return
     }
+    isSubmitting.value = true
     const response = await contractWorkflowService.reject({
       did: contract.value.did,
       updated_at: contract.value.updated_at,
@@ -163,6 +168,8 @@ const reject = async () => {
     }
   } catch (err) {
     console.error('Failed to reject', err)
+  } finally {
+    isSubmitting.value = false
   }
 }
 
@@ -171,7 +178,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  templateDraftStore.reset({ workflow: 'contract' })
+  dcsDraftStore.reset({ workflow: 'contract' })
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
   templateEditorUiStore.reset({ workflow: 'contract' })
@@ -181,44 +188,52 @@ onUnmounted(() => {
 // Contract data includes the template data used to fill the contract template
 function applyContractDataToDraft(contractData?: unknown) {
   if (contractData == null) {
-    templateDraftStore.reset({ workflow: 'contract' })
+    dcsDraftStore.reset({ workflow: 'contract' })
     contractContentValuesStore.reset()
     verificationResult.value = null
     return
   }
-  const cd = preprocessContractData(contractData as ContractData)
-  templateDraftStore.reset({
-    workflow: 'contract',
-    documentOutline: cd.documentOutline ?? [],
-    documentBlocks: cd.documentBlocks ?? [],
-    semanticConditions: cd.semanticConditions ?? [],
-    subTemplateSnapshots: cd.subTemplateSnapshots ?? [],
-    templateDataVersion: cd.templateDataVersion,
-    semanticProfile: cd.semanticProfile,
-    templateVariables: cd.templateVariables ?? [],
-    placeholderBindings: cd.placeholderBindings ?? [],
-    semanticRules: cd.semanticRules ?? [],
-    sla: cd.sla ?? null,
-  })
-  contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  const cd = preprocessContractData(contractData)
+  if (cd) {
+    dcsDraftStore.reset({
+      workflow: 'contract',
+      documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
+      blocks: cd.blocks,
+      layout: cd.layout,
+      contractData: cd.contractData,
+      policies: cd.policies,
+    })
+    contractContentValuesStore.reset({ semanticConditionValues: cd.semanticConditionValues ?? [] })
+  } else {
+    dcsDraftStore.reset({ workflow: 'contract' })
+    contractContentValuesStore.reset()
+  }
   verificationResult.value = null
+}
+
+const { download: downloadExport, exporting } = useDocumentExport()
+
+const exportPDF = async () => {
+  const did = contract?.value?.did
+  if (!did) return
+  await downloadExport(() => contractWorkflowService.exportPdf(did), `contract-${did}.pdf`)
 }
 </script>
 
 <template>
-  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
-    <div v-if="!!contract">
+  <div class="flex h-full flex-col">
+    <div v-if="!!contract" class="flex flex-1 flex-col">
       <div class="flex flex-1 flex-col">
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/40 uppercase">Approve Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Approve Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <a
                 v-for="tab in tabs"
                 :key="tab.id"
                 role="tab"
-                class="tab"
+                class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
@@ -231,6 +246,13 @@ function applyContractDataToDraft(contractData?: unknown) {
         <div class="mt-5 grow">
           <div class="mx-auto max-w-4xl p-6">
             <div class="grid grid-cols-1 gap-4">
+              <WorkflowStageBanner
+                :steps="story.steps"
+                :current-key="story.currentKey"
+                :headline="story.headline"
+                :narrative="story.narrative"
+                :actions="toBannerActions(story.actionHints)"
+              />
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor
                   :contract="contract"
@@ -244,12 +266,11 @@ function applyContractDataToDraft(contractData?: unknown) {
                   <div class="card-body gap-5">
                     <div>
                       <TemplatePreview
-                        :document-outline="templateDraftStore.documentOutline"
-                        :document-blocks="templateDraftStore.documentBlocks"
-                        :semantic-conditions="templateDraftStore.semanticConditions"
+                        :layout="dcsDraftStore.layout"
+                        :blocks="dcsDraftStore.blocks"
+                        :semantic-conditions="dcsDraftStore.semanticConditions"
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
-                        :sub-template-snapshots="templateDraftStore.subTemplateSnapshots"
                         :set-semantic-condition-value="setSemanticConditionValue"
                       />
                     </div>
@@ -274,11 +295,12 @@ function applyContractDataToDraft(contractData?: unknown) {
     </div>
     <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
-        <button class="btn btn-outline md:w-32" @click="$router.back()">Cancel</button>
+        <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
+        <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting"
+          :disabled="!isApprover || isSubmitting"
           @click="reject"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -287,7 +309,7 @@ function applyContractDataToDraft(contractData?: unknown) {
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting"
+          :disabled="!isApprover || isSubmitting"
           @click="resubmit"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -296,7 +318,7 @@ function applyContractDataToDraft(contractData?: unknown) {
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting"
+          :disabled="!isApprover || isSubmitting"
           @click="approve"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>

@@ -1,61 +1,33 @@
-<template>
-  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
-    <!-- Create flow: show only type selection until user chooses -->
-    <div v-if="showTypeSelectionOnly" class="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-12">
-      <h1 class="text-2xl font-bold text-base-content">Choose contract type</h1>
-      <TemplateTypeSelect :model-value="templateType" @update:model-value="onTemplateTypeChosen($event)" />
-      <div class="flex justify-end pt-4">
-        <button type="button" class="btn btn-outline" @click="router.back()">Cancel</button>
-      </div>
-    </div>
-    <template v-else>
-      <TemplateEditors :title="title" />
-
-      <!-- Pinned Footer -->
-      <div
-        v-if="templateEditorUiStore.isTemplateEditable"
-        class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100"
-      >
-        <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
-          <button class="btn btn-outline md:w-32" @click="router.back()">Cancel</button>
-          <CopyTemplateButton v-if="isEditMode && (isCreator || isManager)" class="btn flex-1 btn-primary" />
-          <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="submit">
-            <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-            {{ isEditMode ? 'Update' : 'Create' }}
-          </button>
-        </div>
-      </div>
-    </template>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ROUTES } from '@/router/router'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { TemplateState } from '@/types/contract-template-state'
-import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
-import TemplateTypeSelect from '@template-repository/components/TemplateTypeSelect.vue'
-import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
-import { useTemplateDraftStore } from '@template-repository/store/templateDraftStore'
-import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
 import { storeToRefs } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import CopyTemplateButton from '../components/CopyTemplateButton.vue'
+import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
+import { templateStory, toBannerActions } from '@core/workflow-story'
+import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateTypeSelect from '@template-repository/components/TemplateTypeSelect.vue'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
+import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore.ts'
+import { ROUTES } from '@/router/router'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { TemplateState } from '@/types/contract-template-state'
 
 const router = useRouter()
 const route = useRoute()
 
 const templateEditorUiStore = useTemplateEditorUiStore()
-const draftStore = useTemplateDraftStore()
-const { templateType } = storeToRefs(draftStore)
+const draftStore = useDcsDraftStore()
+const { state, templateType } = storeToRefs(draftStore)
 
 const isEditMode = computed(() => !!route.params.did)
 const hasChosenType = ref(false)
 const showTypeSelectionOnly = computed(() => !isEditMode.value && !hasChosenType.value)
 const title = computed(() => (isEditMode.value ? 'Update Template' : 'Create Template'))
 
-const { isCreator, isManager } = useTemplatePermissions()
+const { isManager } = useTemplatePermissions()
+
+const story = computed(() => templateStory(state.value, { isEditableView: true, templateType: templateType.value }))
 
 function onTemplateTypeChosen(value: typeof templateType.value) {
   draftStore.reset({ templateType: value })
@@ -79,29 +51,17 @@ watch(
             return
           }
           const uneditableStates = [
-            TemplateState.approved,
-            TemplateState.deleted,
             TemplateState.deprecated,
+            TemplateState.registered,
             TemplateState.published,
             TemplateState.registered,
           ].map((s) => s.toLowerCase())
           templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(template.state.toLowerCase()))
 
-          draftStore.reset({
+          draftStore.loadDocument(template.template_data, {
             did: template.did,
-            name: template.name,
-            description: template.description,
-            templateDataVersion: template.template_data?.templateDataVersion ?? 1,
-            documentOutline: template.template_data?.documentOutline ?? [],
-            documentBlocks: template.template_data?.documentBlocks ?? [],
-            semanticConditions: template.template_data?.semanticConditions ?? [],
-            customMetaData: template.template_data?.customMetaData ?? [],
-            semanticProfile: template.template_data?.semanticProfile,
-            templateVariables: template.template_data?.templateVariables ?? [],
-            placeholderBindings: template.template_data?.placeholderBindings ?? [],
-            semanticRules: template.template_data?.semanticRules ?? [],
-            sla: template.template_data?.sla ?? null,
-            subTemplateSnapshots: template.template_data?.subTemplateSnapshots ?? [],
+            name: template.name ?? '',
+            description: template.description ?? '',
             templateType: template.template_type,
             state: template.state,
             version: template.version ?? null,
@@ -123,26 +83,81 @@ watch(
 )
 
 const isSubmitting = ref(false)
+const submitError = ref<string | null>(null)
 
 const submit = async () => {
   isSubmitting.value = true
+  submitError.value = null
   try {
     if (!draftStore.hasTemplateId) {
       // create a draft template
       const data = draftStore.templateCreateRequestData
       await contractTemplateService.create(data)
     } else {
-      // update existing template
-      const data = draftStore.templateUpdateRequestData
-      if (data) {
-        await contractTemplateService.update(data)
+      if (isManager.value) {
+        // update existing template
+        const data = draftStore.templateUpdateManageRequestData
+        if (data) {
+          await contractTemplateService.updateManage(data)
+        }
+      } else {
+        // update existing template
+        const data = draftStore.templateUpdateRequestData
+        if (data) {
+          await contractTemplateService.update(data)
+        }
       }
     }
     await router.push({ name: ROUTES.TEMPLATES.LIST })
   } catch (error) {
     console.error('Submission failed', error)
+    submitError.value = error instanceof Error ? error.message : String(error)
   } finally {
     isSubmitting.value = false
   }
 }
 </script>
+
+<template>
+  <div class="-mx-4 -my-4 flex min-h-full flex-col md:-mx-8 md:-my-8">
+    <!-- Create flow: show only type selection until user chooses -->
+    <div v-if="showTypeSelectionOnly" class="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-12">
+      <h1 class="text-2xl font-bold text-base-content">Choose contract type</h1>
+      <TemplateTypeSelect :model-value="templateType" @update:model-value="onTemplateTypeChosen($event)" />
+      <div class="flex justify-end pt-4">
+        <button type="button" class="btn btn-outline" @click="router.back()">Back</button>
+      </div>
+    </div>
+    <template v-else>
+      <TemplateEditors :title="title">
+        <template #before-tabs>
+          <WorkflowStageBanner
+            v-if="isEditMode && state"
+            :steps="story.steps"
+            :current-key="story.currentKey"
+            :headline="story.headline"
+            :narrative="story.narrative"
+            :actions="toBannerActions(story.actionHints)"
+          />
+        </template>
+      </TemplateEditors>
+
+      <!-- Pinned Footer -->
+      <div
+        v-if="templateEditorUiStore.isTemplateEditable"
+        class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100"
+      >
+        <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
+          <button class="btn btn-outline md:w-32" @click="router.back()">Cancel</button>
+          <button class="btn flex-1 btn-primary" :disabled="isSubmitting" @click="submit">
+            <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+            {{ isEditMode ? 'Update' : 'Create' }}
+          </button>
+        </div>
+        <div v-if="submitError" class="mx-auto max-w-4xl px-6 pb-3">
+          <p class="text-sm text-error">Save failed: {{ submitError }}</p>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

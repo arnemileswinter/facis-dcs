@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
 
@@ -16,10 +14,29 @@ import (
 
 // HydraJWTConfig holds OIDC provider configuration.
 type HydraJWTConfig struct {
-	// Example: http://localhost:30444
-	IssuerURL string
+	PublicIssuerURL   string
+	InternalIssuerURL string
 	// Example: "dcs-client". Hydra JWT access tokens use the client_id claim (RFC 9068).
 	ClientID string
+	// SystemClients are the machine identities of the SRS System User classes
+	// (SRS §2.4 Table 5): integrated platforms and orchestration layers that
+	// reach DCS over its API instead of through a browser.
+	SystemClients []SystemClient
+}
+
+// SystemClient is one non-human caller, authenticated by the OAuth2 client
+// credentials grant. A human user proves who they are with a verifiable
+// credential and the OID4VP ceremony fills the token's ext claims; a system
+// user has no wallet and no ceremony, so its token carries only Hydra's proof
+// that the client secret was presented. What such a client may do is therefore
+// decided HERE, from deployment configuration, and never from claims the caller
+// could influence.
+type SystemClient struct {
+	ClientID string
+	// ParticipantDID is the identity its actions are attributed to in the audit
+	// trail, standing in for the ext.iss a human token carries.
+	ParticipantDID string
+	Roles          []string
 }
 
 // HydraJWTValidator validates JWT tokens from OIDC providers.
@@ -29,20 +46,20 @@ type HydraJWTValidator struct {
 	config   HydraJWTConfig
 }
 
-const (
-	//nolint:unused
-	oidcDiscoveryDefaultAttempts = 30
-	//nolint:unused
-	oidcDiscoveryDefaultAttemptTimeout = 5 * time.Second
-	//nolint:unused
-	oidcDiscoveryDefaultInitialBackoff = 500 * time.Millisecond
-	//nolint:unused
-	oidcDiscoveryDefaultMaxBackoff = 5 * time.Second
-)
-
 // NewHydraJWTValidator connects to the OIDC provider to get public keys.
 func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWTValidator, error) {
-	provider, err := oidc.NewProvider(ctx, config.IssuerURL)
+	publicIssuer := strings.TrimRight(strings.TrimSpace(config.PublicIssuerURL), "/")
+	if publicIssuer == "" {
+		return nil, fmt.Errorf("HydraJWTConfig.PublicIssuerURL is required")
+	}
+
+	discoveryURL := strings.TrimRight(strings.TrimSpace(config.InternalIssuerURL), "/")
+	if discoveryURL == "" {
+		discoveryURL = publicIssuer
+	}
+
+	ctx = oidc.InsecureIssuerURLContext(ctx, publicIssuer)
+	provider, err := oidc.NewProvider(ctx, discoveryURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover OIDC provider: %w", err)
 	}
@@ -60,73 +77,6 @@ func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWT
 		verifier: verifier,
 		config:   config,
 	}, nil
-}
-
-//nolint:unused
-func discoverOIDCProvider(ctx context.Context, issuerURL string) (*oidc.Provider, error) {
-	var lastErr error
-	attempts := oidcDiscoveryAttempts()
-	attemptTimeout := oidcDiscoveryAttemptTimeout()
-	backoff := oidcDiscoveryInitialBackoff()
-	maxBackoff := oidcDiscoveryMaxBackoff()
-
-	for attempt := 1; attempt <= attempts; attempt++ {
-		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
-		provider, err := oidc.NewProvider(attemptCtx, issuerURL)
-		cancel()
-		if err == nil {
-			return provider, nil
-		}
-		lastErr = err
-
-		if attempt == attempts {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(backoff):
-		}
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-
-	return nil, fmt.Errorf("OIDC discovery failed after %d attempts: %w", attempts, lastErr)
-}
-
-//nolint:unused
-func oidcDiscoveryAttempts() int {
-	value, err := strconv.Atoi(os.Getenv("OIDC_DISCOVERY_ATTEMPTS"))
-	if err != nil || value < 1 {
-		return oidcDiscoveryDefaultAttempts
-	}
-	return value
-}
-
-//nolint:unused
-func oidcDiscoveryAttemptTimeout() time.Duration {
-	return oidcDiscoveryDuration("OIDC_DISCOVERY_ATTEMPT_TIMEOUT", oidcDiscoveryDefaultAttemptTimeout)
-}
-
-//nolint:unused
-func oidcDiscoveryInitialBackoff() time.Duration {
-	return oidcDiscoveryDuration("OIDC_DISCOVERY_INITIAL_BACKOFF", oidcDiscoveryDefaultInitialBackoff)
-}
-
-//nolint:unused
-func oidcDiscoveryMaxBackoff() time.Duration {
-	return oidcDiscoveryDuration("OIDC_DISCOVERY_MAX_BACKOFF", oidcDiscoveryDefaultMaxBackoff)
-}
-
-//nolint:unused
-func oidcDiscoveryDuration(envName string, fallback time.Duration) time.Duration {
-	value, err := time.ParseDuration(os.Getenv(envName))
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return value
 }
 
 // TokenInfo holds the validated identity extracted from a JWT.
@@ -157,6 +107,17 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
+	// A system client's token is a client-credentials token: Hydra signed it, so
+	// the client secret was presented, but no OID4VP ceremony ran and there are
+	// no ext claims to read. Its authority comes from configuration.
+	if system, ok := v.systemClientFor(claims); ok {
+		return &TokenInfo{
+			Roles:          system.Roles,
+			HolderDID:      system.ClientID,
+			ParticipantDID: system.ParticipantDID,
+		}, nil
+	}
+
 	if !matchesClientID(claims, v.config.ClientID) {
 		return nil, fmt.Errorf("token is not bound to client ID %q", v.config.ClientID)
 	}
@@ -171,6 +132,21 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 		HolderDID:      claims.Subject,
 		ParticipantDID: issuer,
 	}, nil
+}
+
+// systemClientFor matches a token against the configured system clients. Only
+// an exact client_id/audience match counts — a system client's rights are not
+// something a token can ask for.
+func (v *HydraJWTValidator) systemClientFor(claims Claims) (SystemClient, bool) {
+	for _, system := range v.config.SystemClients {
+		if system.ClientID == "" {
+			continue
+		}
+		if matchesClientID(claims, system.ClientID) {
+			return system, true
+		}
+	}
+	return SystemClient{}, false
 }
 
 // extractRoles extracts DCS roles from a Hydra access token.
@@ -271,4 +247,23 @@ func GetParticipantID(ctx context.Context) string {
 // InjectAuthContext injects the validated identity into the request context.
 func InjectAuthContext(ctx context.Context, roles []string, holderDID string, participantID string) context.Context {
 	return context.WithValue(ctx, authCtxKey{}, AuthContext{Roles: roles, HolderDID: holderDID, ParticipantID: participantID})
+}
+
+// unexported key type for the raw bearer token.
+type bearerTokenCtxKey struct{}
+
+// InjectBearerToken stores the raw JWT presented on the incoming request so
+// downstream handlers can forward it to pdf-core, which uses it to authenticate
+// its call back to the internal C2PA signing endpoint (DCS-IR-HI-01).
+func InjectBearerToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, bearerTokenCtxKey{}, token)
+}
+
+// GetBearerToken returns the raw JWT stored by InjectBearerToken, or "" when the
+// request carried no token (e.g. an internal, non-authenticated code path).
+func GetBearerToken(ctx context.Context) string {
+	if tok, ok := ctx.Value(bearerTokenCtxKey{}).(string); ok {
+		return tok
+	}
+	return ""
 }

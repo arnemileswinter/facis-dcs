@@ -1,3 +1,9 @@
+// Package userrole defines the individual end-user roles used for local RBAC
+// (checked via UserRoles.HasRoles in command/query handlers). This is a
+// separate authorization layer from peer-scoped task ownership: a contract's
+// Responsible.Approvers/Reviewers/Negotiators are peer DIDs (which DCS
+// instance is responsible for a task), while UserRole governs which
+// individual, locally authenticated user may act on behalf of that peer.
 package userrole
 
 import (
@@ -12,18 +18,19 @@ const (
 	TemplateApprover UserRole = "Template Approver"
 	TemplateManager  UserRole = "Template Manager"
 
-	ContractCreator  UserRole = "Contract Creator"
-	ContractReviewer UserRole = "Contract Reviewer"
-	ContractApprover UserRole = "Contract Approver"
-	ContractManager  UserRole = "Contract Manager"
-	ContractSigner   UserRole = "Contract Signer"
-	ContractObserver UserRole = "Contract Observer"
+	ContractCreator    UserRole = "Contract Creator"
+	ContractReviewer   UserRole = "Contract Reviewer"
+	ContractApprover   UserRole = "Contract Approver"
+	ContractManager    UserRole = "Contract Manager"
+	ContractNegotiator UserRole = "Contract Negotiator"
+	ContractSigner     UserRole = "Contract Signer"
+	ContractObserver   UserRole = "Contract Observer"
 
 	ArchiveManager      UserRole = "Archive Manager"
 	Auditor             UserRole = "Auditor"
 	SystemAdministrator UserRole = "Sys. Administrator"
 	ComplianceOfficer   UserRole = "Compliance Officer"
-	IntegrationManager  UserRole = "Ingestion Manager"
+	IntegrationManager  UserRole = "Integration Manager"
 
 	ProcessOrchestrator UserRole = "Process Orchestrator"
 	Validator           UserRole = "Validator"
@@ -34,6 +41,11 @@ const (
 	SystemContractManager  UserRole = "Sys. Contract Manager"
 	SystemContractSigner   UserRole = "Sys. Contract Signer"
 	ContractTargetSystem   UserRole = "Contract Target System"
+	// SystemAuditor extends the SRS System User classes (SRS §2.4 Table 5, all
+	// of which are contract-oriented) with the read-only integrity role an
+	// external notary needs: it may read the audit trail's tamper-evidence
+	// surface and nothing else. See ADR-16.
+	SystemAuditor UserRole = "Sys. Auditor"
 )
 
 func NewUserRole(s string) (UserRole, error) {
@@ -49,11 +61,12 @@ func (r UserRole) IsValid() bool {
 	switch r {
 	case TemplateCreator, TemplateReviewer, TemplateApprover, TemplateManager,
 		ContractCreator, ContractReviewer, ContractApprover, ContractManager,
-		ContractSigner, ContractObserver,
+		ContractNegotiator, ContractSigner, ContractObserver,
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
 		ProcessOrchestrator, Validator,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem:
+		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemAuditor:
 		return true
 	}
 	return false
@@ -68,7 +81,8 @@ func (r UserRole) String() string {
 func (r UserRole) IsSystemRole() bool {
 	switch r {
 	case SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem:
+		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemAuditor:
 		return true
 	}
 	return false

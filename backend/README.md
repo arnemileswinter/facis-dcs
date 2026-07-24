@@ -81,7 +81,8 @@ export FEDERATED_CATALOGUE_CLIENT_ID="dcs-fc-client"
 export FEDERATED_CATALOGUE_CLIENT_SECRET="dcs-fc-client-secret"
 
 # Hydra Authentication
-export HYDRA_ISSUER_URL="http://localhost:30444"
+export HYDRA_PUBLIC_ISSUER_URL="http://localhost:5173"
+export HYDRA_INTERNAL_ISSUER_URL="http://localhost:30444"
 export HYDRA_CLIENT_ID="dcs-client"
 export HYDRA_CLIENT_SECRET="dcs-secret"
 export HYDRA_REDIRECT_URI="http://localhost:5173/api/auth/callback"
@@ -89,7 +90,7 @@ export HYDRA_POST_LOGOUT_REDIRECT_URI="http://localhost:5173/api/auth/logout-com
 export HYDRA_ADMIN_URL="http://localhost:30085"
 ```
 
-When using the local Helm stack, copy `backend/.env.dev` to `backend/.env`.
+When using the local Helm stack, copy `backend/.env.dev1` to `backend/.env` (done automatically by `dev-stack.sh`).
 
 ### Start the DCS backend service
 ```bash

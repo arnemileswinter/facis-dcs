@@ -1,10 +1,10 @@
 <script setup lang="ts" generic="T extends { did: string; type: 'template' | 'contract' }">
-import type { PartialContractTemplate } from '@/models/contract-template'
-import type { Contract } from '@/models/contract/contract'
+import { computed } from 'vue'
 import { useContractTemplatesStore } from '@/stores/contract-templates-store'
 import { useContractsStore } from '@/stores/contracts-store'
-import { computed } from 'vue'
 import ListSearch from '../ListSearch.vue'
+import type { Contract } from '@/models/contract/contract'
+import type { PartialContractTemplate } from '@/models/contract-template'
 
 type Searchable = PartialContractTemplate | Contract
 
@@ -31,7 +31,7 @@ const emptyTemplate: PartialContractTemplate = {
   created_at: '',
   updated_at: '',
   name: '',
-  template_type: 'FRAME_CONTRACT',
+  template_type: 'CONTRACT_TEMPLATE',
   state: 'DRAFT',
   created_by: '',
 }
@@ -71,8 +71,8 @@ const search = (request: Record<string, unknown>): Promise<Searchable[]> => {
   )
 }
 
-const handleSearchResult = (searchResults: Searchable[]) => {
-  const resultDids = new Set(searchResults.map((item) => item.did))
+const handleSearchResult = (searchResults: Searchable[] | null) => {
+  const resultDids = new Set(searchResults?.map((item) => item.did))
   const filteredTasks = props.tasks.filter((task) => resultDids.has(task.did))
   emit('searchResult', filteredTasks)
 }

@@ -1,12 +1,13 @@
+import type { PartialContractTemplate } from '../contract-template'
+import type { ContractTemplateApprovalTask } from '../contract-template-approval-task'
+import type { ContractTemplateEvent } from '../contract-template-event'
+import type { ContractTemplateResponsible } from '../contract-template-responsible'
+import type { ContractTemplateReviewTask } from '../contract-template-review-task'
+import type { DcsTemplateData } from '../dcs-jsonld'
 import type { ComponentType } from '@/types/component-type'
 import type { ContractTemplateEventType } from '@/types/contract-template-event-type'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { TemplateType } from '@/types/template-type'
-import type { ContractTemplateData, PartialContractTemplate } from '../contract-template'
-import type { ContractTemplateApprovalTask } from '../contract-template-approval-task'
-import type { ContractTemplateEvent } from '../contract-template-event'
-import type { ContractTemplateReviewTask } from '../contract-template-review-task'
-import type { ContractTemplateResponsible } from '../contract-template-responsible'
 
 export interface ContractTemplateCreateResponse {
   did: string
@@ -39,7 +40,6 @@ interface ContractTemplateSearchResponseItem {
   created_at: string
   created_by: string
   updated_at: string
-  responsible?: ContractTemplateResponsible
 }
 
 export type ContractTemplateSearchResponse = ContractTemplateSearchResponseItem[]
@@ -62,7 +62,7 @@ export interface ContractTemplateRetrieveByIdResponse {
   created_at: string
   updated_at: string
   /** The template data of the contract template */
-  template_data: ContractTemplateData
+  template_data: DcsTemplateData
   responsible?: ContractTemplateResponsible
 }
 
@@ -95,7 +95,6 @@ export interface ContractTemplateAuditResponseItem {
   did?: string
   created_at: string
   res_log_pred_cid?: string
-  global_log_pred_cid?: string
 }
 
 export type ContractTemplateAuditResponse = ContractTemplateAuditResponseItem[]

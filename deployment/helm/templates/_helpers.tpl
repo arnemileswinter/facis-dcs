@@ -83,19 +83,6 @@ Resolve PostgreSQL host (explicit override or in-chart default).
 {{- end }}
 
 {{/*
-Resolve Keycloak host (explicit override or in-chart default).
-*/}}
-{{- define "digital-contracting-service.keycloakHost" -}}
-{{- if .Values.serviceDiscovery.keycloakHost -}}
-{{- .Values.serviceDiscovery.keycloakHost -}}
-{{- else if .Values.keycloak.enabled -}}
-{{- printf "%s-keycloak" .Release.Name -}}
-{{- else -}}
-{{- "" -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Resolve NATS host (explicit override or in-chart default).
 */}}
 {{- define "digital-contracting-service.natsHost" -}}
@@ -105,19 +92,6 @@ Resolve NATS host (explicit override or in-chart default).
 {{- printf "%s-nats" .Release.Name -}}
 {{- else -}}
 {{- "" -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Resolve Keycloak port from explicit override, in-chart service, or scheme defaults.
-*/}}
-{{- define "digital-contracting-service.keycloakPort" -}}
-{{- if .Values.serviceDiscovery.keycloakPort -}}
-{{- .Values.serviceDiscovery.keycloakPort -}}
-{{- else if .Values.keycloak.enabled -}}
-{{- default 8080 .Values.keycloak.service.port -}}
-{{- else -}}
-443
 {{- end -}}
 {{- end }}
 
@@ -169,6 +143,19 @@ Hydra OAuth2/OIDC issuer (URLs issuer / discovery). Requires hydra.enabled.
 {{- end }}
 
 {{/*
+In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
+*/}}
+{{- define "digital-contracting-service.hydraInternalIssuerURL" -}}
+{{- if .Values.hydra.enabled -}}
+{{- if .Values.hydra.config.internalIssuerURL -}}
+{{- .Values.hydra.config.internalIssuerURL -}}
+{{- else -}}
+{{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.publicPort | int) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Hydra admin API base URL (login/consent accept).
 */}}
 {{- define "digital-contracting-service.hydraAdminURL" -}}
@@ -183,9 +170,6 @@ Keycloak realm URL for Federated Catalogue integration only.
 {{- define "digital-contracting-service.fcKeycloakRealmURL" -}}
 {{- if .Values.fcKeycloak.realmURL -}}
 {{- .Values.fcKeycloak.realmURL -}}
-{{- else if .Values.keycloak.enabled -}}
-{{- $port := .Values.keycloak.service.port | default 8080 | int -}}
-{{- printf "http://%s-keycloak:%d/realms/gaia-x" .Release.Name $port -}}
 {{- else -}}
 {{- "" -}}
 {{- end -}}
@@ -230,31 +214,6 @@ IPFS Document Manager tenant base URL (auto-wired when ipfsDocumentManager sub-c
 {{- end }}
 
 {{/*
-CRYPTO_PROVIDER_URL: explicit override, or derived from the co-deployed signer service.
-VAULT_ADDR: explicit override, or derived from the co-deployed Vault instance.
-*/}}
-{{- define "digital-contracting-service.cryptoProviderURL" -}}
-{{- if .Values.signing.cryptoProviderURL -}}
-{{- .Values.signing.cryptoProviderURL -}}
-{{- else if .Values.cryptoProvider.enabled -}}
-{{- printf "http://%s-crypto-provider-signer:%v" .Release.Name .Values.cryptoProvider.signer.port -}}
-{{- else -}}
-{{- "" -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-CRYPTO_PROVIDER_NAMESPACE: explicit override or taken from subchart transit.mount.
-*/}}
-{{- define "digital-contracting-service.cryptoProviderNamespace" -}}
-{{- if .Values.signing.cryptoProviderNamespace -}}
-{{- .Values.signing.cryptoProviderNamespace -}}
-{{- else if .Values.cryptoProvider.enabled -}}
-{{- .Values.cryptoProvider.transit.mount -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 IPFS MFS base URL - Kubo RPC API (auto-wired when ipfs sub-chart is enabled).
 */}}
 {{- define "digital-contracting-service.ipfsMfsBaseURL" -}}
@@ -270,28 +229,6 @@ IPFS MFS base URL - Kubo RPC API (auto-wired when ipfs sub-chart is enabled).
 {{- end }}
 
 {{/*
-CRYPTO_PROVIDER_KEY: explicit override or taken from subchart transit.key.
-*/}}
-{{- define "digital-contracting-service.cryptoProviderKey" -}}
-{{- if .Values.signing.cryptoProviderKey -}}
-{{- .Values.signing.cryptoProviderKey -}}
-{{- else if .Values.cryptoProvider.enabled -}}
-{{- .Values.cryptoProvider.transit.key -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-CRYPTO_PROVIDER_VC_KEY: explicit override or taken from subchart transit.vcKey.
-*/}}
-{{- define "digital-contracting-service.cryptoProviderVCKey" -}}
-{{- if .Values.signing.cryptoProviderVCKey -}}
-{{- .Values.signing.cryptoProviderVCKey -}}
-{{- else if .Values.cryptoProvider.enabled -}}
-{{- .Values.cryptoProvider.transit.vcKey -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 ISSUER_DID: explicit value or secret ref.
 */}}
 {{- define "digital-contracting-service.issuerDID" -}}
@@ -299,31 +236,19 @@ ISSUER_DID: explicit value or secret ref.
 {{- end }}
 
 {{/*
-Resolve signer cert-chain secret name:
-1) explicit signing.certChain existingSecret
-2) auto-generated dev cert-chain from co-deployed crypto-provider
+Name of the Kubernetes Secret holding the SoftHSM2 token PIN (PKCS11_PIN).
+Auto-created by the chart when pkcs11.pinSecretRef.name is unset.
 */}}
-{{- define "digital-contracting-service.signingCertChainSecretName" -}}
-{{- if and .Values.signing.certChain.enabled .Values.signing.certChain.existingSecret.name -}}
-{{- .Values.signing.certChain.existingSecret.name -}}
-{{- else if and .Values.cryptoProvider.enabled .Values.cryptoProvider.devCertChain.enabled -}}
-{{- default (printf "%s-crypto-provider-dev-cert-chain" .Release.Name) .Values.cryptoProvider.devCertChain.secretName -}}
-{{- else -}}
-{{- "" -}}
-{{- end -}}
+{{- define "digital-contracting-service.hsmPinSecretName" -}}
+{{- default (printf "%s-hsm-pin" (include "digital-contracting-service.fullname" .)) .Values.pkcs11.pinSecretRef.name -}}
 {{- end }}
 
 {{/*
-Resolve signer cert-chain secret key.
+Name of the Secret the provisioning job writes the C2PA x5chain PEM into and
+that pdf-core mounts. SoftHSM2 is a software token for dev/staging/CI only.
 */}}
-{{- define "digital-contracting-service.signingCertChainSecretKey" -}}
-{{- if and .Values.signing.certChain.enabled .Values.signing.certChain.existingSecret.name -}}
-{{- .Values.signing.certChain.existingSecret.key -}}
-{{- else if and .Values.cryptoProvider.enabled .Values.cryptoProvider.devCertChain.enabled -}}
-{{- default "chain.pem" .Values.cryptoProvider.devCertChain.secretKey -}}
-{{- else -}}
-{{- "chain.pem" -}}
-{{- end -}}
+{{- define "digital-contracting-service.hsmX5ChainSecretName" -}}
+{{- printf "%s-hsm-c2pa-x5chain" (include "digital-contracting-service.fullname" .) -}}
 {{- end }}
 
 {{/*
@@ -334,11 +259,11 @@ IPFS_MFS_BASE_URL: explicit value or secret ref.
 {{- end }}
 
 {{/*
-Normalize Keycloak route path (leading slash, no trailing slash).
+Normalize the vendored fc-service route path (leading slash, no trailing slash).
 */}}
-{{- define "digital-contracting-service.keycloakRoutePath" -}}
-{{- if .Values.keycloak.route.path -}}
-{{- printf "/%s" (trimAll "/" (.Values.keycloak.route.path | toString)) -}}
+{{- define "digital-contracting-service.fcserviceRoutePath" -}}
+{{- if .Values.fcservice.route.path -}}
+{{- printf "/%s" (trimAll "/" (.Values.fcservice.route.path | toString)) -}}
 {{- end -}}
 {{- end }}
 
@@ -354,4 +279,132 @@ Kubernetes secret holding demo wallet private keys (synced from Vault).
 */}}
 {{- define "digital-contracting-service.demoWalletSecretName" -}}
 {{- default (printf "%s-demo-wallet" (include "digital-contracting-service.fullname" .)) .Values.oid4vp.demoWallet.secretName -}}
+{{- end }}
+
+{{/*
+PDF-Core internal service URL — auto-wired when pdfCore.enabled=true.
+*/}}
+{{- define "digital-contracting-service.pdfCoreURL" -}}
+{{- if .Values.pdfCore.url -}}
+{{- .Values.pdfCore.url -}}
+{{- else if .Values.pdfCore.enabled -}}
+{{- printf "http://%s-pdf-core:%v" (include "digital-contracting-service.fullname" .) .Values.pdfCore.service.port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Name of the Secret that holds the pdf-core C2PA signing material.
+*/}}
+{{- define "digital-contracting-service.pdfCoreSigningSecretName" -}}
+{{- default (printf "%s-pdf-core-signing" (include "digital-contracting-service.fullname" .)) .Values.pdfCore.signing.existingSecret -}}
+{{- end }}
+
+{{/*
+Name of the Secret that holds the x5chain PEM for pdf-core C2PA signing.
+When pkcs11.provisioning is enabled the chain is derived from the SoftHSM2
+dcs-c2pa token key by the provisioning job; otherwise the inline dev secret.
+*/}}
+{{- define "digital-contracting-service.pdfCoreX5ChainSecretName" -}}
+{{- if .Values.pdfCore.signing.existingSecret -}}
+{{- .Values.pdfCore.signing.existingSecret -}}
+{{- else if .Values.pkcs11.provisioning.enabled -}}
+{{- include "digital-contracting-service.hsmX5ChainSecretName" . -}}
+{{- else -}}
+{{- include "digital-contracting-service.pdfCoreSigningSecretName" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Key within the x5chain Secret for pdf-core C2PA signing.
+*/}}
+{{- define "digital-contracting-service.pdfCoreX5ChainSecretKey" -}}
+{{- if and (not .Values.pdfCore.signing.existingSecret) .Values.pkcs11.provisioning.enabled -}}
+{{- "x5chain-pem" -}}
+{{- else if .Values.pdfCore.signing.existingSecretX5ChainKey -}}
+{{- .Values.pdfCore.signing.existingSecretX5ChainKey -}}
+{{- else -}}
+{{- "x5chain-pem" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The host:port a did:web identifier encodes for THIS instance's own did.json
+(DCS-OR-C2PA-008). route.didHostname is an explicit override (needed when the
+did:web hostname differs from route.publicBaseURL's host — e.g. the BDD
+two-instance suite's cluster-routable dcs-a.localhost/dcs-b.localhost
+hostnames, which resolve via a CoreDNS rewrite rather than being the literal
+ingress host callers use for every path); falling back to publicBaseURL's
+host, then the in-cluster default, keeps every existing single-host
+deployment unchanged.
+*/}}
+{{- define "digital-contracting-service.didHostname" -}}
+{{- if .Values.route.didHostname -}}
+{{- .Values.route.didHostname -}}
+{{- else if .Values.route.publicBaseURL -}}
+{{- (urlParse .Values.route.publicBaseURL).host -}}
+{{- else -}}
+{{- printf "localhost:%v" .Values.service.port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Name of the Secret the hsm-provision Job publishes did.json into and that the
+deployment mounts as the 'identity' volume (DCS_DID) when identity.enabled is
+true. Derived from <fullname> so two releases sharing one namespace (e.g. the
+BDD two-instance suite's 'dcs' / 'dcs2' releases) never collide on a shared
+literal name.
+*/}}
+{{/*
+Public base URL for the absolute IRIs a produced document carries (schema
+anchors, C2PA remote manifests): the did:web hostname — resolvable both
+in-cluster and externally — combined with publicBaseURL's scheme and path.
+*/}}
+{{- define "digital-contracting-service.publicAnchorBaseURL" -}}
+{{- if .Values.route.publicBaseURL -}}
+{{- $u := urlParse .Values.route.publicBaseURL -}}
+{{- printf "%s://%s%s" $u.scheme (include "digital-contracting-service.didHostname" .) $u.path -}}
+{{- end -}}
+{{- end }}
+
+{{- define "digital-contracting-service.identitySecretName" -}}
+{{- default (printf "%s-identity" (include "digital-contracting-service.fullname" .)) .Values.identity.secretName -}}
+{{- end }}
+
+{{/*
+Key within the hsm-c2pa-x5chain Secret for pdf-core PAdES signing (DCS-IR-SI-10).
+The provisioning job issues a second leaf (KEY_LABEL=dcs-contract-pades) bound
+to the token's PAdES key and publishes it into the same Secret object as the
+C2PA x5chain, under this second key, so pdf-core mounts one Secret for both.
+*/}}
+{{- define "digital-contracting-service.pdfCorePadesX5ChainSecretKey" -}}
+{{- if .Values.pdfCore.signing.existingSecretPadesX5ChainKey -}}
+{{- .Values.pdfCore.signing.existingSecretPadesX5ChainKey -}}
+{{- else -}}
+{{- "pades-x5chain-pem" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+STATUSLIST_SERVICE_URL — auto-derived from the statuslistService sub-chart when
+enabled=true, otherwise falls back to the explicit statuslistService.url override.
+*/}}
+{{- define "digital-contracting-service.statuslistServiceURL" -}}
+{{- if .Values.statuslistService.url -}}
+{{- .Values.statuslistService.url -}}
+{{- else if .Values.statuslistService.enabled -}}
+{{- printf "http://%s-statuslist-service:%v" .Release.Name .Values.statuslistService.service.port -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+PDF_CORE_CONTEXT_IRI — the @context IRI embedded in every JSON-LD envelope.
+Set pdfCore.contextIRI to override (e.g. a registered w3id IRI once available).
+Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
+*/}}
+{{- define "digital-contracting-service.pdfCoreContextIRI" -}}
+{{- if .Values.pdfCore.contextIRI -}}
+{{- .Values.pdfCore.contextIRI -}}
+{{- else -}}
+{{- printf "%s/ontology/dcs-pdf-core" (include "digital-contracting-service.pdfCoreURL" .) -}}
+{{- end -}}
 {{- end }}

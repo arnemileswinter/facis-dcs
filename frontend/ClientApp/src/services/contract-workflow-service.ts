@@ -3,25 +3,34 @@ import type {
   ContractApproveRequest,
   ContractAuditRequest,
   ContractCreateRequest,
+  ContractDeployRequest,
   ContractHistoryRetrieveRequest,
+  ContractNegotiationDraftRetrieveRequest,
+  ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferRequest,
   ContractRejectRequest,
   ContractRetrieveByIdRequest,
+  ContractRetrieveRequest,
   ContractReviewRequest,
   ContractSearchRequest,
   ContractStoreRequest,
   ContractSubmitRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
-} from '@/models/requests/contract-requests'
+} from '@/models/requests/contract-request'
 import type {
+  ApprovedContractTemplateRetrieveResponse,
   ContractApproveResponse,
   ContractAuditResponse,
   ContractCreateResponse,
+  ContractDeployResponse,
   ContractHistoryResponse,
+  ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferResponse,
   ContractRejectResponse,
   ContractRetrieveByIdResponse,
   ContractRetrieveResponse,
@@ -43,12 +52,32 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.put<ContractUpdateResponse>('/contract/update', request).then((res) => res.data)
   },
 
+  async offer(request: ContractOfferRequest) {
+    return http.post<ContractOfferResponse>('/contract/offer', request).then((res) => res.data)
+  },
+
   async submit(request: ContractSubmitRequest) {
     return http.post<ContractSubmitResponse>('/contract/submit', request).then((res) => res.data)
   },
 
   async negotiate(request: ContractNegotiationRequest) {
     return http.post<ContractNegotiationResponse>('/contract/negotiate', request).then((res) => res.data)
+  },
+
+  async saveNegotiationDraft(request: ContractNegotiationDraftSaveRequest) {
+    return http.put<ContractNegotiationDraftResponse>('/contract/negotiation_draft', request).then((res) => res.data)
+  },
+
+  async retrieveNegotiationDraft(request: ContractNegotiationDraftRetrieveRequest) {
+    return http
+      .get<ContractNegotiationDraftResponse>(`/contract/negotiation_draft/${request.did}`)
+      .then((res) => res.data)
+  },
+
+  async deleteNegotiationDraft(request: ContractNegotiationDraftRetrieveRequest) {
+    return http
+      .delete<ContractNegotiationDraftResponse>(`/contract/negotiation_draft/${request.did}`)
+      .then((res) => res.data)
   },
 
   async respond(request: ContractNegotiationRespondRequest) {
@@ -59,9 +88,9 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.get<ContractReviewResponse>('/contract/review', { params: request }).then((res) => res.data)
   },
 
-  async retrieve() {
+  async retrieve(request?: ContractRetrieveRequest) {
     return http
-      .get<ContractRetrieveResponse>('/contract/retrieve')
+      .get<ContractRetrieveResponse>('/contract/retrieve', { params: request })
       .then((res) => res.data)
       .catch((err: unknown) => {
         console.error('Retrieve Error:', err)
@@ -71,6 +100,16 @@ export const contractWorkflowService: ContractWorkflowService = {
           approval_tasks: [],
           negotiation_tasks: [],
         }
+      })
+  },
+
+  async retrieveApprovedTemplates() {
+    return http
+      .get<ApprovedContractTemplateRetrieveResponse>('/contract/templates')
+      .then((res) => res.data)
+      .catch((err: unknown) => {
+        console.error('Retrieve Error:', err)
+        return []
       })
   },
 
@@ -110,6 +149,10 @@ export const contractWorkflowService: ContractWorkflowService = {
     return http.post<ContractTerminateResponse>('/contract/terminate', request).then((res) => res.data)
   },
 
+  async deploy(request: ContractDeployRequest) {
+    return http.post<ContractDeployResponse>('/contract/deploy', request).then((res) => res.data)
+  },
+
   async audit(request: ContractAuditRequest) {
     return http
       .post<ContractAuditResponse>('/contract/audit', request)
@@ -133,6 +176,12 @@ export const contractWorkflowService: ContractWorkflowService = {
   async exportPdf(did: string): Promise<Blob> {
     return http
       .get<Blob>(`/pdf/export/contract/${encodeURIComponent(did)}`, { responseType: 'blob' })
+      .then((res) => res.data)
+  },
+
+  async exportBundle(did: string): Promise<Blob> {
+    return http
+      .get<Blob>(`/contract/export/${encodeURIComponent(did)}`, { responseType: 'blob' })
       .then((res) => res.data)
   },
 

@@ -2,7 +2,6 @@ package testutil
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,14 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/fcasset"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
-	"digital-contracting-service/internal/templaterepository/selfdescription"
 	"digital-contracting-service/migrations/fcschemas"
 )
-
-//go:embed testdata/template_resource_sd.jsonld
-var templateResourceSDExample []byte
 
 const DefaultParticipantID = "did:web:argo.asd-stack.eu:facis:participant:cfc9d0a5-cd79-4807-8eef-e245ab0ffee8"
 
@@ -44,14 +39,14 @@ func NewFCClient(cfg FCClientConfig) (*fcclient.FederatedCatalogueClient, error)
 	})
 }
 
-// PrepareFC cleans self-descriptions and syncs SHACL schemas.
+// PrepareFC cleans FC assets and syncs SHACL schemas.
 func PrepareFC(t *testing.T, fc *fcclient.FederatedCatalogueClient) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	CleanupAllSelfDescriptions(t, ctx, fc)
+	CleanupAllAssets(t, ctx, fc)
 	syncFCSchemasOnce(t, ctx, fc)
 }
 
@@ -67,40 +62,40 @@ func syncFCSchemasOnce(t *testing.T, ctx context.Context, fc *fcclient.Federated
 	})
 }
 
-// CleanupAllSelfDescriptions deletes all self-descriptions.
-func CleanupAllSelfDescriptions(t *testing.T, ctx context.Context, fc *fcclient.FederatedCatalogueClient) {
+// CleanupAllAssets deletes all FC assets.
+func CleanupAllAssets(t *testing.T, ctx context.Context, fc *fcclient.FederatedCatalogueClient) {
 	t.Helper()
 
 	query := url.Values{}
-	query.Set("statuses", "REVOKED,ACTIVE,DEPRECATED")
+	query.Set("statuses", "revoked,active,deprecated")
 	query.Set("withMeta", "true")
 
-	resp, err := fc.Get(ctx, fcclient.SelfDescriptionsEndpointPath, query)
+	resp, err := fc.Get(ctx, fcclient.AssetsEndpointPath, query)
 	if err != nil {
-		t.Fatalf("list self-descriptions failed: %v", err)
+		t.Fatalf("list assets failed: %v", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := fc.ExtractErrorMessage(resp.Body)
 		if msg == "" {
 			msg = fmt.Sprintf("status %d", resp.StatusCode)
 		}
-		t.Fatalf("list self-descriptions failed: %s", msg)
+		t.Fatalf("list assets failed: %s", msg)
 	}
 
-	var listed fcclient.GetSelfDescriptionsResponse
+	var listed fcclient.GetAssetsResponse
 	if err := json.Unmarshal(resp.Body, &listed); err != nil {
-		t.Fatalf("unmarshal self-descriptions list failed: %v", err)
+		t.Fatalf("unmarshal assets list failed: %v", err)
 	}
 
 	for _, item := range listed.Items {
-		sdHash := strings.TrimSpace(item.Meta.SdHash)
-		if sdHash == "" {
+		assetHash := strings.TrimSpace(item.Meta.AssetHash)
+		if assetHash == "" {
 			continue
 		}
-		deletePath := path.Join(fcclient.SelfDescriptionsEndpointPath, url.PathEscape(sdHash))
+		deletePath := path.Join(fcclient.AssetsEndpointPath, url.PathEscape(assetHash))
 		delResp, err := fc.Delete(ctx, deletePath, nil)
 		if err != nil {
-			t.Fatalf("delete self-description %s failed: %v", sdHash, err)
+			t.Fatalf("delete asset %s failed: %v", assetHash, err)
 		}
 		if delResp.StatusCode == http.StatusNotFound {
 			continue
@@ -110,42 +105,9 @@ func CleanupAllSelfDescriptions(t *testing.T, ctx context.Context, fc *fcclient.
 			if msg == "" {
 				msg = fmt.Sprintf("status %d", delResp.StatusCode)
 			}
-			t.Fatalf("delete self-description %s failed: %s", sdHash, msg)
+			t.Fatalf("delete asset %s failed: %s", assetHash, msg)
 		}
 	}
-}
-
-// LoadExampleTemplateData parses template_data from the embedded template_resource_sd.jsonld example.
-func LoadExampleTemplateData(t *testing.T) *datatype.JSON {
-	t.Helper()
-
-	var presentation map[string]interface{}
-	if err := json.Unmarshal(templateResourceSDExample, &presentation); err != nil {
-		t.Fatalf("unmarshal template_resource_sd.jsonld failed: %v", err)
-	}
-
-	vcs, ok := presentation["verifiableCredential"].([]interface{})
-	if !ok || len(vcs) == 0 {
-		t.Fatalf("template_resource_sd.jsonld: missing verifiableCredential")
-	}
-	vc, ok := vcs[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("template_resource_sd.jsonld: invalid verifiableCredential entry")
-	}
-	subject, ok := vc["credentialSubject"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("template_resource_sd.jsonld: missing credentialSubject")
-	}
-	rawTemplateData, ok := subject["dcs-template:templateData"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("template_resource_sd.jsonld: missing dcs-template:templateData")
-	}
-
-	templateData, err := datatype.NewJSON(rawTemplateData)
-	if err != nil {
-		t.Fatalf("marshal example template data failed: %v", err)
-	}
-	return &templateData
 }
 
 // TemplateSeed describes a template resource posted to the Federated Catalogue.
@@ -155,55 +117,59 @@ type TemplateSeed struct {
 	DocumentNumber string
 }
 
-// SeedTemplateResource posts a template resource self-description to the Federated Catalogue.
+// SeedTemplateResource posts a catalogue template asset to the Federated Catalogue.
 func SeedTemplateResource(
 	t *testing.T,
 	ctx context.Context,
 	fc *fcclient.FederatedCatalogueClient,
-	participantID string,
+	issuer string,
 	did string,
 	version int,
-	documentNumber string,
-	templateType string,
+	state string,
 	name string,
-	templateData *datatype.JSON,
+	description string,
+	templateType string,
+	templateDataString string,
 ) TemplateSeed {
 	t.Helper()
 
 	now := time.Now().UTC()
-	sd := selfdescription.BuildTemplateResourceSelfDescription(selfdescription.TemplateResourceInput{
-		ParticipantID:  participantID,
-		DID:            did,
-		DocumentNumber: documentNumber,
-		Version:        version,
-		TemplateType:   templateType,
-		Name:           name,
-		Description:    "",
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		TemplateData:   templateData,
+	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
+		Issuer:    issuer,
+		ValidFrom: now,
+		Subject: fcasset.CatalogueSubjectFromRepository(
+			did,
+			version,
+			state,
+			name,
+			description,
+			templateType,
+		),
+		TemplateDataString: templateDataString,
 	})
-
-	body, err := json.Marshal(sd)
 	if err != nil {
-		t.Fatalf("marshal template self-description failed: %v", err)
+		t.Fatalf("build template asset payload failed: %v", err)
 	}
 
-	resp, err := fc.Post(ctx, fcclient.SelfDescriptionsEndpointPath, nil, body)
+	body, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("post template self-description failed: %v", err)
+		t.Fatalf("marshal template asset payload failed: %v", err)
+	}
+
+	resp, err := fc.PostRaw(ctx, fcclient.AssetsEndpointPath, nil, fcclient.JSONLDContentType, body)
+	if err != nil {
+		t.Fatalf("post template asset failed: %v", err)
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
 		msg := fc.ExtractErrorMessage(resp.Body)
 		if msg == "" {
 			msg = fmt.Sprintf("status %d", resp.StatusCode)
 		}
-		t.Fatalf("post template self-description failed: %s", msg)
+		t.Fatalf("post template asset failed: %s", msg)
 	}
 
 	return TemplateSeed{
-		DID:            did,
-		Version:        version,
-		DocumentNumber: documentNumber,
+		DID:     did,
+		Version: version,
 	}
 }

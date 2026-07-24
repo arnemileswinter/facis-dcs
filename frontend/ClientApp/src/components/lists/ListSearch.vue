@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends { did: string }">
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
-import { computed, ref, useTemplateRef, type Ref } from 'vue'
+import { computed, nextTick, type Ref, ref, type ShallowRef, shallowRef, useTemplateRef } from 'vue'
 
 type FilterLabelConfig<T> = Partial<Record<keyof T, string>>
 type SearchFunction<T> = (request: Record<string, unknown>) => Promise<T[]>
@@ -14,7 +14,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  searchResult: [value: T[]]
+  searchResult: [value: T[] | null]
 }>()
 
 const searchQuery = ref('')
@@ -26,7 +26,7 @@ type FilterLabelValue = FilterLabels[FilterLabelKey]
 
 const selectedFilter = ref<FilterLabelValue>(Object.values(props.filterLabels)[0] ?? '')
 const filterPopover = useTemplateRef('filter-popover')
-const searchResults: Ref<T[]> = ref([])
+const searchResults: ShallowRef<T[]> = shallowRef([])
 
 const selectedOption: Ref<T | null> = ref(null)
 
@@ -41,9 +41,7 @@ const searchedItems = computed(() => {
 
   if (searchResults.value.length === 0) return []
 
-  const backendIds = new Set(searchResults.value.map((item) => item.did))
-
-  return props.items.filter((item) => backendIds.has(item.did))
+  return searchResults.value
 })
 
 const inputValue: Ref<T> = computed(() => {
@@ -51,6 +49,8 @@ const inputValue: Ref<T> = computed(() => {
     ? props.emptyItem
     : { ...props.emptyItem, [searchKey.value]: searchQuery.value }
 })
+
+const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabels).length === 1)
 
 async function searchRequest() {
   if (searchQuery.value.length < 1 || !searchKey.value) {
@@ -78,18 +78,21 @@ async function searchList(event?: Event) {
       await searchRequest()
     }
   }
-  emit('searchResult', searchedItems.value)
+  if (searchQuery.value.trim().length > 0) emit('searchResult', searchedItems.value)
+  else emit('searchResult', null)
 }
 
-const getDisplayValue = (template: T | null): string => {
+function getDisplayValue(template: T | null): string {
   return searchKey.value && template ? String(template[searchKey.value]) : ''
 }
 
-const autocompleteOptionClasses = (active: boolean, selected: boolean) => [
-  'cursor-pointer px-4 py-2',
-  active ? 'bg-secondary text-secondary-content' : 'bg-base-100',
-  selected ? 'font-bold' : '',
-]
+function autocompleteOptionClasses(active: boolean, selected: boolean) {
+  return [
+    'cursor-pointer px-4 py-2',
+    active ? 'bg-secondary text-secondary-content' : 'bg-base-100',
+    selected ? 'font-bold' : '',
+  ]
+}
 
 async function onComboboxFocus() {
   await searchRequest()
@@ -97,7 +100,11 @@ async function onComboboxFocus() {
 
 async function onSearchChange(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
-  await searchRequest()
+  if (searchQuery.value.trim().length === 0) {
+    emit('searchResult', null)
+  } else {
+    await searchRequest()
+  }
 }
 
 function onComboboxUpdate(item: T) {
@@ -111,6 +118,22 @@ function onFilterSelect(label: FilterLabelValue) {
   selectedFilter.value = label
   filterPopover.value?.hidePopover()
 }
+
+const showInitialFocus = ref(true)
+
+function focusFirstOption() {
+  void nextTick(() => {
+    filterPopover.value?.querySelector<HTMLElement>('a[tabindex="0"]')?.focus()
+  })
+}
+
+function handlePopoverToggle(event: ToggleEvent) {
+  if (event.newState === 'closed') {
+    showInitialFocus.value = true
+  } else if (showInitialFocus.value) {
+    focusFirstOption()
+  }
+}
 </script>
 
 <template>
@@ -119,24 +142,40 @@ function onFilterSelect(label: FilterLabelValue) {
       <button
         id="list-btn-search"
         type="button"
-        class="select w-full rounded-t-md rounded-b-none select-secondary sm:rounded-l-md sm:rounded-tr-none"
+        class="select-button btn w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default sm:rounded-l-md sm:rounded-tr-none"
         popovertarget="list-popover-search"
-        :class="{ 'btn-disabled': Object.entries(filterLabels).length === 1 }"
+        aria-haspopup="listbox"
+        :aria-expanded="filterPopover?.matches(':popover-open')"
+        :class="{ 'btn-disabled': isFilterSelectionDisabled }"
+        :disabled="isFilterSelectionDisabled"
       >
         {{ selectedFilter }}
       </button>
       <ul
         id="list-popover-search"
         ref="filter-popover"
-        class="menu dropdown dropdown-start w-52 rounded-box bg-base-300 shadow-sm"
+        class="menu dropdown dropdown-start mt-2 w-52 rounded-box bg-base-300 shadow-sm"
         popover
+        role="listbox"
+        :aria-label="'Select search filter'"
+        @toggle="handlePopoverToggle"
       >
-        <li class="menu-title">
-          <span class="menu-disabled pointer-events-none select-none">Select search filter</span>
+        <li role="option" aria-selected="false" class="menu-title">
+          <span class="menu-disabled pointer-events-none text-base-content/70 select-none">Select search filter</span>
         </li>
-        <template v-for="[key, label] in Object.entries(filterLabels)" :key="key">
-          <li>
-            <a :class="{ 'bg-primary text-primary-content': label === selectedFilter }" @click="onFilterSelect(label)">
+        <template v-for="([key, label], index) in Object.entries(filterLabels)" :key="key">
+          <li role="option" :aria-selected="label === selectedFilter">
+            <a
+              tabindex="0"
+              :class="{
+                'bg-primary text-primary-content': label === selectedFilter,
+                'menu-focus': index === 0 && showInitialFocus,
+              }"
+              @blur="index === 0 ? (showInitialFocus = false) : null"
+              @click="onFilterSelect(label)"
+              @keydown.enter="onFilterSelect(label)"
+              @keydown.space.prevent="onFilterSelect(label)"
+            >
               {{ label }}
             </a>
           </li>
@@ -150,6 +189,7 @@ function onFilterSelect(label: FilterLabelValue) {
             :display-value="(item) => getDisplayValue(item as T | null)"
             :placeholder="placeholder || 'Search'"
             class="w-full bg-transparent"
+            :aria-label="placeholder || 'Search'"
             @change="onSearchChange"
             @focus="onComboboxFocus"
             @keydown.enter="searchList"
@@ -182,6 +222,7 @@ function onFilterSelect(label: FilterLabelValue) {
       </Combobox>
     </div>
     <button
+      type="button"
       class="btn join-item ms-0 -mt-px rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
       @click="searchList"
     >

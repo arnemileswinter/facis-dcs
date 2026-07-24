@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import ConfirmationModal from '@/components/ConfirmationModal.vue'
-import type { PartialContractTemplate } from '@/models/contract-template'
-import { TemplateType } from '@/modules/template-repository/models/contract-template'
-import { ROUTES } from '@/router/router'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { useAuthStore } from '@/stores/auth-store'
-import { TemplateState, type ContractTemplateState } from '@/types/contract-template-state'
 import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
+import { TemplateType } from '@template-repository/models/contract-template'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { ROUTES } from '@/router/router'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { type ContractTemplateState, TemplateState } from '@/types/contract-template-state'
+import type { PartialContractTemplate } from '@/models/contract-template'
 
 defineOptions({
   inheritAttrs: false,
@@ -34,13 +34,10 @@ const props = defineProps<{
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const router = useRouter()
-const authStore = useAuthStore()
+
+const { isManager } = useTemplatePermissions()
 
 const isPublishing = ref(false)
-
-const isManager = computed(() => {
-  return authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false
-})
 
 const canArchive = computed(() => {
   const archiveStates: ContractTemplateState[] = [TemplateState.deleted, TemplateState.deprecated]
@@ -50,8 +47,16 @@ const canArchive = computed(() => {
 const showPublishButton = computed(() => {
   return (
     isManager.value &&
+    props.template.state === TemplateState.registered &&
+    props.template.template_type === TemplateType.contractTemplate
+  )
+})
+
+const showRegisterButton = computed(() => {
+  return (
+    isManager.value &&
     props.template.state === TemplateState.approved &&
-    props.template.template_type === TemplateType.frameContract
+    props.template.template_type === TemplateType.contractTemplate
   )
 })
 
@@ -85,17 +90,27 @@ const publish = async () => {
   }
 }
 
-const exportPdf = () => {
-  alert('not implemented yet')
+async function register() {
+  try {
+    if (!confirmationModal.value) return
+    const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with registration?' })
+    if (!isCanceled) {
+      await contractTemplateService.register({ did: props.template.did })
+
+      await router.push({ name: ROUTES.TEMPLATES.LIST })
+    }
+  } catch (err) {
+    console.error('Registration failed:', err)
+  }
 }
 </script>
 
 <template>
-  <button :class="$attrs.class" @click="exportPdf">Export PDF</button>
+  <button v-if="showRegisterButton" :class="$attrs.class" @click="register">Register</button>
   <button v-if="showPublishButton" :class="$attrs.class" :disabled="isPublishing" @click="publish">
     <span v-if="isPublishing" class="loading loading-sm loading-spinner"></span>
     Publish
   </button>
-  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">Archive</button>
+  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" class="z-1000" @click="archive">Archive</button>
   <ConfirmationModal ref="confirmation-modal" />
 </template>

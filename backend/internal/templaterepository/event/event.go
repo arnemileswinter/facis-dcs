@@ -1,3 +1,8 @@
+// Package event defines the template repository's domain events, each
+// implementing base/event.Event (EventType/GetDID). Handlers pass these to
+// base/event.Create in the same DB transaction as their mutation;
+// base/event.OutboxProcessor anchors them into the tamper-evident audit
+// trail and republishes them on NATS.
 package event
 
 import (
@@ -293,6 +298,8 @@ type RegisterEvent struct {
 	OccurredAt    time.Time          `json:"occurred_at"`
 	HolderDID     string             `json:"holder_did"`
 	UserRoles     userrole.UserRoles `json:"user_roles"`
+	PreviousState *string            `json:"previous_state,omitempty"`
+	NewState      *string            `json:"new_state,omitempty"`
 }
 
 // EventType implements the Event interface.

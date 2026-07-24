@@ -13,6 +13,7 @@ var ContractTemplateCreateRequest = Type("ContractTemplateCreateRequest", func()
 
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
+	Attribute("document_number", String, "A document number for the contract template")
 	Attribute("template_data", Any, "The template data of the contract template")
 
 	Required("template_type")
@@ -153,8 +154,6 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
-
 	Required("did", "state", "template_type", "created_at", "updated_at", "version")
 })
 
@@ -178,7 +177,7 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("created_by", String, "Created by")
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
-	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
+	Attribute("latest_did", String, "The DID of the newest contract template")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version")
 })
@@ -217,6 +216,27 @@ var ContractTemplateRetrieveResponse = Type("ContractTemplateRetrieveResponse", 
 	Required("contract_templates", "review_tasks", "approval_tasks")
 })
 
+var TemplateProvenanceRetrieveRequest = Type("TemplateProvenanceRetrieveRequest", func() {
+	Description("Template provenance credentials retrieve request")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "DID of the contract template")
+
+	Required("did")
+})
+
+var TemplateProvenanceCredentialResponse = Type("TemplateProvenanceCredentialResponse", func() {
+	Description("One registered template version's signed W3C provenance credential (DCS-FR-TR-09), linked to its predecessor")
+
+	Attribute("version", Int, "Template version the credential seals")
+	Attribute("vc_id", String, "Credential ID (urn:dcs:vc:template-provenance:<hash>)")
+	Attribute("previous_vc_id", String, "Credential ID of the previous version's credential; absent for the first version")
+	Attribute("credential", Any, "The signed W3C Verifiable Credential (JSON-LD, ecdsa-rdfc-2019 Data Integrity proof)")
+
+	Required("version", "vc_id", "credential")
+})
+
 var ContractTemplateHistoryRetrieveByIDRequest = Type("ContractTemplateHistoryRetrieveByIDRequest", func() {
 	Description("Contract template retrieve by id request")
 
@@ -246,7 +266,6 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
 	Attribute("template_data", Any, "The template data of the contract template")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version")
@@ -281,7 +300,6 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
 	Attribute("template_data", Any, "The template data of the contract template")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version")
@@ -378,7 +396,7 @@ var ContractTemplateRegisterRequest = Type("ContractTemplateRegisterRequest", fu
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 
-	Required("did", "version")
+	Required("did")
 })
 
 var ContractTemplateRegisterResponse = Type("ContractTemplateRegisterResponse", func() {
@@ -411,7 +429,6 @@ var ContractTemplateAuditResponse = Type("ContractTemplateAuditResponse", func()
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 	Attribute("created_at", String, "The creation date of the event")
 	Attribute("res_log_pred_cid", String, "Resource audit trail predecessor on the IPFS chain")
-	Attribute("global_log_pred_cid", String, "Global audit trail predecessor on the IPFS chain")
 
 	Required("id", "component", "event_type", "event_data", "created_at")
 })
@@ -451,6 +468,7 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateCreateRequest)
@@ -469,11 +487,12 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/copy
 	Method("copy", func() {
-		Description("Copy a a template")
+		Description("Copy a template. Behavior depends on the source template's state: if it is not yet REGISTERED/PUBLISHED, the copy starts a new, independent version lineage (version=1, base_template=own new DID); if the source is already REGISTERED/PUBLISHED, the copy becomes the next version of the same lineage (version+1, inherits the source's base_template). A DB guard rejects the copy if a REGISTERED/PUBLISHED template with that version already exists in the lineage.")
 		Meta("dcs:ui", "Template Builder")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateCopyRequest)
@@ -501,6 +520,7 @@ var _ = Service("TemplateRepository", func() {
 			Scope("Template Creator")
 			Scope("Template Reviewer")
 			Scope("Template Approver")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateSubmitRequest)
@@ -527,6 +547,7 @@ var _ = Service("TemplateRepository", func() {
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
 			Scope("Template Reviewer")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateUpdateRequest)
@@ -543,7 +564,7 @@ var _ = Service("TemplateRepository", func() {
 		})
 	})
 
-	// POST /template/update
+	// POST /template/update_manage
 	Method("update_manage", func() {
 		Description("update template data or status.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
@@ -562,7 +583,7 @@ var _ = Service("TemplateRepository", func() {
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
-			POST("/template/update")
+			POST("/template/update_manage")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -638,6 +659,35 @@ var _ = Service("TemplateRepository", func() {
 		})
 	})
 
+	// GET /template/provenance/{did}
+	Method("provenance", func() {
+		Description("DCS-FR-TR-09 Template Provenance and Versioning: the per-version signed W3C provenance credentials (creator/reviewer/approver/registrar claims, content hash, previous-credential linkage) a template user verifies a template's provenance with.")
+		Meta("dcs:requirements", "DCS-FR-TR-09")
+		Meta("dcs:tr:components", "Template Versioning")
+
+		Security(JWTAuth, func() {
+			Scope("Template Creator")
+			Scope("Template Reviewer")
+			Scope("Template Approver")
+			Scope("Template Manager")
+		})
+
+		Payload(TemplateProvenanceRetrieveRequest)
+		Result(ArrayOfRequired(TemplateProvenanceCredentialResponse))
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/template/provenance/{did}")
+			Param("did")
+
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	// GET /template/history/{did}
 	Method("retrieve_history_by_id", func() {
 		Description("fetch history of a contract template")
@@ -658,6 +708,34 @@ var _ = Service("TemplateRepository", func() {
 
 		HTTP(func() {
 			GET("/template/history/{did}")
+			Param("did")
+
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// GET /template/{did} — the template's resource IRI
+	Method("resolve", func() {
+		Description("Dereference a template's resource IRI ({DCS_PUBLIC_URL}/template/{did}): serves the canonical JSON-LD template document under the same authorization as retrieve_by_id. This route is what makes a template's @id follow-your-nose resolvable.")
+		Meta("dcs:requirements", "DCS-FR-TR-01")
+
+		Security(JWTAuth, func() {
+			Scope("Template Creator")
+			Scope("Template Reviewer")
+			Scope("Template Approver")
+			Scope("Template Manager")
+		})
+
+		Payload(ContractTemplateRetrieveByIDRequest)
+		Result(Any)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/template/{did}")
 			Param("did")
 
 			Response(StatusOK)
@@ -705,6 +783,7 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Reviewer")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateVerifyRequest)
@@ -730,6 +809,7 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateApproveRequest)
@@ -755,6 +835,7 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
+			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateRejectRequest)
@@ -773,7 +854,7 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/register
 	Method("register", func() {
-		Description("register new template into the repository.")
+		Description("Register a template with the Federated Catalogue integration. Two distinct modes depending on whether the given DID already exists locally: if it does, only its state is flipped to REGISTERED; if it does not, the template (identified by did + version) is pulled from the Federated Catalogue and imported as a brand-new local DID in state DRAFT.")
 		Meta("dcs:requirements", "DCS-IR-TR-07")
 		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
 		Meta("dcs:ui", "Template Management Dashboard")
@@ -829,7 +910,6 @@ var _ = Service("TemplateRepository", func() {
 		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
-			Scope("Template Manager")
 			Scope("Auditor")
 			Scope("Compliance Officer")
 		})
@@ -852,6 +932,7 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/publish
 	Method("publish", func() {
 		Description("publish a local approved template to the XFSC Catalogue.")
+		Meta("dcs:tr:components", "Contract Templates Storage & Provenance")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")

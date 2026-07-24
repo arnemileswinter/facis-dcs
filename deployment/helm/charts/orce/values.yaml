@@ -27,5 +27,38 @@ persistence:
     - ReadWriteOnce
 
 extraEnv: []
+global:
+  archiveAuditToken: ""
+  archiveAuditTokenSecretRef:
+    name: ""
+    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+
+# Local RFC3161 dev TSA: the /tsa flow signs timestamp replies in-pod with a
+# provisioned dev cert (see configmap-tsa.yaml) instead of forwarding to an
+# external TSA. Self-contained for dev/BDD/CI — no internet dependency.
+localTSA:
+  enabled: true
+  # The provisioning Job needs a Role/RoleBinding to write the material
+  # Secret, which some clusters' deploying identities aren't allowed to
+  # self-grant (RBAC self-management). Set to false there and pre-create
+  # the <release>-orce-tsa-material Secret (keys tsa-cert.pem/tsa-key.pem)
+  # out of band before install — the mount (this flag's `enabled`) still
+  # applies regardless.
+  autoProvision: true
 
 resources: {}
+
+# Mount the chart's merged flows/*.json as Node-RED's startup flows file —
+# deterministic, rollout-race-free. When enabled, the flowImport hook job is
+# skipped for chart flows (flows.json is a read-only mount; runtime /flows
+# deploys would fail to persist anyway).
+flowsFile:
+  enabled: true
+
+flowImport:
+  enabled: true
+  auth:
+    enabled: true
+    tokenUrl: "http://dcs-orce:1880/auth/token"
+    username: "admin"
+    password: "xfsc-orce"

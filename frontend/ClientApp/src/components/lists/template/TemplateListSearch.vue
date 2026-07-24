@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { PartialContractTemplate } from '@/models/contract-template'
-import type { ContractTemplateSearchResponse } from '@/models/responses/template-response'
 import { contractTemplateService } from '@/services/contract-template-service'
 import ListSearch from '../ListSearch.vue'
+import type { PartialContractTemplate } from '@/models/contract-template'
+import type { ContractTemplateSearchResponse } from '@/models/responses/template-response'
 
 defineProps<{
   templates: PartialContractTemplate[]
 }>()
 
 const emit = defineEmits<{
-  searchResult: [value: PartialContractTemplate[]]
+  searchResult: [value: PartialContractTemplate[] | null]
 }>()
 
 const filterLabels: Partial<Record<keyof PartialContractTemplate, string>> = {
@@ -28,7 +28,7 @@ const emptyTemplate: PartialContractTemplate = {
   created_at: '',
   updated_at: '',
   name: '',
-  template_type: 'FRAME_CONTRACT',
+  template_type: 'CONTRACT_TEMPLATE',
   state: 'DRAFT',
   created_by: '',
 }
