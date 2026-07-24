@@ -35,7 +35,7 @@ type GetByIDHandler struct {
 }
 
 const retrieveTemplateByIDStatementTemplate = `
-SELECT (?s AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?template_data_string WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?template_data_string WHERE {
 %s%s%s}
 LIMIT 1
 `
@@ -52,7 +52,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatec
 	}
 
 	extraTriples := fieldTriple(dcsTemplateTypeIRI, "template_type") + fieldTriple(dcsTemplateDataStringIRI, "template_data_string")
-	didFilter := fmt.Sprintf("  FILTER(STR(?s) = \"%s\")\n", sparqlEscapeString(qry.DID))
+	didFilter := fmt.Sprintf("  FILTER(?template_uuid = \"%s\")\n", sparqlEscapeString(qry.DID))
 	statement := fmt.Sprintf(retrieveTemplateByIDStatementTemplate, coreFieldTriples(), extraTriples, didFilter)
 
 	resp, err := h.FCClient.Query(ctx, client.QueryRequest{

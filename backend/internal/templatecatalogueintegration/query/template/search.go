@@ -38,12 +38,12 @@ type SearchHandler struct {
 }
 
 const searchTemplatesCountStatementTemplate = `
-SELECT (COUNT(DISTINCT ?s) AS ?total) WHERE {
+SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
 %s%s}
 `
 
 const searchTemplatesStatementTemplate = `
-SELECT (?s AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
 %s%s}
 ORDER BY ?s
 OFFSET %d
@@ -133,7 +133,7 @@ func buildSearchFilters(qry SearchQry) string {
 	var b strings.Builder
 
 	if value := strings.TrimSpace(qry.DID); value != "" {
-		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(STR(?s)), LCASE(\"%s\")))\n", sparqlEscapeString(value))
+		fmt.Fprintf(&b, "  FILTER(CONTAINS(LCASE(?template_uuid), LCASE(\"%s\")))\n", sparqlEscapeString(value))
 	}
 	if qry.Version > 0 {
 		fmt.Fprintf(&b, "  FILTER(?version = \"%d\")\n", qry.Version)

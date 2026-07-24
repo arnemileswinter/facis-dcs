@@ -30,6 +30,7 @@ type CatalogueSubject struct {
 // BuildInput carries catalogue metadata required for an FC /assets JSON-LD payload.
 type BuildInput struct {
 	Issuer             string
+	SubjectIRI         string
 	ValidFrom          time.Time
 	Subject            CatalogueSubject
 	TemplateDataString string
@@ -37,6 +38,10 @@ type BuildInput struct {
 
 // BuildPayload assembles a thin catalogue VC for FC publish.
 func BuildPayload(input BuildInput) (map[string]any, error) {
+	if strings.TrimSpace(input.SubjectIRI) == "" {
+		return nil, fmt.Errorf("template subject iri is empty")
+	}
+
 	if strings.TrimSpace(input.Subject.ID) == "" {
 		return nil, fmt.Errorf("template did is empty")
 	}
@@ -59,15 +64,22 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 				"prov":   ProvContextURL,
 			},
 		},
-		"id": input.Subject.ID,
+		"id": input.SubjectIRI,
 		"type": []string{
 			"VerifiableCredential",
 			"dcs:ContractTemplate",
 		},
 		"issuer":    input.Issuer,
 		"validFrom": validFrom.Format(time.RFC3339),
+		// credentialSubject's own "id" becomes the RDF subject for every
+		// property below once FC ingests this as JSON-LD — it must be a
+		// well-formed absolute IRI (base.ResourceIRI), not the bare template
+		// UUID: FC's JsonLdToRdf silently drops ("Non well-formed subject...
+		// has been skipped") every triple whose subject isn't one, confirmed
+		// live. dcs:templateUuid carries the bare UUID separately as a plain
+		// literal property, unaffected by that requirement.
 		"credentialSubject": map[string]any{
-			"id":                     input.Subject.ID,
+			"id":                     input.SubjectIRI,
 			"type":                   "dcs:ContractTemplate",
 			"dcs:templateUuid":       input.Subject.ID,
 			"dcs:state":              input.Subject.State,

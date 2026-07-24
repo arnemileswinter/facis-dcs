@@ -34,12 +34,12 @@ type GetAllMetadataHandler struct {
 }
 
 const retrieveTemplatesCountStatementTemplate = `
-SELECT (COUNT(DISTINCT ?s) AS ?total) WHERE {
+SELECT (COUNT(DISTINCT ?template_uuid) AS ?total) WHERE {
 %s}
 `
 
 const retrieveTemplatesStatementTemplate = `
-SELECT (?s AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
 %s}
 ORDER BY ?s
 OFFSET %d

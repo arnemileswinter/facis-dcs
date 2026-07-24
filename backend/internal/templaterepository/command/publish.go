@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
@@ -151,8 +152,9 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:    cmd.InstanceDID,
-		ValidFrom: fullTemplate.UpdatedAt,
+		Issuer:     cmd.InstanceDID,
+		SubjectIRI: base.ResourceIRI("template", cmd.DID),
+		ValidFrom:  fullTemplate.UpdatedAt,
 		Subject: fcasset.CatalogueSubjectFromRepository(
 			cmd.DID,
 			processData.Version,

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/fcasset"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/migrations/fcschemas"
@@ -135,8 +136,9 @@ func SeedTemplateResource(
 
 	now := time.Now().UTC()
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:    issuer,
-		ValidFrom: now,
+		Issuer:     issuer,
+		SubjectIRI: base.ResourceIRI("template", did),
+		ValidFrom:  now,
 		Subject: fcasset.CatalogueSubjectFromRepository(
 			did,
 			version,
