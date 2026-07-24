@@ -835,6 +835,7 @@ func (s *templateRepositorysrvc) Publish(ctx context.Context, req *templaterepos
 		UpdatedAt:   updatedAt,
 		PublishedBy: middleware.GetParticipantID(ctx),
 		HolderDID:   middleware.GetHolderDID(ctx),
+		InstanceDID: s.IssuerDID,
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 	handler := command.Publisher{
