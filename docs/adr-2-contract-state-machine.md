@@ -1,5 +1,13 @@
 # ADR-2: Contract-formation state machine reconciles SRS §1.2 and §3.1.1
 
+> **Superseded in part by [ADR-13](adr-13-pdf-exchange-federation.md)
+> (2026-07-19).** The origin-as-single-writer / full-state-broadcast /
+> peer-task-sync model this ADR's DCS-to-DCS synchronizer originally
+> implied is **withdrawn**: federation exchanges a signed PDF (+ JAdES), not
+> a broadcast of this state machine's internal state. The state machine
+> itself — the transition table below, reconciling SRS §1.2 and §3.1.1 — is
+> unchanged and still binding for each instance's own local contract state.
+
 ## Context
 
 The SRS describes the contract lifecycle in two places that do not agree.

@@ -9,6 +9,13 @@ full-state-broadcast / peer-task-sync model). Builds on
 signature artifacts) and [ADR-4](adr-4-c2pa-embedding.md) (the PDF carries the
 C2PA provenance chain and the embedded machine-readable JSON-LD).
 
+**Superseded in part by [ADR-19](adr-19-federation-agreement-credential.md)
+(2026-07-22).** The third trust layer this ADR relied on — the static
+`trusted_peers` allowlist — is **withdrawn** and removed entirely, replaced
+by a self-signed agreement credential plus a local policy endpoint. The PDF
+(+ JAdES) exchange model described below, and the first two trust layers
+(eIDAS certificate chain, per-request challenge-response), are unchanged.
+
 ## Context
 
 The previous federation had the **origin** peer act as the single writer for a
