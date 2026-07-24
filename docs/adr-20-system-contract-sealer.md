@@ -28,16 +28,17 @@ and a live ORCE compliance probe,
 errors `'COMPLIANCE DEFECT - a System Contract Signer was allowed to sign'`
 if that ever stops being true).
 
-Separately, this session confirmed (tracing `backend/internal/.../apply.go`)
-that the *human* signing path already supports exactly the "download →
-sign externally with whatever tool → re-upload" model an eIDAS seal would
-need: `PrepareSignature` returns a real, complete PDF (PoA already embedded,
-not a hash-to-be-signed), `SubmitSignature` accepts a whole finished
-PAdES-signed PDF back, and `assertSubmittedPayloadIsOurs` verifies the
-re-upload only *added* a signature rather than changing the document —
-DCS is, by design, ignorant of how the signature was produced. Nothing about
-that machinery requires a human or a wallet; it requires the resubmitted PDF
-to still say what DCS thinks it says.
+Separately, the *human* signing path
+(`backend/internal/signingmanagement/command/apply.go`) already supports
+exactly the "download → sign externally with whatever tool → re-upload"
+model an eIDAS seal would need: `PrepareSignature` returns a real, complete
+PDF (PoA already embedded, not a hash-to-be-signed), `SubmitSignature`
+accepts a whole finished PAdES-signed PDF back, and
+`assertSubmittedPayloadIsOurs` verifies the re-upload only *added* a
+signature rather than changing the document — DCS is, by design, ignorant
+of how the signature was produced. Nothing about that machinery requires a
+human or a wallet; it requires the resubmitted PDF to still say what DCS
+thinks it says.
 
 That's the seal ADR-17 deferred: reuse the same generic verify-on-reupload
 path, without a PoA (a machine sealing for itself, not a person acting under
@@ -59,9 +60,10 @@ correctly-scoped role instead of AES's/QES's natural-person requirement.
   re-upload is cryptographically valid (DSS AdES/PAdES validation) and
   content-faithful (`assertSubmittedPayloadIsOurs`), and *labels it correctly*
   in its own records (a new `instrument: seal` discriminator on the signature
-  record / audit trail / provenance credential — today's schema has no such
-  field and would otherwise silently record this as an AES/QES signature,
-  which is exactly the misrepresentation ADR-17 exists to prevent).
+  record / audit trail / provenance credential — the signature record
+  schema carries no such field and would otherwise silently record this as
+  an AES/QES signature, which is exactly the misrepresentation ADR-17
+  exists to prevent).
 - **DCS explicitly does NOT police the certificate profile** (that the key
   used is genuinely an Annex III seal certificate rather than an Annex I
   signature certificate misused as one). That determination — using the
