@@ -16,7 +16,7 @@ import (
 const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubject"
 
 var (
-	dcsTemplateUuidIRI       = fcasset.DCSContextURL + "templateUuid"
+	dcsTemplateUUIDIRI       = fcasset.DCSContextURL + "templateUuid"
 	dcsStateIRI              = fcasset.DCSContextURL + "state"
 	dcsTemplateTypeIRI       = fcasset.DCSContextURL + "templateType"
 	dcsTemplateDataStringIRI = fcasset.DCSContextURL + "templateDataString"
@@ -39,7 +39,7 @@ func fieldTriple(predicateIRI, varName string) string {
 // searchable/listable fields, joined on the one subject variable ?s (== DID).
 func coreFieldTriples() string {
 	var b strings.Builder
-	b.WriteString(fieldTriple(dcsTemplateUuidIRI, "template_uuid"))
+	b.WriteString(fieldTriple(dcsTemplateUUIDIRI, "template_uuid"))
 	b.WriteString(fieldTriple(schemaNameIRI, "name"))
 	b.WriteString(fieldTriple(schemaDescriptionIRI, "description"))
 	b.WriteString(fieldTriple(schemaVersionIRI, "version"))
