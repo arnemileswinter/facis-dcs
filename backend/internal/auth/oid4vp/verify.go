@@ -88,11 +88,12 @@ func (v verifier) VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedP
 		return nil, err
 	}
 
-	// TEMP: EUDI playground PIDs currently omit status; re-enable when they ship a status claim again
-	// err = checkStatusList(verified.RawClaims)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	// Self-issued dev PIDs carry a real status claim (ensure_statuslist_for_dev.py,
+	// mirroring the PoA credential's status wiring), so this now runs for real
+	// instead of vacuously (ADR-20 — EUDIPLO, which omitted status, is removed).
+	if err := checkStatusList(verified.RawClaims); err != nil {
+		return nil, err
+	}
 
 	return verified, nil
 }

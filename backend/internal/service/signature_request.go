@@ -178,11 +178,29 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 }
 
 // buildDocumentRetrievalJAR builds the published-ceremony JAR that asks the
-// wallet to fetch and sign the prepared PDF (ADR-12).
+// wallet to fetch and sign the prepared PDF AND the canonical JSON-LD payload
+// (ADR-12: "document_digests is an array: the PDF and the JSON-LD are offered
+// together, so one ceremony yields both a PAdES and a JAdES over the same
+// content hash"). The payload's digest doubles as the nonce-binding and
+// byte-pin anchor the callback checks the returned JAdES against (ADR-20).
 func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony) (io.ReadCloser, error) {
-	digestBytes, decErr := hex.DecodeString(*ceremony.PreparedPDFSHA256)
+	pdfDigestBytes, decErr := hex.DecodeString(*ceremony.PreparedPDFSHA256)
 	if decErr != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("decode prepared document digest: %w", decErr))
+	}
+	digests := []oid4vprequest.DocumentDigest{
+		{Label: ceremony.FieldName, Hash: base64.StdEncoding.EncodeToString(pdfDigestBytes)},
+	}
+	locations := []oid4vprequest.DocumentLocation{
+		{URI: s.signatureRequestURL(ceremony.ID, "document"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}},
+	}
+	if ceremony.PinnedPayloadSHA256 != nil && *ceremony.PinnedPayloadSHA256 != "" {
+		payloadDigestBytes, decErr := hex.DecodeString(*ceremony.PinnedPayloadSHA256)
+		if decErr != nil {
+			return nil, signaturemanagement.MakeInternalError(fmt.Errorf("decode prepared payload digest: %w", decErr))
+		}
+		digests = append(digests, oid4vprequest.DocumentDigest{Label: ceremony.FieldName + "-payload", Hash: base64.StdEncoding.EncodeToString(payloadDigestBytes)})
+		locations = append(locations, oid4vprequest.DocumentLocation{URI: s.signatureRequestURL(ceremony.ID, "payload"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}})
 	}
 
 	credentialType := "AES"
@@ -196,12 +214,8 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 		Nonce:              *ceremony.RequestNonce,
 		ExpiresAt:          *ceremony.RequestExpiresAt,
 		SignatureQualifier: signatureQualifierFor(credentialType),
-		DocumentDigests: []oid4vprequest.DocumentDigest{
-			{Label: ceremony.FieldName, Hash: base64.StdEncoding.EncodeToString(digestBytes)},
-		},
-		DocumentLocations: []oid4vprequest.DocumentLocation{
-			{URI: s.signatureRequestURL(ceremony.ID, "document"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}},
-		},
+		DocumentDigests:    digests,
+		DocumentLocations:  locations,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("build signing request object: %w", err))
@@ -249,6 +263,23 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s has no prepared document", p.CeremonyID))
 	}
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
+}
+
+// SignatureRequestPayload serves the pinned canonical JSON-LD contract payload
+// the wallet fetches from the request object's SECOND document_locations
+// entry, to produce the JAdES twin of the PAdES over the same content hash
+// (ADR-12 SM-02/-11) — and, since it is served byte-for-byte identical to what
+// was pinned at prepare, the same bytes the DCS's byte-pin check (ADR-20)
+// compares the returned JAdES payload against.
+func (s *signatureManagementsrvc) SignatureRequestPayload(ctx context.Context, p *signaturemanagement.SignatureRequestPayloadPayload) (io.ReadCloser, error) {
+	ceremony, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ceremony.PinnedPayload) == 0 {
+		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s has no pinned payload", p.CeremonyID))
+	}
+	return io.NopCloser(bytes.NewReader(ceremony.PinnedPayload)), nil
 }
 
 // SignatureRequestCallback is the OpenID4VP response_uri for a ceremony. While

@@ -716,6 +716,33 @@ var _ = Service("SignatureManagement", func() {
 		})
 	})
 
+	Method("signatureRequestPayload", func() {
+		Description("serve the canonical machine-readable JSON-LD contract payload the wallet fetches from the request object's second document_locations entry, to produce the JAdES twin of the PAdES over the same content hash (ADR-12 SM-02/-11, ADR-20 nonce binding).")
+		Meta("dcs:requirements", "DCS-FR-SM-02", "DCS-FR-SM-11", "DCS-IR-SI-04")
+
+		NoSecurity()
+
+		Payload(func() {
+			Attribute("ceremony_id", String, "Identifier of the ceremony whose to-be-signed payload is served")
+			Required("ceremony_id")
+		})
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "Ceremony not found, not published, or has no pinned payload")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/signature/request/{ceremony_id}/payload")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK, func() {
+				ContentType("application/json")
+			})
+			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("signatureRequestCallback", func() {
 		Description("accept the wallet's direct_post of the signed document at the request object's response_uri (ADR-12): validate it identifies the signatory (sole control) and finalize the contract, reusing the /signature/submit validate+finalize path. The wallet posts the EUDI walletdriven-signer form-urlencoded body (documentWithSignature[]/signatureObject[]/state/error), which the service parses off the raw request. Authenticated by the unguessable ceremony id, not a JWT (the caller is the signatory's wallet).")
 		Meta("dcs:requirements", "DCS-FR-SM-16", "DCS-FR-SM-18", "DCS-IR-SI-04")

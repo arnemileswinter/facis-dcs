@@ -17,8 +17,9 @@ const (
 )
 
 // SignatureCeremony is a signing ceremony: a request for the signer's wallet to
-// present a PID (via EUDIPLO/OID4VP) that must complete before a PAdES
-// signature can be applied (FR-SM-14, UC-04-02).
+// present a PID over OID4VP directly (ADR-20; EUDIPLO is not a dependency)
+// that must complete before a PAdES signature can be applied (FR-SM-14,
+// UC-04-02).
 type SignatureCeremony struct {
 	ID          string  `db:"id"`
 	ContractDID string  `db:"contract_did"`
