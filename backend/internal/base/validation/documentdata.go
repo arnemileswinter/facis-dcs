@@ -281,7 +281,19 @@ func addDocumentIdentity(raw *datatype.JSON, did string, aliases ...string) (*da
 	}
 	if strings.TrimSpace(did) != "" {
 		previousID, _ := data["@id"].(string)
+		// derivedFromTemplate is a cross-document provenance reference, not
+		// an identifier owned by the document being anchored. A freshly
+		// converted contract still carries the template as its temporary
+		// document @id, so the generic rebase would otherwise rewrite this
+		// reference to the new contract DID as collateral damage.
+		derivedFromTemplateID := ""
+		if provenance, ok := data["derivedFromTemplate"].(map[string]any); ok {
+			derivedFromTemplateID, _ = provenance["@id"].(string)
+		}
 		rebaseDocumentIDs(map[string]any(data), previousID, did, aliases)
+		if derivedFromTemplateID != "" {
+			data["derivedFromTemplate"].(map[string]any)["@id"] = derivedFromTemplateID
+		}
 		data["@id"] = did
 		if metadata, ok := topLevelValue(data, "metadata").(map[string]any); ok {
 			metadata["@id"] = did + "#metadata"

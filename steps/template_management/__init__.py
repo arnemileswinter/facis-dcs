@@ -17,3 +17,4 @@ from . import contract_format_review_extra_steps  # noqa: F401
 from . import template_notification_steps  # noqa: F401
 from . import template_provenance_steps  # noqa: F401
 from . import document_number_removal_steps  # noqa: F401
+from . import realistic_contract_field_artifact_flow_steps  # noqa: F401
