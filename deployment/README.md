@@ -15,9 +15,8 @@ Key components:
 - **Multi-Contract Signing** — multi-party contract execution within a single workflow
 - **Automated Workflows** — contract generation, execution, and deployment
 - **Lifecycle Management** — contract monitoring with renewal/expiration alerts
-- **Signature Management** — signatures linked to verifiable digital identities
+- **Signature Management** — signatures linked to verifiable digital identities, produced by the signatory's own wallet, never a DCS-held key (see "Contract signing" below)
 - **Secure Archiving** — tamper-evident archive compliant with retention policies
-- **Machine Signing** — automated signing for high-volume transactions
 
 ---
 
@@ -249,6 +248,40 @@ pkcs11:
   provisioning:
     enabled: false
 ```
+
+### Contract signing: PID trust anchors and QES trusted-list
+
+The DCS holds no contract-signing key (ADR-12/ADR-20): a signature is produced
+by the signatory's own wallet, and the DCS's job is to verify what comes back.
+Two trust configurations follow from that:
+
+- **PID issuer trust anchors** (`OID4VP_TRUST_DATA_PATH`, a JSON file shaped
+  like `backend/config/oid4vp/trust.dev.json`): the DID/URL-keyed issuer
+  public keys the backend accepts a PID (and Power of Attorney) credential
+  from. **Dev/CI only** ships a self-issuance dev issuer key
+  (`did:web:dev.example:issuer:poa`, matching the key `testWallet/scripts/
+  issue_pid_credentials.py` self-signs with) — self-issued PIDs are a
+  dev-edge substitution for the broken remote EUDIPLO PID service and must
+  **never** appear in a production trust store. A production deployment
+  points this file at the real PID issuer registry's public keys instead —
+  swapping the file is the entire change; the verification code
+  (`oid4vp.Verifier.VerifyPID`) is identical either way.
+- **QES trusted list**: a contract that requires QES for a signature field
+  (`dcs:requiredCredentialType: "QES"` on its `dcs:SignatureField`, ADR-20) is
+  only accepted when DSS's validation reports a `QESIG` qualification — a
+  qualified certificate chaining to an EU trusted-list (LOTL/TL) CA. The DSS
+  instance (`deployment/helm/charts/dss`) validates against whatever trusted
+  list it is configured with; a production deployment points it at the real
+  EU LOTL. **This chart does not yet provision a mock/custom trusted list for
+  CI/dev QES testing** — that is tracked in ADR-20 §5 as a remaining
+  CI-provisioning item, not a gap in the acceptance gate itself (the gate
+  rejects a non-qualified signature regardless of what trusted list DSS runs
+  against).
+- **Per-contract signature-level requirement**: set on the contract's
+  `dcs:SignatureField` node at authoring time (`dcs:requiredCredentialType`,
+  `AES` or `QES`, default `AES` when absent) — no deployment-level
+  configuration; it's contract content, enforced per field at prepare and
+  submit.
 
 ### Hydra
 - Enable `hydra.enabled` and set `hydra.config.selfIssuerURL` to the public issuer URL
