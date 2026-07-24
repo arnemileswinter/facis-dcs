@@ -8,23 +8,23 @@ import (
 )
 
 // ErrContractNotClosed is a client-input error (map to 4xx): a contract still
-// carries unresolved placeholders and so is not yet a contract. Templates
+// carries unresolved contractFields and so is not yet a contract. Templates
 // (odrl:Offer) may stay open; a contract must be closed before it leaves draft
 // and is signed.
 var ErrContractNotClosed = errors.New("contract is not closed")
 
 // ValidateContractClosed enforces the SRS contract-completeness invariant. A
 // template's ODRL is open — parties, negotiated boundaries and values are
-// placeholders resolved during generation and negotiation. A contract must be
+// contractFields resolved during generation and negotiation. A contract must be
 // closed: the SRS requires Contract Generation to "fill in the necessary
-// placeholders" so the "filled-out contract MUST be ready to be sent to the
+// contractFields" so the "filled-out contract MUST be ready to be sent to the
 // Responder", and Contract Approval to verify "schema completeness". This gate
 // runs at approval and again at the signing seal.
 //
-// A contract is closed when every placeholder the policy relies on is
+// A contract is closed when every field the policy relies on is
 // materialized: each negotiated-boundary right operand references a filled
 // field, each required data field a policy enforces carries a value, and each
-// prose placeholder binds to a filled field.
+// prose field binds to a filled field.
 func ValidateContractClosed(contractDocument any) error {
 	data, err := normalizeObject(contractDocument)
 	if err != nil {
@@ -65,7 +65,7 @@ func ValidateContractClosed(contractDocument any) error {
 		}
 	}
 
-	for _, message := range unresolvedProsePlaceholders(data, fields) {
+	for _, message := range unresolvedProseFieldReferences(data, fields) {
 		add(message)
 	}
 
@@ -81,30 +81,30 @@ type contractFieldInfo struct {
 	hasValue bool
 }
 
-// contractFieldValues indexes the document's top-level placeholder nodes by
+// contractFieldValues indexes the document's top-level ContractField nodes by
 // @id, noting whether each is required and carries an inline value (dcs:value).
 func contractFieldValues(data documentData) map[string]contractFieldInfo {
 	out := map[string]contractFieldInfo{}
-	placeholders, _ := topLevelValue(data, "contractData").([]any)
-	for _, rawPlaceholder := range placeholders {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	fields, _ := topLevelValue(data, "contractFields").([]any)
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]any)
 		if !ok {
 			continue
 		}
-		id, _ := placeholder["@id"].(string)
+		id, _ := field["@id"].(string)
 		if id == "" {
 			continue
 		}
-		required, _ := placeholder["dcs:required"].(bool)
-		out[id] = contractFieldInfo{required: required, hasValue: hasInlineValue(placeholder)}
+		required, _ := field["dcs:required"].(bool)
+		out[id] = contractFieldInfo{required: required, hasValue: hasInlineValue(field)}
 	}
 	return out
 }
 
-// hasInlineValue reports whether a placeholder carries a non-empty filled value
+// hasInlineValue reports whether a field carries a non-empty filled value
 // (dcs:value); an absent key or empty string is unset.
-func hasInlineValue(placeholder map[string]any) bool {
-	value, present := placeholder["dcs:value"]
+func hasInlineValue(field map[string]any) bool {
+	value, present := field["dcs:value"]
 	if !present || value == nil {
 		return false
 	}
@@ -125,10 +125,10 @@ func nodeReferenceID(value any) string {
 	return id
 }
 
-// unresolvedProsePlaceholders reports clause placeholder references (bare
-// {"@id"} nodes) whose top-level placeholder carries no value — a placeholder
+// unresolvedProseFieldReferences reports clause field references (bare
+// {"@id"} nodes) whose top-level field carries no value — a field
 // that never got materialized.
-func unresolvedProsePlaceholders(data documentData, fields map[string]contractFieldInfo) []string {
+func unresolvedProseFieldReferences(data documentData, fields map[string]contractFieldInfo) []string {
 	messages := []string{}
 	structure, ok := topLevelValue(data, "documentStructure").(map[string]any)
 	if !ok {
@@ -157,7 +157,7 @@ func unresolvedProsePlaceholders(data documentData, fields map[string]contractFi
 				continue
 			}
 			if info, ok := fields[fieldID]; !ok || !info.hasValue {
-				messages = append(messages, fmt.Sprintf("prose placeholder binds to unfilled field %q", fieldID))
+				messages = append(messages, fmt.Sprintf("prose field binds to unfilled field %q", fieldID))
 			}
 		}
 	}

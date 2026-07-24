@@ -92,6 +92,7 @@ function buildCurrentContractData(): ContractData | undefined {
     description: contract.value.description,
     blocks: dcsDraftStore.blocks,
     layout: dcsDraftStore.layout,
+    contractFields: dcsDraftStore.contractFields,
     contractData: dcsDraftStore.contractData,
     policies: dcsDraftStore.policies,
     semanticConditionValues: contractContentValuesStore.semanticConditionValues,

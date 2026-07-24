@@ -43,7 +43,7 @@ const userPayloadJSON = `{
     "@id": "did:web:localhost:template:fb#ds",
     "@type": "dcs:DocumentStructure",
     "dcs:blocks": {"@list": [
-      {"@id": "did:web:localhost:template:fb#c631", "@type": "dcs:Clause", "dcs:content": {"@list": ["Dispute Resolution Method: ", {"@type": "dcs:Placeholder"}]}, "dcs:title": "Legal Terms"},
+      {"@id": "did:web:localhost:template:fb#c631", "@type": "dcs:Clause", "dcs:content": {"@list": ["Dispute Resolution Method: ", "_____"]}, "dcs:title": "Legal Terms"},
       {"@id": "did:web:localhost:template:fb#0fe4", "@type": "dcs:Section", "dcs:title": "ABCDEFG"},
       {"@id": "did:web:localhost:template:fb#c006", "@type": "dcs:TextBlock", "dcs:text": "asdsadsaddasd"},
       {"@id": "did:web:localhost:template:fb#f969", "@type": "dcs:Section", "dcs:title": "dasdasdsa"},

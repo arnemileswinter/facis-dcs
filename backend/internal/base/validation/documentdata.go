@@ -381,6 +381,11 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 			setTopLevelValue(data, "dcs:contractData", []any{})
 		}
 	}
+	if _, ok := topLevelValue(data, "contractFields").([]any); !ok {
+		if _, exists := topLevelValueExists(data, "contractFields"); !exists {
+			setTopLevelValue(data, "dcs:contractFields", []any{})
+		}
+	}
 	if _, ok := topLevelValue(data, "policies").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "policies"); !exists {
 			setTopLevelValue(data, "dcs:policies", []any{})
@@ -484,6 +489,11 @@ func validateCanonicalEnvelope(data documentData, policyTypes []string) error {
 			return errors.New("contractData must be an array")
 		}
 	}
+	if contractFields, exists := topLevelValueExists(data, "contractFields"); exists {
+		if _, ok := contractFields.([]any); !ok {
+			return errors.New("contractFields must be an array")
+		}
+	}
 	if policies, exists := topLevelValueExists(data, "policies"); exists {
 		if err := validateODRLPoliciesShape(policies, policyTypes); err != nil {
 			return err
@@ -573,44 +583,57 @@ func validateCanonicalReferences(data documentData, documentStructure map[string
 	}
 	for _, rawBlock := range blocks {
 		block := rawBlock.(map[string]any)
-		if err := validateBlockPlaceholders(block, fieldIDs); err != nil {
+		if err := validateBlockFieldReferences(block, fieldIDs); err != nil {
 			return err
 		}
+	}
+	if err := validateContractDataFieldReferences(data, fieldIDs); err != nil {
+		return err
 	}
 	return validatePolicyOperands(data, fieldIDs)
 }
 
-// canonicalFieldIDs indexes the document's top-level dcs:Placeholder nodes by
-// @id. dcs:contractData is a flat, self-contained registry of typed placeholder
-// nodes; each carries its own dcs:datatype (resolved from its SHACL shape), so
-// render and pdf-core resolve a clause reference by @id with no field/shape
-// chasing. A placeholder with no datatype is rejected outright.
+// canonicalFieldIDs indexes the document's top-level dcs:ContractField
+// declarations. Contract data objects, clause content and ODRL operands refer
+// to these declarations by bare {"@id": ...} references.
 func canonicalFieldIDs(data documentData) (map[string]bool, error) {
-	contractData, _ := topLevelValue(data, "contractData").([]any)
+	contractFields, _ := topLevelValue(data, "contractFields").([]any)
 	fieldIDs := map[string]bool{}
-	for index, rawPlaceholder := range contractData {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	for index, rawField := range contractFields {
+		field, ok := rawField.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("contractData.%d must be a placeholder object", index)
+			return nil, fmt.Errorf("contractFields.%d must be a ContractField object", index)
 		}
-		id, _ := placeholder["@id"].(string)
+		id, _ := field["@id"].(string)
 		if strings.TrimSpace(id) == "" {
-			return nil, fmt.Errorf("contractData.%d.@id is required", index)
+			return nil, fmt.Errorf("contractFields.%d.@id is required", index)
 		}
 		if fieldIDs[id] {
-			return nil, fmt.Errorf("duplicate contract data placeholder @id %q", id)
+			return nil, fmt.Errorf("duplicate contract field @id %q", id)
 		}
-		if strings.TrimSpace(stringMapValue(placeholder, "dcs:datatype")) == "" {
-			return nil, fmt.Errorf("contract data placeholder %q has no dcs:datatype", id)
+		if compactTerm(fmt.Sprint(field["@type"])) != "ContractField" {
+			return nil, fmt.Errorf("contract field %q must have @type dcs:ContractField", id)
+		}
+		if strings.TrimSpace(stringMapValue(field, "dcs:label")) == "" {
+			return nil, fmt.Errorf("contract field %q has no dcs:label", id)
+		}
+		if strings.TrimSpace(stringMapValue(field, "dcs:datatype")) == "" {
+			return nil, fmt.Errorf("contract field %q has no dcs:datatype", id)
+		}
+		if _, exists := field["dcs:required"]; !exists {
+			return nil, fmt.Errorf("contract field %q has no dcs:required", id)
+		}
+		if _, ok := field["dcs:required"].(bool); !ok {
+			return nil, fmt.Errorf("contract field %q dcs:required must be boolean", id)
 		}
 		fieldIDs[id] = true
 	}
 	return fieldIDs, nil
 }
 
-// validateBlockPlaceholders checks that every placeholder a clause references
-// (a bare {"@id"} node in dcs:content) resolves to a top-level placeholder.
-func validateBlockPlaceholders(block map[string]any, fieldIDs map[string]bool) error {
+// validateBlockFieldReferences checks that every field reference in clause
+// content resolves to a top-level ContractField declaration.
+func validateBlockFieldReferences(block map[string]any, fieldIDs map[string]bool) error {
 	content, ok := jsonLDList(block["dcs:content"])
 	if !ok {
 		return nil
@@ -625,7 +648,43 @@ func validateBlockPlaceholders(block map[string]any, fieldIDs map[string]bool) e
 			continue
 		}
 		if !fieldIDs[id] {
-			return fmt.Errorf("placeholder references nonexistent contract data field %q", id)
+			return fmt.Errorf("clause content references nonexistent contract field %q", id)
+		}
+	}
+	return nil
+}
+
+// validateContractDataFieldReferences enforces the two-level model:
+// contractData contains typed domain objects; each of their business
+// properties is a bare reference to a declared ContractField.
+func validateContractDataFieldReferences(data documentData, fieldIDs map[string]bool) error {
+	contractData, _ := topLevelValue(data, "contractData").([]any)
+	for index, rawObject := range contractData {
+		object, ok := rawObject.(map[string]any)
+		if !ok {
+			return fmt.Errorf("contractData.%d must be a domain object", index)
+		}
+		if strings.TrimSpace(fmt.Sprint(object["@type"])) == "" {
+			return fmt.Errorf("contractData.%d.@type is required", index)
+		}
+		for property, rawValue := range object {
+			if strings.HasPrefix(property, "@") {
+				continue
+			}
+			values, _ := asArray(rawValue)
+			if values == nil {
+				values = []any{rawValue}
+			}
+			for _, value := range values {
+				ref, ok := value.(map[string]any)
+				if !ok || len(ref) != 1 {
+					return fmt.Errorf("contractData.%d.%s must reference a contract field by @id", index, property)
+				}
+				id, _ := ref["@id"].(string)
+				if !fieldIDs[id] {
+					return fmt.Errorf("contractData.%d.%s references nonexistent contract field %q", index, property, id)
+				}
+			}
 		}
 	}
 	return nil

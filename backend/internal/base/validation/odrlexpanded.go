@@ -176,23 +176,23 @@ func expandedODRLPolicyRules(root map[string]any) []map[string]any {
 	return rules
 }
 
-// expandedODRLFieldIndex maps placeholder @ids to their label and the value
-// carried inline on the placeholder node (dcs:value) — the same IRI the ODRL
+// expandedODRLFieldIndex maps ContractField @ids to their label and inline
+// dcs:value — the same IRI the ODRL
 // constraint names as its odrl:leftOperand.
 func expandedODRLFieldIndex(root map[string]any) map[string]odrlFieldInfo {
 	index := map[string]odrlFieldInfo{}
-	for _, rawPlaceholder := range expandedValues(root, dcsNamespace()+"contractData") {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	for _, rawField := range expandedValues(root, dcsNamespace()+"contractFields") {
+		field, ok := rawField.(map[string]any)
 		if !ok {
 			continue
 		}
-		fieldID, _ := placeholder["@id"].(string)
+		fieldID, _ := field["@id"].(string)
 		if fieldID == "" {
 			continue
 		}
-		value, hasValue := expandedInlineFieldValue(placeholder)
+		value, hasValue := expandedInlineFieldValue(field)
 		index[fieldID] = odrlFieldInfo{
-			label:    expandedFirstLiteralString(placeholder, dcsNamespace()+"label"),
+			label:    expandedFirstLiteralString(field, dcsNamespace()+"label"),
 			value:    value,
 			hasValue: hasValue,
 		}
@@ -200,8 +200,7 @@ func expandedODRLFieldIndex(root map[string]any) map[string]odrlFieldInfo {
 	return index
 }
 
-// expandedInlineFieldValue reads the value a placeholder carries inline
-// (dcs:value).
+// expandedInlineFieldValue reads a ContractField's inline dcs:value.
 func expandedInlineFieldValue(field map[string]any) (any, bool) {
 	values := expandedValues(field, dcsNamespace()+"value")
 	if len(values) == 0 {
@@ -326,7 +325,7 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 
 		fieldInfo, ok := fieldIndex[operandID]
 		if !ok {
-			finding := contractFinding(ruleID, ruleID, "error", fmt.Sprintf("ODRL policy %q references nonexistent contract data field %q", ruleID, operandID), operandID, "dcs:Placeholder")
+			finding := contractFinding(ruleID, ruleID, "error", fmt.Sprintf("ODRL policy %q references nonexistent contract field %q", ruleID, operandID), operandID, "dcs:ContractField")
 			applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)
 			findings = append(findings, finding)
 			continue

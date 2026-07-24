@@ -12,8 +12,8 @@ real UI). Federation follows the prefer-inbound rule — the peer's PDF is autho
 stored verbatim because it carries provenance we cannot reproduce, regeneration is
 verify-only — and inbound counter-offers are authorised by counterparty rather than by local
 RBAC. The audit trail's global tamper evidence moved from a per-event chain to Merkle
-checkpoints (ADR-16), the contract format collapsed onto one typed `dcs:Placeholder` node
-(ADR-15) in expanded JSON-LD (ADR-14), and machine callers became SRS System Users with one
+checkpoints (ADR-16), the contract format separates typed `dcs:ContractField` declarations
+(ContractField model) in expanded JSON-LD (ADR-14), and machine callers became SRS System Users with one
 OAuth2 client per class. Two dispositions in this wave are refusals rather than features:
 `Sys. Contract Signer` holds no signing scope (ADR-17, eIDAS Art. 3(9)/26 — a signatory is a
 natural person under sole control, and a legal person's instrument is a seal we do not
@@ -44,7 +44,7 @@ non-cache column changes (migration 20260717, caught by the C2PA chain scenario)
 (frontend/ClientApp/e2e, run in CI after behave against the same kind stack): real OID4VP
 sessions per test, API-seeded fixtures, 9/9 specs green. It surfaced and fixed four real UI
 defects (Pinia boot-order crash; the odrl:Set-era isOdrlSet predicate that blocked rendering
-of every canonical contract; a crash on domainField-less RequirementFields; shacl-form's
+of every canonical contract; a crash on domainField-less ContractFields; shacl-form's
 rdf:type-vs-@type serialization that kept ODRL typed clauses from ever becoming rules through
 the browser). Rows below marked "e2e/" cite that suite. Same wave: contracts/templates carry
 dereferenceable resource IRIs (@id = {DCS_PUBLIC_URL}/contract/{key}, resolve routes added),
@@ -450,7 +450,7 @@ declared ODRL profile.
 |---|---|
 | Documents are valid JSON-LD 1.1; every term resolves | `@context` is the Semantic Hub's versioned, dereferenceable URL (23/semantic_hub resolve scenarios); json-gold expansion round-trips in every audit (`expandForAudit`, backend/internal/base/validation/odrlexpanded.go); external contexts resolve or normalization fails (`validateExternalContextsResolvable`). |
 | Policy sets are conformant ODRL 2.2 | One enclosing `odrl:Offer` (unsigned) / `odrl:Agreement` (sealed at first signature — 18 "first signature seals" scenario); rules under permission/prohibition/obligation only (odrl:duty bucket rejected); policy identity is `@id` (separate `uid` rejected); exactly one action + assigner/assignee/target per rule (18 structure scenarios; `validateODRLPolicySet`). |
-| Custom semantics are declared, not implied | The DCS ODRL profile is a served document (`/semantic/ontology/dcs-odrl-profile`; docs/semantic-ontology/odrl/dcs-odrl-profile.ttl) declaring `dcs:provideCompliantValue odrl:includedIn odrl:use` and `dcs:RequirementField ⊑ odrl:LeftOperand`; every policy set declares `odrl:profile`. |
+| Custom semantics are declared, not implied | The DCS ODRL profile is a served document (`/semantic/ontology/dcs-odrl-profile`; docs/semantic-ontology/odrl/dcs-odrl-profile.ttl) declaring `dcs:provideCompliantValue odrl:includedIn odrl:use` and `dcs:ContractField ⊑ odrl:LeftOperand`; every policy set declares `odrl:profile`. |
 | Constraint↔value binding is plain graph traversal | A submitted value references its field by IRI (`dcs:forField` = the constraint's `odrl:leftOperand`); enforced by SHACL (`dcs:SemanticConditionValueShape`) and exercised by every 18/05 enforcement scenario plus the Playwright fill spec (e2e/contract-fill.spec.ts). |
 | Machine rules are prose-backed | `dcs:prose` required on every rule (Go gate + `Odrl*ProseShape` SHACL shapes); the Playwright builder spec asserts the emitted rule's prose dereferences to a document block. |
 | SHACL validation is real SHACL | goRDFlib engine (ADR-9) against hub-served shapes pinned by `sh:shapesGraph` (ADR-8); version-pinning proven by 23 "stricter shapes version" scenario; shacl-form renders forms from the same raw Turtle (Gaia-X shapes render unmodified). |

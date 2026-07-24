@@ -12,7 +12,7 @@ import (
 func contractWithBoundary(value string) map[string]any {
 	field := map[string]any{
 		"@id":          "urn:dcs:field:region",
-		"@type":        "dcs:Placeholder",
+		"@type":        "dcs:ContractField",
 		"dcs:label":    "region",
 		"dcs:datatype": "xsd:string",
 		"dcs:required": true,
@@ -21,8 +21,8 @@ func contractWithBoundary(value string) map[string]any {
 		field["dcs:value"] = value
 	}
 	return map[string]any{
-		"@type":            "dcs:Contract",
-		"dcs:contractData": []any{field},
+		"@type":              "dcs:Contract",
+		"dcs:contractFields": []any{field},
 		"dcs:policies": map[string]any{
 			"@type": "odrl:Agreement",
 			"odrl:permission": []any{
@@ -59,9 +59,9 @@ func TestValidateContractClosedFlagsUnfilledRequiredField(t *testing.T) {
 	// required field a policy enforces must carry a value.
 	doc := map[string]any{
 		"@type": "dcs:Contract",
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
-				"@id": "urn:dcs:field:amount", "@type": "dcs:Placeholder",
+				"@id": "urn:dcs:field:amount", "@type": "dcs:ContractField",
 				"dcs:label": "amount", "dcs:datatype": "xsd:decimal", "dcs:required": true,
 			},
 		},
@@ -88,8 +88,8 @@ func TestValidateContractClosedFlagsUnfilledRequiredField(t *testing.T) {
 	require.ErrorContains(t, err, "required data field")
 }
 
-func TestValidateContractClosedFlagsUnfilledProsePlaceholder(t *testing.T) {
-	doc := contractWithBoundary("DE") // boundary filled, but a prose placeholder is not
+func TestValidateContractClosedFlagsUnfilledProseContractField(t *testing.T) {
+	doc := contractWithBoundary("DE") // boundary filled, but a prose field is not
 	doc["dcs:documentStructure"] = map[string]any{
 		"@type": "dcs:DocumentStructure",
 		"dcs:blocks": map[string]any{"@list": []any{
@@ -104,5 +104,5 @@ func TestValidateContractClosedFlagsUnfilledProsePlaceholder(t *testing.T) {
 	}
 	err := ValidateContractClosed(doc)
 	require.ErrorIs(t, err, ErrContractNotClosed)
-	require.ErrorContains(t, err, "prose placeholder")
+	require.ErrorContains(t, err, "prose field")
 }

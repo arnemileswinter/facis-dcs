@@ -5,7 +5,8 @@
     "https://dcs.example.org/api/semantic/context/facis-dcs?version=1",
     {
       "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
-      "odrl": "http://www.w3.org/ns/odrl/2/"
+      "odrl": "http://www.w3.org/ns/odrl/2/",
+      "xsd": "http://www.w3.org/2001/XMLSchema#"
     }
   ],
   "dcs:metadata": {
@@ -54,24 +55,23 @@
   "sh:shapesGraph": {
     "@id": "https://dcs.example.org/api/semantic/shapes/facis-dcs?version=1"
   },
+  "dcs:contractFields": [
+    {
+      "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage",
+      "@type": "dcs:ContractField",
+      "dcs:label": "Provider coverage",
+      "dcs:datatype": "xsd:decimal",
+      "dcs:required": true,
+      "dcs:value": 99
+    }
+  ],
   "dcs:contractData": [
     {
-      "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#requirement-provider",
-      "@type": "dcs:DataRequirement",
-      "dcs:name": "Provider",
-      "dcs:fields": [
-        {
-          "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage",
-          "@type": "dcs:RequirementField",
-          "dcs:required": true,
-          "dcs:valueType": "number",
-          "dcs:parameterName": "coverage"
-        }
-      ],
-      "dcs:entityRole": "provider",
-      "dcs:entityType": "CompanyParty",
-      "dcs:conditionId": "provider",
-      "dcs:schemaVersion": "v1"
+      "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#provider-service-level",
+      "@type": "dcs:ServiceLevelClause",
+      "dcs:coverage": {
+        "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
+      }
     }
   ],
   "dcterms:conformsTo": {
@@ -89,11 +89,7 @@
             "@list": [
               "Provider coverage: ",
               {
-                "@type": "dcs:Placeholder",
-                "dcs:token": "{{provider.coverage}}",
-                "dcs:bindsTo": {
-                  "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
-                }
+                "@id": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage"
               }
             ]
           }
@@ -114,12 +110,5 @@
         }
       }
     ]
-  },
-  "semanticConditionValues": [
-    {
-      "blockId": "block-clause-1",
-      "forField": "https://dcs.example.org/api/contract/a04ad7b3-019c-4bb7-90e8-98247834d9a6#field-provider-coverage",
-      "parameterValue": 99
-    }
-  ]
+  }
 }

@@ -88,10 +88,10 @@ func canonicalTemplateData(t *testing.T) *datatype.JSON {
 				},
 			},
 		},
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
 				"@id":                 "urn:uuid:field-provider-country",
-				"@type":               "dcs:Placeholder",
+				"@type":               "dcs:ContractField",
 				"dcs:label":           "Provider country",
 				"dcs:datatype":        "xsd:string",
 				"dcs:shape":           map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"},
@@ -173,8 +173,8 @@ func TestNormalizeTemplateDataForPersistenceAddsDocumentIdentity(t *testing.T) {
 	structure := data["dcs:documentStructure"].(map[string]any)
 	block := structure["dcs:blocks"].(map[string]any)["@list"].([]any)[0].(map[string]any)
 	require.Equal(t, "did:web:facis.example:template:1#block-clause-1", block["@id"])
-	placeholder := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
-	require.Equal(t, "did:web:facis.example:template:1#field-provider-country", placeholder["@id"])
+	field := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
+	require.Equal(t, "did:web:facis.example:template:1#field-provider-country", field["@id"])
 	policy := firstPolicyDuty(data)
 	constraint := policy["odrl:constraint"].(map[string]any)
 	require.Equal(t, "did:web:facis.example:template:1#field-provider-country", constraint["odrl:leftOperand"].(map[string]any)["@id"])
@@ -196,19 +196,19 @@ func TestNormalizeTemplateDataForPersistenceRebasesCopiedTemplateIDs(t *testing.
 	require.Equal(t, "did:web:facis.example:template:copy#field-provider-country", constraint["odrl:leftOperand"].(map[string]any)["@id"])
 }
 
-func TestNormalizeTemplateDataRejectsMissingPlaceholderField(t *testing.T) {
+func TestNormalizeTemplateDataRejectsMissingContractField(t *testing.T) {
 	raw := canonicalTemplateData(t)
 	var data map[string]any
 	require.NoError(t, json.Unmarshal(*raw, &data))
 	structure := data["dcs:documentStructure"].(map[string]any)
 	block := structure["dcs:blocks"].(map[string]any)["@list"].([]any)[0].(map[string]any)
-	placeholder := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
-	placeholder["@id"] = "urn:uuid:field-missing"
+	field := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
+	field["@id"] = "urn:uuid:field-missing"
 	invalid, err := datatype.NewJSON(data)
 	require.NoError(t, err)
 
 	_, err = NormalizeTemplateData(&invalid)
-	require.ErrorContains(t, err, "placeholder references nonexistent contract data field")
+	require.ErrorContains(t, err, "clause content references nonexistent contract field")
 }
 
 func TestNormalizeTemplateDataRejectsMissingPolicyField(t *testing.T) {
