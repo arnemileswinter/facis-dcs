@@ -52,9 +52,10 @@ hydra:
 
 # PKCS#11: production points at a REAL, pre-provisioned HSM — no
 # in-cluster SoftHSM2 token, no provisioning job. The HSM's module path,
-# token label, and key labels (dcs-c2pa, dcs-contract-pades, dcs-did, etc. —
-# see backend/internal/base/hsm) must already exist on the HSM before this
-# release is installed; this chart does not create HSM keys in production.
+# token label, and key labels (dcs-c2pa, dcs-did, dcs-vc, dcs-oid4vp-jar —
+# see backend/internal/base/hsm; no contract-signing key, the DCS holds none)
+# must already exist on the HSM before this release is installed; this chart
+# does not create HSM keys in production.
 pkcs11:
   modulePath: ""   # e.g. /usr/lib/pkcs11/real-hsm.so, mounted via an extra volume
   tokenLabel: ""
