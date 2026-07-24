@@ -94,7 +94,6 @@ var SMContractSignatureEnvelope = Type("SMContractSignatureEnvelope", func() {
 var SMContractRetrieveByIDResponse = Type("SMContractRetrieveByIDResponse", func() {
 	Attribute("contract", SMContractItem, "The contract")
 	Attribute("signature_envelope", SMContractSignatureEnvelope, "The latest signature envelope; absent for an APPROVED-unsigned contract that has no signature yet")
-	Attribute("key_version", Int, "HSM key version that produced the latest signature (DCS-OR-C2PA-007)")
 
 	Required("contract")
 })
@@ -374,28 +373,6 @@ var SMSignatureRequestStatusResponse = Type("SMSignatureRequestStatusResponse", 
 	Required("ceremony_id", "status")
 })
 
-var SMSignatureWebhookRequest = Type("SMSignatureWebhookRequest", func() {
-	Description("EUDIPLO OID4VP webhook: a completed PID presentation for a ceremony (NFR-SEC-18, FR-SM-14)")
-
-	Attribute("webhook_secret", String, "Shared secret authenticating the webhook caller")
-	Attribute("ceremony_id", String, "Identifier of the ceremony the presentation completes")
-	Attribute("vp_token", String, "The SD-JWT VC + KB-JWT compact PID presentation")
-	Attribute("pid_claims", Any, "The disclosed PID claims (sub, given_name, family_name)")
-	Attribute("poa_organization", String, "Organization from the Power of Attorney credential presented at signing (UC-14, FR-SM-03): the party the signatory is authorized to act for")
-	Attribute("poa_roles", Any, "Roles from the Power of Attorney credential presented at signing")
-
-	Required("ceremony_id", "vp_token")
-})
-
-var SMSignatureWebhookResponse = Type("SMSignatureWebhookResponse", func() {
-	Description("Result of accepting a EUDIPLO webhook presentation")
-
-	Attribute("ceremony_id", String, "Identifier of the ceremony")
-	Attribute("status", String, "Ceremony lifecycle status after processing the presentation")
-
-	Required("ceremony_id", "status")
-})
-
 var SMSignatureRequestPublishRequest = Type("SMSignatureRequestPublishRequest", func() {
 	Description("Publish the OID4VP Document-Retrieval signing request for a verified ceremony (ADR-12): prepare the to-be-signed document and emit the signed request object as a QR/deep link.")
 
@@ -584,7 +561,12 @@ var _ = Service("SignatureManagement", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
-		Error("signature_invalid", ErrorResult, "The submitted signature is not valid or does not identify the signatory")
+		Error("signature_invalid", ErrorResult, "The submitted signature is not cryptographically valid")
+		Error("document_mismatch", ErrorResult, "The submitted document's initial revision does not byte-match the document prepared for signing (ADR-20 TBS byte pinning)")
+		Error("nonce_mismatch", ErrorResult, "The submitted signature is not bound to the ceremony's request nonce (ADR-20 nonce binding)")
+		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
+		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
+		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -593,6 +575,11 @@ var _ = Service("SignatureManagement", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
 			Response("signature_invalid", StatusUnprocessableEntity)
+			Response("document_mismatch", StatusUnprocessableEntity)
+			Response("nonce_mismatch", StatusUnprocessableEntity)
+			Response("level_below_required", StatusUnprocessableEntity)
+			Response("cert_pid_mismatch", StatusUnprocessableEntity)
+			Response("jades_invalid", StatusUnprocessableEntity)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -641,31 +628,6 @@ var _ = Service("SignatureManagement", func() {
 			GET("/signature/request/{ceremony_id}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
-			Response("not_found", StatusNotFound)
-			Response("internal_error", StatusInternalServerError)
-		})
-	})
-
-	Method("ceremonyWebhook", func() {
-		Description("accept a EUDIPLO OID4VP webhook carrying a completed PID presentation for a ceremony; authenticated by a shared-secret header, not a JWT (NFR-SEC-18, FR-SM-14).")
-		Meta("dcs:requirements", "DCS-FR-SM-16")
-
-		NoSecurity()
-
-		Payload(SMSignatureWebhookRequest)
-		Result(SMSignatureWebhookResponse)
-
-		Error("bad_request", ErrorResult, "Bad request")
-		Error("unauthorized", ErrorResult, "Missing or incorrect webhook shared secret")
-		Error("not_found", ErrorResult, "Ceremony not found")
-		Error("internal_error", ErrorResult, "Internal server error")
-
-		HTTP(func() {
-			POST("/signature/request/webhook")
-			Header("webhook_secret:X-EUDIPLO-Webhook-Secret")
-			Response(StatusOK)
-			Response("bad_request", StatusBadRequest)
-			Response("unauthorized", StatusUnauthorized)
 			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
@@ -768,7 +730,12 @@ var _ = Service("SignatureManagement", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("not_found", ErrorResult, "Ceremony not found or not published")
-		Error("signature_invalid", ErrorResult, "The submitted signature is not valid or does not identify the signatory")
+		Error("signature_invalid", ErrorResult, "The submitted signature is not cryptographically valid")
+		Error("document_mismatch", ErrorResult, "The submitted document's initial revision does not byte-match the document prepared for signing (ADR-20 TBS byte pinning)")
+		Error("nonce_mismatch", ErrorResult, "The submitted signature is not bound to the ceremony's request nonce (ADR-20 nonce binding)")
+		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
+		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
+		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -778,6 +745,11 @@ var _ = Service("SignatureManagement", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
 			Response("signature_invalid", StatusUnprocessableEntity)
+			Response("document_mismatch", StatusUnprocessableEntity)
+			Response("nonce_mismatch", StatusUnprocessableEntity)
+			Response("level_below_required", StatusUnprocessableEntity)
+			Response("cert_pid_mismatch", StatusUnprocessableEntity)
+			Response("jades_invalid", StatusUnprocessableEntity)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

@@ -20,7 +20,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/base/validation"
@@ -878,11 +877,6 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		return err
 	}
 
-	keyVersion, err := h.CRepo.ActiveKeyVersion(ctx, tx, hsm.KeyLabelPADES())
-	if err != nil {
-		return fmt.Errorf("could not resolve active key version: %w", err)
-	}
-
 	ceremonyID := in.ceremony.ID
 	fieldName := in.ceremony.FieldName
 	signature := db.ContractSignature{
@@ -891,7 +885,6 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		SignatureBytes: signedPDFSum[:],
 		SignerDID:      cmd.SignerDID,
 		CredentialType: cmd.CredentialType,
-		KeyVersion:     keyVersion,
 		IpfsCID:        &cid,
 		CeremonyID:     &ceremonyID,
 		PDFHash:        &signedPDFHash,

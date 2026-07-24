@@ -45,19 +45,21 @@ func mapSignatureCommandError(err error) error {
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
 		return signaturemanagement.MakeCeremonyRequired(err)
 	}
-	// Every ADR-20 acceptance-gate rejection (document-byte mismatch, nonce
-	// binding, level-below-required, cert/PID mismatch, cert inconsistency,
-	// invalid JAdES) is reported as signature_invalid alongside the original
-	// ErrSignatureInvalid — the frontend distinguishes the specific failure
-	// from the error message today; typed per-cause Goa results are tracked
-	// under item 11's validation-failure view.
-	if errors.Is(err, command.ErrSignatureInvalid) ||
-		errors.Is(err, command.ErrDocumentMismatch) ||
-		errors.Is(err, command.ErrNonceMismatch) ||
-		errors.Is(err, command.ErrLevelBelowRequired) ||
-		errors.Is(err, command.ErrCertPIDMismatch) ||
-		errors.Is(err, command.ErrCertInconsistent) ||
-		errors.Is(err, command.ErrJAdESInvalid) {
+	// Every ADR-20 acceptance-gate rejection gets its OWN typed Goa error, not
+	// a shared signature_invalid — the frontend's validation-failure view
+	// (item 11) distinguishes these by CODE, never by matching error text.
+	switch {
+	case errors.Is(err, command.ErrDocumentMismatch):
+		return signaturemanagement.MakeDocumentMismatch(err)
+	case errors.Is(err, command.ErrNonceMismatch):
+		return signaturemanagement.MakeNonceMismatch(err)
+	case errors.Is(err, command.ErrLevelBelowRequired):
+		return signaturemanagement.MakeLevelBelowRequired(err)
+	case errors.Is(err, command.ErrCertPIDMismatch), errors.Is(err, command.ErrCertInconsistent):
+		return signaturemanagement.MakeCertPidMismatch(err)
+	case errors.Is(err, command.ErrJAdESInvalid):
+		return signaturemanagement.MakeJadesInvalid(err)
+	case errors.Is(err, command.ErrSignatureInvalid):
 		return signaturemanagement.MakeSignatureInvalid(err)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
@@ -267,7 +269,6 @@ func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signatu
 			SignerDid:      envelope.SignerDID,
 			Status:         envelope.Status.String(),
 		}
-		res.KeyVersion = &envelope.KeyVersion
 	}
 
 	return res, nil
@@ -739,42 +740,8 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 	return res, nil
 }
 
-func (s *signatureManagementsrvc) CeremonyWebhook(ctx context.Context, req *signaturemanagement.SMSignatureWebhookRequest) (res *signaturemanagement.SMSignatureWebhookResponse, err error) {
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
-	secret := ""
-	if req.WebhookSecret != nil {
-		secret = *req.WebhookSecret
-	}
-	poaOrganization := ""
-	if req.PoaOrganization != nil {
-		poaOrganization = *req.PoaOrganization
-	}
-	handler := command.WebhookHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
-	ceremony, err := handler.Handle(ctx, command.WebhookCmd{
-		Secret:          secret,
-		CeremonyID:      req.CeremonyID,
-		VpToken:         req.VpToken,
-		PidClaims:       req.PidClaims,
-		PoAOrganization: poaOrganization,
-		PoARoles:        req.PoaRoles,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, command.ErrWebhookUnauthorized):
-			return nil, signaturemanagement.MakeUnauthorized(err)
-		case errors.Is(err, command.ErrPoAUnauthorized):
-			return nil, signaturemanagement.MakeBadRequest(err)
-		case errors.Is(err, command.ErrCeremonyNotFound):
-			return nil, signaturemanagement.MakeNotFound(err)
-		default:
-			return nil, signaturemanagement.MakeInternalError(err)
-		}
-	}
-
-	return &signaturemanagement.SMSignatureWebhookResponse{
-		CeremonyID: ceremony.ID,
-		Status:     ceremony.Status,
-	}, nil
-}
+// The EUDIPLO OID4VP webhook (ceremonyWebhook) is removed (ADR-20): the
+// remote EUDIPLO PID service is not a dependency of this DCS anymore. Ceremony
+// PID+PoA verification runs entirely from the wallet's own direct_post
+// (ceremonyPresentationDirectPost in signature_request.go) — see
+// command.PresentationHandler.

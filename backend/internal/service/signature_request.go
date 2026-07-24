@@ -20,6 +20,7 @@ import (
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/middleware"
@@ -403,9 +404,19 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		_ = json.Unmarshal(verifiedPID.RawClaims, &pidClaims)
 	}
 
-	handler := command.WebhookHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
-	verified, err := handler.CompletePresentation(ctx, command.WebhookCmd{
+	// sdHash is extracted (not re-verified — VerifyPID above already did that,
+	// against the ceremony's own nonce and the configured trust anchors) purely
+	// as a record-keeping field for the KB-JWT credential-chain link (SM-26).
+	presentation, err := sdjwt.ParsePresentation(pidPresentation)
+	if err != nil {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("invalid vp_token: %w", err))
+	}
+
+	handler := command.PresentationHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
+	verified, err := handler.CompletePresentation(ctx, command.PresentationCmd{
 		CeremonyID:      ceremonyID,
+		SignerDID:       verifiedPID.SubjectDID,
+		SDHash:          presentation.SDHash,
 		VpToken:         pidPresentation,
 		PidClaims:       pidClaims,
 		PoAOrganization: strings.TrimSpace(verifiedPoA.ParticipantDID),

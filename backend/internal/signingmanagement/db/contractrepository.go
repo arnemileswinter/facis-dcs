@@ -112,7 +112,6 @@ type ContractSignature struct {
 	CertRevokedAt  *time.Time `db:"cert_revoked_at"`
 	IpfsCID        *string    `db:"ipfs_cid"`
 	SignatureBytes []byte     `db:"signature_bytes"`
-	KeyVersion     int        `db:"key_version"`
 	CeremonyID     *string    `db:"ceremony_id"`
 	PDFHash        *string    `db:"pdf_hash"`
 	ContentHash    *string    `db:"content_hash"`
@@ -131,7 +130,6 @@ type ContractSignatureEnvelope struct {
 	SignedAt       *string `db:"signed_at"`
 	RevokedAt      *string `db:"revoked_at"`
 	IpfsCID        *string `db:"ipfs_cid"`
-	KeyVersion     int     `db:"key_version"`
 }
 
 type ContractSigningTask struct {
@@ -177,7 +175,6 @@ type ContractRepo interface {
 	// modification by standards-compliant PAdES validators).
 	SetSignedPDF(ctx context.Context, tx *sqlx.Tx, did, ipfsCID, rendererVersion, c2paState, payloadHash string) error
 	RevokeSignature(ctx context.Context, tx *sqlx.Tx, did string, signerDID string) error
-	ActiveKeyVersion(ctx context.Context, tx *sqlx.Tx, label string) (int, error)
 	ReadLatestEnvelopeByContractDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractSignatureEnvelope, error)
 	ReadAllSigningTasks(ctx context.Context, tx *sqlx.Tx) ([]ContractSigningTask, error)
 	CountSignatureForContractDID(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
