@@ -119,7 +119,7 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
 }
 
 test('full vertical through the real UI', async ({ page, loginAs }) => {
-  test.setTimeout(600_000)
+  test.setTimeout(90_000)
   page.setDefaultTimeout(15_000)
 
   const unique = Date.now()
@@ -233,6 +233,10 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/template/register') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Register', exact: true }).click()
+    // Register goes through the shared ConfirmationModal ("Proceed with
+    // registration?") before it actually submits — the click above only
+    // opens it.
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click()
     await registered
   })
 

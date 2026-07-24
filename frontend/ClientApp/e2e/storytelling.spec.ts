@@ -27,7 +27,7 @@ test.describe('lifecycle narration on an authored draft', () => {
   let fixture: DraftContractFixture
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(600_000)
+    test.setTimeout(60_000)
     fixture = await buildDraftContractFixture(browser)
   })
 
