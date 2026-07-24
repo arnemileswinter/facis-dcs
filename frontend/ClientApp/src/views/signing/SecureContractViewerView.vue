@@ -16,10 +16,15 @@ import {
   signatureManagementService,
   type SignatureValidateResult,
   type SignatureVerifyResult,
+  signingErrorMessage,
 } from '@/services/signature-management-service'
 import { downloadBlob } from '@/utils/download-blob'
 
-// QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
+// The level requested here is a hint to the wallet only — the backend gates
+// on the contract's OWN declared per-field requirement regardless of what is
+// requested (ADR-20 SM-01). AES covers every contract that doesn't declare a
+// stricter requirement; a contract requiring QES needs a wallet/QTSP capable
+// of producing one, which this desktop-upload path does not orchestrate.
 const CREDENTIAL_TYPE = 'AES'
 
 const route = useRoute()
@@ -203,7 +208,7 @@ async function applySignature() {
     pendingSignerDid.value = outcome.data.signerDid
     done.value.apply = true
   } catch (e: unknown) {
-    stepError.value.apply = `Could not prepare the contract for signing: ${message(e)}`
+    stepError.value.apply = `Could not prepare the contract for signing: ${signingErrorMessage(e)}`
   } finally {
     busy.value = false
   }
@@ -227,7 +232,7 @@ async function submitSigned(event: Event) {
     done.value.submit = true
     await loadProvenance()
   } catch (e: unknown) {
-    stepError.value.submit = `The signed contract was rejected: ${message(e)}`
+    stepError.value.submit = `The signed contract was rejected: ${signingErrorMessage(e)}`
   } finally {
     busy.value = false
     input.value = ''

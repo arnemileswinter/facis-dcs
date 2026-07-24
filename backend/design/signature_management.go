@@ -312,6 +312,10 @@ var SMSignatureViewItem = Type("SMSignatureViewItem", func() {
 	Attribute("pdf_hash", String, "SHA-256 of the base PDF bytes the signature covers — cryptographic integrity proof (DCS-FR-SM-26)")
 	Attribute("kb_sd_hash", String, "KB-JWT sd_hash binding the signature to the presented credential — the credential chain link (DCS-FR-SM-26)")
 	Attribute("validation_report_hash", String, "Hash of the SHACL validation report pinned at signing time (drift evidence)")
+	Attribute("required_credential_type", String, "The contract's OWN declared signature-level requirement for this field (ADR-20, SM-01) — compare against credential_type (the level actually achieved) for the compliance pass/fail")
+	Attribute("qualified", Boolean, "Whether DSS's qualification determination for this signature was QESIG (qualified certificate + QSCD, ADR-20) — the QES evidence distinct from credential_type alone")
+	Attribute("signer_cert_subject", String, "Subject of the signing certificate that produced this signature (ADR-20 sole-control evidence, DCS-FR-SM-26)")
+	Attribute("signer_cert_serial", String, "Serial number of the signing certificate that produced this signature (DCS-FR-SM-26)")
 
 	Required("signer_did", "credential_type", "status", "format")
 })

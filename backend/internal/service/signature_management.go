@@ -612,6 +612,22 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
+	// Per-signature ceremony lookup (ADR-20 SM-26): the contract's declared
+	// level requirement and the signing certificate's subject/serial live on
+	// the ceremony row, not the embedded ContractSigningSummaryCredential.
+	ceremonies := make(map[string]*db.SignatureCeremony, len(records))
+	for _, rec := range records {
+		if rec.CeremonyID == nil || ceremonies[*rec.CeremonyID] != nil {
+			continue
+		}
+		ceremony, cErr := s.CeremonyRepo.GetCeremonyByID(ctx, tx, *rec.CeremonyID)
+		if cErr != nil {
+			return nil, signaturemanagement.MakeInternalError(cErr)
+		}
+		if ceremony != nil {
+			ceremonies[*rec.CeremonyID] = ceremony
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
@@ -626,6 +642,8 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 			Format:         "PAdES (ETSI.CAdES.detached) + JAdES (ETSI TS 119 182-1)",
 			Jades:          rec.JAdESSignature,
 		}
+		qualified := strings.EqualFold(rec.CredentialType, "QES")
+		item.Qualified = &qualified
 		if rec.SignedAt != nil {
 			t := rec.SignedAt.UTC().Format(time.RFC3339)
 			item.SignedAt = &t
@@ -633,6 +651,13 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 		if rec.RevokedAt != nil {
 			t := rec.RevokedAt.UTC().Format(time.RFC3339)
 			item.RevokedAt = &t
+		}
+		if rec.CeremonyID != nil {
+			if ceremony := ceremonies[*rec.CeremonyID]; ceremony != nil {
+				item.RequiredCredentialType = ceremony.RequiredCredentialType
+				item.SignerCertSubject = ceremony.SignerCertSubject
+				item.SignerCertSerial = ceremony.SignerCertSerial
+			}
 		}
 		enrichWithSigningEvidence(item, rec, validation.SigningEvidence)
 		signatures = append(signatures, item)
