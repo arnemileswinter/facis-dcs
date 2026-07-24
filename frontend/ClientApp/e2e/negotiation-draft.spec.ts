@@ -10,7 +10,7 @@ import { buildDraftContract, gotoAs } from './lifecycle-helpers'
  */
 
 test('a staged counter-offer survives navigation and is consumed by proposing it', async ({ page, loginAs }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(60_000)
 
   const { contractDid } = await buildDraftContract(page, loginAs)
 

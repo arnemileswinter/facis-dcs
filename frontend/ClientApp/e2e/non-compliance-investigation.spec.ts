@@ -52,7 +52,7 @@ test('@REQ-non-compliance-investigation-ui-AC1 @DCS-IR-PACM-03 @UC-08-02 complia
   page,
   loginAs,
 }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(60_000)
 
   const contractDid = await buildContractPendingApproval(page, loginAs)
 
@@ -118,7 +118,7 @@ test.describe('non-compliance incident report submission', () => {
   let fixture: DraftContractFixture
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(90_000)
+    test.setTimeout(60_000)
     fixture = await buildDraftContractFixture(browser)
   })
 
