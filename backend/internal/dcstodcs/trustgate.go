@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/federation"
+	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	qry "digital-contracting-service/internal/processauditandcompliance/query"
@@ -94,11 +95,22 @@ func (g *TrustGate) Check(ctx context.Context, peerDID string, direction Directi
 	return nil
 }
 
+// vcVerificationMethodID returns the id of the verification method a peer's
+// agreement credential must be self-signed with — did.json publishes it
+// under the same key label (hsm.KeyLabelVC()) this instance's own gendid
+// uses, found by id suffix rather than a fixed array position so a did.json
+// that adds or reorders verification methods doesn't silently pick the
+// wrong key.
+func vcVerificationMethodID(did string) string {
+	return did + "#" + hsm.KeyLabelVC()
+}
+
 // verifyAgreementCredential fetches the peer's agreement credential, checks
-// its signature against the dedicated VC key published as the SECOND
-// verificationMethod in the peer's own did.json, and compares its
-// termsOfUse.hash against this instance's own embedded federation rules
-// hash.
+// its signature against the dedicated VC verificationMethod in the peer's
+// own did.json, confirms the credential is self-signed by that same peer
+// (its issuer resolves to the same hostname the credential was fetched
+// from), and compares its termsOfUse.hash against this instance's own
+// embedded federation rules hash.
 func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, error) {
 	hostname, err := identity.DIDWebToHostname(peerDID)
 	if err != nil {
@@ -108,10 +120,21 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: fetch peer did.json: %w", err)
 	}
-	if len(peerDIDDocument.VerificationMethod) < 2 {
-		return nil, fmt.Errorf("agreement credential: peer did.json publishes no dedicated VC verificationMethod")
+	peerDocID, err := peerDIDDocument.GetID()
+	if err != nil {
+		return nil, fmt.Errorf("agreement credential: peer did.json: %w", err)
 	}
-	vcMethod := peerDIDDocument.VerificationMethod[1]
+	wantVCMethodID := vcVerificationMethodID(peerDocID)
+	var vcMethod *identity.VerificationMethod
+	for i := range peerDIDDocument.VerificationMethod {
+		if peerDIDDocument.VerificationMethod[i].ID == wantVCMethodID {
+			vcMethod = &peerDIDDocument.VerificationMethod[i]
+			break
+		}
+	}
+	if vcMethod == nil {
+		return nil, fmt.Errorf("agreement credential: peer did.json publishes no %q verificationMethod", wantVCMethodID)
+	}
 	vcPub, err := vcMethod.PublicKeyJWK.ECPublicKey()
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: peer VC verificationMethod key: %w", err)
@@ -133,14 +156,27 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 		return nil, fmt.Errorf("agreement credential: decode: %w", err)
 	}
 
-	// The credential's issuer is NOT required to equal peerDID verbatim: trust
-	// is anchored to the HOSTNAME did:web resolves to (identity.DIDWebToHostname
-	// stops at the first ":" after the "did:web:" prefix, exactly like the
-	// challenge-response check above it in PostPdf/shipToPeers), not to an
-	// exact DID string match — a peer identifier may legitimately carry a
-	// path/fragment suffix beyond the host component.
-	if _, err := issuerIdentifier(parsed.Issuer); err != nil {
+	// The credential must be self-signed by the SAME peer it was fetched
+	// from: its issuer is not required to equal peerDID verbatim (a peer
+	// identifier may legitimately carry a path/fragment suffix beyond the
+	// host component), but the issuer's did:web HOSTNAME (the same
+	// resolution identity.DIDWebToHostname applies to peerDID, and the same
+	// challenge-response check above it in PostPdf/shipToPeers uses) must
+	// match the hostname the credential was actually fetched from — a
+	// credential issued by some other party can't be presented on this
+	// peer's behalf even if it happens to verify against a key published
+	// here.
+	issuer, err := issuerIdentifier(parsed.Issuer)
+	if err != nil {
 		return nil, fmt.Errorf("agreement credential: %w", err)
+	}
+	issuerHostname, err := identity.DIDWebToHostname(issuer)
+	if err != nil {
+		return nil, fmt.Errorf("agreement credential: issuer: %w", err)
+	}
+	if issuerHostname != hostname {
+		return nil, fmt.Errorf("agreement credential: issuer %q resolves to hostname %q, not the peer's own %q",
+			issuer, issuerHostname, hostname)
 	}
 	if parsed.Proof.VerificationMethod != vcMethod.ID {
 		return nil, fmt.Errorf("agreement credential: proof.verificationMethod %q does not reference the peer's dedicated VC key %q",
