@@ -34,20 +34,9 @@ type GetByIDHandler struct {
 	FCClient *client.FederatedCatalogueClient
 }
 
-const retrieveTemplateByIDStatement = `
-MATCH (ct)
-WHERE ct.templateUuid IS NOT NULL
-  AND head(ct.claimsGraphUri) = $did
-RETURN {
-  did: head(ct.claimsGraphUri),
-  name: ct.name,
-  description: ct.description,
-  version: ct.version,
-  state: ct.state,
-  template_uuid: ct.templateUuid,
-  template_type: ct.templateType,
-  template_data_string: ct.templateDataString
-} AS n
+const retrieveTemplateByIDStatementTemplate = `
+SELECT (?s AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?template_data_string WHERE {
+%s%s%s}
 LIMIT 1
 `
 
@@ -62,11 +51,12 @@ func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatec
 		return nil, fmt.Errorf("version must be greater than 0")
 	}
 
+	extraTriples := fieldTriple(dcsTemplateTypeIRI, "template_type") + fieldTriple(dcsTemplateDataStringIRI, "template_data_string")
+	didFilter := fmt.Sprintf("  FILTER(STR(?s) = \"%s\")\n", sparqlEscapeString(qry.DID))
+	statement := fmt.Sprintf(retrieveTemplateByIDStatementTemplate, coreFieldTriples(), extraTriples, didFilter)
+
 	resp, err := h.FCClient.Query(ctx, client.QueryRequest{
-		Statement: retrieveTemplateByIDStatement,
-		Parameters: map[string]string{
-			"did": qry.DID,
-		},
+		Statement: statement,
 	})
 	if err != nil {
 		return nil, err

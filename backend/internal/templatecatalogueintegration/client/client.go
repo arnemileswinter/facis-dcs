@@ -63,10 +63,9 @@ type QueryResults struct {
 	Items      []map[string]interface{} `json:"items"`
 }
 
-// QueryRequest carries an OpenCypher query sent to FC POST /query/search.
+// QueryRequest carries a SPARQL query sent to FC POST /query/search.
 type QueryRequest struct {
-	Statement  string
-	Parameters map[string]string
+	Statement string
 }
 
 type fcErrorBody struct {
@@ -172,7 +171,9 @@ func (c *FederatedCatalogueClient) GetAssets(ctx context.Context, req GetAssetsR
 	return &out, nil
 }
 
-// Query executes an OpenCypher graph query via FC POST /query/search.
+// Query executes a SPARQL graph query via FC POST /query/search. FC's
+// deployed graph store is Fuseki (SPARQL-only) — see
+// deployment/helm/charts/federated-catalogue.
 func (c *FederatedCatalogueClient) Query(ctx context.Context, req QueryRequest) (*QueryResults, error) {
 	statement := strings.TrimSpace(req.Statement)
 	if statement == "" {
@@ -182,13 +183,9 @@ func (c *FederatedCatalogueClient) Query(ctx context.Context, req QueryRequest) 
 	body := map[string]any{
 		"statement": statement,
 		"annotations": map[string]any{
-			"queryLanguage":  "OPENCYPHER",
+			"queryLanguage":  "SPARQL",
 			"withTotalCount": true,
 		},
-	}
-
-	if len(req.Parameters) > 0 {
-		body["parameters"] = req.Parameters
 	}
 
 	raw, err := json.Marshal(body)

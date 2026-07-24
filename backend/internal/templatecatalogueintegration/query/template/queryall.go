@@ -33,26 +33,16 @@ type GetAllMetadataHandler struct {
 	FCClient *client.FederatedCatalogueClient
 }
 
-const retrieveTemplatesCountStatement = `
-MATCH (ct)
-WHERE ct.templateUuid IS NOT NULL
-  AND head(ct.claimsGraphUri) IS NOT NULL
-RETURN count(ct) AS total
+const retrieveTemplatesCountStatementTemplate = `
+SELECT (COUNT(DISTINCT ?s) AS ?total) WHERE {
+%s}
 `
 
 const retrieveTemplatesStatementTemplate = `
-MATCH (ct)
-WHERE ct.templateUuid IS NOT NULL
-  AND head(ct.claimsGraphUri) IS NOT NULL
-RETURN {
-  did: head(ct.claimsGraphUri),
-  name: ct.name,
-  description: ct.description,
-  version: ct.version,
-  state: ct.state,
-  template_uuid: ct.templateUuid
-} AS n
-SKIP %d
+SELECT (?s AS ?did) ?name ?description ?version ?state ?template_uuid WHERE {
+%s}
+ORDER BY ?s
+OFFSET %d
 LIMIT %d
 `
 
@@ -65,20 +55,20 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, qry GetAllMetadataQr
 	}
 
 	countResp, err := h.FCClient.Query(ctx, client.QueryRequest{
-		Statement: retrieveTemplatesCountStatement,
+		Statement: fmt.Sprintf(retrieveTemplatesCountStatementTemplate, coreFieldTriples()),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	totalCount := countResp.TotalCount
+	totalCount := countFromResults(countResp.Items, "total")
 
 	limit := qry.Limit
 	if limit < 1 {
 		limit = totalCount
 	}
 
-	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, qry.Offset, limit)
+	statement := fmt.Sprintf(retrieveTemplatesStatementTemplate, coreFieldTriples(), qry.Offset, limit)
 	dataResp, err := h.FCClient.Query(ctx, client.QueryRequest{
 		Statement: statement,
 	})
@@ -128,6 +118,10 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, qry GetAllMetadataQr
 	}, nil
 }
 
+// projectionMap unwraps a single query result row into its projected fields.
+// SPARQL SELECT rows are already flat (variable name -> value); a nested map
+// under a single key is the Neo4j/Cypher `RETURN {...} AS n` shape kept here
+// only in case any caller still produces it.
 func projectionMap(row map[string]interface{}) map[string]interface{} {
 	if row == nil {
 		return nil
@@ -137,7 +131,7 @@ func projectionMap(row map[string]interface{}) map[string]interface{} {
 			return mapped
 		}
 	}
-	return nil
+	return row
 }
 
 func mapCatalogueItem(ct map[string]interface{}) *templatecatalogueintegration.TemplateCatalogueItem {
