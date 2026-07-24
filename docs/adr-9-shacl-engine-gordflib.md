@@ -100,8 +100,8 @@ the pySHACL-sidecar escape hatch.
   synthesize, unlike the deleted subset matcher's noisier per-property
   "X conforms" info entries. A fully compliant document now produces **zero**
   SHACL findings, not N info findings. This is more correct (matches real
-  SHACL semantics) and is called out explicitly in
-  `docs/TRACEABILITY_SRS_BDD.md` and the BDD scenarios that read findings.
+  SHACL semantics) and is called out explicitly in the BDD scenarios that
+  read findings.
 - The Semantic Hub's canonical shapes
   (`backend/internal/semantichub/assets/facis-dcs-shapes.ttl`) were
   rewritten as valid Turtle

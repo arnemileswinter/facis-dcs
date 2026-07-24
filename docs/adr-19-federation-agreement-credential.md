@@ -7,9 +7,7 @@ Accepted (2026-07-22). **Replaces the third trust layer of
 allowlist, which is removed entirely) without touching the first two (eIDAS
 certificate chain, per-request challenge-response). Research basis: Gaia-X Trust Framework / Compliance
 Document (Loire), XFSC TSA/TRAIN specifications, EDC Decentralized Claims
-Protocol, W3C VC Data Model 2.0 §5.5, Regulation (EU) 2024/1183 — see
-[the federation trust run-down](blog-federated-trust-anchor.md) for the full
-citation trail.
+Protocol, W3C VC Data Model 2.0 §5.5, Regulation (EU) 2024/1183.
 
 ## Context
 
@@ -188,7 +186,7 @@ The four resulting layers, and what anchors each:
 
 | Piece | State |
 | --- | --- |
-| ADR + design, research run-down | this document, [blog-federated-trust-anchor.md](blog-federated-trust-anchor.md) |
+| ADR + design, research run-down | this document |
 | Embedded rules document (`go:embed`) + startup hash | pending |
 | `/.well-known/dcs-agreement-credential.json` endpoint (Goa design + HSM-signed VC) | pending |
 | Agreement verification in `PostPdf` and in the outbound ship path | pending |
