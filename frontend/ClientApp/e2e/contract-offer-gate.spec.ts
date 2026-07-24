@@ -20,7 +20,7 @@ import { buildDraftContract, gotoAs } from './lifecycle-helpers'
  */
 
 test('offer to counterparty is blocked until the draft is filled out', async ({ page, loginAs }) => {
-  test.setTimeout(120_000)
+  test.setTimeout(60_000)
 
   const { contractDid } = await buildDraftContract(page, loginAs)
 
