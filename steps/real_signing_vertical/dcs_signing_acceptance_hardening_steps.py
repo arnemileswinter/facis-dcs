@@ -114,6 +114,37 @@ def step_then_callback_rejects(context, name):
     )
 
 
+@when('the wallet signs a byte-tampered copy of the to-be-signed document for contract "{name}" as "{signatory}"')
+def step_when_sign_tampered_document(context, name, signatory):
+    """Flip a byte early in the to-be-signed PDF — well before any embedded
+    evidence attachment, which lives later in the file — sign the TAMPERED
+    bytes (a genuinely valid signature, over the wrong content), and submit.
+    This is exactly the hole the old attachment-only comparison missed
+    (ADR-20 item 2): the embedded JSON-LD is untouched, only a visible/
+    structural byte changed, so only the byte-prefix check catches it."""
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.remote_signer import sign_pdf  # noqa: PLC0415
+
+    ceremony_id = context.ceremony_ids[name]
+    document_uri = signature_request_leaf_url(context, ceremony_id, "document")
+    to_be_signed = bytearray(_requests.get(document_uri, timeout=context.http_timeout_seconds).content)
+    assert to_be_signed[:5] == b"%PDF-", f"expected a PDF, got: {bytes(to_be_signed[:16])!r}"
+    tamper_offset = 20  # just past the %PDF-1.7 header, well before any embedded-file object
+    to_be_signed[tamper_offset] ^= 0xFF
+
+    signed_pdf = sign_pdf(
+        bytes(to_be_signed), user=signatory, dss_url=os.getenv("BDD_DSS_URL", "http://localhost:18099"),
+        keys_dir=AuthService.resolve_wallet_keys_dir(),
+    )
+    callback_uri = signature_request_leaf_url(context, ceremony_id, "callback")
+    context.requests_response = _requests.post(
+        callback_uri,
+        data={"documentWithSignature[0]": base64.b64encode(signed_pdf).decode()},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=context.http_timeout_seconds,
+    )
+
+
 @when('a raw invalid JAdES is submitted for the signed document on contract "{name}"')
 def step_when_submit_invalid_jades(context, name):
     """Sign the PDF properly (a valid PAdES), then post it back with a

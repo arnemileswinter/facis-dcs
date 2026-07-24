@@ -17,6 +17,14 @@ Feature: Signing acceptance-path hardening
     Then the ceremony callback for contract "SAH Cert Mismatch Contract" rejects the signature
 
   @ADR-20
+  Scenario: A signed document whose visible content diverges from what was prepared is rejected
+    Given contract "SAH Byte Tamper Contract" is APPROVED and has completed a signing ceremony for signatory "SAHByteTamper"
+    When the signer publishes the OID4VP signing request for contract "SAH Byte Tamper Contract"
+    Then get http 200:Success code
+    When the wallet signs a byte-tampered copy of the to-be-signed document for contract "SAH Byte Tamper Contract" as "SAHByteTamper"
+    Then the ceremony callback for contract "SAH Byte Tamper Contract" rejects the signature
+
+  @ADR-20
   Scenario: An invalid JAdES is rejected even when the PAdES signature is genuinely valid
     Given contract "SAH Invalid JAdES Contract" is APPROVED and has completed a signing ceremony for signatory "SAHInvalidJAdES"
     When the signer publishes the OID4VP signing request for contract "SAH Invalid JAdES Contract"
