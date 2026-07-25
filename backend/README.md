@@ -74,7 +74,12 @@ contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
    (`POST /signature/request/{ceremony_id}/callback`) — verified
    cryptographically against the ceremony's nonce and the configured PID
    issuer trust anchors (`OID4VP_TRUST_DATA_PATH`) before anything is
-   persisted.
+   persisted. A PID whose issuer credential carries an x5c certificate
+   (a real EUDI wallet, rather than this project's JWKS-only dev issuer) is
+   only accepted if its chain verifies against `OID4VP_X5C_TRUST_ANCHORS_PATH`
+   (a PEM bundle of trusted roots) — unset in dev/BDD, where no PID is ever
+   x5c-signed; an x5c-bearing credential presented with none configured is
+   refused outright, never trusted off its own embedded certificate.
 3. `POST /signature/request/{ceremony_id}/publish` — prepare the to-be-signed
    PDF and JSON-LD payload (evidence embedded, bytes pinned), and publish a
    standard OID4VP Document-Retrieval request object as a QR/deep link.

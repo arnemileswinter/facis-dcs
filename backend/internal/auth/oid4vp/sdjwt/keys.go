@@ -34,6 +34,10 @@ type TrustConfig interface {
 	IssuerTrusted(iss string) bool
 	VCTAllowed(vct string) bool
 	IssuerJWKS(iss string) (json.RawMessage, error)
+	// X5CTrustRoots returns the trust anchors an x5c-bearing credential's
+	// certificate chain must verify against, or nil if none are configured —
+	// in which case an x5c-bearing credential must be refused outright.
+	X5CTrustRoots() *x509.CertPool
 }
 
 // --- Issuer credential JWT: verification key resolution ---
@@ -74,44 +78,75 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 	}
 
 	if _, ok := token.Header["x5c"]; ok {
-		return verificationKeyFromX5C(token.Header["x5c"])
+		return verificationKeyFromX5C(token.Header["x5c"], cfg.X5CTrustRoots())
 	}
 
 	return verificationKeyFromTrustedJWKS(jwksRaw, token)
 }
 
 // ResolveIssuerVerificationKeyForPID resolves the issuer key for PID credentials signed with x5c.
-func ResolveIssuerVerificationKeyForPID(token *jwt.Token) (any, error) {
+func ResolveIssuerVerificationKeyForPID(cfg TrustConfig, token *jwt.Token) (any, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("trust config is not configured")
+	}
+
 	rawX5C, ok := token.Header["x5c"]
 	if !ok {
 		return nil, fmt.Errorf("pid credential jwt requires x5c")
 	}
 
-	return verificationKeyFromX5C(rawX5C)
+	return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
 }
 
-func verificationKeyFromX5C(raw any) (any, error) {
-	certs, ok := raw.([]any)
-	if !ok || len(certs) == 0 {
+// verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
+// §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's
+// public key. roots being nil (no trust anchors configured) is refused, not
+// silently accepted off the chain's own say-so — an x5c header proves
+// nothing about WHO the leaf belongs to without a trust anchor to verify
+// against; trusting an unverified chain would let anyone mint their own
+// key+cert and self-certify as any issuer.
+func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
+	if roots == nil {
+		return nil, fmt.Errorf("no x5c trust anchors are configured")
+	}
+
+	certsRaw, ok := raw.([]any)
+	if !ok || len(certsRaw) == 0 {
 		return nil, fmt.Errorf("x5c header is empty")
 	}
 
-	leafB64, ok := certs[0].(string)
-	if !ok || strings.TrimSpace(leafB64) == "" {
-		return nil, fmt.Errorf("x5c leaf certificate is invalid")
+	certs := make([]*x509.Certificate, 0, len(certsRaw))
+	for i, entry := range certsRaw {
+		certB64, ok := entry.(string)
+		if !ok || strings.TrimSpace(certB64) == "" {
+			return nil, fmt.Errorf("x5c[%d] is invalid", i)
+		}
+		der, err := base64.StdEncoding.DecodeString(certB64)
+		if err != nil {
+			return nil, fmt.Errorf("decode x5c[%d]: %w", i, err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("parse x5c[%d]: %w", i, err)
+		}
+		certs = append(certs, cert)
 	}
 
-	der, err := base64.StdEncoding.DecodeString(leafB64)
-	if err != nil {
-		return nil, fmt.Errorf("decode x5c leaf certificate: %w", err)
+	leaf := certs[0]
+	intermediates := x509.NewCertPool()
+	for _, cert := range certs[1:] {
+		intermediates.AddCert(cert)
 	}
 
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil, fmt.Errorf("parse x5c leaf certificate: %w", err)
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}); err != nil {
+		return nil, fmt.Errorf("x5c certificate chain does not verify against configured trust anchors: %w", err)
 	}
 
-	switch pk := cert.PublicKey.(type) {
+	switch pk := leaf.PublicKey.(type) {
 	case *ecdsa.PublicKey:
 		if pk.Curve != elliptic.P256() {
 			return nil, fmt.Errorf("x5c leaf certificate is not P-256")

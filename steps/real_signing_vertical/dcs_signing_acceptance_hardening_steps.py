@@ -116,6 +116,8 @@ def step_when_sign_tampered_document(context, name, signatory):
     (ADR-20 item 2): the embedded JSON-LD is untouched, only a visible/
     structural byte changed, so only the byte-prefix check catches it."""
     AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.jades_signer import sign_jades_payload  # noqa: PLC0415
+    from dcs_wallet.oid4vp_signing import _decode_jwt_claims  # noqa: PLC0415
     from dcs_wallet.remote_signer import sign_pdf  # noqa: PLC0415
 
     ceremony_id = context.ceremony_ids[name]
@@ -129,10 +131,26 @@ def step_when_sign_tampered_document(context, name, signatory):
         bytes(to_be_signed), user=signatory, dss_url=os.getenv("BDD_DSS_URL", "http://localhost:18099"),
         keys_dir=AuthService.resolve_wallet_keys_dir(),
     )
+
+    # A genuinely-valid, correctly-paired JAdES so the byte-tampered PDF is
+    # the ONLY malformed input — otherwise a missing/nonce-unbound JAdES would
+    # itself be rejected, and the assertion below would no longer prove the
+    # byte-prefix check specifically caught the tampering (ADR-20 item 2).
+    request_uri = signature_request_leaf_url(context, ceremony_id, "object")
+    claims = _decode_jwt_claims(_requests.get(request_uri, timeout=context.http_timeout_seconds).text.strip())
+    payload_uri = claims["documentLocations"][1]["uri"]
+    payload_bytes = _requests.get(payload_uri, timeout=context.http_timeout_seconds).content
+    jades = sign_jades_payload(
+        payload_bytes, user=signatory, keys_dir=AuthService.resolve_wallet_keys_dir(), nonce=claims["nonce"],
+    )
+
     callback_uri = signature_request_leaf_url(context, ceremony_id, "callback")
     context.requests_response = _requests.post(
         callback_uri,
-        data={"documentWithSignature[0]": base64.b64encode(signed_pdf).decode()},
+        data={
+            "documentWithSignature[0]": base64.b64encode(signed_pdf).decode(),
+            "signatureObject[0]": jades,
+        },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=context.http_timeout_seconds,
     )

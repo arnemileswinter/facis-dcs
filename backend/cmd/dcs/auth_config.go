@@ -55,6 +55,20 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 	}
 
+	// Optional: a real EUDI-wallet-issued PID (or any x5c-bearing credential)
+	// carries its issuer certificate this way, not a bare JWK. Unset in
+	// environments that never present one (dev/BDD issue PID credentials via
+	// the JWKS issuer path); an x5c credential presented with no trust
+	// anchors configured is refused outright, never silently trusted off its
+	// own embedded leaf cert (sdjwt.verificationKeyFromX5C).
+	if x5cPath := strings.TrimSpace(os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH")); x5cPath != "" {
+		x5cRoots, err := oid4vp.LoadX5CTrustAnchors(x5cPath)
+		if err != nil {
+			return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
+		}
+		trustCfg.SetX5CTrustRoots(x5cRoots)
+	}
+
 	xfscAllowUnsignedFallback := false
 	if v := strings.TrimSpace(os.Getenv("OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK")); strings.EqualFold(v, "true") {
 		xfscAllowUnsignedFallback = true

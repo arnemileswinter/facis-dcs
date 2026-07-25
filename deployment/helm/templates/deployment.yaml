@@ -155,6 +155,10 @@ spec:
             - name: OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK
               value: "true"
             {{- end }}
+            {{- if .Values.oid4vp.trust.x5cAnchorsPath }}
+            - name: OID4VP_X5C_TRUST_ANCHORS_PATH
+              value: {{ .Values.oid4vp.trust.x5cAnchorsPath | quote }}
+            {{- end }}
             {{- end }}
             # ---- PKCS#11 signing token (DCS-IR-HI-01) ------------------------------
             # Every private key lives in this PKCS#11 token; there is no software

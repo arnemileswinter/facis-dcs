@@ -113,8 +113,11 @@ def sign_via_document_retrieval(
     # The SECOND documentLocations entry, when offered (ADR-12), is the
     # canonical JSON-LD payload: sign it as a JAdES with the ceremony's nonce
     # bound into the protected header (ADR-20 item 1) and post it as
-    # signatureObject[0] — the DCS's byte-pin check requires the RAW fetched
-    # bytes signed with no re-serialization (see jades_signer.py).
+    # signatureObject[0] — a DETACHED signature value (CSC obtainSignedDoc's
+    # own shape: documentWithSignature and signatureObject are independent
+    # lists for the same document, not a positional split across documents).
+    # The DCS's byte-pin check requires the RAW fetched bytes signed with no
+    # re-serialization (see jades_signer.py).
     if len(locations) > 1:
         payload_uri = _reorigin(locations[1]["uri"], request_uri)
         payload_bytes = _get(payload_uri, accept="application/json")

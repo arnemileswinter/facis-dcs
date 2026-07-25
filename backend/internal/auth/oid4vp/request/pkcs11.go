@@ -45,7 +45,11 @@ func (s *HSMSigner) SignAuthorizationRequestJWT(claims jwt.MapClaims) (string, e
 	if s == nil {
 		return "", fmt.Errorf("hsm request signer is not configured")
 	}
-	return signES256JWT(s.kid, claims, s.jwk, func(signingInput string) ([]byte, error) {
+	var extraHeaders map[string]any
+	if s.jwk != nil {
+		extraHeaders = map[string]any{"jwk": s.jwk}
+	}
+	return signES256JWT(s.kid, claims, extraHeaders, func(signingInput string) ([]byte, error) {
 		return s.signES256(s.signer, []byte(signingInput))
 	})
 }

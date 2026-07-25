@@ -72,6 +72,9 @@ identity:
 oid4vp:
   trust:
     xfscAllowUnsignedFallback: true
+    # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
+    # issuer" scenarios) verifies against this baked-in dev cert.
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
   enabled: true

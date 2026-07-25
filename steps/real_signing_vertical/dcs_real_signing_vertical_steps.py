@@ -222,6 +222,97 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     return presentation, issuer_jwt, disclosures, subject_did
 
 
+def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, nonce: str, trusted: bool = True):
+    """Same as _build_pid_presentation, but the issuer credential JWT carries
+    an x5c certificate chain in its header instead of a bare jwk+kid trusted
+    via DID allow-list — what a real EUDI wallet's issued PID actually looks
+    like (ResolveIssuerVerificationKeyForPID). trusted=False signs with an
+    UNRELATED self-signed cert never configured as an OID4VP_X5C_TRUST_
+    ANCHORS_PATH root, for the negative "untrusted issuer is refused" case.
+    """
+    AuthService._ensure_dcs_wallet_importable()
+    from cryptography import x509  # noqa: PLC0415
+    from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
+
+    from dcs_wallet.issuer import sign_credential_sd_jwt_x5c, sign_key_binding_jwt  # noqa: PLC0415
+    from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, load_json, private_key_material, public_jwk  # noqa: PLC0415
+    from dcs_wallet.sdjwt import join_sd_jwt, split_sd_jwt  # noqa: PLC0415
+    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE, build_credential_status  # noqa: PLC0415
+
+    import os  # noqa: PLC0415
+
+    keys_dir = AuthService.resolve_wallet_keys_dir()
+    if trusted:
+        issuer_private = private_key_material(load_json(keys_dir / "issuer-dev-x5c.jwk"))
+        issuer_cert_der = x509.load_pem_x509_certificate(
+            (keys_dir / "issuer-dev-x5c.crt.pem").read_bytes()
+        ).public_bytes(serialization.Encoding.DER)
+        issuer_did = "did:web:dev.example:issuer:pid-x5c"
+    else:
+        # An UNRELATED, freshly-minted self-signed cert — never configured as
+        # a trust anchor anywhere, deliberately not the trusted dev issuer.
+        from cryptography.hazmat.primitives import hashes  # noqa: PLC0415
+        from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
+        from cryptography.x509.oid import NameOID  # noqa: PLC0415
+        import base64 as _b64  # noqa: PLC0415
+        import datetime as _dt  # noqa: PLC0415
+
+        untrusted_key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Untrusted PID Issuer (BDD negative case)")])
+        now = _dt.datetime.now(_dt.timezone.utc)
+        untrusted_cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject).issuer_name(subject).public_key(untrusted_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - _dt.timedelta(hours=1)).not_valid_after(now + _dt.timedelta(hours=1))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .sign(untrusted_key, hashes.SHA256())
+        )
+        d = untrusted_key.private_numbers()
+        pub = d.public_numbers
+        coord = 32
+        issuer_private = {
+            "kty": "EC", "crv": "P-256",
+            "x": _b64.urlsafe_b64encode(pub.x.to_bytes(coord, "big")).rstrip(b"=").decode(),
+            "y": _b64.urlsafe_b64encode(pub.y.to_bytes(coord, "big")).rstrip(b"=").decode(),
+            "d": _b64.urlsafe_b64encode(d.private_value.to_bytes(coord, "big")).rstrip(b"=").decode(),
+        }
+        issuer_cert_der = untrusted_cert.public_bytes(serialization.Encoding.DER)
+        issuer_did = "did:web:untrusted.example:issuer:pid-x5c"
+
+    wallet_private = private_key_material(load_json(keys_dir / "wallet.jwk"))
+    holder_public = public_jwk(wallet_private)
+    subject_did = did_jwk_from_public_jwk(holder_public)
+
+    now_ts = int(time.time())
+    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
+    visible_claims = {
+        "iss": issuer_did,
+        "sub": subject_did,
+        "vct": "urn:eudi:pid:de:1",
+        "iat": now_ts - 3600,
+        "exp": now_ts + 3600,
+        "cnf": {"jwk": cnf_jwk(holder_public)},
+        "status": build_credential_status(
+            sub=subject_did, organization=given_name, roles=[family_name],
+            service_base=status_base, tenant=BDD_CREDENTIAL_TENANT,
+        ),
+    }
+    selective_claims = {"given_name": given_name, "family_name": family_name}
+    issued = sign_credential_sd_jwt_x5c(
+        visible_claims=visible_claims,
+        selective_claims=selective_claims,
+        issuer_private=issuer_private,
+        issuer_cert_der=issuer_cert_der,
+    )
+    issuer_jwt, disclosures, _old_kb = split_sd_jwt(issued)
+    kb_jwt = sign_key_binding_jwt(
+        issuer_jwt=issuer_jwt, disclosures=disclosures, wallet_private=wallet_private, aud=aud, nonce=nonce,
+    )
+    presentation = join_sd_jwt(issuer_jwt, disclosures, kb_jwt)
+    return presentation, subject_did
+
+
 # ---------------------------------------------------------------------------
 # Ceremony helpers
 # ---------------------------------------------------------------------------
@@ -557,6 +648,57 @@ def step_when_presentation_wrong_nonce(context, name):
         presentation_info["given_name"],
         presentation_info["family_name"],
         nonce=wrong_nonce,
+    )
+
+
+def _present_pid_x5c(context, name, field_name, *, trusted):
+    """Start a fresh ceremony and present a PID whose issuer credential is
+    x5c-signed instead of DID/JWKS-trusted — what a real EUDI wallet's PID
+    actually looks like (ResolveIssuerVerificationKeyForPID). trusted=False
+    signs with an unrelated cert never configured as a trust anchor."""
+    signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
+    start_resp = _start_ceremony(context, name, field_name, signer_h)
+    assert start_resp.status_code == 200, (
+        f"POST /signature/request failed for contract '{name}': {start_resp.status_code} {start_resp.text}"
+    )
+    ceremony_id = start_resp.json().get("ceremony_id")
+    assert ceremony_id, f"/signature/request response has no ceremony_id: {start_resp.text}"
+
+    nonce = _fetch_pending_nonce(context, ceremony_id)
+    given_name, family_name = field_name, "BDD-Testperson"
+    presentation, subject_did = _build_pid_presentation_x5c(
+        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce, trusted=trusted,
+    )
+    if not hasattr(context, "ceremony_ids"):
+        context.ceremony_ids = {}
+    context.ceremony_ids[name] = ceremony_id
+    context.requests_response = _complete_ceremony_via_presentation(
+        context, ceremony_id, presentation, subject_did, given_name, family_name,
+        poa_organization=field_name, nonce=nonce,
+    )
+
+
+@when('the signer presents a PID signed with x5c by the trusted dev issuer for contract "{name}" field "{field_name}"')
+def step_when_present_pid_x5c_trusted(context, name, field_name):
+    _present_pid_x5c(context, name, field_name, trusted=True)
+
+
+@when('the signer presents a PID signed with x5c by an untrusted issuer for contract "{name}" field "{field_name}"')
+def step_when_present_pid_x5c_untrusted(context, name, field_name):
+    _present_pid_x5c(context, name, field_name, trusted=False)
+
+
+@then('the x5c PID presentation for contract "{name}" is accepted')
+def step_then_pid_x5c_accepted(context, name):
+    resp = context.requests_response
+    assert resp.status_code == 200, f"expected the x5c PID presentation to be accepted, got {resp.status_code}: {resp.text}"
+
+
+@then('the x5c PID presentation for contract "{name}" is rejected as untrusted')
+def step_then_pid_x5c_untrusted_rejected(context, name):
+    resp = context.requests_response
+    assert resp.status_code >= 400, (
+        f"expected the untrusted-issuer x5c PID presentation to be rejected, got {resp.status_code}: {resp.text}"
     )
 
 

@@ -77,6 +77,41 @@ def sign_credential_sd_jwt(
     return join_sd_jwt(issuer_jwt, disclosures)
 
 
+def sign_credential_sd_jwt_x5c(
+    *,
+    visible_claims: dict[str, Any],
+    selective_claims: dict[str, Any],
+    issuer_private: dict[str, Any],
+    issuer_cert_der: bytes,
+) -> str:
+    """Same as sign_credential_sd_jwt, but the issuer JWT header carries the
+    issuer's own x5c certificate chain instead of a bare jwk+kid — what a
+    real EUDI wallet's issued PID actually looks like (ResolveIssuerVerification
+    KeyForPID, backend/internal/auth/oid4vp/sdjwt/keys.go), as opposed to this
+    project's default JWKS-trust-listed dev issuer path (DEFAULT_ISSUER_DID).
+    """
+    disclosures: list[str] = []
+    sd_digests: list[str] = []
+    for claim_name, claim_value in selective_claims.items():
+        encoded, digest = create_property_disclosure(claim_name, claim_value)
+        disclosures.append(encoded)
+        sd_digests.append(digest)
+
+    payload = {**visible_claims, "_sd": sd_digests, "_sd_alg": DEFAULT_SD_ALG}
+    headers = {
+        "typ": CREDENTIAL_JWT_TYP,
+        "alg": "ES256",
+        "x5c": [base64.b64encode(issuer_cert_der).decode()],
+    }
+    issuer_jwt = jwt.encode(
+        payload,
+        _jwt_private_key(issuer_private),
+        algorithm="ES256",
+        headers=headers,
+    )
+    return join_sd_jwt(issuer_jwt, disclosures)
+
+
 def sign_key_binding_jwt(
     *,
     issuer_jwt: str,

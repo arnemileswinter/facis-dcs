@@ -79,7 +79,7 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 		jwt.WithValidMethods([]string{"ES256"}),
 	).Parse(token, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Header["x5c"]; ok {
-			return ResolveIssuerVerificationKeyForPID(t)
+			return ResolveIssuerVerificationKeyForPID(cfg, t)
 		}
 		return ResolveIssuerVerificationKey(cfg, t)
 	})
