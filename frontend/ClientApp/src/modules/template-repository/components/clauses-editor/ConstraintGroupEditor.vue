@@ -189,11 +189,11 @@ function resetFixedOperand(child: AtomicDraft) {
           <option value="">choose value</option>
           <option
             v-for="option in valueOptionsFor(child)"
-            :key="option.value"
-            :value="option.value"
-            :selected="fixedValueFor(child) === option.value"
+            :key="optionKey(option, child)"
+            :value="optionKey(option, child)"
+            :selected="fixedValueFor(child) === optionKey(option, child)"
           >
-            {{ formatValueOption(option.value, valueOptionsFor(child)) }}
+            {{ formatValueOption(optionKey(option, child), valueOptionsFor(child)) }}
           </option>
         </select>
         <details v-else-if="!child.rightSource" data-testid="constraint-value-multiselect" class="dropdown max-w-full">
@@ -209,18 +209,18 @@ function resetFixedOperand(child: AtomicDraft) {
               </legend>
               <label
                 v-for="option in catalog.options"
-                :key="option.value"
+                :key="optionKey(option, child)"
                 class="flex min-h-8 items-center gap-2 rounded px-2 hover:bg-base-200"
               >
                 <input
                   type="checkbox"
                   class="checkbox checkbox-sm checkbox-primary"
-                  :value="option.value"
-                  :checked="selectedOptionValues(child).includes(option.value)"
-                  @change="toggleOption(child, option.value)"
+                  :value="optionKey(option, child)"
+                  :checked="selectedOptionValues(child).includes(optionKey(option, child))"
+                  @change="toggleOption(child, optionKey(option, child))"
                 />
                 <span class="text-sm">
-                  {{ formatValueOption(option.value, valueOptionsFor(child)) }}
+                  {{ formatValueOption(optionKey(option, child), valueOptionsFor(child)) }}
                 </span>
               </label>
             </fieldset>

@@ -54,6 +54,9 @@ classes:
   Contract:
     class_uri: dcs:Contract
     is_a: ContractTemplate
+    slot_usage:
+      metadata:
+        range: ContractMetadata
 
   ContractField:
     class_uri: dcs:ContractField
@@ -103,6 +106,15 @@ classes:
       - schema:Text
     slots:
       - text
+
+  ContractMetadata:
+    class_uri: dcs:ContractMetadata
+    slot_usage:
+      title:
+        required: true
+    slots:
+      - title
+      - description
 
   TemplateMetadata:
     class_uri: dcs:TemplateMetadata
@@ -350,9 +362,13 @@ slots:
   value:
     slot_uri: dcs:value
     description: Optional filled scalar value of a ContractField; validated against dcs:datatype by the DCS document gate.
+    # double is listed because a fractional JSON number is xsd:double in
+    # JSON-LD; the DCS document gate still checks the fill against the
+    # field's declared dcs:datatype.
     any_of:
       - range: string
       - range: decimal
+      - range: double
       - range: integer
       - range: boolean
       - range: date
