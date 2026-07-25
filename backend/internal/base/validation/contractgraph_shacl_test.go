@@ -122,3 +122,19 @@ func TestMaterializeKeepsOriginalUntouched(t *testing.T) {
 	materializedLegal := materialized["dcs:contractData"].([]any)[1].(map[string]any)
 	require.Equal(t, "DEU", materializedLegal["ex:countryName"])
 }
+
+// A fill written as a typed {"@value"} literal — the canonical serialization
+// for "properly @value-linked" data — dereferences through materialization
+// and satisfies the external library exactly like a bare scalar fill.
+func TestExternalLibraryAcceptsTypedValueFill(t *testing.T) {
+	restore := swapExternalLibraryShapeSource(t)
+	defer restore()
+
+	contract := nestedDomainContract(t)
+	field := contract["dcs:contractFields"].([]any)[0].(map[string]any)
+	field["dcs:value"] = map[string]any{"@value": "DEU", "@type": "xsd:string"}
+
+	findings, _, err := validateAgainstHubShapes(context.Background(), contract)
+	require.NoError(t, err)
+	require.Empty(t, errorFindings(findings), fmt.Sprintf("expected a conformant graph, got: %+v", findings))
+}
