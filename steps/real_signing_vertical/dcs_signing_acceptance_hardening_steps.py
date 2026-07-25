@@ -64,6 +64,10 @@ def step_when_wallet_signs_with_mismatched_cert(context, name, signatory, given_
         context.requests_response = None
     except Exception as exc:  # the wallet CLI raises SystemExit-shaped errors on a non-200 callback
         context.wallet_callback_response = None
+        # Without this, step_then_callback_rejects falls through to the STALE
+        # context.requests_response left by the earlier publish step (200) and
+        # asserts on that instead of this rejection.
+        context.requests_response = None
         context.signing_error = str(exc)
 
 
