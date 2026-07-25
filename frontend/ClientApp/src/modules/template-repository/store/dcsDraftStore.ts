@@ -1151,8 +1151,8 @@ function contractFieldsToSemanticConditions(
       const targets =
         rightOperand === undefined || isReference
           ? []
-          : '@list' in rightOperand
-            ? rightOperand['@list'].map(jsonLdValue)
+          : Array.isArray(rightOperand)
+            ? rightOperand.map(jsonLdValue)
             : [jsonLdValue(rightOperand)]
       const fieldId = constraint['odrl:leftOperand']['@id']
       operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets }])
@@ -1192,10 +1192,13 @@ function contractFieldsToSemanticConditions(
 function odrlRightOperand(
   operator: SemanticParameterOperator,
   parameterType: SemanticConditionParameter['type'],
-): JsonLdTypedValue | { '@list': JsonLdTypedValue[] } | undefined {
+): JsonLdTypedValue | JsonLdTypedValue[] | undefined {
   if (!operator.targets.length) return undefined
   const operands = operator.targets.map((target) => typedJsonLdValue(target, parameterType))
-  if (isSetOperator(operator.operate)) return { '@list': operands }
+  // A set operand is an unordered JSON-LD set (bare array): the policy audit
+  // expands and matches each member individually, while an @list would reach
+  // it as a single nested list value.
+  if (isSetOperator(operator.operate)) return operands
   return operands[0]
 }
 

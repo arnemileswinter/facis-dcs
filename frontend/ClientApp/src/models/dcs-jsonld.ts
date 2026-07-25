@@ -104,7 +104,7 @@ export interface OdrlConstraint {
    * are negotiated field references, resolved to their filled values at
    * enforcement.
    */
-  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | { '@list': (JsonLdTypedValue | JsonLdReference)[] }
+  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | (JsonLdTypedValue | JsonLdReference)[]
 }
 
 /**

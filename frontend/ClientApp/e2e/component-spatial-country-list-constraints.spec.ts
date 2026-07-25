@@ -170,7 +170,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
       'odrl:permission'?: {
         'odrl:constraint'?: {
           'odrl:leftOperand': { '@id': string }
-          'odrl:rightOperand': { '@list': { '@id': string }[] }
+          'odrl:rightOperand': { '@id': string }[]
         }[]
       }[]
     }
@@ -178,7 +178,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
   const purpose = document['dcs:policies']['odrl:permission']?.[0]?.['odrl:constraint']?.find(
     (constraint) => constraint['odrl:leftOperand']['@id'] === 'odrl:purpose',
   )
-  expect(purpose?.['odrl:rightOperand']['@list']).toEqual([
+  expect(purpose?.['odrl:rightOperand']).toEqual([
     { '@id': 'https://w3id.org/facis/dcs/taxonomy/v1#service-purpose-operations' },
     { '@id': 'https://w3id.org/facis/dcs/taxonomy/v1#data-use-purpose-operations' },
   ])
