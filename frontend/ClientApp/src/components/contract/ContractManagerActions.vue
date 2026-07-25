@@ -3,11 +3,11 @@ import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { type DcsContractField, fieldFillScalar } from '@/models/dcs-jsonld'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { ContractState } from '@/types/contract-state'
 import type { Contract } from '@/models/contract/contract'
-import type { DcsContractField } from '@/models/dcs-jsonld'
 
 defineOptions({
   inheritAttrs: false,
@@ -53,7 +53,7 @@ const unfilledRequired = computed<DcsContractField[]>(() => {
   const fields = props.contract.contract_data?.['dcs:contractFields'] ?? []
   return fields.filter((field) => {
     if (!field['dcs:required']) return false
-    const value = field['dcs:value']
+    const value = fieldFillScalar(field['dcs:value'])
     return value === undefined || value === null || String(value).trim() === ''
   })
 })

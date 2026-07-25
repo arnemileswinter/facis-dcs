@@ -35,8 +35,24 @@ export interface DcsContractField {
   'dcs:datatype': XsdDatatype
   'dcs:shape'?: JsonLdReference
   'dcs:required': boolean
-  'dcs:value'?: string | number | boolean
+  'dcs:value'?: string | number | boolean | JsonLdTypedValue
   'dcs:valueConstraint'?: import('@template-repository/models/contract-template').SemanticValueConstraint
+}
+
+/** Serializes a fill as a typed literal carrying the field's declared
+ *  datatype. The lexical form is a string, so the document carries the
+ *  exact token the user agreed to — deterministic across round trips. */
+export function typedFieldFill(value: string | number | boolean, datatype: XsdDatatype): JsonLdTypedValue {
+  return { '@value': String(value), '@type': datatype }
+}
+
+/** Reads a fill back to its lexical scalar, accepting the typed-literal
+ *  serialization and bare scalars alike. Returns undefined for an absent
+ *  fill. Typed fills come back as their lexical string — write and read
+ *  stay symmetric, so draft dirty-checks never see a phantom change. */
+export function fieldFillScalar(fill: DcsContractField['dcs:value']): string | number | boolean | undefined {
+  if (fill !== null && typeof fill === 'object') return fill['@value']
+  return fill ?? undefined
 }
 
 /** A clause references a ContractField only by its @id. */

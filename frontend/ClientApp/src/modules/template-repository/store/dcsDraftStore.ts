@@ -13,6 +13,7 @@ import {
   type DcsDocumentStructure,
   type DcsLayoutNode,
   type DcsTemplateData,
+  fieldFillScalar,
   isAtomicConstraint,
   isDcsClause,
   isDcsDocumentData,
@@ -23,6 +24,7 @@ import {
   type OdrlConstraintNode,
   type OdrlRule,
   type OdrlSet,
+  typedFieldFill,
 } from '@/models/dcs-jsonld'
 import type { SemanticConditionValue } from '@/models/contract-data'
 import type { ContractTemplate } from '@/models/contract-template'
@@ -1013,7 +1015,9 @@ function semanticParamToContractField(
     ...(parameter.fieldIri ? { 'dcs:shape': { '@id': domainField?.ontologyId ?? parameter.fieldIri } } : {}),
     'dcs:required': parameter.isRequired,
     ...(constraint ? { 'dcs:valueConstraint': cloneValueConstraint(constraint) } : {}),
-    ...(hasValue ? { 'dcs:value': value as string | number | boolean } : {}),
+    ...(hasValue
+      ? { 'dcs:value': typedFieldFill(value as string | number | boolean, PARAM_TYPE_TO_XSD[parameter.type]) }
+      : {}),
   }
 }
 
@@ -1190,7 +1194,7 @@ function contractFieldsToSemanticConditions(
           uiMetadata: { label },
           isRequired: field['dcs:required'],
           operators: operatorsByField.get(field['@id']) ?? [],
-          value: field['dcs:value'],
+          value: fieldFillScalar(field['dcs:value']),
         },
       ],
     }

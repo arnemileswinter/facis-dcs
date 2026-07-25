@@ -1093,3 +1093,25 @@ func TestAuditContractAcceptsTempoSpatialAccessPolicy(t *testing.T) {
 	require.Contains(t, fmt.Sprint(spatial.ExpectedValue), "DE", "negotiated region boundary resolved to the filled value")
 	require.Equal(t, "lte", temporal.Operator)
 }
+
+// A fill serialized as a typed {"@value"} lexical must evaluate numerically:
+// the rego to_num coerces the string lexical, so "150000"^^xsd:decimal still
+// exceeds an odrl:lteq 100000 bound, and "9500" satisfies it.
+func TestAuditContractContentEvaluatesTypedValueFillNumerically(t *testing.T) {
+	fieldID := "urn:dcs:field:liability-cap"
+	exceeded := odrlContract(fieldID, "liability", "capAmount",
+		[]any{odrlDuty("FACIS-CONTRACT-STATIC-003", fieldID, "odrl:lteq", float64(100000))},
+		map[string]any{"@value": "150000", "@type": "xsd:decimal"},
+	)
+	findings, err := AuditContractContent(context.Background(), exceeded, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.True(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-003", "error"))
+
+	within := odrlContract(fieldID, "liability", "capAmount",
+		[]any{odrlDuty("FACIS-CONTRACT-STATIC-003", fieldID, "odrl:lteq", float64(100000))},
+		map[string]any{"@value": "9500", "@type": "xsd:decimal"},
+	)
+	findings, err = AuditContractContent(context.Background(), within, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.False(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-003", "error"))
+}

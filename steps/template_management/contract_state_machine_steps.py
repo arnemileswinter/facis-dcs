@@ -460,7 +460,9 @@ def step_when_fill_required_placeholder(context, name, value):
     filled = 0
     for field in contract_data.get("dcs:contractFields") or []:
         if field.get("dcs:required") and not field.get("dcs:value"):
-            field["dcs:value"] = float(value) if "." in value else int(value)
+            # A fill is a typed literal carrying the field's declared
+            # datatype — the lexical string keeps the exact agreed token.
+            field["dcs:value"] = {"@value": value, "@type": field.get("dcs:datatype", "xsd:string")}
             filled += 1
     assert filled, (
         f"contract '{name}' has no unfilled required field to fill: "
