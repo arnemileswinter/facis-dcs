@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"database/sql"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -33,6 +35,7 @@ import (
 	"digital-contracting-service/internal/signingmanagement/dss"
 	event2 "digital-contracting-service/internal/signingmanagement/event"
 
+	"github.com/digitorus/pkcs7"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -341,9 +344,29 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// ceremony's verified PID by name — mandatory for QES (Annex I requires
 	// the qualified cert to carry the signatory's verified name), policy-
 	// configurable for AES (ADR-20; defaults to enforced).
+	//
+	// The certificate identity is read directly from the submitted PDF's own
+	// CMS SignerInfo (signerCertificateFromIncrementalUpdate), not from DSS's
+	// validation report: DSS's simpleReport never carries structured
+	// GIVENNAME/SURNAME at all (only a CommonName-derived SignedBy), and its
+	// diagnosticData per-certificate entries came back empty in CI for our
+	// dev CA - DSS appears to only populate those for certificates it
+	// recognizes as qualified. Reading the bytes this submission itself
+	// added (ADR-20 byte pinning already proves cmd.SignedPDF is exactly
+	// ceremony.PreparedPDF plus one incremental update) has no such
+	// dependency on what DSS chooses to report, and cannot be ambiguous
+	// about which signature it names the way DSS's report was before
+	// resolveSigningCertificate/latestSignatureEntry scoped it.
 	pidGiven, pidFamily := pidGivenFamilyName(ceremony.PidClaims)
-	certGiven, certSurname := report.SubjectGivenName(), report.SubjectSurname()
 	nameMatchRequired := requiredLevel == "QES" || conf.AESCertNameMatchRequired()
+	var certGiven, certSurname string
+	if nameMatchRequired {
+		signerCert, err := signerCertificateFromIncrementalUpdate(cmd.SignedPDF, ceremony.PreparedPDF)
+		if err != nil {
+			return fmt.Errorf("%w: could not read the submitted signature's own certificate: %v", ErrCertPIDMismatch, err)
+		}
+		certGiven, certSurname = certGivenSurname(signerCert)
+	}
 	// Diagnostic (temporary): the sole-control gate accepted a submission that
 	// a BDD negative scenario expects it to reject, and the callback response
 	// alone carries no detail about why namesMatch found a match. Always
@@ -1274,6 +1297,92 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// oidGivenName/oidSurname are the X.520 RDN attribute types (eIDAS Annex I
+// natural-person certificate fields) — crypto/x509/pkix.Name has no
+// dedicated GivenName/Surname fields (unlike CommonName), so they must be
+// read from the certificate's raw parsed RDN sequence.
+var (
+	oidGivenName = asn1.ObjectIdentifier{2, 5, 4, 42}
+	oidSurname   = asn1.ObjectIdentifier{2, 5, 4, 4}
+)
+
+// signerCertificateFromIncrementalUpdate extracts the X.509 certificate that
+// produced the signature signedPDF's most recent incremental update carries —
+// exactly the bytes this submission itself added on top of preparedPDF
+// (already proven to be an exact byte-prefix of signedPDF, ADR-20 byte
+// pinning) — from that update's own CMS SignerInfo, independent of anything
+// DSS's validation report chooses to expose.
+func signerCertificateFromIncrementalUpdate(signedPDF, preparedPDF []byte) (*x509.Certificate, error) {
+	if len(signedPDF) < len(preparedPDF) {
+		return nil, fmt.Errorf("signed PDF is shorter than the prepared document")
+	}
+	delta := signedPDF[len(preparedPDF):]
+	der, err := extractContentsDER(delta)
+	if err != nil {
+		return nil, fmt.Errorf("locate the newly-added signature's /Contents: %w", err)
+	}
+	p7, err := pkcs7.Parse(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse the newly-added signature's CMS SignerInfo: %w", err)
+	}
+	cert := p7.GetOnlySigner()
+	if cert == nil {
+		return nil, fmt.Errorf("the newly-added signature's CMS carries no matching signer certificate")
+	}
+	return cert, nil
+}
+
+// extractContentsDER locates the first PDF hex-string /Contents value in raw
+// and decodes it. PAdES signature dictionaries are never placed inside a
+// compressed object stream — the byte-range signing mechanism requires them
+// to be byte-addressable in the plain revision — so a direct search is
+// reliable, the same direct-byte-search approach this repo already uses
+// elsewhere for CMS/COSE contents.
+func extractContentsDER(raw []byte) ([]byte, error) {
+	marker := []byte("/Contents")
+	idx := bytes.Index(raw, marker)
+	if idx < 0 {
+		return nil, fmt.Errorf("no /Contents entry found")
+	}
+	rest := bytes.TrimLeft(raw[idx+len(marker):], " \t\r\n")
+	if len(rest) == 0 || rest[0] != '<' {
+		return nil, fmt.Errorf("/Contents is not a hex string")
+	}
+	end := bytes.IndexByte(rest, '>')
+	if end < 0 {
+		return nil, fmt.Errorf("/Contents hex string has no closing '>'")
+	}
+	// PDF hex strings may contain whitespace between digit pairs; the
+	// trailing run of zero bytes padding the /Contents placeholder to its
+	// pre-allocated length decodes fine and is ignored by ASN.1 parsing,
+	// which stops at the DER SEQUENCE's own declared length.
+	hexDigits := bytes.Join(bytes.Fields(rest[1:end]), nil)
+	der := make([]byte, hex.DecodedLen(len(hexDigits)))
+	n, err := hex.Decode(der, hexDigits)
+	if err != nil {
+		return nil, fmt.Errorf("decode /Contents hex: %w", err)
+	}
+	return der[:n], nil
+}
+
+// certGivenSurname reads the GIVENNAME/SURNAME RDN attributes from a
+// certificate's subject.
+func certGivenSurname(cert *x509.Certificate) (given, surname string) {
+	for _, atv := range cert.Subject.Names {
+		s, ok := atv.Value.(string)
+		if !ok {
+			continue
+		}
+		switch {
+		case atv.Type.Equal(oidGivenName):
+			given = s
+		case atv.Type.Equal(oidSurname):
+			surname = s
+		}
+	}
+	return given, surname
 }
 
 // pidGivenFamilyName extracts given_name/family_name from the ceremony's

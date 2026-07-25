@@ -1,10 +1,19 @@
 package command
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"testing"
+	"time"
 
+	"github.com/digitorus/pkcs7"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,6 +56,78 @@ func TestNamesMatch(t *testing.T) {
 	require.False(t, namesMatch("Jane", "Doe", "John", "Doe"), "given name mismatch")
 	require.False(t, namesMatch("Jane", "Doe", "", ""), "no certificate name is never a match")
 	require.False(t, namesMatch("", "", "Jane", "Doe"), "no PID name is never a match")
+}
+
+// TestSignerCertificateFromIncrementalUpdate proves the sole-control gate's
+// certificate identity extraction (ADR-20 item 4) end to end: mint a leaf
+// certificate carrying GIVENNAME/SURNAME RDNs the same way
+// testWallet/dcs_wallet/signer.py's ensure_signing_material does, wrap it in
+// a detached CMS SignedData the same way DSS's signDocument would, embed
+// that as a PDF hex-string /Contents value (with the same trailing zero
+// padding a real /Contents placeholder carries), and confirm the whole chain
+// - byte-prefix delta, hex decode, CMS parse, GetOnlySigner, RDN read -
+// recovers the identity without going through DSS's validation report at
+// all (dss/client.go's report never carries these fields reliably; see
+// signerCertificateFromIncrementalUpdate's doc comment).
+func TestSignerCertificateFromIncrementalUpdate(t *testing.T) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "DCS Wallet Dev Signing CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(3650 * 24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			CommonName: "DCS Signatory Instance B Signatory",
+			ExtraNames: []pkix.AttributeTypeAndValue{
+				{Type: oidGivenName, Value: "Instance B Signatory"},
+				{Type: oidSurname, Value: "BDD-Testperson"},
+			},
+		},
+		NotBefore: time.Now().Add(-time.Hour),
+		NotAfter:  time.Now().Add(825 * 24 * time.Hour),
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	require.NoError(t, err)
+	leafCert, err := x509.ParseCertificate(leafDER)
+	require.NoError(t, err)
+
+	signedData, err := pkcs7.NewSignedData([]byte("the data to be signed"))
+	require.NoError(t, err)
+	require.NoError(t, signedData.AddSigner(leafCert, leafKey, pkcs7.SignerInfoConfig{}))
+	signedData.Detach()
+	cms, err := signedData.Finish()
+	require.NoError(t, err)
+
+	// /Contents is pre-allocated at prepare time to a fixed length and DSS's
+	// actual CMS content rarely fills it exactly - the remainder pads with
+	// zero bytes, which a correct DER parse must tolerate.
+	padded := make([]byte, len(cms)+64)
+	copy(padded, cms)
+	preparedPDF := []byte("%PDF-1.7 fake prepared document\n")
+	delta := []byte("12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /Contents <" +
+		hex.EncodeToString(padded) + "> /ByteRange [0 1 2 3] >>\nendobj\n")
+	signedPDF := append(append([]byte{}, preparedPDF...), delta...)
+
+	cert, err := signerCertificateFromIncrementalUpdate(signedPDF, preparedPDF)
+	require.NoError(t, err)
+	given, surname := certGivenSurname(cert)
+	require.Equal(t, "Instance B Signatory", given)
+	require.Equal(t, "BDD-Testperson", surname)
 }
 
 // TestJWSPayloadAndHeaderRoundTrip proves the nonce-binding and payload-pin
