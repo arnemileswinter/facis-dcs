@@ -20,7 +20,7 @@ from steps.support.services.auth_service import AuthService
 from steps.support.services.template_service import TemplateService
 
 
-ARTIFACT_DIRECTORY = Path("tests/integration/artifacts")
+ARTIFACT_DIRECTORY = Path("tests/integration/artifacts/generated")
 TEMPLATE_ARTIFACT = ARTIFACT_DIRECTORY / "realistic-contract-field-template.jsonld"
 CONTRACT_ARTIFACT = ARTIFACT_DIRECTORY / "realistic-contract-field-contract.jsonld"
 
@@ -205,7 +205,7 @@ def _realistic_template_document():
         "dcs:documentStructure": {
             "@type": "dcs:DocumentStructure",
             "dcs:blocks": {"@list": blocks},
-            "dcs:layout": layout,
+            "dcs:layout": {"@list": layout},
         },
     }
 
@@ -250,7 +250,7 @@ def _blocks_by_suffix(document):
 
 
 def _layout_by_suffix(document):
-    layout = document["dcs:documentStructure"]["dcs:layout"]
+    layout = document["dcs:documentStructure"]["dcs:layout"]["@list"]
     return {node["@id"].rsplit("#block-", 1)[-1]: node for node in layout}
 
 

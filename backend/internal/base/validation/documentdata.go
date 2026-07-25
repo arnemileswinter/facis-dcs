@@ -414,7 +414,11 @@ func typeLayoutNodes(data documentData) {
 	if !ok {
 		return
 	}
-	nodes, ok := topLevelValue(documentData(structure), "layout").([]any)
+	rawLayout := topLevelValue(documentData(structure), "layout")
+	nodes, ok := jsonLDList(rawLayout)
+	if !ok {
+		nodes, ok = rawLayout.([]any)
+	}
 	if !ok {
 		return
 	}

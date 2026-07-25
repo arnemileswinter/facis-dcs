@@ -35,6 +35,7 @@ testWallet/.venv
 testWallet/dcs_wallet/__pycache__/
 
 # BDD test build artifacts
+tests/integration/artifacts/generated/
 bdd-executor
 tests/bdd/.coverage*
 tests/bdd/.tmp

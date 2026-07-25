@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -87,8 +86,7 @@ func TestRealisticContractFieldArtifactPipeline(t *testing.T) {
 	}
 	assertRealisticProvenanceAndRebase(t, templateDocument, contractDocument)
 
-	artifactDir := filepath.Join(realisticRepositoryRoot(t), "tests", "integration", "artifacts")
-	require.NoError(t, os.MkdirAll(artifactDir, 0o755))
+	artifactDir := t.TempDir()
 	writeRealisticArtifact(t, filepath.Join(artifactDir, "realistic-contract-field-template.jsonld"), templateDocument)
 	writeRealisticArtifact(t, filepath.Join(artifactDir, "realistic-contract-field-contract.jsonld"), contractDocument)
 }
@@ -182,7 +180,7 @@ func realisticTemplateDocument() map[string]any {
 		"dcs:documentStructure": map[string]any{
 			"@type":      "dcs:DocumentStructure",
 			"dcs:blocks": map[string]any{"@list": blocks},
-			"dcs:layout": layout,
+			"dcs:layout": map[string]any{"@list": layout},
 		},
 	}
 }
@@ -272,7 +270,7 @@ func assertRealisticDocumentStructure(t *testing.T, label string, document map[s
 		blocks[realisticIDSuffix(block["@id"].(string), "#block-")] = block
 	}
 	layout := map[string]map[string]any{}
-	for _, rawNode := range structure["dcs:layout"].([]any) {
+	for _, rawNode := range structure["dcs:layout"].(map[string]any)["@list"].([]any) {
 		node := rawNode.(map[string]any)
 		layout[realisticIDSuffix(node["@id"].(string), "#block-")] = node
 	}
@@ -357,13 +355,6 @@ func realisticJSON(t *testing.T, value any) *datatype.JSON {
 	raw, err := datatype.NewJSON(value)
 	require.NoError(t, err)
 	return &raw
-}
-
-func realisticRepositoryRoot(t *testing.T) string {
-	t.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	require.True(t, ok, "resolve test source path")
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", ".."))
 }
 
 func writeRealisticArtifact(t *testing.T, path string, document map[string]any) {
