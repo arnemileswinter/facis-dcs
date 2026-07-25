@@ -216,6 +216,9 @@ func NormalizeContractData(raw *datatype.JSON, _ bool) (*datatype.JSON, error) {
 		return nil, err
 	}
 	normalizeCanonicalEnvelope(data, "dcs:Contract")
+	if err := validateContractMetadataType(data); err != nil {
+		return nil, err
+	}
 	if err := validateExternalContextsResolvable(data); err != nil {
 		return nil, err
 	}

@@ -1,6 +1,29 @@
 package validation
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+// validateContractMetadataType fails fast on a dcs:Contract document whose
+// metadata node is not typed dcs:ContractMetadata — the render gate's SHACL
+// would otherwise reject the document asynchronously, long after the
+// submitting API call succeeded.
+func validateContractMetadataType(data documentData) error {
+	documentType, _ := data["@type"].(string)
+	if compactTerm(documentType) != "Contract" {
+		return nil
+	}
+	metadata, ok := topLevelValue(data, "metadata").(map[string]any)
+	if !ok {
+		return nil // cardinality is the canonical shapes' concern
+	}
+	metadataType, _ := metadata["@type"].(string)
+	if term := compactTerm(metadataType); term != "" && term != "ContractMetadata" {
+		return fmt.Errorf("a dcs:Contract document's dcs:metadata must be typed dcs:ContractMetadata, got %q", metadataType)
+	}
+	return nil
+}
 
 // materializeContractDataFields returns a deep copy of a contract document
 // whose contract-data field references are dereferenced for shape

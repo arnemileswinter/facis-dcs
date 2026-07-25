@@ -161,3 +161,13 @@ func TestContractDataGraphSurvivesPersistenceRebase(t *testing.T) {
 	fieldID := doc["dcs:contractFields"].([]any)[0].(map[string]any)["@id"].(string)
 	require.Equal(t, fieldID, countryRef)
 }
+
+// A dcs:Contract document whose metadata node still carries the template's
+// type must fail at submission — the render gate's SHACL would otherwise
+// reject it asynchronously, long after the API call succeeded.
+func TestContractRejectsTemplateMetadataType(t *testing.T) {
+	data := nestedDomainContract(t)
+	data["dcs:metadata"].(map[string]any)["@type"] = "dcs:TemplateMetadata"
+	err := normalizeNested(t, data)
+	require.ErrorContains(t, err, "dcs:ContractMetadata")
+}
