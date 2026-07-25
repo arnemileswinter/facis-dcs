@@ -86,8 +86,8 @@ contract-signing key (ADR-12, ADR-20). The only signing path is the ceremony:
 4. The wallet fetches the request object, fetches both documents, signs the
    PDF (PAdES, via its own SCA/QTSP) and the JSON-LD payload (JAdES, with the
    ceremony's request nonce bound into the protected header), and posts both
-   back to the SAME callback endpoint from step 2, positionally correlated in
-   `documentWithSignature[]` (`[0]` the PDF, `[1]` the JAdES).
+   back to the SAME callback endpoint from step 2 (`documentWithSignature[]`
+   / `signatureObject[]`).
 5. The callback validates: the submitted PDF's initial revision byte-matches
    what was pinned at prepare, the DSS-validated signature meets the
    contract's declared level (AES or QES, per `dcs:requiredCredentialType` on

@@ -54,3 +54,19 @@ Feature: Signing acceptance-path hardening
     Then get http 200:Success code
     When the wallet signs contract "SAH Replay Contract" as "SAHReplay" and the same callback is replayed
     Then the ceremony callback for contract "SAH Replay Contract" rejects the signature
+
+  # A real EUDI wallet's issued PID carries its issuer certificate as an x5c
+  # chain, not a bare jwk trusted via DID allow-list — this project's own dev
+  # PID issuance never exercised that path until now (ResolveIssuerVerification
+  # KeyForPID, backend/internal/auth/oid4vp/sdjwt/keys.go).
+  @ADR-20 @DCS-FR-SM-18
+  Scenario: A PID signed with x5c by the trusted dev issuer is accepted
+    Given contract "SAH X5C PID Trusted Contract" has reached contract state "APPROVED"
+    When the signer presents a PID signed with x5c by the trusted dev issuer for contract "SAH X5C PID Trusted Contract" field "SAHX5CTrusted"
+    Then the x5c PID presentation for contract "SAH X5C PID Trusted Contract" is accepted
+
+  @ADR-20 @DCS-FR-SM-18
+  Scenario: A PID signed with x5c by an untrusted issuer is rejected
+    Given contract "SAH X5C PID Untrusted Contract" has reached contract state "APPROVED"
+    When the signer presents a PID signed with x5c by an untrusted issuer for contract "SAH X5C PID Untrusted Contract" field "SAHX5CUntrusted"
+    Then the x5c PID presentation for contract "SAH X5C PID Untrusted Contract" is rejected as untrusted

@@ -133,9 +133,9 @@ def step_when_sign_tampered_document(context, name, signatory):
     )
 
     # A genuinely-valid, correctly-paired JAdES so the byte-tampered PDF is
-    # the ONLY malformed input — otherwise a missing/short documentWithSignature[]
-    # would itself be rejected, and the assertion below would no longer prove
-    # the byte-prefix check specifically caught the tampering (ADR-20 item 2).
+    # the ONLY malformed input — otherwise a missing/nonce-unbound JAdES would
+    # itself be rejected, and the assertion below would no longer prove the
+    # byte-prefix check specifically caught the tampering (ADR-20 item 2).
     request_uri = signature_request_leaf_url(context, ceremony_id, "object")
     claims = _decode_jwt_claims(_requests.get(request_uri, timeout=context.http_timeout_seconds).text.strip())
     payload_uri = claims["documentLocations"][1]["uri"]
@@ -149,7 +149,7 @@ def step_when_sign_tampered_document(context, name, signatory):
         callback_uri,
         data={
             "documentWithSignature[0]": base64.b64encode(signed_pdf).decode(),
-            "documentWithSignature[1]": base64.b64encode(jades.encode()).decode(),
+            "signatureObject[0]": jades,
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=context.http_timeout_seconds,
@@ -159,8 +159,8 @@ def step_when_sign_tampered_document(context, name, signatory):
 @when('a raw invalid JAdES is submitted for the signed document on contract "{name}"')
 def step_when_submit_invalid_jades(context, name):
     """Sign the PDF properly (a valid PAdES), then post it back with a
-    garbage documentWithSignature[1] — the JAdES must be rejected on its own
-    merits, independent of the PAdES being genuinely valid (ADR-20 item 6)."""
+    garbage signatureObject[0] — the JAdES must be rejected on its own merits,
+    independent of the PAdES being genuinely valid (ADR-20 item 6)."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.remote_signer import sign_pdf  # noqa: PLC0415
 
@@ -175,7 +175,7 @@ def step_when_submit_invalid_jades(context, name):
         callback_uri,
         data={
             "documentWithSignature[0]": base64.b64encode(signed_pdf).decode(),
-            "documentWithSignature[1]": base64.b64encode(b"not-a-valid-jades-at-all").decode(),
+            "signatureObject[0]": "not-a-valid-jades-at-all",
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=context.http_timeout_seconds,

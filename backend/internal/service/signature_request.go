@@ -365,20 +365,9 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
 	}
 
-	// documentWithSignature[] is positionally correlated to the documentDigests/
-	// documentLocations the request object offered (buildDocumentRetrievalJAR):
-	// [0] the PDF, and — only when a payload location was offered — [1] the
-	// JAdES over the canonical JSON-LD payload. There is no separate
-	// "signatureObject" field in the real spec's response shape; a wallet
-	// asked to sign N documents returns N signed documents, in the same order.
-	expectedDocs := 1
-	payloadRequested := ceremony.PinnedPayloadSHA256 != nil && *ceremony.PinnedPayloadSHA256 != ""
-	if payloadRequested {
-		expectedDocs = 2
-	}
 	signedDocs := formList(form, "documentWithSignature")
-	if len(signedDocs) < expectedDocs {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("expected %d signed document(s) in documentWithSignature, got %d", expectedDocs, len(signedDocs)))
+	if len(signedDocs) == 0 {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("no documentWithSignature was posted"))
 	}
 	signedPDF, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(signedDocs[0]))
 	if decErr != nil {
@@ -389,13 +378,16 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if ceremony.CredentialType != nil && *ceremony.CredentialType != "" {
 		credentialType = *ceremony.CredentialType
 	}
+	// documentWithSignature[] and signatureObject[] are two INDEPENDENT lists
+	// for the same document index (CSC obtainSignedDoc's own shape,
+	// ResponseDispatcher.Positive in the EUDI walletdriven-signer reference)
+	// — not a positional split across documents. documentWithSignature is the
+	// enveloped signature (the PAdES, embedded in the returned PDF);
+	// signatureObject is a detached signature value, which is where the
+	// detached-by-nature JAdES over the machine-readable JSON-LD rides.
 	jades := ""
-	if payloadRequested {
-		jadesBytes, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(signedDocs[1]))
-		if decErr != nil {
-			return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("decode signed payload: %w", decErr))
-		}
-		jades = strings.TrimSpace(string(jadesBytes))
+	if objects := formList(form, "signatureObject"); len(objects) > 0 {
+		jades = strings.TrimSpace(objects[0])
 	}
 	appliedBy := ""
 	if ceremony.PublishedBy != nil {

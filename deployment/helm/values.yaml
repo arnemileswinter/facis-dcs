@@ -66,6 +66,11 @@ oid4vp:
     # Baked into the container image (see deployment/docker/Dockerfile).
     dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: false
+    # Optional: trust anchors an x5c-bearing credential's certificate chain
+    # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
+    # unset — an x5c-bearing credential is then refused outright, never
+    # trusted off its own embedded certificate (sdjwt.verificationKeyFromX5C).
+    x5cAnchorsPath: ""
 
 customCA:
   enabled: false
