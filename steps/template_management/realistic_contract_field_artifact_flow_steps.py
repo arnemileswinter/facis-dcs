@@ -438,7 +438,12 @@ def step_then_documents_retain_layout(context):
 @then("the contract records its template provenance and rebases internal identifiers")
 def step_then_contract_provenance_and_rebase(context):
     provenance = context.realistic_contract_data.get("derivedFromTemplate") or {}
-    assert provenance.get("@id") == context.realistic_template_did, (
+    # The backend records the template's dereferenceable resource IRI
+    # (base.ResourceIRI("template", did)), not the bare system key.
+    provenance_id = provenance.get("@id") or ""
+    assert provenance_id == context.realistic_template_did or provenance_id.endswith(
+        f"/template/{context.realistic_template_did}"
+    ), (
         f"Contract provenance does not identify source template: {provenance}"
     )
     assert isinstance(provenance.get("version"), int) and provenance["version"] >= 1, (
