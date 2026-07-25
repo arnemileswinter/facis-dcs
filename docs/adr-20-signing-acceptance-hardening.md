@@ -133,23 +133,52 @@ by the time it ran).
 ### 4. Cert-subject to PID name matching (sole control)
 
 The signing certificate's subject must name the ceremony's verified PID:
-`GIVEN_NAME`/`SURNAME` (preferring structured DSS diagnostic-data fields,
-falling back to parsing the `SignedBy` DN string) compared, case/whitespace
-normalized, against the PID's `given_name`/`family_name`. **Mandatory for
-QES** (eIDAS Annex I requires a qualified certificate to carry the
-signatory's verified name) and **policy-configurable for AES**
-(`DCS_AES_CERT_NAME_MATCH_REQUIRED`, default **enabled** — the whole point of
-this gate is closing the shared/self-signed-key hole in item 4, so leaving it
-off by default would reopen exactly that). A repeat signatory on the same
-contract must also use a **consistent** certificate across their own
-signatures — a mid-contract certificate swap for one signer is the signal a
-compromised or shared key would produce. The validated certificate's subject
-and serial are recorded on the ceremony (`signer_cert_subject`,
-`signer_cert_serial`) for the Signature Compliance Viewer (SM-26) and this
-consistency check.
+`GIVEN_NAME`/`SURNAME` compared, case/whitespace normalized, against the
+PID's `given_name`/`family_name`. **Mandatory for QES** (eIDAS Annex I
+requires a qualified certificate to carry the signatory's verified name) and
+**policy-configurable for AES** (`DCS_AES_CERT_NAME_MATCH_REQUIRED`, default
+**enabled** — the whole point of this gate is closing the shared/self-signed-
+key hole in item 4, so leaving it off by default would reopen exactly that).
+A repeat signatory on the same contract must also use a **consistent**
+certificate across their own signatures — a mid-contract certificate swap for
+one signer is the signal a compromised or shared key would produce.
+
+The certificate is read directly from the **submitted PDF's own CMS
+SignerInfo** (`signerCertificateFromIncrementalUpdate`,
+`github.com/digitorus/pkcs7`), not from DSS's validation report. That started
+as the design (prefer DSS's structured `GivenName`/`Surname`, fall back to
+parsing the `SignedBy` DN string) but DSS's `simpleReport` never carries
+structured name attributes at all — only a CommonName-derived `SignedBy` — and
+its `diagnosticData` per-certificate entries came back empty in CI for a
+non-qualified dev-CA certificate (DSS appears to populate those name fields
+only for certificates it recognizes as qualified). Byte pinning (item 2)
+already proves the submitted PDF is exactly `ceremony.PreparedPDF` plus one
+incremental update, so the bytes after that prefix can only be the signature
+just submitted — reading the certificate from there has no dependency on what
+DSS chooses to report and cannot be ambiguous about which signature it names.
+`dss.Report.SubjectGivenName`/`SubjectSurname`/`ParseSubjectAttributes` remain
+in `dss/client.go` (DSS's `Indication`/`SubIndication`/`Qualification`/
+`SignedBy` are still sourced from its report and still matter — see item 5)
+but are no longer what the sole-control gate itself calls. The validated
+certificate's subject and serial are recorded on the ceremony
+(`signer_cert_subject`, `signer_cert_serial`) for the Signature Compliance
+Viewer (SM-26) and the cross-signature consistency check above.
 
 ### 5. Level-aware acceptance
 
+- **DSS report attribution is scoped to the submission's own signature, not
+  the document's first one.** A multi-signer contract's second-and-later
+  signatories always submit a document that already carries an earlier
+  signatory's signature — PAdES incremental updates only append — so DSS's
+  `simpleReport.signatureOrTimestampOrEvidenceRecord` carries one entry per
+  signature, oldest first. Walking the whole JSON response for the first
+  `Indication`/`SubIndication`/`SignedBy`/qualification match (the original
+  implementation) silently attributed every submission to the *oldest*
+  signature on the document, not the one just submitted.
+  `dss.latestSignatureEntry` scopes extraction to the last Signature-typed
+  entry in that list before either the fast-path fields or the item 4
+  certificate resolution run, with a whole-document-walk fallback for DSS
+  response shapes that don't nest that way.
 - `dss.Report.AssertValidAES()` is unchanged: cryptographically sound,
   carries a certificate, tolerates `INDETERMINATE`/`NO_CERTIFICATE_CHAIN_FOUND`
   (a non-qualified CA is a trust-list gap, not a crypto failure — AES needs
