@@ -22,7 +22,9 @@ import (
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
@@ -72,7 +74,19 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s has no verified PID presentation to publish a signing request for", req.CeremonyID))
 	}
 
+	// Default to the CONTRACT's own declared level requirement for this field
+	// (SM-01 per-contract level enforcement) rather than a blind "AES": a
+	// caller that omits credential_type is asking the DCS to request whatever
+	// the field actually needs, not "AES regardless" — otherwise a QES-required
+	// field's publish call fails its own fail-fast check inside Prepare below
+	// (comparing "AES" against the QES it itself requires) before the wallet
+	// ever gets a chance to sign, and the JAR's signatureQualifier would have
+	// asked the wallet for the wrong level anyway. An explicit request still
+	// wins (and still meets Prepare's fail-fast check, or is rejected there).
 	credentialType := "AES"
+	if contractData, cErr := s.readContractDataByDID(ctx, ceremony.ContractDID); cErr == nil && contractData != nil {
+		credentialType = validation.RequiredCredentialType(*contractData, ceremony.FieldName)
+	}
 	if req.CredentialType != nil && *req.CredentialType != "" {
 		credentialType = *req.CredentialType
 	}
@@ -496,6 +510,28 @@ func (s *signatureManagementsrvc) getCeremony(ctx context.Context, id string) (*
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 	return ceremony, nil
+}
+
+// readContractDataByDID reads a contract's JSON-LD data in a short read
+// transaction, so PublishSignatureRequest can default credential_type to the
+// contract's OWN declared level requirement before Prepare's fail-fast check
+// runs. Returns (nil, nil) rather than an error for a contract carrying no
+// data yet — the caller falls back to "AES" in that case, and Prepare's own
+// (authoritative) checks reject an actually-broken contract regardless.
+func (s *signatureManagementsrvc) readContractDataByDID(ctx context.Context, did string) (*datatype.JSON, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	contract, err := s.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return nil, err
+	}
+	if contract == nil {
+		return nil, nil
+	}
+	return contract.ContractData, nil
 }
 
 // loadPendingCeremony resolves a pending ceremony that has not yet been
