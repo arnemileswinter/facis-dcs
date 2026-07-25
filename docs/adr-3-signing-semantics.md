@@ -12,6 +12,12 @@
 > mechanism changed — "via EUDIPLO" below is historical. EUDIPLO is removed as
 > a dependency (ADR-20): the ceremony verifies a PID presented directly by the
 > wallet over OID4VP, with the issuer trust anchor as dev/prod configuration.
+> The "QES/QSeal is out of scope for v1 (TBD-A)" line below is also
+> **retracted** — SRS FR-SM-01 requires SES/AES/QES selectable per contract;
+> ADR-20 brings QES fully into scope for a natural person's signature, with
+> its own per-contract level gate. TBD-A's actual open question — the *legal*
+> form question the SRS itself flags as externally unsettled — is otherwise
+> unaffected; only the "out of scope" framing is withdrawn.
 
 ## Context
 
