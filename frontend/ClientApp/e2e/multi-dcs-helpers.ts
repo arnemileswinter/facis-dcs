@@ -555,7 +555,7 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
   // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
   // 15000). Carried over from the single-instance component (which fills 250),
   // 500 made every negotiated value violate the contract's own ODRL rule, so the

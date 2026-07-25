@@ -144,7 +144,7 @@ async function authorPaymentComponent(
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
   await constraint.locator('input[placeholder="value"]').fill('500')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()

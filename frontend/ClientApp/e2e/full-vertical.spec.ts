@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
 import { signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { Page } from '@playwright/test'
 
 /**
  * Full vertical: a component template with a semantic clause — human prose
@@ -167,7 +167,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-    await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+    await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
     await constraint.locator('input[placeholder="value"]').fill('500')
 
     await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -358,12 +358,12 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     // so give it a realistic window.
     const pdfDownload = page.waitForEvent('download', { timeout: 90_000 })
     await page.getByRole('button', { name: 'Export PDF' }).click()
-    const pdfBytes = readFileSync((await (await pdfDownload).path())!)
+    const pdfBytes = readFileSync(await (await pdfDownload).path())
     expect(pdfBytes.subarray(0, 5).toString('latin1')).toBe('%PDF-')
 
     const bundleDownload = page.waitForEvent('download', { timeout: 90_000 })
     await page.getByRole('button', { name: 'Export bundle' }).click()
-    const bundleBytes = readFileSync((await (await bundleDownload).path())!)
+    const bundleBytes = readFileSync(await (await bundleDownload).path())
     expect(bundleBytes.subarray(0, 2).toString('latin1')).toBe('PK')
   })
 

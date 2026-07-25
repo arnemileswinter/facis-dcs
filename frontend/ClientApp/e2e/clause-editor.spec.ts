@@ -74,8 +74,8 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     await row.locator('select').nth(1).selectOption({ label: operator })
     await row.locator('select').nth(2).selectOption({ index: boundaryIndex })
   }
-  await addContext('access region (spatial)', 'must equal', 1)
-  await addContext('access time (dateTime)', 'must be at most', 2)
+  await addContext('access region (spatial)', 'equal to', 1)
+  await addContext('access time (dateTime)', 'less than or equal to', 2)
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
@@ -146,7 +146,7 @@ test('the builder emits a logical (or) constraint when constraints are combined 
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const row = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
     await row.locator('select').nth(3).selectOption({ label: value })
   }
   await addSpatial('Germany (DEU)')
@@ -196,7 +196,7 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
     await duty.getByRole('button', { name: '+ constraint' }).click()
     const row = duty.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
     await row.locator('select').nth(3).selectOption({ label: value })
   }
   await addDutyRegion('Germany (DEU)')
@@ -255,7 +255,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const topRow = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await topRow.locator('select').nth(0).selectOption({ label: 'purpose' })
-  await topRow.locator('select').nth(1).selectOption({ label: 'must equal' })
+  await topRow.locator('select').nth(1).selectOption({ label: 'equal to' })
   await topRow.locator('select').nth(3).selectOption({ label: 'Research (RESEARCH)' })
 
   await editor.getByRole('button', { name: '+ group' }).click()
@@ -264,7 +264,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
     await group.getByRole('button', { name: '+ constraint' }).click()
     const row = group.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
     await row.locator('select').nth(3).selectOption({ label: value })
   }
   await addGroupRegion('Germany (DEU)')
