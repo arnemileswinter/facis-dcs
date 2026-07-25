@@ -43,7 +43,7 @@ export function applyInlineSemanticValues(
 export function fromDocumentSemanticValues(fields: DcsContractField[]): SemanticConditionValue[] {
   const values: SemanticConditionValue[] = []
   for (const field of fields) {
-    const scalar = fieldFillScalar(field['dcs:value'])
+    const scalar = fieldFillScalar(field['dcs:value'], field['dcs:datatype'])
     if (scalar === undefined) continue
     values.push({
       blockId: '',
