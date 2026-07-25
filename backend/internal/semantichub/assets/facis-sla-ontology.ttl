@@ -32,7 +32,7 @@ dcs:SignatureRequirement a rdfs:Class ; rdfs:label "Signature Requirement"@en .
 dcs:DomainField a owl:Class ;
   rdfs:subClassOf rdf:Property ;
   rdfs:label "Domain Field"@en ;
-  skos:definition "A contract-data field templates bind placeholders and ODRL constraints to; its IRI is its identity."@en .
+  skos:definition "A contract field templates bind clause content and ODRL constraints to; its IRI is its identity."@en .
 
 dcs:ContractPartyRoleCode a rdfs:Class ;
   rdfs:subClassOf dcs:VocabularyTerm ;
