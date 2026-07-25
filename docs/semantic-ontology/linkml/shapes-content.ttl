@@ -11,23 +11,6 @@
 # from their parent class's slot list in linkml.yaml so gen-shacl emits no
 # conflicting constraint.
 
-dcs:Clause sh:property [
-    sh:path ( dcs:content [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
-    sh:or (
-        [ sh:datatype xsd:string ]
-        [ sh:class dcs:Placeholder ]
-    )
-] .
-
-dcs:DocumentStructure sh:property [
-    sh:path ( dcs:blocks [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
-    sh:or (
-        [ sh:class dcs:Clause ]
-        [ sh:class dcs:Section ]
-        [ sh:class dcs:TextBlock ]
-    )
-] .
-
 dcs:LayoutNode sh:property [
     sh:path ( dcs:children [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
     sh:nodeKind sh:IRI

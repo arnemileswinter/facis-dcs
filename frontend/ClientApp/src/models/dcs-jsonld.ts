@@ -24,36 +24,31 @@ export interface DcsContractMetadata {
   'dcs:customMetaData'?: unknown[]
 }
 
-/** An xsd datatype a placeholder resolves to (from its SHACL sh:datatype). */
+/** An XSD datatype declared by a contract field. */
 export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
 
-/**
- * A typed, self-contained slot. The full node lives in the document's top-level
- * dcs:contractData registry, carrying its datatype straight from the SHACL
- * shape; a clause and an ODRL operand both reference it by @id. The filled value
- * rides inline on the same node (dcs:value).
- */
-export interface DcsPlaceholder {
+/** A declared contract field referenced by domain data and clause prose. */
+export interface DcsContractField {
   '@id': string
-  '@type': 'dcs:Placeholder'
-  /** Human representation shown in prose in place of the unfilled value. */
+  '@type': 'dcs:ContractField'
   'dcs:label': string
-  /** The input type, resolved from the shape's sh:datatype. */
   'dcs:datatype': XsdDatatype
-  /** The SHACL shape the datatype and constraint were resolved from. */
   'dcs:shape'?: JsonLdReference
-  'dcs:required'?: boolean
-  /** The filled runtime value; absent on a template (the declaration). */
+  'dcs:required': boolean
   'dcs:value'?: string | number | boolean
-  /** Value constraint (options/pattern/min/max) carried inline so the slot is
-   *  self-contained — render picks a select/text input without ontology lookup. */
   'dcs:valueConstraint'?: import('@template-repository/models/contract-template').SemanticValueConstraint
 }
 
-/** A clause references a placeholder by @id — a bare {"@id"} node in content. */
-export type DcsPlaceholderRef = JsonLdReference
+/** A clause references a ContractField only by its @id. */
+export type DcsContractFieldRef = JsonLdReference
 
-export type DcsContentSegment = string | DcsPlaceholderRef
+export type DcsContentSegment = string | DcsContractFieldRef
+
+/** A typed business object whose properties reference declared fields. */
+export type DcsContractDataObject = {
+  '@id'?: string
+  '@type': string
+} & Record<string, string | JsonLdReference | JsonLdReference[] | undefined>
 
 export interface DcsSection {
   '@type': 'dcs:Section'
@@ -97,15 +92,6 @@ export interface DcsDocumentStructure {
   'dcs:layout': { '@list': DcsLayoutNode[] }
 }
 
-export interface DcsContractField {
-  '@id': string
-  '@type': 'dcs:ContractField'
-  'dcs:dataType': JsonLdReference
-  'dcs:sourceObject': JsonLdReference
-  'dcs:path': string
-  'dcs:domainField'?: JsonLdReference
-}
-
 export interface OdrlConstraint {
   '@type': 'odrl:Constraint'
   'odrl:leftOperand': JsonLdReference
@@ -118,7 +104,7 @@ export interface OdrlConstraint {
    * are negotiated field references, resolved to their filled values at
    * enforcement.
    */
-  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdTypedValue[] | JsonLdReference
+  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | { '@list': (JsonLdTypedValue | JsonLdReference)[] }
 }
 
 /**
@@ -200,8 +186,10 @@ export interface DcsDocumentData {
   '@id'?: string
   'dcs:metadata': DcsTemplateMetadata | DcsContractMetadata
   'dcs:documentStructure': DcsDocumentStructure
-  /** Flat, self-contained registry of the document's typed placeholder nodes. */
-  'dcs:contractData': DcsPlaceholder[]
+  /** Typed business objects whose properties bind to declared contract fields. */
+  'dcs:contractData': DcsContractDataObject[]
+  /** Flat registry of fillable field declarations. */
+  'dcs:contractFields': DcsContractField[]
   'dcs:policies': OdrlSet
 }
 
@@ -213,7 +201,6 @@ export interface DcsTemplateData extends DcsDocumentData {
 export interface DcsContractData extends DcsDocumentData {
   '@type': 'dcs:Contract'
   'dcs:metadata': DcsContractMetadata | DcsTemplateMetadata
-  'dcs:contractFields'?: DcsContractField[]
   'dcs:parentContract'?: JsonLdReference
   derivedFromTemplate?: DcsTemplateProvenance
 }
@@ -236,7 +223,7 @@ export function isDcsClause(block: DcsBlock): block is DcsClause {
   return block['@type'] === 'dcs:Clause'
 }
 
-export function isDcsPlaceholder(seg: DcsContentSegment): seg is DcsPlaceholderRef {
+export function isDcsContractFieldRef(seg: DcsContentSegment): seg is DcsContractFieldRef {
   return typeof seg !== 'string'
 }
 
@@ -248,6 +235,7 @@ export function isDcsDocumentData(raw: unknown): raw is DcsDocumentData {
     (value['@type'] === 'dcs:ContractTemplate' || value['@type'] === 'dcs:Contract') &&
     typeof value['dcs:documentStructure'] === 'object' &&
     Array.isArray(value['dcs:contractData']) &&
+    Array.isArray(value['dcs:contractFields']) &&
     // Canonical shape: a single enclosing odrl:Set object.
     // An empty array is still accepted as "no policies yet" (brand-new
     // documents); a non-empty bare-rule array is not.

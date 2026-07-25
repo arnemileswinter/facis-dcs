@@ -105,7 +105,7 @@ to the maintained translator where it is worth its weight.
 The evaluator's "state of the world" is:
 
 - Pre-signatory: the contract's **inline field values** — `dcs:parameterValue`
-  carried on each `dcs:RequirementField` (the value-inlining unification;
+  carried on each `dcs:ContractField` (the value-inlining unification;
   the field an `odrl:leftOperand` names now carries its value directly).
 - KPI: the externally-reported runtime KPI value passed to
   `EvaluateKPIViolation`, injected as a transient world fact keyed by the same

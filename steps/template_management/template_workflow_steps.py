@@ -17,6 +17,7 @@ from steps.support.api_client import (
     template_retrieve_by_id_url,
     template_search_url,
     template_submit_url,
+    template_update_manage_url,
     template_update_url,
     template_verify_url,
 )
@@ -287,6 +288,25 @@ def step_when_submit_template(context, name, description):
     if context.requests_response.status_code == 200:
         ua = TemplateService.fetch_template(context, t["did"]).get("updated_at", "draft")
         TemplateService.store_named(context, name, t["did"], ua)
+
+@when('I update manager metadata for template "{name}" with name "{new_name}" and legacy state "{state}"')
+def step_when_manager_updates_name_and_legacy_state(context, name, new_name, state):
+    t = TemplateService.named(context, name)
+    context.requests_response = post_json(
+        context,
+        template_update_manage_url(context),
+        {"did": t["did"], "updated_at": t["updated_at"], "name": new_name, "state": state},
+    )
+
+
+@when('I update manager metadata for template "{name}" with description "{description}"')
+def step_when_manager_updates_description(context, name, description):
+    t = TemplateService.named(context, name)
+    context.requests_response = post_json(
+        context,
+        template_update_manage_url(context),
+        {"did": t["did"], "updated_at": t["updated_at"], "description": description},
+    )
 
 @when('I submit template "{name}" for review without reviewers')
 def step_when_submit_template(context, name):
@@ -565,6 +585,16 @@ def step_then_template_status(context, expected_status):
     )
 
 
+
+
+@then('template "{name}" status remains "{expected_status}"')
+def step_then_template_status_remains(context, name, expected_status):
+    assert context.requests_response.status_code == 200, context.requests_response.text
+    t = TemplateService.named(context, name)
+    actual = TemplateService.fetch_template(context, t["did"]).get("state", "").upper()
+    assert actual == expected_status.upper(), (
+        f"Template state changed: expected '{expected_status.upper()}', got '{actual}'"
+    )
 @then('the template is available for contract generation')
 def step_then_template_available_for_generation(context):
     body = context.requests_response.json()

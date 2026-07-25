@@ -7,10 +7,11 @@ import {
   type DcsBlock,
   type DcsContentSegment,
   type DcsContractData,
+  type DcsContractDataObject,
+  type DcsContractField,
   type DcsDocumentData,
   type DcsDocumentStructure,
   type DcsLayoutNode,
-  type DcsPlaceholder,
   type DcsTemplateData,
   isAtomicConstraint,
   isDcsClause,
@@ -55,7 +56,6 @@ export interface LoadDocumentMeta {
   templateType?: TemplateTypeValue
   state?: ContractTemplateState | null
   version?: number | null
-  document_number?: string | null
   updated_at?: string | null
   created_by?: string
   responsible?: ContractTemplateResponsible | null
@@ -72,7 +72,7 @@ export const useDcsDraftStore = defineStore(storeId, {
     },
     /** Enriched semantic conditions derived from stored JSON-LD contractData + policies. */
     semanticConditions(): SemanticCondition[] {
-      return contractDataToSemanticConditions(this.contractData, this.policies)
+      return contractFieldsToSemanticConditions(this.contractFields, this.policies)
     },
     /** Parties a clause rule can bind (assigner/assignee/target), by label. */
     partyAnchors(): { id: string; label: string }[] {
@@ -98,6 +98,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         templateType: this.templateType,
         blocks: this.blocks,
         layout: this.layout,
+        contractFields: this.contractFields,
         contractData: this.contractData,
         policies: this.policies,
         customMetaData: this.customMetaData,
@@ -125,9 +126,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       if (!this.did || !this.updated_at) return null
       return {
         did: this.did,
-        state: this.state,
         updated_at: this.updated_at,
-        document_number: this.document_number ?? undefined,
         template_type: this.templateType,
         name: this.name,
         description: this.description,
@@ -155,7 +154,6 @@ export const useDcsDraftStore = defineStore(storeId, {
           templateType: templateType !== TemplateType.component ? templateType : derivedTemplateType,
           state: meta.state ?? undefined,
           version: meta.version ?? null,
-          document_number: meta.document_number ?? null,
           updated_at: meta.updated_at ?? null,
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
@@ -163,6 +161,7 @@ export const useDcsDraftStore = defineStore(storeId, {
           layout: extractLayoutList(structure['dcs:layout']).length
             ? extractLayoutList(structure['dcs:layout'])
             : getInitialLayout(),
+          contractFields: rawDoc['dcs:contractFields'],
           contractData: rawDoc['dcs:contractData'],
           policies: flattenPolicySet(rawDoc['dcs:policies']),
           customMetaData: (metadata['dcs:customMetaData'] as MetaData[]) ?? [],
@@ -178,7 +177,6 @@ export const useDcsDraftStore = defineStore(storeId, {
         templateType,
         state: meta.state ?? undefined,
         version: meta.version ?? null,
-        document_number: meta.document_number ?? null,
         updated_at: meta.updated_at ?? null,
         created_by: meta.created_by ?? '',
         responsible: meta.responsible ?? null,
@@ -202,7 +200,8 @@ export const useDcsDraftStore = defineStore(storeId, {
       const inlined = inlineComponentDocument(templateData, this.did ?? undefined)
       this.blocks.push(...inlined.blocks)
       this.layout.push(...inlined.layoutNodes)
-      this.contractData.push(...inlined.placeholders)
+      this.contractFields.push(...inlined.contractFields)
+      this.contractData.push(...inlined.contractData)
       this.policies.push(...inlined.policies)
 
       const parent = this.layout.find((n) => n['@id'] === parentBlockId)
@@ -271,30 +270,37 @@ export const useDcsDraftStore = defineStore(storeId, {
     addSemanticCondition(payload: Omit<SemanticCondition, 'conditionId'>): void {
       const conditionId = crypto.randomUUID()
       const documentId = this.documentIri ?? this.did ?? undefined
-      const placeholders = payload.parameters.map((p) => semanticParamToPlaceholder(conditionId, p, documentId))
-      this.contractData.push(...placeholders)
+      const fields = payload.parameters.map((p) => semanticParamToContractField(conditionId, p, documentId))
+      this.contractFields.push(...fields)
+      this.contractData.push(semanticConditionToContractData({ ...payload, conditionId }, fields, documentId))
       this.policies.push(
-        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractData, this.blocks, documentId),
+        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractFields, this.blocks, documentId),
       )
     },
     updateSemanticCondition(conditionId: string, payload: Omit<SemanticCondition, 'conditionId'>): void {
       const documentId = this.documentIri ?? this.did ?? undefined
-      // A condition maps 1:1 to a placeholder (@id == conditionId in the
-      // reconstructed view-model); replace that node and its policies.
-      const oldFieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
+      const oldFieldIds = new Set(
+        this.contractFields.filter((field) => field['@id'].includes(conditionId)).map((field) => field['@id']),
+      )
       if (oldFieldIds.size === 0) return
-      const placeholders = payload.parameters.map((p) => semanticParamToPlaceholder(conditionId, p, documentId))
-      this.contractData = [...this.contractData.filter((ph) => ph['@id'] !== conditionId), ...placeholders]
+      const fields = payload.parameters.map((p) => semanticParamToContractField(conditionId, p, documentId))
+      this.contractFields = [...this.contractFields.filter((field) => !oldFieldIds.has(field['@id'])), ...fields]
+      this.contractData = [
+        ...this.contractData.filter((object) => object['@id'] !== contractDataObjectIri(conditionId, documentId)),
+        semanticConditionToContractData({ ...payload, conditionId }, fields, documentId),
+      ]
       this.policies = this.policies.filter((p) => !ruleLeftOperands(p).some((op) => oldFieldIds.has(op)))
       this.policies.push(
-        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractData, this.blocks, documentId),
+        ...semanticConditionToPolicies({ ...payload, conditionId }, this.contractFields, this.blocks, documentId),
       )
     },
     deleteSemanticCondition(conditionId: string): void {
-      const fieldIds = new Set(this.contractData.filter((ph) => ph['@id'] === conditionId).map((ph) => ph['@id']))
+      const fieldIds = new Set(
+        this.contractFields.filter((field) => field['@id'].includes(conditionId)).map((field) => field['@id']),
+      )
       if (fieldIds.size === 0) return
 
-      // Remove placeholder references from clause blocks
+      // Remove field references from clause blocks.
       for (const block of this.blocks) {
         if (block['@type'] !== 'dcs:Clause') continue
         const clause = block
@@ -305,7 +311,10 @@ export const useDcsDraftStore = defineStore(storeId, {
         }
       }
 
-      this.contractData = this.contractData.filter((ph) => !fieldIds.has(ph['@id']))
+      this.contractFields = this.contractFields.filter((field) => !fieldIds.has(field['@id']))
+      this.contractData = this.contractData.filter(
+        (object) => object['@id'] !== contractDataObjectIri(conditionId, this.documentIri ?? this.did ?? undefined),
+      )
       this.policies = this.policies.filter((p) => !ruleLeftOperands(p).some((op) => fieldIds.has(op)))
     },
     /** Adds a clause as prose + its machine-readable ODRL rule (linked by
@@ -319,7 +328,7 @@ export const useDcsDraftStore = defineStore(storeId, {
     }): void {
       const blockId = this.addClause({ title: payload.title, content: payload.content })
       for (const f of payload.fields) {
-        this.contractData.push(placeholderFromField(f.id, f.parameterName, f.domainFieldIri))
+        this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri))
       }
       if (payload.rule) {
         this.policies.push({ ...payload.rule, 'dcs:prose': { '@id': blockId } })
@@ -386,9 +395,6 @@ export const useDcsDraftStore = defineStore(storeId, {
     },
     updateDescription(description: string): void {
       this.description = description
-    },
-    updateDocumentNumber(documentNumber: string): void {
-      this.document_number = documentNumber || null
     },
     reset(overrides?: Partial<TemplateDraftState>) {
       Object.assign(this, getInitialState())
@@ -489,7 +495,8 @@ interface CanonicalDocumentInput {
   templateType?: TemplateTypeValue
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
-  contractData: DcsPlaceholder[]
+  contractFields: DcsContractField[]
+  contractData: DcsContractDataObject[]
   policies: OdrlRule[]
   customMetaData?: MetaData[]
   semanticConditionValues?: SemanticConditionValue[]
@@ -500,9 +507,11 @@ interface CanonicalDocumentInput {
 function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentData {
   const isContract = input.documentType === 'dcs:Contract'
   const submittedValues = input.semanticConditionValues ?? []
-  // A contract carries its submitted values inline on the placeholder each one
-  // targets (dcs:value); a template declares placeholders with no values.
-  const contractData = isContract ? applyInlineSemanticValues(input.contractData, submittedValues) : input.contractData
+  // A contract carries submitted values on the field declarations; domain
+  // objects and clause prose continue to reference those fields only by @id.
+  const contractFields = isContract
+    ? applyInlineSemanticValues(input.contractFields, submittedValues)
+    : input.contractFields
   const canonicalBlocks = canonicalizeBlocks(input.blocks)
   const canonicalLayout = canonicalizeLayout(input.layout)
   const commonMetadata = {
@@ -531,7 +540,8 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
       'dcs:blocks': { '@list': canonicalBlocks },
       'dcs:layout': { '@list': canonicalLayout },
     },
-    'dcs:contractData': contractData,
+    'dcs:contractFields': contractFields,
+    'dcs:contractData': input.contractData,
     'dcs:policies': assemblePolicySet(input.policies, input.documentId),
     ...(isContract
       ? {
@@ -562,7 +572,8 @@ export interface ContractDocumentInput {
   description?: string
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
-  contractData: DcsPlaceholder[]
+  contractFields: DcsContractField[]
+  contractData: DcsContractDataObject[]
   policies: OdrlRule[]
   semanticConditionValues: SemanticConditionValue[]
   parentContractDid?: string
@@ -578,7 +589,7 @@ export function buildContractDocument(input: ContractDocumentInput): DcsContract
 
 export function getSemanticConditionsFromTemplateData(td: DcsDocumentData | undefined): SemanticCondition[] {
   if (!isDcsDocumentData(td)) return []
-  return contractDataToSemanticConditions(td['dcs:contractData'], flattenPolicySet(td['dcs:policies']))
+  return contractFieldsToSemanticConditions(td['dcs:contractFields'], flattenPolicySet(td['dcs:policies']))
 }
 
 // ---- Flatten-on-compose ----
@@ -589,14 +600,15 @@ interface InlinedComponent {
   /** The remapped @ids of the component's root-level blocks, in order. */
   rootChildIds: string[]
   blocks: DcsBlock[]
-  placeholders: DcsPlaceholder[]
+  contractFields: DcsContractField[]
+  contractData: DcsContractDataObject[]
   policies: OdrlRule[]
 }
 
 /**
  * Deep-clones a component document and rewrites every component-owned @id
- * (blocks, layout nodes, placeholders, policies) to a fresh unique id, keeping
- * all in-document references (@id links in layout children, clause placeholder
+ * (blocks, layout nodes, contract fields/data, policies) to fresh unique ids,
+ * keeping all in-document references (@id links in layout children, clause field
  * refs, ODRL leftOperand/rightOperand/prose) consistent. Two inlines of the
  * same component never collide.
  */
@@ -604,7 +616,8 @@ function inlineComponentDocument(component: DcsTemplateData, documentId?: string
   const structure = component['dcs:documentStructure']
   const blocks = deepClone(structure['dcs:blocks']['@list'])
   const layout = deepClone(extractLayoutList(structure['dcs:layout']))
-  const placeholders = deepClone(component['dcs:contractData'] ?? [])
+  const contractFields = deepClone(component['dcs:contractFields'] ?? [])
+  const contractData = deepClone(component['dcs:contractData'] ?? [])
   const policies = deepClone(flattenPolicySet(component['dcs:policies']))
 
   const idMap = new Map<string, string>()
@@ -619,14 +632,16 @@ function inlineComponentDocument(component: DcsTemplateData, documentId?: string
 
   for (const block of blocks) remap(block['@id'])
   for (const node of layout) remap(node['@id'])
-  for (const placeholder of placeholders) remap(placeholder['@id'])
+  for (const field of contractFields) remap(field['@id'])
+  for (const object of contractData) if (object['@id']) remap(object['@id'])
   for (const rule of policies) if (rule['@id']) remap(rule['@id'])
 
   const rewrittenBlocks = blocks.map((block) => ({ ...block, '@id': remap(block['@id']) }))
-  const rewrittenPlaceholders = placeholders.map((placeholder) => ({
-    ...placeholder,
-    '@id': remap(placeholder['@id']),
+  const rewrittenContractFields = contractFields.map((field) => ({
+    ...field,
+    '@id': remap(field['@id']),
   }))
+  const rewrittenContractData = contractData.map((object) => rewriteContractDataObject(object, idMap, remap))
   rewriteContentRefs(rewrittenBlocks, idMap)
 
   const root = layout.find((node) => node['dcs:isRoot'])
@@ -645,12 +660,13 @@ function inlineComponentDocument(component: DcsTemplateData, documentId?: string
     layoutNodes,
     rootChildIds,
     blocks: rewrittenBlocks,
-    placeholders: rewrittenPlaceholders,
+    contractFields: rewrittenContractFields,
+    contractData: rewrittenContractData,
     policies: rewrittenPolicies,
   }
 }
 
-/** Rewrites placeholder references inside clause content to their fresh ids. */
+/** Rewrites contract-field references inside clause content to their fresh ids. */
 function rewriteContentRefs(blocks: DcsBlock[], idMap: Map<string, string>): void {
   for (const block of blocks) {
     if (!isDcsClause(block)) continue
@@ -662,6 +678,26 @@ function rewriteContentRefs(blocks: DcsBlock[], idMap: Map<string, string>): voi
       ),
     }
   }
+}
+
+function rewriteContractDataObject(
+  object: DcsContractDataObject,
+  idMap: Map<string, string>,
+  remap: (id: string) => string,
+): DcsContractDataObject {
+  const rewritten: DcsContractDataObject = {
+    ...object,
+    ...(object['@id'] ? { '@id': remap(object['@id']) } : {}),
+  }
+  for (const [property, value] of Object.entries(object)) {
+    if (property.startsWith('@') || typeof value === 'string' || value === undefined) continue
+    if (Array.isArray(value)) {
+      rewritten[property] = value.map((ref) => ({ '@id': idMap.get(ref['@id']) ?? ref['@id'] }))
+    } else {
+      rewritten[property] = { '@id': idMap.get(value['@id']) ?? value['@id'] }
+    }
+  }
+  return rewritten
 }
 
 /** Rewrites a rule's own @id plus every component-owned @id it references (prose, constraint operands, nested duties). */
@@ -703,12 +739,12 @@ function remapConstraintIds(node: OdrlConstraintNode, idMap: Map<string, string>
     }
     return next
   }
-  const next = { ...node } as Record<string, unknown>
+  const next = { ...node }
   for (const op of ['odrl:and', 'odrl:or', 'odrl:xone', 'odrl:andSequence'] as const) {
     const group = node[op]
     if (group) next[op] = { '@list': group['@list'].map((child) => remapConstraintIds(child, idMap)) }
   }
-  return next as OdrlConstraintNode
+  return next
 }
 
 // ---- Layout helpers ----
@@ -891,12 +927,12 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   name: '',
   description: '',
   templateDataVersion: 1,
+  contractFields: [],
   contractData: [],
   policies: [],
   customMetaData: [],
   templateType: TemplateType.component,
   state: undefined,
-  document_number: null,
   version: null,
   updated_at: null,
   created_by: '',
@@ -909,6 +945,7 @@ function getInitialState(): TemplateDraftState {
     ...(defaultState as TemplateDraftState),
     blocks: [],
     layout: getInitialLayout(),
+    contractFields: [],
     contractData: [],
     policies: [],
     customMetaData: [],
@@ -919,7 +956,7 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-// ---- Semantic condition helpers (contractData ↔ SemanticCondition[]) ----
+// ---- Semantic condition helpers (contractFields ↔ SemanticCondition[]) ----
 
 /** xsd datatype ↔ the UI parameter type. */
 const PARAM_TYPE_TO_XSD: Record<SemanticConditionParameter['type'], import('@/models/dcs-jsonld').XsdDatatype> = {
@@ -950,19 +987,19 @@ function xsdToParamType(
   }
 }
 
-/** Builds a self-contained typed placeholder node from an authoring parameter. */
-function semanticParamToPlaceholder(
+/** Builds a self-contained ContractField declaration from an authoring parameter. */
+function semanticParamToContractField(
   conditionId: string,
   parameter: SemanticConditionParameter,
   documentId?: string,
-): DcsPlaceholder {
+): DcsContractField {
   const domainField = ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === parameter.fieldIri)
   const value = parameter.value
   const hasValue = value !== undefined && value !== null && value !== ''
   const constraint = parameter.valueConstraint ?? domainField?.valueConstraint
   return {
     '@id': fieldIri(conditionId, parameter.parameterName, documentId),
-    '@type': 'dcs:Placeholder',
+    '@type': 'dcs:ContractField',
     'dcs:label': parameter.uiMetadata?.label ?? parameter.parameterName,
     'dcs:datatype': PARAM_TYPE_TO_XSD[parameter.type],
     ...(parameter.fieldIri ? { 'dcs:shape': { '@id': domainField?.ontologyId ?? parameter.fieldIri } } : {}),
@@ -972,12 +1009,12 @@ function semanticParamToPlaceholder(
   }
 }
 
-/** Builds a placeholder for a clause-editor field binding (id + domain field). */
-function placeholderFromField(id: string, parameterName: string, domainFieldIri: string): DcsPlaceholder {
+/** Builds a ContractField for a clause-editor field binding. */
+function contractFieldFromDomainField(id: string, parameterName: string, domainFieldIri: string): DcsContractField {
   const domainField = ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri)
   return {
     '@id': id,
-    '@type': 'dcs:Placeholder',
+    '@type': 'dcs:ContractField',
     'dcs:label': domainField?.label ?? parameterName,
     'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
@@ -986,6 +1023,33 @@ function placeholderFromField(id: string, parameterName: string, domainFieldIri:
       ? { 'dcs:valueConstraint': cloneValueConstraint(domainField.valueConstraint) }
       : {}),
   }
+}
+
+function contractDataObjectIri(conditionId: string, documentId?: string): string {
+  return objectIri('contract-data', conditionId, documentId)
+}
+
+function semanticConditionToContractData(
+  condition: SemanticCondition,
+  fields: readonly DcsContractField[],
+  documentId?: string,
+): DcsContractDataObject {
+  const localType = condition.conditionName
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
+  const object: DcsContractDataObject = {
+    '@id': contractDataObjectIri(condition.conditionId, documentId),
+    '@type': `dcs:${localType || 'ContractData'}${localType.endsWith('Clause') ? '' : 'Clause'}`,
+  }
+  condition.parameters.forEach((parameter, index) => {
+    const property = `dcs:${parameter.parameterName.replace(/[^A-Za-z0-9_]/g, '') || `field${index + 1}`}`
+    const field = fields[index]
+    if (field) object[property] = { '@id': field['@id'] }
+  })
+  return object
 }
 
 function proseBlockForField(blocks: readonly DcsBlock[], fieldId: string): JsonLdReference {
@@ -1000,13 +1064,13 @@ function proseBlockForField(blocks: readonly DcsBlock[], fieldId: string): JsonL
     }
   }
   throw new Error(
-    `No clause text binds field ${fieldId}: every machine-readable rule must be backed by human-readable prose (place the field's placeholder in a clause first).`,
+    `No clause text binds field ${fieldId}: every machine-readable rule must be backed by human-readable prose (place the field reference in a clause first).`,
   )
 }
 
 function semanticConditionToPolicies(
   condition: SemanticCondition,
-  _contractData: DcsPlaceholder[],
+  _contractFields: DcsContractField[],
   blocks: readonly DcsBlock[],
   documentId?: string,
 ): OdrlRule[] {
@@ -1065,8 +1129,8 @@ function ruleLeftOperands(rule: OdrlRule): string[] {
   )
 }
 
-function contractDataToSemanticConditions(
-  placeholders: readonly DcsPlaceholder[],
+function contractFieldsToSemanticConditions(
+  fields: readonly DcsContractField[],
   policies: readonly OdrlRule[],
 ): SemanticCondition[] {
   const operatorsByField = new Map<string, SemanticParameterOperator[]>()
@@ -1087,38 +1151,38 @@ function contractDataToSemanticConditions(
       const targets =
         rightOperand === undefined || isReference
           ? []
-          : Array.isArray(rightOperand)
-            ? rightOperand.map(jsonLdValue)
+          : '@list' in rightOperand
+            ? rightOperand['@list'].map(jsonLdValue)
             : [jsonLdValue(rightOperand)]
       const fieldId = constraint['odrl:leftOperand']['@id']
       operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets }])
     }
   }
 
-  // Each self-contained placeholder is surfaced as a single-parameter condition
-  // whose conditionId is the placeholder @id; its input type comes straight from
+  // Each field is surfaced as a single-parameter condition whose conditionId
+  // is the field @id; its input type comes straight from
   // dcs:datatype and its constraint from the inline dcs:valueConstraint.
-  return placeholders.map((placeholder) => {
-    const shapeIri = placeholder['dcs:shape']?.['@id']
+  return fields.map((field) => {
+    const shapeIri = field['dcs:shape']?.['@id']
     const ontologyField = ONTOLOGY_DOMAIN_FIELDS.find((candidate) => candidate.ontologyId === shapeIri)
-    const constraint = placeholder['dcs:valueConstraint'] ?? ontologyField?.valueConstraint
+    const constraint = field['dcs:valueConstraint'] ?? ontologyField?.valueConstraint
     const hasOptions = !!constraint?.valueOptions?.length || !!constraint?.allowedValues?.length
-    const label = placeholder['dcs:label']
+    const label = field['dcs:label']
     return {
-      conditionId: placeholder['@id'],
+      conditionId: field['@id'],
       conditionName: label,
       schemaVersion: 'v1' as const,
       parameters: [
         {
           parameterName: label,
-          fieldId: placeholder['@id'],
-          type: xsdToParamType(placeholder['dcs:datatype'], hasOptions),
-          fieldIri: shapeIri ?? placeholder['@id'],
+          fieldId: field['@id'],
+          type: xsdToParamType(field['dcs:datatype'], hasOptions),
+          fieldIri: shapeIri ?? field['@id'],
           valueConstraint: constraint ? cloneValueConstraint(constraint) : undefined,
           uiMetadata: { label },
-          isRequired: placeholder['dcs:required'] ?? false,
-          operators: operatorsByField.get(placeholder['@id']) ?? [],
-          value: placeholder['dcs:value'],
+          isRequired: field['dcs:required'],
+          operators: operatorsByField.get(field['@id']) ?? [],
+          value: field['dcs:value'],
         },
       ],
     }
@@ -1128,10 +1192,10 @@ function contractDataToSemanticConditions(
 function odrlRightOperand(
   operator: SemanticParameterOperator,
   parameterType: SemanticConditionParameter['type'],
-): JsonLdTypedValue | JsonLdTypedValue[] | undefined {
+): JsonLdTypedValue | { '@list': JsonLdTypedValue[] } | undefined {
   if (!operator.targets.length) return undefined
   const operands = operator.targets.map((target) => typedJsonLdValue(target, parameterType))
-  if (isSetOperator(operator.operate)) return operands
+  if (isSetOperator(operator.operate)) return { '@list': operands }
   return operands[0]
 }
 
@@ -1184,7 +1248,8 @@ function isSetOperator(operator: string): boolean {
   return operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf'
 }
 
-function jsonLdValue(value: JsonLdTypedValue): unknown {
+function jsonLdValue(value: JsonLdTypedValue | JsonLdReference): unknown {
+  if ('@id' in value) return value['@id']
   switch (value['@type']) {
     case 'xsd:decimal':
     case 'xsd:integer':
@@ -1206,5 +1271,6 @@ function cloneValueConstraint(
     ...constraint,
     allowedValues: constraint.allowedValues ? [...constraint.allowedValues] : undefined,
     valueOptions: constraint.valueOptions?.map((option) => ({ ...option })),
+    odrlLeftOperands: constraint.odrlLeftOperands ? [...constraint.odrlLeftOperands] : undefined,
   }
 }

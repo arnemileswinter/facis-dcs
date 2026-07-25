@@ -7,7 +7,6 @@ export interface ContractTemplateCreateRequest {
   template_type: TemplateType
   name?: string
   description?: string
-  document_number?: string | null
   /** The template data of the contract template */
   template_data?: DcsTemplateData
 }
@@ -28,7 +27,6 @@ export interface ContractTemplateSubmitRequest {
 export interface ContractTemplateUpdateRequest {
   did: string
   updated_at: string
-  document_number?: string
   name?: string
   description?: string
   /** The template data of the contract template */
@@ -37,9 +35,7 @@ export interface ContractTemplateUpdateRequest {
 
 export interface ContractTemplateUpdateManageRequest {
   did: string
-  state?: ContractTemplateState
   updated_at: string
-  document_number?: string
   template_type?: TemplateType
   name?: string
   description?: string
@@ -51,7 +47,6 @@ export interface ContractTemplateSearchRequest {
   offset?: number
   limit?: number
   did?: string
-  document_number?: string
   version?: number
   template_type?: TemplateType
   state?: ContractTemplateState

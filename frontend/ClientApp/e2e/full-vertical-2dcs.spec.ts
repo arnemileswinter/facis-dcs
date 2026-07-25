@@ -63,7 +63,7 @@ test.describe.configure({ retries: 0 })
 
 let bInstance: Awaited<ReturnType<typeof openInstanceB>> | undefined
 test.afterEach(async () => {
-  await bInstance?.context.close().catch(() => {})
+  await bInstance?.context.close().catch(() => undefined)
   bInstance = undefined
 })
 

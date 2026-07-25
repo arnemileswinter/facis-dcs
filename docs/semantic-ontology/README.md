@@ -27,23 +27,24 @@ A document is a `dcs:ContractTemplate` or `dcs:Contract` carrying:
 - `dcs:metadata` — title, description, template type.
 - `dcs:documentStructure` — ordered `dcs:blocks` (`dcs:Section`,
   `dcs:TextBlock`, `dcs:Clause` — a clause's `dcs:content` list mixes prose
-  strings and `dcs:Placeholder` segments binding to requirement fields; a
+  strings and bare `{"@id":"…"}` references to contract fields; a
   clause may carry a `dcs:typedClause` instance shaped by the hub's clause
   catalog) and a `dcs:layout` tree.
-- `dcs:contractData` — `dcs:DataRequirement` groups of
-  `dcs:RequirementField`s; a field may reference a catalog property via
-  `dcs:domainField` (the field IRI is its identity).
+- `dcs:contractFields` — flat `dcs:ContractField` declarations with label,
+  datatype, required flag, optional shape, and optional filled value.
+- `dcs:contractData` — typed business objects whose properties reference
+  declared contract fields by `@id`.
 - `dcs:policies` — ONE enclosing ODRL policy: `odrl:Offer` until the first
   signature seals it into an `odrl:Agreement`. Every rule carries
   `odrl:action`, `odrl:assigner`, `odrl:assignee`, `odrl:target`, and
   `dcs:prose` (the human-readable clause it operationalizes).
-- `semanticConditionValues` — submitted runtime values:
-  `{ forField: <RequirementField IRI>, parameterValue, blockId }`.
+- Filled contracts carry submitted runtime values as `dcs:value` on the
+  corresponding `dcs:ContractField`.
 - Contracts add `derivedFromTemplate` (provenance) and `dcs:parties`
   (`dcs:CompanyParty` nodes with `dcs:role`).
 
 Real, current examples: [contract.jsonld](examples/contract.jsonld)
-(placeholder fill + ODRL Offer) and
+(contract-field fill + ODRL Offer) and
 [typed-clause-contract.jsonld](examples/typed-clause-contract.jsonld)
 (hub typed clause carried through template derivation).
 

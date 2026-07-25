@@ -26,7 +26,6 @@ const filterLabels: Partial<Record<keyof Searchable, string>> = {
 
 const emptyTemplate: PartialContractTemplate = {
   did: '',
-  document_number: '',
   version: -1,
   created_at: '',
   updated_at: '',

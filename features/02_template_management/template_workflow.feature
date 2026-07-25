@@ -1,4 +1,4 @@
-@UC-02-10
+@UC-02-10 @REQ-remove-free-template-state-selection-AC5
 Feature: Template Approval Workflow
   Templates progress through submission, review, and approval
   before becoming available for contract generation.

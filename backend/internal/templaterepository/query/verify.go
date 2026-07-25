@@ -97,13 +97,12 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 	}
 
 	evt := templateevents.VerifyEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		VerifiedBy:     cmd.VerifiedBy,
-		OccurredAt:     time.Now().UTC(),
-		HolderDID:      cmd.HolderDID,
-		UserRoles:      cmd.UserRoles,
+		DID:        cmd.DID,
+		Version:    processData.Version,
+		VerifiedBy: cmd.VerifiedBy,
+		OccurredAt: time.Now().UTC(),
+		HolderDID:  cmd.HolderDID,
+		UserRoles:  cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
@@ -135,10 +134,6 @@ func (h *Verifier) verifyTemplateResourceSelfDescription(ctx context.Context, cm
 	findings := []string{}
 	if cmd.HolderDID == "" {
 		findings = append(findings, "holder did is empty")
-	}
-
-	if processData.DocumentNumber != nil && *processData.DocumentNumber == "" {
-		findings = append(findings, "documentNumber is empty")
 	}
 
 	if fullTemplate.Name != nil && *fullTemplate.Name == "" {
