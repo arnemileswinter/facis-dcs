@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -129,8 +130,15 @@ def sign_via_document_retrieval(
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
     )
-    with urllib.request.urlopen(post, timeout=120) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(post, timeout=120) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # HTTPError's default str() is just "HTTP Error 400: Bad Request" — the
+        # DCS's typed error body (name/message, ADR-20) is what actually says
+        # WHY, and is otherwise silently discarded.
+        detail = exc.read().decode("utf-8", "replace")[:3000]
+        raise RuntimeError(f"ceremony callback POST {response_uri} returned HTTP {exc.code}: {detail}") from exc
 
 
 def _main() -> None:
