@@ -63,7 +63,7 @@ def _minimal_canonical_contract_data(extra_top_level: dict | None = None) -> dic
         "@context": {"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
         "@type": "dcs:Contract",
         "dcs:metadata": {
-            "@type": "dcs:TemplateMetadata",
+            "@type": "dcs:ContractMetadata",
             "dcs:title": "BDD Hierarchy Contract",
         },
         "dcs:documentStructure": {

@@ -226,6 +226,14 @@ def _refresh_template(context, role):
     return context.realistic_template_response
 
 
+def _scoped_to_did(node_id: str, did: str) -> bool:
+    """True when an internal identifier is rebased under the document's DID.
+    The backend mints dereferenceable resource IRIs (base.ResourceIRI), so
+    the pre-fragment part is either the bare DID or a URL ending in /<did>."""
+    base, _, _ = node_id.partition("#")
+    return base == did or base.endswith(f"/{did}")
+
+
 def _document_ids(document):
     ids = []
 
@@ -462,13 +470,13 @@ def step_then_contract_provenance_and_rebase(context):
         if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
     ]
     assert template_internal_ids and all(
-        node_id.startswith(context.realistic_template_did + "#") for node_id in template_internal_ids
+        _scoped_to_did(node_id, context.realistic_template_did) for node_id in template_internal_ids
     ), f"Template identifiers were not rebased to its DID: {template_internal_ids}"
     assert contract_internal_ids and all(
-        node_id.startswith(context.realistic_contract_did + "#") for node_id in contract_internal_ids
+        _scoped_to_did(node_id, context.realistic_contract_did) for node_id in contract_internal_ids
     ), f"Contract identifiers were not rebased to its DID: {contract_internal_ids}"
     assert not any(
-        node_id.startswith(context.realistic_template_did + "#") for node_id in contract_internal_ids
+        _scoped_to_did(node_id, context.realistic_template_did) for node_id in contract_internal_ids
     ), f"Contract still contains template-scoped internal identifiers: {contract_internal_ids}"
 
 
