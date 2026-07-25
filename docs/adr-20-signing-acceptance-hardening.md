@@ -178,12 +178,31 @@ consistency check.
   no code path that weakens it. What is **not yet done** is provisioning a
   mock EU trusted list into the CI DSS instance so a QES BDD scenario has a
   realistic happy path (the dev CA cannot honestly be "qualified" against the
-  real EU LOTL DSS validates against by default). This is tracked as its own
-  CI-provisioning work item against `deployment/helm/charts/dss` — it needs
-  a live DSS instance to iterate against, which a local dev environment
-  doesn't reliably provide either. Until it lands, QES BDD coverage is
-  correctness-of-rejection only (AES-vs-QES-required is covered); the
-  QES-succeeds happy path is the explicit remaining gap.
+  real EU LOTL DSS validates against by default). Until it lands, QES BDD
+  coverage is correctness-of-rejection only (AES-vs-QES-required is
+  covered); the QES-succeeds happy path is the explicit remaining gap.
+
+  Researched but not yet implemented: the DSS demo webapp
+  (`conectx/dss-demo`, wrapping `esig/dss-demonstrations`'
+  `dss-demo-webapp`) supports an *additional*, LOTL-independent trust
+  anchor via `trusted.source.keystore.{type,filename,password}`
+  (`dss.properties`) — `DSSBeanConfig.trustedCertificateSource()` loads a
+  `KeyStoreCertificateSource` from that keystore and adds it to the
+  certificate verifier **alongside** the LOTL source, which is enough to
+  turn `NO_CERTIFICATE_CHAIN_FOUND` into `TOTAL-PASSED` for the dev CA. It is
+  **not** enough on its own for `AssertValidQES`: DSS's `QESIG`
+  qualification determination is derived from **trusted-list SERVICE
+  metadata** (ETSI TS 119 172-4 service-type identifiers and qualifiers,
+  e.g. QC + QSCD), which a bare trusted keystore does not carry — only a
+  proper trusted-list entry does. So the real remaining work is standing up
+  a minimal, correctly-structured mock trusted list (not just a trusted
+  keystore) naming the dev CA as a QC/QSCD-qualified TSP, mounted into the
+  DSS container and pointed to via `current.lotl.url` (or the parallel
+  `tl.loader.ades.*` AdES-LOTL properties, which look like the
+  purpose-built override point rather than replacing the primary LOTL). This
+  is a CI-provisioning work item against `deployment/helm/charts/dss`; it
+  needs a live DSS instance to iterate against, which a local dev
+  environment doesn't reliably provide either.
 
 ### 6. JAdES validation
 
