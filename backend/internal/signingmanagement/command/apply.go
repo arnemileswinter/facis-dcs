@@ -344,6 +344,15 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	pidGiven, pidFamily := pidGivenFamilyName(ceremony.PidClaims)
 	certGiven, certSurname := report.SubjectGivenName(), report.SubjectSurname()
 	nameMatchRequired := requiredLevel == "QES" || conf.AESCertNameMatchRequired()
+	// Diagnostic (temporary): the sole-control gate accepted a submission that
+	// a BDD negative scenario expects it to reject, and the callback response
+	// alone carries no detail about why namesMatch found a match. Always
+	// logging what it actually compared is cheap and turns "check the pod
+	// logs" into real evidence instead of another guess.
+	log.Printf(
+		"sole-control name-match: ceremony=%s field=%s requiredLevel=%s nameMatchRequired=%v pid=%q/%q cert=%q/%q rawSignedBy=%q",
+		ceremony.ID, ceremony.FieldName, requiredLevel, nameMatchRequired, pidGiven, pidFamily, certGiven, certSurname, report.SignedBy,
+	)
 	if nameMatchRequired && !namesMatch(pidGiven, pidFamily, certGiven, certSurname) {
 		return fmt.Errorf("%w: PID %q %q vs. certificate %q %q", ErrCertPIDMismatch, pidGiven, pidFamily, certGiven, certSurname)
 	}
