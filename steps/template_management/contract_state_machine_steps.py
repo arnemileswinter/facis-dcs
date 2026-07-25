@@ -418,21 +418,21 @@ def step_given_contract_reached_state(context, name, state):
 @given('contract "{name}" is a draft with an unfilled required placeholder')
 def step_given_draft_with_open_placeholder(context, name):
     """A DRAFT contract derived from a template whose clause carries an inline,
-    required dcs:Placeholder without a dcs:value — the document is not closed
+    required dcs:ContractField without a dcs:value — the document is not closed
     (validation.ValidateContractClosed: "prose placeholder binds to unfilled
-    field"), which is exactly what the offer gate rejects. Placeholder @ids are
+    field"), which is exactly what the offer gate rejects. Field @ids are
     urn:uuid:* on the template; contract creation rebases them onto the
-    contract DID (documentdata.go rebaseIDText), placeholder node and prose
+    contract DID (documentdata.go rebaseIDText), field node and prose
     reference alike, so closedness still pairs them up."""
     from steps.support.services.template_service import TemplateService  # noqa: PLC0415
 
     field_id = "urn:uuid:field-payment-amount"
     template_data = TemplateService.canonical_document_data("BDD Open Placeholder Template")
     template_data["@context"]["xsd"] = "http://www.w3.org/2001/XMLSchema#"
-    template_data["dcs:contractData"] = [
+    template_data["dcs:contractFields"] = [
         {
             "@id": field_id,
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Amount",
             "dcs:datatype": "xsd:decimal",
             "dcs:required": True,
@@ -458,13 +458,13 @@ def step_when_fill_required_placeholder(context, name, value):
     assert contract_data, f"contract '{name}' has no contract_data: {body}"
 
     filled = 0
-    for placeholder in contract_data.get("dcs:contractData") or []:
-        if placeholder.get("dcs:required") and not placeholder.get("dcs:value"):
-            placeholder["dcs:value"] = float(value) if "." in value else int(value)
+    for field in contract_data.get("dcs:contractFields") or []:
+        if field.get("dcs:required") and not field.get("dcs:value"):
+            field["dcs:value"] = float(value) if "." in value else int(value)
             filled += 1
     assert filled, (
-        f"contract '{name}' has no unfilled required placeholder to fill: "
-        f"{contract_data.get('dcs:contractData')}"
+        f"contract '{name}' has no unfilled required field to fill: "
+        f"{contract_data.get('dcs:contractFields')}"
     )
 
     resp = put_json(
