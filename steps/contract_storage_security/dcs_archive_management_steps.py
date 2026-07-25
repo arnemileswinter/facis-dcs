@@ -17,6 +17,7 @@ from steps.support.api_client import (
     archive_delete_url,
     archive_retrieve_url,
     archive_search_url,
+    archive_statistics_url,
     delete_with_params,
     get_with_headers,
     post_json,
@@ -319,4 +320,75 @@ def step_then_archive_annotation_audited(context, name):
     assert "ANNOTATE_ARCHIVED_CONTRACT" in event_types_for_did, (
         f"Expected an ANNOTATE_ARCHIVED_CONTRACT audit event for contract '{name}' ({did}), "
         f"got event types for this DID: {event_types_for_did}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Archive dashboard statistics (DCS-FR-CSA-21)
+# ---------------------------------------------------------------------------
+
+
+@given('contract "{name}" is set to expire in 7 days directly in the database (expiry-window test seam)')
+def step_given_contract_expires_soon(context, name):
+    """The UI has no expiration editor yet (CSA-23 surface) and contract
+    update only accepts EventUpdate from Draft, so the expiry window is
+    seeded via the shared test DB connection — the same accepted seam
+    steps/contract_deployment/dcs_contract_deployment_steps.py's
+    expiry-date step uses."""
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    cursor = context.db.cursor()
+    cursor.execute("UPDATE contracts SET exp_date = %s WHERE did = %s", (expires, did))
+    context.db.commit()
+    cursor.close()
+
+
+@when("the Archive Manager retrieves the archive statistics")
+def step_when_archive_manager_retrieves_statistics(context):
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    context.requests_response = get_with_headers(context, archive_statistics_url(context), headers=headers)
+
+
+@when("I attempt to retrieve the archive statistics with my current role")
+def step_when_attempt_retrieve_statistics(context):
+    headers = getattr(context, "headers", {})
+    context.requests_response = get_with_headers(context, archive_statistics_url(context), headers=headers)
+
+
+@then("the archive statistics count at least one archived contract with positive storage volume")
+def step_then_statistics_counts_archive(context):
+    body = context.requests_response.json()
+    assert body.get("archived_total", 0) >= 1, f"expected at least one archive entry: {body}"
+    assert body.get("archived_contracts", 0) >= 1, f"expected at least one archived contract: {body}"
+    assert body.get("storage_bytes", 0) > 0, f"expected a positive storage volume: {body}"
+
+
+@then("the archive statistics report a compliant archive entry")
+def step_then_statistics_compliant(context):
+    body = context.requests_response.json()
+    assert body.get("compliant_total", 0) >= 1, (
+        f"expected at least one compliant entry (snapshot + content hash + signature "
+        f"metadata + TSA receipt): {body}"
+    )
+
+
+@then('the archive statistics list contract "{name}" as expiring')
+def step_then_statistics_expiring(context, name):
+    did, _ = ContractService._contract_data(context, name)
+    body = context.requests_response.json()
+    expiring = [entry.get("did") for entry in body.get("expiring_contracts", [])]
+    assert did in expiring, f"expected {did} in expiring contracts, got: {expiring}"
+
+
+@then('the archive statistics include a recent archive action for contract "{name}"')
+def step_then_statistics_recent_action(context, name):
+    did, _ = ContractService._contract_data(context, name)
+    body = context.requests_response.json()
+    actions = body.get("recent_actions", [])
+    matching = [action for action in actions if action.get("did") == did]
+    assert matching, f"expected a recent archive action for {did}, got: {actions}"
+    assert all(action.get("actor") for action in matching), (
+        f"recent actions must name their actor: {matching}"
     )

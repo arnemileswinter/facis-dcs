@@ -1,4 +1,5 @@
 import {
+  ArchiveBoxIcon,
   ArrowsRightLeftIcon,
   CheckCircleIcon,
   CircleStackIcon,
@@ -27,6 +28,7 @@ import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
+import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
@@ -67,6 +69,9 @@ const ROUTES = {
   },
   AUDIT: {
     LIST: 'audit.list',
+  },
+  ARCHIVE: {
+    DASHBOARD: 'archive.dashboard',
   },
   AUTH: {
     SUCCESS: 'auth.success',
@@ -263,6 +268,19 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Audit',
       order: 5,
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
+    },
+  },
+  {
+    path: '/archive/dashboard',
+    name: ROUTES.ARCHIVE.DASHBOARD,
+    component: ArchiveDashboardView,
+    meta: {
+      name: 'Archive',
+      icon: ArchiveBoxIcon,
+      requiresAuth: true,
+      title: 'DCS - Archive Dashboard',
+      order: 6,
       roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
     },
   },

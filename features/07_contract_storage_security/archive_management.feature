@@ -125,3 +125,20 @@ Feature: Contract storage and archive retrieval
     And I am authenticated with roles: "Contract Observer"
     When I attempt to annotate the archived contract "Unauthorized Annotation Contract" with my current role
     Then the request is denied with a client error
+
+  @UC-07-01 @DCS-FR-CSA-21
+  Scenario: Archive dashboard statistics reflect the archive and flag expiring contracts
+    Given contract "Archive Statistics Contract" has reached contract state "SIGNED"
+    And contract "Archive Statistics Contract" is set to expire in 7 days directly in the database (expiry-window test seam)
+    When the Archive Manager retrieves the archive statistics
+    Then get http 200:Success code
+    And the archive statistics count at least one archived contract with positive storage volume
+    And the archive statistics report a compliant archive entry
+    And the archive statistics list contract "Archive Statistics Contract" as expiring
+    And the archive statistics include a recent archive action for contract "Archive Statistics Contract"
+
+  @UC-07-02 @DCS-FR-CSA-21
+  Scenario: A role outside the archive scope cannot read the archive statistics
+    Given I am authenticated with roles: "Template Creator"
+    When I attempt to retrieve the archive statistics with my current role
+    Then the request is denied with a client error
