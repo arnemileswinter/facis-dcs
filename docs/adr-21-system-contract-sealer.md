@@ -1,4 +1,4 @@
-# ADR-20: System Contract Sealer — the seal ADR-17 deliberately deferred
+# ADR-21: System Contract Sealer — the seal ADR-17 deliberately deferred
 
 ## Status
 
