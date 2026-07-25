@@ -367,11 +367,11 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		}
 		certGiven, certSurname = certGivenSurname(signerCert)
 	}
-	// Diagnostic (temporary): the sole-control gate accepted a submission that
-	// a BDD negative scenario expects it to reject, and the callback response
-	// alone carries no detail about why namesMatch found a match. Always
-	// logging what it actually compared is cheap and turns "check the pod
-	// logs" into real evidence instead of another guess.
+	// The sole-control gate's outcome is a security decision on every
+	// submission, and the callback response alone carries no detail about
+	// what was actually compared — logging it is cheap and turns "why was
+	// this signature accepted/rejected" into real, immediate evidence
+	// instead of needing to reproduce it.
 	log.Printf(
 		"sole-control name-match: ceremony=%s field=%s requiredLevel=%s nameMatchRequired=%v pid=%q/%q cert=%q/%q rawSignedBy=%q",
 		ceremony.ID, ceremony.FieldName, requiredLevel, nameMatchRequired, pidGiven, pidFamily, certGiven, certSurname, report.SignedBy,
