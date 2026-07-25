@@ -260,7 +260,7 @@ def _complete_ceremony_via_presentation(
     vp_token = {PID_QUERY_ID: [presentation]}
     if poa_organization:
         vp_token[POA_QUERY_ID] = [
-            _build_poa_presentation(organization=poa_organization, roles=["signatory"], aud=CEREMONY_AUD, nonce=nonce)
+            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=CEREMONY_AUD, nonce=nonce)
         ]
     import json  # noqa: PLC0415
 
