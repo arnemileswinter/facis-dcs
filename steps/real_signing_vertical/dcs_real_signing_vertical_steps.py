@@ -324,23 +324,32 @@ def _run_full_ceremony(context, name, field_name, signatory_name, holder_private
     return ceremony_id, presentation, subject_did
 
 
-def _apply_signature(context, name, *, signer_did, credential_type="AES", field_name=None):
+def _apply_signature(context, name, *, signer_did, credential_type="AES", field_name=None, ceremony_id=None, signatory=None):
     """Drive the wallet-driven signing ceremony (ADR-12): prepare the
     to-be-signed PDF, sign it with the signatory's own key via the external SCA
     (a real EU DSS), then submit it. The DCS holds no signing key — it validates
     and records what the signatory produced. Replaces the removed
     /signature/apply. A precondition failure (e.g. no completed ceremony)
     surfaces from /signature/prepare, so error scenarios see the same responses.
+
+    ceremony_id/signatory default to the contract's single most-recently-run
+    ceremony (context.ceremony_ids/pid_presentations, keyed by contract name only)
+    — correct for single-signer callers. Multi-signer callers run several
+    ceremonies under the same contract name, so that shared state holds only the
+    LAST ceremony run; they must pass both explicitly (see multi_signer_steps.py).
     """
     from steps.support.signing import wallet_sign  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
-    # The signatory name is the natural person (wallet key identity / certificate
-    # subject), taken from the ceremony's PID. It is distinct from the signature
-    # field, which names the party (instance DID) — passed separately as field_name.
-    presentation = (getattr(context, "pid_presentations", {}) or {}).get(name) or {}
-    signatory = presentation.get("given_name") or name
-    ceremony_id = (getattr(context, "ceremony_ids", {}) or {}).get(name)
+    if ceremony_id is None or signatory is None:
+        # The signatory name is the natural person (wallet key identity / certificate
+        # subject), taken from the ceremony's PID. It is distinct from the signature
+        # field, which names the party (instance DID) — passed separately as field_name.
+        presentation = (getattr(context, "pid_presentations", {}) or {}).get(name) or {}
+        if signatory is None:
+            signatory = presentation.get("given_name") or name
+        if ceremony_id is None:
+            ceremony_id = (getattr(context, "ceremony_ids", {}) or {}).get(name)
     return wallet_sign(
         context,
         did,
