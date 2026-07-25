@@ -330,18 +330,22 @@ def sign_pdf(
     signed_pdf = base64.b64decode(signed_b64)
 
     # DSS embeds signingCertificate's DER bytes verbatim in the CMS SignerInfo
-    # it builds - the same direct-byte-search proof style used elsewhere in
-    # this repo for CMS/COSE contents. This is a SEPARATE external call from
-    # ensure_signing_material's cache (already checked above): one shared DSS
-    # instance handles every concurrent signing call across the whole test
-    # run, so if it substituted a different in-flight request's certificate
-    # under load, that would show up here, not in the cache check.
-    if cert_der not in signed_pdf:
+    # it builds, but the PDF's /Contents signature dictionary entry holds that
+    # CMS blob as a HEX-ENCODED string literal (ISO 32000), not raw binary — so
+    # this searches for the cert's hex encoding, not cert_der itself, which
+    # would never match a PDF's byte stream at all. This is a SEPARATE external
+    # call from ensure_signing_material's cache (already checked above): one
+    # shared DSS instance handles every concurrent signing call across the
+    # whole test run, so if it substituted a different in-flight request's
+    # certificate under load, that would show up here, not in the cache check.
+    cert_hex_lower = cert_der.hex().encode("ascii")
+    cert_hex_upper = cert_hex_lower.upper()
+    if cert_hex_lower not in signed_pdf and cert_hex_upper not in signed_pdf:
         raise RuntimeError(
             f"DSS signDocument for user={user!r} field={field!r} returned a PDF that does not "
             "embed the certificate we sent it (searched for the requested signingCertificate's "
-            "DER bytes in the response and found no match) - this points at the shared DSS "
-            "instance itself substituting another concurrent signing call's certificate, not a "
-            "local cache issue."
+            "hex-encoded DER bytes in the response and found no match) - this points at the "
+            "shared DSS instance itself substituting another concurrent signing call's "
+            "certificate, not a local cache issue."
         )
     return signed_pdf
