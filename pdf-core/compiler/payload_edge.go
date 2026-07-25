@@ -114,6 +114,7 @@ func (l *inProcessLoader) LoadDocument(u string) (*ld.RemoteDocument, error) {
 var dcsListProperties = map[string]bool{
 	dcsOntologyIRI + "blocks":  true,
 	dcsOntologyIRI + "content": true,
+	dcsOntologyIRI + "layout":  true,
 }
 
 // dcsListIRIProperties are DCS properties that are both ordered RDF lists

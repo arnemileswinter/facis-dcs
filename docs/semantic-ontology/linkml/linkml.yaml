@@ -82,8 +82,6 @@ classes:
 
   DocumentStructure:
     class_uri: dcs:DocumentStructure
-    slots:
-      - layout
 
   Clause:
     class_uri: dcs:Clause

@@ -17,17 +17,43 @@ dcs:Clause a sh:NodeShape ;
 dcs:Contract a sh:NodeShape ;
     sh:closed false ;
     sh:ignoredProperties ( rdf:type ) ;
-    sh:property [ sh:class dcs:TemplateMetadata ;
+    sh:property [ sh:class dcs:SignatureField ;
+            sh:nodeKind sh:BlankNodeOrIRI ;
+            sh:order 6 ;
+            sh:path dcs:signatureFields ],
+        [ sh:class dcs:DocumentStructure ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:BlankNodeOrIRI ;
+            sh:order 3 ;
+            sh:path dcs:documentStructure ],
+        [ sh:class dcs:TemplateMetadata ;
             sh:maxCount 1 ;
             sh:minCount 1 ;
             sh:nodeKind sh:BlankNodeOrIRI ;
             sh:order 4 ;
             sh:path dcs:metadata ],
+        [ sh:description "Typed domain objects whose properties reference ContractField nodes by @id; validated by the DCS document gate." ;
+            sh:nodeKind sh:IRI ;
+            sh:order 2 ;
+            sh:path dcs:contractData ],
+        [ sh:nodeKind sh:IRI ;
+            sh:order 5 ;
+            sh:path dcs:policies ],
         [ sh:class dcs:ContractField ;
             sh:nodeKind sh:BlankNodeOrIRI ;
             sh:order 1 ;
             sh:path dcs:contractFields ],
-        [ sh:class dcs:DocumentStructure ;
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 0 ;
+            sh:path dcs:documentTitle ] ;
+    sh:targetClass dcs:Contract .
+
+dcs:ContractTemplate a sh:NodeShape ;
+    sh:closed false ;
+    sh:ignoredProperties ( rdf:type ) ;
+    sh:property [ sh:class dcs:DocumentStructure ;
             sh:maxCount 1 ;
             sh:nodeKind sh:BlankNodeOrIRI ;
             sh:order 3 ;
@@ -36,10 +62,6 @@ dcs:Contract a sh:NodeShape ;
             sh:nodeKind sh:IRI ;
             sh:order 2 ;
             sh:path dcs:contractData ],
-        [ sh:class dcs:SignatureField ;
-            sh:nodeKind sh:BlankNodeOrIRI ;
-            sh:order 6 ;
-            sh:path dcs:signatureFields ],
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
@@ -47,18 +69,7 @@ dcs:Contract a sh:NodeShape ;
             sh:path dcs:documentTitle ],
         [ sh:nodeKind sh:IRI ;
             sh:order 5 ;
-            sh:path dcs:policies ] ;
-    sh:targetClass dcs:Contract .
-
-dcs:ContractTemplate a sh:NodeShape ;
-    sh:closed false ;
-    sh:ignoredProperties ( rdf:type ) ;
-    sh:property [ sh:class dcs:TemplateMetadata ;
-            sh:maxCount 1 ;
-            sh:minCount 1 ;
-            sh:nodeKind sh:BlankNodeOrIRI ;
-            sh:order 4 ;
-            sh:path dcs:metadata ],
+            sh:path dcs:policies ],
         [ sh:class dcs:SignatureField ;
             sh:nodeKind sh:BlankNodeOrIRI ;
             sh:order 6 ;
@@ -67,23 +78,12 @@ dcs:ContractTemplate a sh:NodeShape ;
             sh:nodeKind sh:BlankNodeOrIRI ;
             sh:order 1 ;
             sh:path dcs:contractFields ],
-        [ sh:description "Typed domain objects whose properties reference ContractField nodes by @id; validated by the DCS document gate." ;
-            sh:nodeKind sh:IRI ;
-            sh:order 2 ;
-            sh:path dcs:contractData ],
-        [ sh:class dcs:DocumentStructure ;
+        [ sh:class dcs:TemplateMetadata ;
             sh:maxCount 1 ;
+            sh:minCount 1 ;
             sh:nodeKind sh:BlankNodeOrIRI ;
-            sh:order 3 ;
-            sh:path dcs:documentStructure ],
-        [ sh:nodeKind sh:IRI ;
-            sh:order 5 ;
-            sh:path dcs:policies ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 0 ;
-            sh:path dcs:documentTitle ] ;
+            sh:order 4 ;
+            sh:path dcs:metadata ] ;
     sh:targetClass dcs:ContractTemplate .
 
 dcs:KPIObservationSet a sh:NodeShape ;
@@ -95,6 +95,16 @@ dcs:KPIObservationSet a sh:NodeShape ;
             sh:order 0 ;
             sh:path dcs:observation ] ;
     sh:targetClass dcs:KPIObservationSet .
+
+dcs:LayoutNode a sh:NodeShape ;
+    sh:closed false ;
+    sh:ignoredProperties ( rdf:type ) ;
+    sh:property [ sh:datatype xsd:boolean ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 0 ;
+            sh:path dcs:isRoot ] ;
+    sh:targetClass dcs:LayoutNode .
 
 dcs:Section a sh:NodeShape ;
     sh:closed false ;
@@ -120,44 +130,34 @@ dcs:KPIObservation a sh:NodeShape ;
     rdfs:comment "One KPI value a contract target system reported for a deployed contract." ;
     sh:closed false ;
     sh:ignoredProperties ( rdf:type ) ;
-    sh:property [ sh:maxCount 1 ;
-            sh:nodeKind sh:IRI ;
-            sh:order 0 ;
-            sh:path dcs:aboutContract ],
-        [ sh:datatype xsd:dateTime ;
+    sh:property [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
+            sh:minCount 1 ;
             sh:nodeKind sh:Literal ;
-            sh:order 2 ;
-            sh:path dcs:observedAt ],
+            sh:order 3 ;
+            sh:path dcs:observedValue ],
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:minCount 1 ;
             sh:nodeKind sh:Literal ;
             sh:order 1 ;
             sh:path dcs:metricName ],
+        [ sh:datatype xsd:dateTime ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 2 ;
+            sh:path dcs:observedAt ],
         [ sh:datatype xsd:boolean ;
             sh:description "Whether the observed value violates an obligation the contract's own ODRL policies declare for the metric." ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
             sh:order 4 ;
             sh:path dcs:violation ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:minCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 3 ;
-            sh:path dcs:observedValue ] ;
-    sh:targetClass dcs:KPIObservation .
-
-dcs:LayoutNode a sh:NodeShape ;
-    sh:closed false ;
-    sh:ignoredProperties ( rdf:type ) ;
-    sh:property [ sh:datatype xsd:boolean ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
+        [ sh:maxCount 1 ;
+            sh:nodeKind sh:IRI ;
             sh:order 0 ;
-            sh:path dcs:isRoot ] ;
-    sh:targetClass dcs:LayoutNode .
+            sh:path dcs:aboutContract ] ;
+    sh:targetClass dcs:KPIObservation .
 
 dcs:ContractField a sh:NodeShape ;
     sh:closed false ;
@@ -169,12 +169,6 @@ dcs:ContractField a sh:NodeShape ;
             sh:nodeKind sh:Literal ;
             sh:order 0 ;
             sh:path dcs:label ],
-        [ sh:datatype xsd:boolean ;
-            sh:maxCount 1 ;
-            sh:minCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 3 ;
-            sh:path dcs:required ],
         [ sh:description "Optional filled scalar value of a ContractField; validated against dcs:datatype by the DCS document gate." ;
             sh:maxCount 1 ;
             sh:or ( [ sh:datatype xsd:string ;
@@ -197,16 +191,18 @@ dcs:ContractField a sh:NodeShape ;
             sh:minCount 1 ;
             sh:nodeKind sh:Literal ;
             sh:order 1 ;
-            sh:path dcs:datatype ] ;
+            sh:path dcs:datatype ],
+        [ sh:datatype xsd:boolean ;
+            sh:maxCount 1 ;
+            sh:minCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 3 ;
+            sh:path dcs:required ] ;
     sh:targetClass dcs:ContractField .
 
 dcs:DocumentStructure a sh:NodeShape ;
     sh:closed false ;
     sh:ignoredProperties ( rdf:type ) ;
-    sh:property [ sh:class dcs:LayoutNode ;
-            sh:nodeKind sh:BlankNodeOrIRI ;
-            sh:order 0 ;
-            sh:path dcs:layout ] ;
     sh:targetClass dcs:DocumentStructure .
 
 dcs:SignatureField a sh:NodeShape ;
@@ -232,44 +228,8 @@ dcs:TemplateMetadata a sh:NodeShape ;
     sh:property [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
-            sh:order 7 ;
-            sh:path dcs:state ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 2 ;
-            sh:path dcs:description ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 6 ;
-            sh:path dcs:sourceSystemType ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 12 ;
-            sh:path dcs:uuid ],
-        [ sh:datatype xsd:integer ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 9 ;
-            sh:path dcs:templateVersion ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 4 ;
-            sh:path dcs:name ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:nodeKind sh:Literal ;
             sh:order 5 ;
             sh:path dcs:schemaVersion ],
-        [ sh:datatype xsd:string ;
-            sh:maxCount 1 ;
-            sh:minCount 1 ;
-            sh:nodeKind sh:Literal ;
-            sh:order 10 ;
-            sh:path dcs:title ],
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
@@ -278,8 +238,38 @@ dcs:TemplateMetadata a sh:NodeShape ;
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
-            sh:order 0 ;
-            sh:path dcs:createdAt ],
+            sh:order 11 ;
+            sh:path dcs:updatedAt ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 6 ;
+            sh:path dcs:sourceSystemType ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 2 ;
+            sh:path dcs:description ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 8 ;
+            sh:path dcs:templateType ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 4 ;
+            sh:path dcs:name ],
+        [ sh:datatype xsd:integer ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 9 ;
+            sh:path dcs:templateVersion ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 12 ;
+            sh:path dcs:uuid ],
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
@@ -288,13 +278,19 @@ dcs:TemplateMetadata a sh:NodeShape ;
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
-            sh:order 11 ;
-            sh:path dcs:updatedAt ],
+            sh:order 7 ;
+            sh:path dcs:state ],
         [ sh:datatype xsd:string ;
             sh:maxCount 1 ;
             sh:nodeKind sh:Literal ;
-            sh:order 8 ;
-            sh:path dcs:templateType ] ;
+            sh:order 0 ;
+            sh:path dcs:createdAt ],
+        [ sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:minCount 1 ;
+            sh:nodeKind sh:Literal ;
+            sh:order 10 ;
+            sh:path dcs:title ] ;
     sh:targetClass dcs:TemplateMetadata .
 
 
@@ -307,13 +303,25 @@ dcs:TemplateMetadata a sh:NodeShape ;
 # on the property path, which sees only the list-head blank node and fails.
 # These shapes use the property path  p / rdf:rest* / rdf:first  to iterate
 # every member of an @list and validate each member individually.
-# The corresponding slots (content, blocks, children) are intentionally omitted
-# from their parent class's slot list in linkml.yaml so gen-shacl emits no
-# conflicting constraint.
+# The corresponding slots (content, blocks, children, layout) are intentionally
+# omitted from their parent class's slot list in linkml.yaml so gen-shacl emits
+# no conflicting constraint.
 
 dcs:LayoutNode sh:property [
     sh:path ( dcs:children [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
     sh:nodeKind sh:IRI
+] .
+
+dcs:DocumentStructure sh:property [
+    sh:path ( dcs:layout [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
+    sh:class dcs:LayoutNode
+] .
+
+# A clause content member is a literal text run or a bare IRI reference to a
+# contract field — never an embedded (blank) node.
+dcs:Clause sh:property [
+    sh:path ( dcs:content [ sh:zeroOrMorePath rdf:rest ] rdf:first ) ;
+    sh:or ( [ sh:nodeKind sh:Literal ] [ sh:nodeKind sh:IRI ] )
 ] .
 
 dcs:SignatureField sh:nodeKind sh:IRI .
