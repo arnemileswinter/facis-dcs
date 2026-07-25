@@ -5,6 +5,7 @@ document anchoring (@context hub URL + sh:shapesGraph injected by the normalizat
 ontology-prefix enforcement at template creation."""
 
 import json
+import re
 
 import requests as _requests
 from behave import given, then, when
@@ -54,6 +55,42 @@ def step_when_resolve_ontology(context, name):
     context.requests_response = _requests.get(
         _hub_url(context, f"/semantic/ontology/{name}"),
         timeout=context.http_timeout_seconds,
+    )
+
+
+@then(
+    'the ontology defines at least {minimum:d} labeled value catalogs with labeled concepts for ODRL left operand "{operand}"'
+)
+def step_then_ontology_defines_grouped_value_catalogs(context, minimum, operand):
+    turtle = context.requests_response.json()["content"]
+    statements = re.findall(
+        r"(?ms)^([^\s@#]\S*)\s+(.+?\s\.)\s*(?=^[^\s@#]|\Z)",
+        "\n".join(line for line in turtle.splitlines() if not line.lstrip().startswith("#")),
+    )
+
+    catalogs = {
+        catalog
+        for _, body in statements
+        if "a dcs:ValueConstraint" in body
+        and f"dcs:odrlLeftOperand odrl:{operand}" in body
+        for catalog in re.findall(r"dcs:valueCatalog\s+(\S+)\s*[;.]", body)
+    }
+    labeled_schemes = {
+        subject
+        for subject, body in statements
+        if "a skos:ConceptScheme" in body and "skos:prefLabel" in body
+    }
+    schemes_with_labeled_concepts = {
+        scheme
+        for _, body in statements
+        if "a skos:Concept" in body and "skos:prefLabel" in body
+        for scheme in re.findall(r"skos:inScheme\s+(\S+)\s*[;.]", body)
+    }
+    complete_catalogs = catalogs & labeled_schemes & schemes_with_labeled_concepts
+
+    assert len(complete_catalogs) >= minimum, (
+        f"Expected at least {minimum} labeled catalogs with labeled concepts for odrl:{operand}, "
+        f"got {sorted(complete_catalogs)} from mapped catalogs {sorted(catalogs)}"
     )
 
 

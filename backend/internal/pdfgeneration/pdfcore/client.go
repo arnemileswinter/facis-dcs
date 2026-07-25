@@ -125,10 +125,6 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 // Download posts jsonld to POST /render and returns the resulting PDF bytes
 // plus the renderer version from the X-PDF-Core-Version response header.
 func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, version string, err error) {
-	jsonld, err = inlinePlaceholderRenderText(jsonld)
-	if err != nil {
-		return nil, "", fmt.Errorf("pdf-core download: inline placeholder text: %w", err)
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/render", bytes.NewReader(jsonld))
 	if err != nil {
@@ -164,10 +160,6 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 // (DCS-OR-C2PA-008). Returns the updated PDF bytes and the renderer version
 // header.
 func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte, manifestURL string) (pdf []byte, version string, err error) {
-	jsonld, err = inlinePlaceholderRenderText(jsonld)
-	if err != nil {
-		return nil, "", fmt.Errorf("pdf-core update: inline placeholder text: %w", err)
-	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 

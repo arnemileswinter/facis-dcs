@@ -13,43 +13,40 @@ import (
 var ErrContractTemplateNotFound = errors.New("template not found")
 
 type ContractTemplate struct {
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	Version        int            `db:"version"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	CreatedBy      string         `db:"created_by"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
-	TemplateData   *datatype.JSON `db:"template_data"`
-	BaseTemplate   *string        `db:"base_template"`
+	DID          string         `db:"did"`
+	Version      int            `db:"version"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	CreatedBy    string         `db:"created_by"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+	TemplateData *datatype.JSON `db:"template_data"`
+	BaseTemplate *string        `db:"base_template"`
 }
 
 type ContractTemplateMetadata struct {
-	DID            string    `db:"did"`
-	DocumentNumber *string   `db:"document_number"`
-	Version        int       `db:"version"`
-	State          string    `db:"state"`
-	TemplateType   string    `db:"template_type"`
-	Name           *string   `db:"name"`
-	Description    *string   `db:"description"`
-	CreatedBy      string    `db:"created_by"`
-	CreatedAt      time.Time `db:"created_at"`
-	UpdatedAt      time.Time `db:"updated_at"`
-	BaseTemplate   *string   `db:"base_template"`
-	Outdated       *bool     `db:"outdated"`
-	LatestDID      *string   `db:"latest_did"`
+	DID          string    `db:"did"`
+	Version      int       `db:"version"`
+	State        string    `db:"state"`
+	TemplateType string    `db:"template_type"`
+	Name         *string   `db:"name"`
+	Description  *string   `db:"description"`
+	CreatedBy    string    `db:"created_by"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+	BaseTemplate *string   `db:"base_template"`
+	Outdated     *bool     `db:"outdated"`
+	LatestDID    *string   `db:"latest_did"`
 }
 
 type ContractTemplateProcessData struct {
-	DID            string    `db:"did"`
-	DocumentNumber *string   `db:"document_number"`
-	Version        int       `db:"version"`
-	State          string    `db:"state"`
-	CreatedBy      string    `db:"created_by"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	DID       string    `db:"did"`
+	Version   int       `db:"version"`
+	State     string    `db:"state"`
+	CreatedBy string    `db:"created_by"`
+	UpdatedAt time.Time `db:"updated_at"`
 	// ContentUpdatedAt moves only when template_data actually changes, so the
 	// optimistic-lock guard distinguishes a real concurrent content edit from a
 	// benign write (a state transition, the background PDF write) that merely
@@ -58,40 +55,37 @@ type ContractTemplateProcessData struct {
 }
 
 type ContractTemplateUpdateData struct {
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	TemplateData   *datatype.JSON `db:"template_data"`
+	DID          string         `db:"did"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	TemplateData *datatype.JSON `db:"template_data"`
 }
 
 type ContractTemplateHistory struct {
-	ID             string         `db:"id"`
-	DID            string         `db:"did"`
-	DocumentNumber *string        `db:"document_number"`
-	Version        int            `db:"version"`
-	State          string         `db:"state"`
-	TemplateType   string         `db:"template_type"`
-	Name           *string        `db:"name"`
-	Description    *string        `db:"description"`
-	CreatedBy      string         `db:"created_by"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
-	TemplateData   *datatype.JSON `db:"template_data"`
-	BaseTemplate   *string        `json:"base_template"`
+	ID           string         `db:"id"`
+	DID          string         `db:"did"`
+	Version      int            `db:"version"`
+	State        string         `db:"state"`
+	TemplateType string         `db:"template_type"`
+	Name         *string        `db:"name"`
+	Description  *string        `db:"description"`
+	CreatedBy    string         `db:"created_by"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+	TemplateData *datatype.JSON `db:"template_data"`
+	BaseTemplate *string        `json:"base_template"`
 }
 
 type SearchValues struct {
-	DID            string
-	DocumentNumber string
-	Version        int
-	State          string
-	TemplateType   string
-	Name           string
-	Description    string
-	TemplateData   string
+	DID          string
+	Version      int
+	State        string
+	TemplateType string
+	Name         string
+	Description  string
+	TemplateData string
 }
 
 type ContractTemplatePDFState struct {

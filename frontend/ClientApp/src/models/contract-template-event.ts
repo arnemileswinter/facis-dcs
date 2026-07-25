@@ -28,7 +28,6 @@ export interface ContractTemplateCopyEvent {
 
 export interface ContractTemplateSubmitEvent {
   did: string
-  document_number?: string
   version: number
   previous_state: ContractTemplateState
   new_state: ContractTemplateState
@@ -43,7 +42,6 @@ export interface ContractTemplateSubmitEvent {
 
 export interface ContractTemplateApproveEvent {
   did: string
-  document_number?: string
   version: number
   approved_by: string
   decision_notes?: string[]
@@ -54,7 +52,6 @@ export interface ContractTemplateApproveEvent {
 
 export interface ContractTemplateRejectEvent {
   did: string
-  document_number?: string
   version: string
   rejected_by: string
   reason: string
@@ -65,7 +62,6 @@ export interface ContractTemplateRejectEvent {
 
 export interface ContractTemplateVerifyEvent {
   did: string
-  document_number?: string
   version: number
   verified_by: string
   occurred_at: string
@@ -76,8 +72,6 @@ export interface ContractTemplateVerifyEvent {
 export interface ContractTemplateUpdateEvent {
   did: string
   updated_by: string
-  old_document_number?: string
-  new_document_number?: string
   old_name?: string
   new_name?: string
   old_description?: string
@@ -92,10 +86,6 @@ export interface ContractTemplateUpdateEvent {
 export interface ContractTemplateUpdateManageEvent {
   did: string
   updated_at: string
-  old_document_number?: string
-  new_document_number?: string
-  old_state?: ContractTemplateState
-  new_state?: ContractTemplateState
   old_name?: string
   new_name?: string
   old_description?: string
@@ -123,7 +113,6 @@ export interface ContractTemplateRetrieveAllEvent {
 
 export interface ContractTemplateRetrieveByIDEvent {
   did: string
-  document_number?: string
   version: number
   retrieved_by: string
   occurred_at: string
@@ -133,7 +122,6 @@ export interface ContractTemplateRetrieveByIDEvent {
 
 export interface ContractTemplateArchiveEvent {
   did: string
-  document_number?: string
   version: number
   archived_by: string
   occurred_at: string
@@ -157,7 +145,6 @@ export interface ContractTemplateRegisterEvent {
 
 export interface ContractTemplatePublishEvent {
   did: string
-  document_number?: string
   version: number
   published_by: string
   holder_did: string

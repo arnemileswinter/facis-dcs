@@ -42,14 +42,14 @@ $(VENV_PATH)/bin/activate:
 $(OUTPUT_PATH):
 	mkdir -p $(OUTPUT_PATH)
 
-$(OUTPUT_PATH)/$(SCHEMA).owl.ttl: setup_venv $(OUTPUT_PATH)
-	$(GEN_OWL) $(GEN_OWL_FLAGS) $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).owl.ttl
+$(OUTPUT_PATH)/$(SCHEMA).owl.ttl: setup_venv $(OUTPUT_PATH) $(SCHEMA)
+	$(VENV_PYTHON) $(GEN_OWL) $(GEN_OWL_FLAGS) $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).owl.ttl
 
-$(OUTPUT_PATH)/$(SCHEMA).shacl.ttl: setup_venv $(OUTPUT_PATH)
-	$(GEN_SHACL) --non-closed $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).shacl.ttl
+$(OUTPUT_PATH)/$(SCHEMA).shacl.ttl: setup_venv $(OUTPUT_PATH) $(SCHEMA)
+	$(VENV_PYTHON) $(GEN_SHACL) --non-closed $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).shacl.ttl
 
-$(OUTPUT_PATH)/$(SCHEMA).context.jsonld: setup_venv $(OUTPUT_PATH)
-	$(GEN_JSONLD_CONTEXT) $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).context.jsonld
+$(OUTPUT_PATH)/$(SCHEMA).context.jsonld: setup_venv $(OUTPUT_PATH) $(SCHEMA)
+	$(VENV_PYTHON) $(GEN_JSONLD_CONTEXT) $(SCHEMA) > $(OUTPUT_PATH)/$(SCHEMA).context.jsonld
 	$(VENV_PYTHON) -c "\
 import json; \
 path = '$(OUTPUT_PATH)/$(SCHEMA).context.jsonld'; \
@@ -74,7 +74,7 @@ RESET := \033[0m
 validate: setup_venv $(SHAPES_MERGED)
 	@failed=0; \
 	for f in $(VALID_TESTS); do \
-	    out=$$($(PYSHACL) -s $(SHAPES_MERGED) -df json-ld $$f 2>&1); \
+	    out=$$($(VENV_PYTHON) $(PYSHACL) -s $(SHAPES_MERGED) -df json-ld $$f 2>&1); \
 	    if echo "$$out" | grep -q "Conforms: True"; then \
 	        printf "$(GREEN)PASS$(RESET)  $$f\n"; \
 	    else \
@@ -83,7 +83,7 @@ validate: setup_venv $(SHAPES_MERGED)
 	    fi; \
 	done; \
 	for f in $(INVALID_TESTS); do \
-	    out=$$($(PYSHACL) -s $(SHAPES_MERGED) -df json-ld $$f 2>&1); \
+	    out=$$($(VENV_PYTHON) $(PYSHACL) -s $(SHAPES_MERGED) -df json-ld $$f 2>&1); \
 	    if ! echo "$$out" | grep -q "Conforms: True"; then \
 	        printf "$(GREEN)PASS$(RESET)  $$f  (correctly rejected)\n"; \
 	        echo "$$out" | grep -E "Constraint Violation|Message:|Result Path:" | sed 's/^/      /'; \

@@ -4,10 +4,10 @@
     },
     "@id": "did:web:localhost:template:test-required-not-boolean",
     "@type": "dcs:ContractTemplate",
-    "dcs:contractData": [
+    "dcs:contractFields": [
         {
             "@id": "did:web:localhost:template:test-required-not-boolean#field-1",
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Some Field",
             "dcs:datatype": "xsd:string",
             "dcs:required": "yes"

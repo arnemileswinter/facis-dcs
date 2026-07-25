@@ -1,6 +1,6 @@
-Feature: dcs:Placeholder rendering in human-readable PDF
+Feature: dcs:ContractField rendering in human-readable PDF
 
-  A clause references a top-level dcs:Placeholder by a bare {"@id"} node (ADR-15).
+  A clause references a top-level dcs:ContractField by a bare {"@id"} node.
   The DCS copies the placeholder's dcs:label and, once filled, its dcs:value onto
   that in-content reference. The compiler renders the filled value, or five
   underscores where a value has not yet been supplied — never the raw @id.
@@ -22,7 +22,7 @@ Feature: dcs:Placeholder rendering in human-readable PDF
           "@type": "TemplateMetadata",
           "title": "Placeholder Rendering Test"
         },
-        "contractData": [
+        "contractFields": [
           {
             "@id": "urn:doc:placeholder-test#field-party-name",
             "@type": "Placeholder",
@@ -90,7 +90,7 @@ Feature: dcs:Placeholder rendering in human-readable PDF
           "@type": "TemplateMetadata",
           "title": "Filled Placeholder Test"
         },
-        "contractData": [
+        "contractFields": [
           {
             "@id": "urn:doc:placeholder-filled#field-amount",
             "@type": "Placeholder",

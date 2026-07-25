@@ -28,15 +28,14 @@ import (
 )
 
 type CreateCmd struct {
-	DID            string
-	CreatedBy      string
-	TemplateType   contracttemplatetype.ContractTemplateType
-	Name           *string
-	Description    *string
-	TemplateData   *datatype.JSON
-	HolderDID      string
-	UserRoles      userrole.UserRoles
-	DocumentNumber *string
+	DID          string
+	CreatedBy    string
+	TemplateType contracttemplatetype.ContractTemplateType
+	Name         *string
+	Description  *string
+	TemplateData *datatype.JSON
+	HolderDID    string
+	UserRoles    userrole.UserRoles
 }
 
 type Creator struct {
@@ -62,14 +61,13 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}(tx)
 
 	data := db.ContractTemplate{
-		DID:            cmd.DID,
-		CreatedBy:      cmd.CreatedBy,
-		State:          contracttemplatestate.Draft.String(),
-		TemplateType:   cmd.TemplateType.String(),
-		Name:           cmd.Name,
-		Description:    cmd.Description,
-		DocumentNumber: cmd.DocumentNumber,
-		TemplateData:   cmd.TemplateData,
+		DID:          cmd.DID,
+		CreatedBy:    cmd.CreatedBy,
+		State:        contracttemplatestate.Draft.String(),
+		TemplateType: cmd.TemplateType.String(),
+		Name:         cmd.Name,
+		Description:  cmd.Description,
+		TemplateData: cmd.TemplateData,
 	}
 	createdAt, err := h.CTRepo.Create(ctx, tx, data)
 	if err != nil {

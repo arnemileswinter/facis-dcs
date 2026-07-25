@@ -156,7 +156,6 @@ function descriptionFromEventData(eventData: unknown): string {
   const objectDid = stringValue(eventData.objectDid)
   const state = stringValue(eventData.state)
   const templateType = stringValue(eventData.templateType)
-  const documentNumber = stringValue(eventData.documentNumber)
   const version = typeof eventData.version === 'number' ? String(eventData.version) : stringValue(eventData.version)
   const parts = [
     objectName
@@ -165,9 +164,7 @@ function descriptionFromEventData(eventData: unknown): string {
         ? `Object DID: ${objectDid}`
         : '',
     [templateType ? `Type: ${templateType}` : '', state ? `State: ${state}` : ''].filter(Boolean).join(' · '),
-    [documentNumber ? `Document: ${documentNumber}` : '', version ? `Version: ${version}` : '']
-      .filter(Boolean)
-      .join(' · '),
+    version ? `Version: ${version}` : '',
     message,
     requirement ? `Requirement: ${requirement}` : '',
     actualValue ? `Actual value: ${actualValue}` : '',

@@ -17,7 +17,7 @@
       "title": "Template declares contract data requirements",
       "severity": "error",
       "builtin": "canonical_contract_data",
-      "ontologyTerm": "dcs:DataRequirement",
+      "ontologyTerm": "dcs:ContractField",
       "appliesToTemplateTypes": ["CONTRACT_TEMPLATE"]
     },
     {
@@ -41,7 +41,7 @@
       "title": "Component contract data declarations are internally consistent",
       "severity": "error",
       "builtin": "component_contract_data_integrity",
-      "ontologyTerm": "dcs:DataRequirement",
+      "ontologyTerm": "dcs:ContractField",
       "appliesToTemplateTypes": ["COMPONENT"]
     },
     {

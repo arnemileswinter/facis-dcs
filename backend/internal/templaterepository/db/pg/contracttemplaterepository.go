@@ -46,7 +46,7 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 	statement := `
 		WITH source AS (
 			SELECT
-				did, document_number, template_type, name, description, created_by, template_data,
+				did, template_type, name, description, created_by, template_data,
 				CASE
 					WHEN state IN ('REGISTERED', 'PUBLISHED') THEN version + 1
 					ELSE 1
@@ -59,11 +59,10 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 			WHERE did = $2
 		)
 		INSERT INTO contract_templates
-			(did, document_number, version, state, template_type, name, description, created_by, created_at, updated_at,
+			(did, version, state, template_type, name, description, created_by, created_at, updated_at,
 			 template_data, base_template)
 		SELECT
 			$1,
-			source.document_number,
 			source.new_version,
 			'DRAFT', source.template_type, source.name, source.description, source.created_by, NOW(), NOW(),
 			source.template_data, source.new_base_template
@@ -92,10 +91,10 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         INSERT INTO contract_templates_history 
-            (did, document_number, version, state, template_type, name, description, created_by, created_at, updated_at, 
+            (did, version, state, template_type, name, description, created_by, created_at, updated_at,
              template_data, base_template)
         SELECT 
-            did, document_number, version, state, template_type, name, description, created_by, created_at, updated_at, 
+            did, version, state, template_type, name, description, created_by, created_at, updated_at,
             template_data, base_template
         FROM contract_templates 
         WHERE did = $1
@@ -106,7 +105,7 @@ func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Cont
 
 func (r *PostgresContractTemplateRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractTemplateHistory, error) {
 	query := `
-        SELECT did, document_number, version, state, name, description,
+        SELECT did, version, state, name, description,
                created_by, created_at, updated_at, template_data, template_type, base_template
         FROM contract_templates_history WHERE did = $1
     `
@@ -124,14 +123,14 @@ func (r *PostgresContractTemplateRepo) ReadHistoryByDID(ctx context.Context, tx 
 func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.ContractTemplate) (*time.Time, error) {
 	statement := `
         INSERT INTO contract_templates (
-            did, document_number, created_by, state, name,
+            did, created_by, state, name,
             description, template_data, template_type, base_template
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING created_at
     `
 	var createdAt time.Time
 	err := tx.GetContext(ctx, &createdAt, statement,
-		data.DID, data.DocumentNumber, data.CreatedBy, data.State, data.Name,
+		data.DID, data.CreatedBy, data.State, data.Name,
 		data.Description, data.TemplateData, data.TemplateType, data.DID,
 	)
 	if err != nil {
@@ -142,7 +141,7 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 
 func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplate, error) {
 	query := `
-        SELECT did, document_number, version, state, name, description,
+        SELECT did, version, state, name, description,
                created_by, created_at, updated_at, template_data, template_type,
                base_template
         FROM contract_templates WHERE did = $1
@@ -175,7 +174,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 			ORDER BY base_template, version DESC
 		)
 		SELECT
-			t.did, t.document_number, t.version, t.state, t.template_type, t.name,
+			t.did, t.version, t.state, t.template_type, t.name,
 			t.description, t.created_by, t.created_at, t.updated_at,
 			t.base_template,
 			CASE
@@ -207,7 +206,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 
 func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues, pagination datatype.Pagination) ([]db.ContractTemplateMetadata, error) {
 	query := `
-        SELECT did, document_number, version, state, name, template_type, description,
+        SELECT did, version, state, name, template_type, description,
                created_by, created_at, updated_at, base_template
         FROM contract_templates
     `
@@ -237,7 +236,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Conte
 
 func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplateProcessData, error) {
 	query := `
-        SELECT did, document_number, version, state, updated_at, content_updated_at, created_by
+		SELECT did, version, state, updated_at, content_updated_at, created_by
         FROM contract_templates WHERE did = $1
     `
 	var processData db.ContractTemplateProcessData
@@ -329,11 +328,6 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		params = append(params, values.DID)
 		paramIndex++
 	}
-	if len(values.DocumentNumber) > 0 {
-		conditions += ` document_number = $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, values.DocumentNumber)
-		paramIndex++
-	}
 	if values.Version > 0 {
 		conditions += ` version = $` + strconv.Itoa(paramIndex) + ` AND`
 		params = append(params, values.Version)
@@ -383,10 +377,6 @@ func createQuery(data db.ContractTemplateUpdateData) (*string, []interface{}, er
 	}
 
 	contentChanged := false
-	if data.DocumentNumber != nil && len(*data.DocumentNumber) > 0 {
-		addParam("document_number", data.DocumentNumber)
-		contentChanged = true
-	}
 	if len(data.State) > 0 {
 		addParam("state", data.State)
 	}

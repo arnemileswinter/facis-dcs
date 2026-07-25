@@ -44,11 +44,32 @@ classes:
         required: true
     slots:
       - documentTitle
+      - contractFields
       - contractData
       - documentStructure
       - metadata
       - policies
       - signatureFields
+
+  Contract:
+    class_uri: dcs:Contract
+    is_a: ContractTemplate
+
+  ContractField:
+    class_uri: dcs:ContractField
+    slot_usage:
+      label:
+        required: true
+      datatype:
+        required: true
+      required:
+        required: true
+    slots:
+      - label
+      - datatype
+      - shape
+      - required
+      - value
 
   SignatureField:
     class_uri: dcs:SignatureField
@@ -84,14 +105,6 @@ classes:
       - schema:Text
     slots:
       - text
-
-  Placeholder:
-    class_uri: dcs:Placeholder
-    slots:
-      - label
-      - datatype
-      - shape
-      - required
 
   TemplateMetadata:
     class_uri: dcs:TemplateMetadata
@@ -149,7 +162,13 @@ slots:
 
   contractData:
     slot_uri: dcs:contractData
-    range: Placeholder
+    range: uriorcurie
+    multivalued: true
+    description: Typed domain objects whose properties reference ContractField nodes by @id; validated by the DCS document gate.
+
+  contractFields:
+    slot_uri: dcs:contractFields
+    range: ContractField
     multivalued: true
 
   documentStructure:
@@ -328,7 +347,18 @@ slots:
     list_elements_ordered: true
     any_of:
       - range: string
-      - range: Placeholder
+      - range: uriorcurie
+
+  value:
+    slot_uri: dcs:value
+    description: Optional filled scalar value of a ContractField; validated against dcs:datatype by the DCS document gate.
+    any_of:
+      - range: string
+      - range: decimal
+      - range: integer
+      - range: boolean
+      - range: date
+      - range: datetime
 
   wasDerivedFrom:
     abstract: true

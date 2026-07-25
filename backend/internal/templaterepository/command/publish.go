@@ -116,13 +116,12 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	evt := templateevents.PublishEvent{
-		DID:            cmd.DID,
-		DocumentNumber: processData.DocumentNumber,
-		Version:        processData.Version,
-		PublishedBy:    cmd.PublishedBy,
-		HolderDID:      cmd.HolderDID,
-		OccurredAt:     time.Now().UTC(),
-		UserRoles:      cmd.UserRoles,
+		DID:         cmd.DID,
+		Version:     processData.Version,
+		PublishedBy: cmd.PublishedBy,
+		HolderDID:   cmd.HolderDID,
+		OccurredAt:  time.Now().UTC(),
+		UserRoles:   cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

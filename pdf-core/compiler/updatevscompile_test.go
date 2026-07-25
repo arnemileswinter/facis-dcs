@@ -33,12 +33,13 @@ func TestUpdatePDFPageContentMatchesFreshCompile(t *testing.T) {
 const richFilledContractPayload = `{
   "@type":"dcs:Contract",
   "dcs:metadata":{"@type":"dcs:TemplateMetadata","dcs:title":"Rich Filled Contract"},
-  "dcs:contractData":{"@list":[
-    {"@type":"dcs:DataRequirement","dcs:fields":{"@list":[
-      {"@id":"urn:c#f-amount","@type":"dcs:RequirementField","dcs:parameterName":"amount","dcs:parameterValue":"15000"},
-      {"@id":"urn:c#f-term","@type":"dcs:RequirementField","dcs:parameterName":"term","dcs:parameterValue":"36"}
-    ]}}
+  "dcs:contractFields":{"@list":[
+    {"@id":"urn:c#f-amount","@type":"dcs:ContractField","dcs:label":"Amount","dcs:datatype":"xsd:decimal","dcs:required":true,"dcs:value":15000},
+    {"@id":"urn:c#f-term","@type":"dcs:ContractField","dcs:label":"Term","dcs:datatype":"xsd:integer","dcs:required":true,"dcs:value":36}
   ]},
+  "dcs:contractData":[
+    {"@id":"urn:c#payment","@type":"dcs:PaymentClause","dcs:amount":{"@id":"urn:c#f-amount"},"dcs:term":{"@id":"urn:c#f-term"}}
+  ],
   "dcs:policies":{"@type":"odrl:Set","odrl:permission":[{"@type":"odrl:Permission","odrl:action":{"@id":"odrl:use"}}]},
   "dcs:documentStructure":{"@type":"dcs:DocumentStructure",
     "dcs:layout":{"@list":[
@@ -49,9 +50,9 @@ const richFilledContractPayload = `{
     ]},
     "dcs:blocks":{"@list":[
       {"@type":"dcs:Section","@id":"urn:c#s1","dcs:title":"1. Payment"},
-      {"@type":"dcs:Clause","@id":"urn:c#c1","dcs:content":["The amount is ",{"@type":"dcs:Placeholder","dcs:bindsTo":{"@id":"urn:c#f-amount"}}," EUR per ",{"@id":"urn:c#f-term"},"."]},
+      {"@type":"dcs:Clause","@id":"urn:c#c1","dcs:content":["The amount is ",{"@id":"urn:c#f-amount"}," EUR per ",{"@id":"urn:c#f-term"},"."]},
       {"@type":"dcs:Section","@id":"urn:c#s1a","dcs:title":"1.1 Term"},
-      {"@type":"dcs:Clause","@id":"urn:c#c2","dcs:content":["The term is ",{"@type":"dcs:Placeholder","dcs:bindsTo":{"@id":"urn:c#f-term"}}," months; renewal is ",{"@type":"dcs:Placeholder"},"."]},
+      {"@type":"dcs:Clause","@id":"urn:c#c2","dcs:content":["The term is ",{"@id":"urn:c#f-term"}," months."]},
       {"@type":"dcs:Section","@id":"urn:c#s2","dcs:title":"2. Governing Law"},
       {"@type":"dcs:Clause","@id":"urn:c#c3","dcs:content":["This agreement is governed by the laws referenced in ",{"@id":"https://w3id.org/facis/dcs/ontology/v1#Jurisdiction","schema:name":"Jurisdiction"},"."]}
     ]}

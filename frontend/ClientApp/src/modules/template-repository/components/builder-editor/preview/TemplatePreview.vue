@@ -67,7 +67,7 @@ const clauseContent = computed((): DcsContentSegment[] => {
   return content['@list']
 })
 
-// Under ADR-15 every placeholder is a self-contained top-level node wired by
+// Every ContractField is a self-contained top-level declaration wired by
 // @id, so a clause always resolves against the top-level conditions.
 const clauseSemanticConditions = computed(() => props.semanticConditions)
 </script>

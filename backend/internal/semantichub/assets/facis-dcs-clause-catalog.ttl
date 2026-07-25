@@ -166,7 +166,7 @@ dcs:OdrlConstraintShape
   sh:property [
     sh:path odrl:leftOperand ;
     sh:name "Left operand" ;
-    sh:description "What the constraint governs: an ODRL left operand (odrl:spatial, odrl:dateTime, ...) or a contract-data field (dcs:RequirementField IRI)." ;
+    sh:description "What the constraint governs: an ODRL left operand (odrl:spatial, odrl:dateTime, ...) or a contract-data field (dcs:ContractField IRI)." ;
     sh:order 1 ;
     sh:nodeKind sh:IRI ;
     sh:minCount 1 ;

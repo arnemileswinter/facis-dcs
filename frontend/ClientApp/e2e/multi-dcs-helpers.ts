@@ -145,10 +145,10 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   })
 
   const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
-  const prepared = await preparedResponse.catch((e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e)
+  const prepared = await preparedResponse.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `${msg}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+      `${message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
     )
   })
   expect(

@@ -83,12 +83,6 @@ function displayDate(value: unknown): string {
                   <div class="font-mono text-sm break-all sm:col-span-2">{{ displayValue(catalogue.did) }}</div>
                 </div>
                 <div class="grid grid-cols-1 gap-1 sm:grid-cols-3 sm:gap-4">
-                  <div class="text-xs font-semibold text-base-content/60">Document Number</div>
-                  <div class="font-mono text-sm break-all sm:col-span-2">
-                    {{ displayValue(catalogue.document_number) }}
-                  </div>
-                </div>
-                <div class="grid grid-cols-1 gap-1 sm:grid-cols-3 sm:gap-4">
                   <div class="text-xs font-semibold text-base-content/60">Version</div>
                   <div class="font-mono text-sm break-all sm:col-span-2">{{ displayValue(catalogue.version) }}</div>
                 </div>

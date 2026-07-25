@@ -2,7 +2,6 @@ import type { DcsTemplateData } from '@/models/dcs-jsonld'
 
 export interface TemplateResource {
   did: string
-  document_number?: string
   version: number
   name?: string
   description?: string
@@ -15,7 +14,6 @@ export interface TemplateResource {
 
 export interface TemplateResourcesItem {
   did: string
-  document_number?: string
   version: number
   name?: string
   description?: string

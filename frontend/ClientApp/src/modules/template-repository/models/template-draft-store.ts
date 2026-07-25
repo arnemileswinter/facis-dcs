@@ -1,5 +1,5 @@
 import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
-import type { DcsBlock, DcsLayoutNode, DcsPlaceholder, OdrlRule } from '@/models/dcs-jsonld'
+import type { DcsBlock, DcsContractDataObject, DcsContractField, DcsLayoutNode, OdrlRule } from '@/models/dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { MetaData, TemplateTypeValue } from '@template-repository/models/contract-template'
 
@@ -17,14 +17,15 @@ interface TemplateDraftState {
   blocks: DcsBlock[]
   /** JSON-LD layout tree. */
   layout: DcsLayoutNode[]
-  /** JSON-LD data requirements (replaces semanticConditions as stored state). */
-  contractData: DcsPlaceholder[]
+  /** JSON-LD field declarations referenced by clauses and domain data. */
+  contractFields: DcsContractField[]
+  /** Typed business objects that bind properties to the declared fields. */
+  contractData: DcsContractDataObject[]
   /** JSON-LD ODRL policies (operator constraints). */
   policies: OdrlRule[]
   customMetaData: MetaData[]
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
-  document_number: string | null
   version: number | null
   updated_at: string | null
   created_by: string

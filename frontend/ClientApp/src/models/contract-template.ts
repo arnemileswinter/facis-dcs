@@ -7,7 +7,6 @@ export interface ContractTemplate {
   did: string
   created_by: string
   created_at: string
-  document_number?: string
   version: number
   template_type: TemplateType
   state: ContractTemplateState

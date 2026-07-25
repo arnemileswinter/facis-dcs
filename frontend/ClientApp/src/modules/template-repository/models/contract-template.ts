@@ -61,20 +61,30 @@ export interface SemanticConditionParameter {
 export const SEMANTIC_CONDITION_SCHEMA_VERSION = 'v1'
 
 export interface SemanticValueConstraint {
+  iri?: string
   format?: 'iso-3166-1-alpha-3' | 'iso-4217' | 'eidas-signature-level' | 'controlled-vocabulary'
   pattern?: string
   allowedValues?: readonly string[]
   valueOptions?: readonly SemanticValueOption[]
+  valueCatalog?: SemanticValueCatalog
   allowedValuesRef?: string
+  odrlLeftOperands?: readonly string[]
   min?: number
   max?: number
   description?: string
+}
+
+export interface SemanticValueCatalog {
+  iri: string
+  label: string
 }
 
 export interface SemanticValueOption {
   value: string
   label?: string
   symbol?: string
+  iri?: string
+  catalog?: SemanticValueCatalog
 }
 
 // ---- Validation Metadata ----

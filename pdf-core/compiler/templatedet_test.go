@@ -20,7 +20,7 @@ const templateSingleNodePayload = `{
     "dcs:layout":{"@type":"dcs:LayoutNode","dcs:isRoot":true,"dcs:children":{"@list":[{"@id":"urn:t#s1"}]}},
     "dcs:blocks":{"@list":[
       {"@type":"dcs:Section","@id":"urn:t#s1","dcs:title":"1. Payment"},
-      {"@type":"dcs:Clause","@id":"urn:t#c1","dcs:content":["The amount is ",{"@type":"dcs:Placeholder"},"."]}
+      {"@type":"dcs:Clause","@id":"urn:t#c1","dcs:content":["The amount is ","_____","."]}
     ]}
   }
 }`

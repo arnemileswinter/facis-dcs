@@ -250,6 +250,10 @@ def template_update_url(context) -> str:
     return f"{context.base_url}/template/update"
 
 
+def template_update_manage_url(context) -> str:
+    return f"{context.base_url}/template/update_manage"
+
+
 def template_verify_url(context) -> str:
     return f"{context.base_url}/template/verify"
 
