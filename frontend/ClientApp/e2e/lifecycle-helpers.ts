@@ -11,6 +11,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
 const python = process.env.E2E_BDD_PYTHON ?? path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
 
+// The single-instance signing identity: MUST be passed explicitly to BOTH
+// complete_signing_webhook.py (the PID) and sign_prepared_pdf.py (the signing
+// certificate) — never left to each script's own env-var default — so the
+// two can never resolve to different signatories (ADR-20's cert-subject to
+// PID name-match gate rejects exactly that mismatch).
+const E2E_SIGNATORY_NAME = 'E2E Vertical Signer'
+
 /**
  * UI lifecycle helpers shared by e2e specs that need a contract in a given
  * state. Extracted from the full-vertical flow: they drive a component
@@ -520,7 +527,12 @@ export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.wallet_uri], {
     cwd: repoRoot,
-    env: { ...process.env, STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL, BDD_DCS_BASE_URL: E2E_API_BASE },
+    env: {
+      ...process.env,
+      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      BDD_DCS_BASE_URL: E2E_API_BASE,
+      E2E_SIGNATORY: E2E_SIGNATORY_NAME,
+    },
     stdio: 'pipe',
   })
 
@@ -539,7 +551,7 @@ export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs
   // No E2E_SIGN_FIELD: the wallet discovers the pre-placed field from the PDF.
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
-    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: 'E2E Vertical Signer', E2E_SIGN_FIELD: signField },
+    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: E2E_SIGNATORY_NAME, E2E_SIGN_FIELD: signField },
     stdio: 'pipe',
   })
 

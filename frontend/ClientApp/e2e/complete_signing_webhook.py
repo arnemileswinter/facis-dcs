@@ -103,10 +103,11 @@ def main() -> None:
     # given_name MUST match E2E_SIGNATORY passed to sign_prepared_pdf.py's
     # ensure_signing_material for the SAME ceremony — the DCS's cert-subject
     # to PID name-match gate (ADR-20) checks these two against each other.
-    # family_name mirrors ensure_signing_material's own default
-    # ("BDD-Testperson") so callers that don't override either script need no
-    # special-casing.
-    given_name = os.getenv("E2E_SIGNATORY", "E2E Vertical Signer")
+    # Required, no silent default: a caller that forgets to set it would
+    # otherwise get a WORKING PID presentation for the wrong identity instead
+    # of a loud failure, and only find out from a cert_pid_mismatch two steps
+    # later against whatever identity happened to be cached.
+    given_name = os.environ["E2E_SIGNATORY"]
     family_name = os.getenv("E2E_SIGNATORY_FAMILY_NAME", "BDD-Testperson")
 
     request_uri = resolve_request_uri(wallet_uri)
