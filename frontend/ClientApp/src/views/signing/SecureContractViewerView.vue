@@ -202,6 +202,7 @@ async function applySignature() {
       did.value,
       outcome.data.signerDid,
       CREDENTIAL_TYPE,
+      signatureFieldName.value,
     )
     preparedDocument.value = prepared
     downloadBlob(prepared, documentFilename.value)
@@ -227,6 +228,7 @@ async function submitSigned(event: Event) {
       pendingSignerDid.value,
       CREDENTIAL_TYPE,
       file,
+      signatureFieldName.value,
     )
     pendingSignerDid.value = null
     done.value.submit = true

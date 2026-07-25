@@ -194,11 +194,21 @@ export const signatureManagementService = {
   // to-be-signed PDF (PoA + summary embedded, signature field placed), which the
   // signatory signs externally (their wallet/QTSP, or a desktop PAdES signer),
   // then submit the signed PDF for validation and recording.
-  async prepareSignature(did: string, signerDid: string, credentialType: string): Promise<Blob> {
+  //
+  // fieldName MUST be the SAME value passed to startCeremony for this signing
+  // ceremony, and passed to BOTH prepareSignature and submitSignature — the
+  // backend resolves "the verified ceremony for this signer" without it,
+  // which is only unambiguous while exactly one verified ceremony exists for
+  // that signer on this contract. Passing the field pins prepare and submit
+  // to the SAME ceremony explicitly (ADR-20 byte pinning depends on it: submit
+  // must resolve the exact ceremony prepare pinned bytes on, never "whichever
+  // one is now most recent").
+  async prepareSignature(did: string, signerDid: string, credentialType: string, fieldName: string): Promise<Blob> {
     const res = await http.post<{ document: string }>('/signature/prepare', {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      field_name: fieldName,
     })
     const bytes = Uint8Array.from(atob(res.data.document), (c) => c.charCodeAt(0))
     return new Blob([bytes], { type: 'application/pdf' })
@@ -209,6 +219,7 @@ export const signatureManagementService = {
     signerDid: string,
     credentialType: string,
     signedPdf: Blob,
+    fieldName: string,
   ): Promise<SignatureEnvelope | undefined> {
     const buffer = await signedPdf.arrayBuffer()
     let binary = ''
@@ -219,6 +230,7 @@ export const signatureManagementService = {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      field_name: fieldName,
       signed_pdf: btoa(binary),
       jades_signature: '',
     })
