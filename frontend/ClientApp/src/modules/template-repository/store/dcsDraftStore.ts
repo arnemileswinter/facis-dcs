@@ -680,6 +680,10 @@ function rewriteContentRefs(blocks: DcsBlock[], idMap: Map<string, string>): voi
   }
 }
 
+function isDataReference(value: unknown): value is JsonLdReference {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && '@id' in value
+}
+
 function rewriteContractDataObject(
   object: DcsContractDataObject,
   idMap: Map<string, string>,
@@ -687,13 +691,17 @@ function rewriteContractDataObject(
 ): DcsContractDataObject {
   const rewritten: DcsContractDataObject = {
     ...object,
-    ...(object['@id'] ? { '@id': remap(object['@id']) } : {}),
+    '@id': remap(object['@id']),
   }
+  // Only @id references are rewritten; literals and typed {@value} literals
+  // pass through untouched — the graph admits all three value kinds.
   for (const [property, value] of Object.entries(object)) {
-    if (property.startsWith('@') || typeof value === 'string' || value === undefined) continue
+    if (property.startsWith('@') || value === undefined) continue
     if (Array.isArray(value)) {
-      rewritten[property] = value.map((ref) => ({ '@id': idMap.get(ref['@id']) ?? ref['@id'] }))
-    } else {
+      rewritten[property] = value.map((member) =>
+        isDataReference(member) ? { '@id': idMap.get(member['@id']) ?? member['@id'] } : member,
+      )
+    } else if (isDataReference(value)) {
       rewritten[property] = { '@id': idMap.get(value['@id']) ?? value['@id'] }
     }
   }

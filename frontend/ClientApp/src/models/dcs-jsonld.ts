@@ -44,11 +44,18 @@ export type DcsContractFieldRef = JsonLdReference
 
 export type DcsContentSegment = string | DcsContractFieldRef
 
-/** A typed business object whose properties reference declared fields. */
+/** A property value in the contract-data graph: a literal (fixed data), a
+ *  typed literal, or a reference to a declared field or another domain
+ *  object. */
+export type DcsContractDataValue = string | number | boolean | JsonLdTypedValue | JsonLdReference
+
+/** A typed domain object in the contract-data graph. Properties hold
+ *  literals, references to declared contract fields (negotiable leaves), or
+ *  references to other domain objects (structure, arbitrary depth). */
 export type DcsContractDataObject = {
-  '@id'?: string
+  '@id': string
   '@type': string
-} & Record<string, string | JsonLdReference | JsonLdReference[] | undefined>
+} & Record<string, DcsContractDataValue | DcsContractDataValue[] | undefined>
 
 export interface DcsSection {
   '@type': 'dcs:Section'

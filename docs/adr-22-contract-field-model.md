@@ -5,6 +5,11 @@ Status: Accepted (2026-07-24). **Supersedes
 SHACL-derived, @id-linked, self-contained node per negotiable data point) and
 replacing its naming and top-level layout.
 
+> **Amended by [ADR-23](adr-23-generic-contract-data-graph.md) (2026-07-26).**
+> The "field references only" restriction on domain-object properties is
+> lifted: `dcs:contractData` is a generic object graph whose properties hold
+> literals, field references, or references to other domain objects.
+
 ## Context
 
 ADR-15 collapsed the four-hop placeholder indirection (`dcs:bindsTo`,

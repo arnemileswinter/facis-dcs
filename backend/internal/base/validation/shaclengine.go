@@ -59,7 +59,10 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 		return nil, 0, err
 	}
 
-	contractJSON, err := json.Marshal(contract)
+	// Shape libraries are written against plain instance data; dereference
+	// filled field references so a library's literal constraints see the
+	// value where vanilla SHACL expects it.
+	contractJSON, err := json.Marshal(materializeContractDataFields(contract))
 	if err != nil {
 		return nil, 0, fmt.Errorf("encode contract document: %w", err)
 	}
