@@ -20,3 +20,13 @@ resources:
     memory: "512Mi"
   limits:
     memory: "1536Mi"
+
+# The bundled dss.properties this image ships already defaults
+# current.lotl.url to the real EU LOTL, so QES qualification determination
+# against the actual EU trusted lists is the out-of-the-box behavior with no
+# override needed — this just pins it explicitly (mounted as
+# dss-custom.properties, which the bundle's own Spring config loads from the
+# Tomcat shared classpath) so a future image tag silently defaulting
+# elsewhere can't change that unnoticed.
+trustedList:
+  lotlURL: https://ec.europa.eu/tools/lotl/eu-lotl.xml

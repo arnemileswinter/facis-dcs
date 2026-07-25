@@ -87,14 +87,23 @@ type signatureManagementsrvc struct {
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
-	// RequestSigner signs the OID4VP Document-Retrieval request object (JAR) the
-	// wallet consumes in the publish/callback signing ceremony (ADR-12). It is the
-	// SAME HSM JAR signer the auth service uses for login/PID request objects — the
-	// DCS attesting as itself, not as a contracting party.
+	// RequestSigner signs the pending-ceremony PID/PoA presentation request
+	// object (JAR) — the SAME HSM JAR signer + Hydra client_id the auth
+	// service's login flow uses (jwk header, no x509_san_dns claim).
 	RequestSigner oid4vprequest.Signer
-	// OID4VPClientID is the DCS relying party's x509_san_dns client_id bound into
-	// the request object (the same Hydra client_id the auth OID4VP flows use).
+	// OID4VPClientID is the Hydra client_id the pending-ceremony (PID/PoA
+	// presentation) request object declares.
 	OID4VPClientID string
+	// DocRetrievalSigner signs the published Document-Retrieval request object
+	// (JAR) a real wallet consumes to fetch and sign the prepared documents
+	// (ADR-12). Distinct from RequestSigner: this request declares
+	// client_id_scheme=x509_san_dns, which requires an x5c certificate chain
+	// in the header, not a bare jwk — see oid4vprequest.X5CSigner.
+	DocRetrievalSigner oid4vprequest.Signer
+	// DocRetrievalClientID is the DNS hostname DocRetrievalSigner's own
+	// certificate identifies (x509_san_dns requires client_id to be that DNS
+	// name, and to equal the leaf certificate's SAN).
+	DocRetrievalClientID string
 	// PublicAPIBase is the externally-resolvable API base the request object's
 	// request_uri, document_locations, and response_uri are built from.
 	PublicAPIBase string
@@ -118,28 +127,31 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
+	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
 
 	return &signatureManagementsrvc{
-		JWTAuthenticator: jwtAuth,
-		DB:               db,
-		CRepo:            cRepo,
-		CeremonyRepo:     ceremonyRepo,
-		PDFCore:          pdfCore,
-		ATrailReader:     auditTrailReader,
-		VCSigner:         vcSigner,
-		VCIssuer:         vcIssuer,
-		IssuerDID:        issuerDID,
-		IPFSClient:       ipfsClient,
-		ArchiveRepo:      archiveRepo,
-		ArchiveNotary:    archiveNotary,
-		ArchiveTSA:       archiveTSA,
-		RequestSigner:    requestSigner,
-		OID4VPClientID:   oid4vpClientID,
-		PublicAPIBase:    publicAPIBase,
-		PIDDCQLQuery:     pidDCQLQuery,
-		DCQLQuery:        dcqlQuery,
-		Trust:            trust,
+		JWTAuthenticator:     jwtAuth,
+		DB:                   db,
+		CRepo:                cRepo,
+		CeremonyRepo:         ceremonyRepo,
+		PDFCore:              pdfCore,
+		ATrailReader:         auditTrailReader,
+		VCSigner:             vcSigner,
+		VCIssuer:             vcIssuer,
+		IssuerDID:            issuerDID,
+		IPFSClient:           ipfsClient,
+		ArchiveRepo:          archiveRepo,
+		ArchiveNotary:        archiveNotary,
+		ArchiveTSA:           archiveTSA,
+		RequestSigner:        requestSigner,
+		OID4VPClientID:       oid4vpClientID,
+		PublicAPIBase:        publicAPIBase,
+		DocRetrievalSigner:   docRetrievalSigner,
+		DocRetrievalClientID: docRetrievalClientID,
+		PIDDCQLQuery:         pidDCQLQuery,
+		DCQLQuery:            dcqlQuery,
+		Trust:                trust,
 	}
 }
 

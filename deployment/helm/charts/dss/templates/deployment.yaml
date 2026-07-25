@@ -48,3 +48,12 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          volumeMounts:
+            - name: dss-custom-properties
+              mountPath: /dss/apache-tomcat-11.0.4/lib/dss-custom.properties
+              subPath: dss-custom.properties
+              readOnly: true
+      volumes:
+        - name: dss-custom-properties
+          configMap:
+            name: {{ .Release.Name }}-dss-custom-properties

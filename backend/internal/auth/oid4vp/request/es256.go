@@ -11,7 +11,7 @@ import (
 
 const oauthAuthzReqJWTType = "oauth-authz-req+jwt"
 
-func signES256JWT(kid string, claims jwt.MapClaims, jwk any, sign func(signingInput string) ([]byte, error)) (string, error) {
+func signES256JWT(kid string, claims jwt.MapClaims, extraHeaders map[string]any, sign func(signingInput string) ([]byte, error)) (string, error) {
 	kid = strings.TrimSpace(kid)
 
 	if kid == "" {
@@ -23,8 +23,8 @@ func signES256JWT(kid string, claims jwt.MapClaims, jwk any, sign func(signingIn
 		"typ": oauthAuthzReqJWTType,
 		"kid": kid,
 	}
-	if jwk != nil {
-		header["jwk"] = jwk
+	for k, v := range extraHeaders {
+		header[k] = v
 	}
 
 	headerJSON, err := json.Marshal(header)

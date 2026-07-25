@@ -103,18 +103,22 @@ def sign_via_document_retrieval(
     )
 
     # The EUDI walletdriven-signer direct_post: an application/x-www-form-urlencoded
-    # body carrying the PAdES-signed document (enveloped in the PDF) in the
-    # documentWithSignature[] list. The ceremony identity is the response_uri path,
-    # so no state is echoed.
+    # body carrying the signed documents in the documentWithSignature[] list,
+    # positionally correlated to the request object's documentDigests/
+    # documentLocations (there is no separate field for a second document —
+    # a wallet asked to sign N documents returns N signed documents, in
+    # order). The ceremony identity is the response_uri path, so no state is
+    # echoed. Every entry is base64-encoded uniformly, PAdES (binary,
+    # enveloped in the PDF) and JAdES (ASCII compact JWS) alike.
     form = {
         "documentWithSignature[0]": base64.b64encode(signed_pdf).decode(),
     }
 
     # The SECOND documentLocations entry, when offered (ADR-12), is the
     # canonical JSON-LD payload: sign it as a JAdES with the ceremony's nonce
-    # bound into the protected header (ADR-20 item 1) and post it as
-    # signatureObject[0] — the DCS's byte-pin check requires the RAW fetched
-    # bytes signed with no re-serialization (see jades_signer.py).
+    # bound into the protected header (ADR-20 item 1) — the DCS's byte-pin
+    # check requires the RAW fetched bytes signed with no re-serialization
+    # (see jades_signer.py).
     if len(locations) > 1:
         payload_uri = _reorigin(locations[1]["uri"], request_uri)
         payload_bytes = _get(payload_uri, accept="application/json")
@@ -122,7 +126,7 @@ def sign_via_document_retrieval(
             payload_bytes, user=user, keys_dir=keys_dir, nonce=nonce,
             given_name=given_name, family_name=family_name,
         )
-        form["signatureObject[0]"] = jades
+        form["documentWithSignature[1]"] = base64.b64encode(jades.encode()).decode()
 
     body = urlencode(form).encode()
     post = urllib.request.Request(

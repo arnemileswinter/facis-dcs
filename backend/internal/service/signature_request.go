@@ -56,8 +56,8 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	if s.RequestSigner == nil {
-		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("OID4VP request signer is not configured"))
+	if s.DocRetrievalSigner == nil || strings.TrimSpace(s.DocRetrievalClientID) == "" {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("OID4VP document-retrieval request signer is not configured"))
 	}
 	if strings.TrimSpace(s.PublicAPIBase) == "" {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("public API base URL is not configured"))
@@ -151,12 +151,26 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	requestURI := s.signatureRequestURL(ceremony.ID, "object")
 	return &signaturemanagement.SMSignatureRequestPublishResponse{
 		CeremonyID: ceremony.ID,
-		ClientID:   s.OID4VPClientID,
+		ClientID:   s.DocRetrievalClientID,
 		RequestURI: requestURI,
-		WalletURI:  buildOpenID4VPPresentationURI(s.OID4VPClientID, requestURI),
+		WalletURI:  buildOpenID4VPPresentationURI(s.DocRetrievalClientID, requestURI),
 		Nonce:      &nonce,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
 	}, nil
+}
+
+// assertPreparedDocumentDigestConsistent verifies the ceremony's persisted
+// PreparedPDF and PreparedPDFSHA256 still agree, at every point either is
+// about to be handed to a wallet (JAR digest and document serving).
+func assertPreparedDocumentDigestConsistent(ceremony *db.SignatureCeremony) error {
+	if ceremony.PreparedPDFSHA256 == nil {
+		return fmt.Errorf("ceremony %s has no pinned document digest", ceremony.ID)
+	}
+	actual := sha256.Sum256(ceremony.PreparedPDF)
+	if hex.EncodeToString(actual[:]) != strings.ToLower(strings.TrimSpace(*ceremony.PreparedPDFSHA256)) {
+		return fmt.Errorf("ceremony %s: prepared document no longer matches its pinned digest", ceremony.ID)
+	}
+	return nil
 }
 
 // SignatureRequestObject serves the signed OpenID4VP request object (JAR) the
@@ -203,6 +217,9 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 // content hash"). The payload's digest doubles as the nonce-binding and
 // byte-pin anchor the callback checks the returned JAdES against (ADR-20).
 func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony) (io.ReadCloser, error) {
+	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	pdfDigestBytes, decErr := hex.DecodeString(*ceremony.PreparedPDFSHA256)
 	if decErr != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("decode prepared document digest: %w", decErr))
@@ -227,8 +244,8 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 		credentialType = *ceremony.CredentialType
 	}
 
-	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.RequestSigner, oid4vprequest.DocRetrievalParams{
-		ClientID:           s.OID4VPClientID,
+	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.DocRetrievalSigner, oid4vprequest.DocRetrievalParams{
+		ClientID:           s.DocRetrievalClientID,
 		ResponseURI:        s.signatureRequestURL(ceremony.ID, "callback"),
 		Nonce:              *ceremony.RequestNonce,
 		ExpiresAt:          *ceremony.RequestExpiresAt,
@@ -281,6 +298,18 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 	if len(ceremony.PreparedPDF) == 0 {
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s has no prepared document", p.CeremonyID))
 	}
+	// PreparedPDF and PreparedPDFSHA256 are written together in one
+	// StorePreparedRequest call, but are read back here as two independently
+	// persisted columns — a persistence-layer bug (wrong column read/scanned,
+	// truncation, encoding mismatch) could silently desync them without ever
+	// touching the in-memory write path a unit test would exercise. This is
+	// exactly the document a real wallet is about to fetch and the digest the
+	// JAR already told it to expect (buildDocumentRetrievalJAR); catch a
+	// mismatch here, at the source, rather than as an opaque wallet-side
+	// refusal with no attributable cause on our end.
+	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
 }
 
@@ -323,15 +352,6 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return s.ceremonyPresentationDirectPost(ctx, p.CeremonyID, vpToken)
 	}
 
-	signedDocs := formList(form, "documentWithSignature")
-	if len(signedDocs) == 0 {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("no documentWithSignature was posted"))
-	}
-	signedPDF, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(signedDocs[0]))
-	if decErr != nil {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("decode signed document: %w", decErr))
-	}
-
 	ceremony, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
 	if err != nil {
 		return nil, err
@@ -345,15 +365,37 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
 	}
 
+	// documentWithSignature[] is positionally correlated to the documentDigests/
+	// documentLocations the request object offered (buildDocumentRetrievalJAR):
+	// [0] the PDF, and — only when a payload location was offered — [1] the
+	// JAdES over the canonical JSON-LD payload. There is no separate
+	// "signatureObject" field in the real spec's response shape; a wallet
+	// asked to sign N documents returns N signed documents, in the same order.
+	expectedDocs := 1
+	payloadRequested := ceremony.PinnedPayloadSHA256 != nil && *ceremony.PinnedPayloadSHA256 != ""
+	if payloadRequested {
+		expectedDocs = 2
+	}
+	signedDocs := formList(form, "documentWithSignature")
+	if len(signedDocs) < expectedDocs {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("expected %d signed document(s) in documentWithSignature, got %d", expectedDocs, len(signedDocs)))
+	}
+	signedPDF, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(signedDocs[0]))
+	if decErr != nil {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("decode signed document: %w", decErr))
+	}
+
 	credentialType := "AES"
 	if ceremony.CredentialType != nil && *ceremony.CredentialType != "" {
 		credentialType = *ceremony.CredentialType
 	}
-	// A detached JAdES over the machine-readable JSON-LD rides in the EUDI
-	// signatureObject[] list (the PAdES itself is enveloped in the PDF).
 	jades := ""
-	if objects := formList(form, "signatureObject"); len(objects) > 0 {
-		jades = strings.TrimSpace(objects[0])
+	if payloadRequested {
+		jadesBytes, decErr := base64.StdEncoding.DecodeString(strings.TrimSpace(signedDocs[1]))
+		if decErr != nil {
+			return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("decode signed payload: %w", decErr))
+		}
+		jades = strings.TrimSpace(string(jadesBytes))
 	}
 	appliedBy := ""
 	if ceremony.PublishedBy != nil {
