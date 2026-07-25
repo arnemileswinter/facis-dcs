@@ -167,6 +167,7 @@ var SMSignaturePrepareRequest = Type("SMSignaturePrepareRequest", func() {
 	Attribute("signer_did", String, "DID of the signer")
 	Attribute("field_name", String, "For multi-signer contracts (DCS-FR-SM-07/-17): the declared signature field this signer covers.")
 	Attribute("credential_type", String, "Type of credential to use (default: AES)")
+	Attribute("ceremony_id", String, "The specific verified ceremony to prepare against, when the caller already has one (e.g. from startCeremony's polled result) — resolves this exact ceremony instead of \"the signer's most recent verified ceremony\", which can change if more than one ceremony is verified for the same signer/field between prepare and a later submit (ADR-20 byte pinning requires the two calls resolve the SAME ceremony).")
 
 	Required("did", "signer_did")
 })
@@ -190,6 +191,7 @@ var SMSignatureSubmitRequest = Type("SMSignatureSubmitRequest", func() {
 	Attribute("credential_type", String, "Type of credential used (default: AES)")
 	Attribute("signed_pdf", Bytes, "The signatory's PAdES-signed contract")
 	Attribute("jades_signature", String, "The signatory's JAdES over the machine-readable JSON-LD (DCS-FR-SM-02/-11); empty when only the PDF was signed")
+	Attribute("ceremony_id", String, "The specific ceremony this submission completes — MUST be the same ceremony_id passed to prepareSignature, so submit resolves the exact ceremony prepare pinned bytes on (ADR-20) rather than \"the signer's most recent verified ceremony\", which is ambiguous once more than one ceremony has been verified for the same signer/field.")
 
 	Required("did", "signer_did", "signed_pdf")
 })

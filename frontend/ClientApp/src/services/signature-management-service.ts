@@ -195,20 +195,29 @@ export const signatureManagementService = {
   // signatory signs externally (their wallet/QTSP, or a desktop PAdES signer),
   // then submit the signed PDF for validation and recording.
   //
-  // fieldName MUST be the SAME value passed to startCeremony for this signing
-  // ceremony, and passed to BOTH prepareSignature and submitSignature — the
-  // backend resolves "the verified ceremony for this signer" without it,
-  // which is only unambiguous while exactly one verified ceremony exists for
-  // that signer on this contract. Passing the field pins prepare and submit
-  // to the SAME ceremony explicitly (ADR-20 byte pinning depends on it: submit
-  // must resolve the exact ceremony prepare pinned bytes on, never "whichever
-  // one is now most recent").
-  async prepareSignature(did: string, signerDid: string, credentialType: string, fieldName: string): Promise<Blob> {
+  // ceremonyId MUST be the SAME ceremony_id (from startCeremony/the polled
+  // ceremony result) passed to BOTH prepareSignature and submitSignature —
+  // without it, the backend resolves "the signer's most recent verified
+  // ceremony [for fieldName]", which is only unambiguous while exactly one
+  // ceremony has been verified for that signer/field on this contract; a
+  // retried ceremony (e.g. "Start a new ceremony" after a stalled one) makes
+  // that heuristic pick a DIFFERENT ceremony at submit time than the one
+  // prepare pinned bytes onto (ADR-20 byte pinning requires the two calls
+  // resolve the SAME ceremony). fieldName is still sent for multi-signer
+  // contracts and as a fallback when ceremonyId is unavailable.
+  async prepareSignature(
+    did: string,
+    signerDid: string,
+    credentialType: string,
+    fieldName: string,
+    ceremonyId: string,
+  ): Promise<Blob> {
     const res = await http.post<{ document: string }>('/signature/prepare', {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
       field_name: fieldName,
+      ceremony_id: ceremonyId,
     })
     const bytes = Uint8Array.from(atob(res.data.document), (c) => c.charCodeAt(0))
     return new Blob([bytes], { type: 'application/pdf' })
@@ -220,6 +229,7 @@ export const signatureManagementService = {
     credentialType: string,
     signedPdf: Blob,
     fieldName: string,
+    ceremonyId: string,
   ): Promise<SignatureEnvelope | undefined> {
     const buffer = await signedPdf.arrayBuffer()
     let binary = ''
@@ -230,6 +240,7 @@ export const signatureManagementService = {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      ceremony_id: ceremonyId,
       field_name: fieldName,
       signed_pdf: btoa(binary),
       jades_signature: '',

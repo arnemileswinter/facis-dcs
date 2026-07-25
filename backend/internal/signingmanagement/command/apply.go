@@ -107,7 +107,16 @@ type ApplyCmd struct {
 	// FieldName selects which declared signature field this signer covers
 	// on a multi-signer contract (DCS-FR-SM-07/-17). Empty = single-signer
 	// flow (resolve the signer's most recent verified ceremony).
-	FieldName      string
+	FieldName string
+	// CeremonyID, when set, resolves this EXACT ceremony instead of "the
+	// signer's most recent verified ceremony [for this field]" — the
+	// heuristic resolveCeremony falls back to when this is empty. The
+	// heuristic is ambiguous once more than one ceremony has been verified
+	// for the same signer/field between a Prepare call and a later
+	// SubmitSignature call (ADR-20 byte pinning requires the two calls
+	// resolve the SAME ceremony; the caller should pass the ceremony_id it
+	// already has from starting/polling the ceremony to both calls).
+	CeremonyID     string
 	CredentialType string
 	AppliedBy      string
 	HolderDID      string
@@ -809,6 +818,18 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 // to the signer's most recent verified ceremony (single-signer flow). Shared
 // by prepare() and SubmitSignature so both resolve identically.
 func resolveCeremony(ctx context.Context, tx *sqlx.Tx, repo db.CeremonyRepo, cmd ApplyCmd) (*db.SignatureCeremony, error) {
+	if cmd.CeremonyID != "" {
+		ceremony, err := repo.GetCeremonyByID(ctx, tx, cmd.CeremonyID)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve signing ceremony %s: %w", cmd.CeremonyID, err)
+		}
+		if ceremony == nil || ceremony.Status != db.CeremonyVerified || ceremony.ContractDID != cmd.DID ||
+			ceremony.SignerDID == nil || *ceremony.SignerDID != cmd.SignerDID {
+			return nil, ErrCeremonyRequired
+		}
+		return ceremony, nil
+	}
+
 	var ceremony *db.SignatureCeremony
 	var err error
 	if cmd.FieldName != "" {

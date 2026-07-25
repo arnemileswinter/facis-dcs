@@ -359,12 +359,17 @@ func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *sig
 	if req.FieldName != nil {
 		fieldName = *req.FieldName
 	}
+	ceremonyID := ""
+	if req.CeremonyID != nil {
+		ceremonyID = *req.CeremonyID
+	}
 
 	handler := s.newApplier()
 	document, err := handler.Prepare(ctx, command.ApplyCmd{
 		DID:            req.Did,
 		SignerDID:      req.SignerDid,
 		FieldName:      fieldName,
+		CeremonyID:     ceremonyID,
 		CredentialType: credentialType,
 		AppliedBy:      middleware.GetParticipantID(ctx),
 		HolderDID:      middleware.GetHolderDID(ctx),
@@ -396,6 +401,10 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 	if req.JadesSignature != nil {
 		jadesSignature = *req.JadesSignature
 	}
+	ceremonyID := ""
+	if req.CeremonyID != nil {
+		ceremonyID = *req.CeremonyID
+	}
 
 	handler := s.newApplier()
 	if err := handler.SubmitSignature(ctx, command.SubmitSignatureCmd{
@@ -403,6 +412,7 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 			DID:            req.Did,
 			SignerDID:      req.SignerDid,
 			FieldName:      fieldName,
+			CeremonyID:     ceremonyID,
 			CredentialType: credentialType,
 			AppliedBy:      middleware.GetParticipantID(ctx),
 			HolderDID:      middleware.GetHolderDID(ctx),

@@ -53,9 +53,12 @@ const validateResult = ref<SignatureValidateResult | undefined>()
 const provenanceChain = ref<ProvenanceEntry[]>([])
 
 // After prepare, the contract awaits the externally-signed upload; holds the
-// ceremony's signatory DID for the submit call and the to-be-signed PDF so the
-// signer can download it again without re-running the identity ceremony.
+// ceremony's signatory DID and ceremony id for the submit call (submit MUST
+// resolve the SAME ceremony prepare pinned bytes on, ADR-20) and the
+// to-be-signed PDF so the signer can download it again without re-running
+// the identity ceremony.
 const pendingSignerDid = ref<string | null>(null)
+const pendingCeremonyId = ref<string | null>(null)
 const preparedDocument = ref<Blob | null>(null)
 
 const busy = ref(false)
@@ -203,10 +206,12 @@ async function applySignature() {
       outcome.data.signerDid,
       CREDENTIAL_TYPE,
       signatureFieldName.value,
+      outcome.data.ceremonyId,
     )
     preparedDocument.value = prepared
     downloadBlob(prepared, documentFilename.value)
     pendingSignerDid.value = outcome.data.signerDid
+    pendingCeremonyId.value = outcome.data.ceremonyId
     done.value.apply = true
   } catch (e: unknown) {
     stepError.value.apply = `Could not prepare the contract for signing: ${signingErrorMessage(e)}`
@@ -219,7 +224,7 @@ async function applySignature() {
 async function submitSigned(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file || !pendingSignerDid.value) return
+  if (!file || !pendingSignerDid.value || !pendingCeremonyId.value) return
   busy.value = true
   delete stepError.value.submit
   try {
@@ -229,8 +234,10 @@ async function submitSigned(event: Event) {
       CREDENTIAL_TYPE,
       file,
       signatureFieldName.value,
+      pendingCeremonyId.value,
     )
     pendingSignerDid.value = null
+    pendingCeremonyId.value = null
     done.value.submit = true
     await loadProvenance()
   } catch (e: unknown) {
