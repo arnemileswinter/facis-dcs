@@ -77,30 +77,55 @@ func TestValidatePDFExtractsSignerIdentity(t *testing.T) {
 // multi-signer contract's second-and-later signatory: by the time they
 // submit, the document already carries an earlier signatory's signature, so
 // simpleReport.signatureOrTimestampOrEvidenceRecord carries one entry per
-// signature, oldest first (PAdES incremental updates only append). The
-// report must attribute to the LAST (just-submitted) signature, not the
-// first — the cert↔PID sole-control check (ADR-20) would otherwise validate
-// a submission against a different signatory's certificate entirely.
+// signature, oldest first (PAdES incremental updates only append), and
+// diagnosticData.Signatures carries a parallel per-signature entry whose
+// SigningCertificate.Certificate IDREF resolves the actual signing cert (with
+// GivenName/Surname) out of the flat diagnosticData.UsedCertificates list
+// (real DSS 6.2 WSReportsDTO shape, confirmed against its published XSDs —
+// simpleReport's own Signature/CertificateChain/Certificate types carry no
+// GivenName/Surname field at all; SignedBy there is just the cert's CN). The
+// report must attribute to the LAST (just-submitted) signature's own
+// certificate — the cert↔PID sole-control check (ADR-20) would otherwise
+// validate a submission against a different signatory's certificate, or an
+// unrelated cert (the CA, the TSA) it happened to visit first.
 func TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
 			"simpleReport": {
 				"signatureOrTimestampOrEvidenceRecord": [
 					{"Signature": {
+						"Id": "S-A",
 						"Indication": "TOTAL-PASSED",
-						"SignedBy": "CN=DCS Signatory Instance A Signatory,GIVENNAME=Instance A Signatory,SURNAME=BDD-Testperson",
+						"SignedBy": "DCS Signatory Instance A Signatory",
 						"SigningTime": "2026-07-18T10:00:00Z"
 					}},
 					{"Timestamp": {
+						"Id": "T-1",
 						"Indication": "PASSED",
-						"SignedBy": "CN=Dev TSA"
+						"SignedBy": "Dev TSA"
 					}},
 					{"Signature": {
+						"Id": "S-B",
 						"Indication": "TOTAL-PASSED",
-						"SignedBy": "CN=DCS Signatory Instance B Signatory,GIVENNAME=Instance B Signatory,SURNAME=BDD-Testperson",
+						"SignedBy": "DCS Signatory Instance B Signatory",
 						"SigningTime": "2026-07-18T10:05:00Z"
 					}}
 				]
+			},
+			"diagnosticData": {
+				"Signatures": {
+					"Signature": [
+						{"Id": "S-A", "SigningCertificate": {"Certificate": "C-A"}},
+						{"Id": "S-B", "SigningCertificate": {"Certificate": "C-B"}}
+					]
+				},
+				"UsedCertificates": {
+					"Certificate": [
+						{"Id": "C-CA", "CommonName": "DCS Wallet Dev Signing CA"},
+						{"Id": "C-A", "CommonName": "DCS Signatory Instance A Signatory", "GivenName": "Instance A Signatory", "Surname": "BDD-Testperson"},
+						{"Id": "C-B", "CommonName": "DCS Signatory Instance B Signatory", "GivenName": "Instance B Signatory", "Surname": "BDD-Testperson"}
+					]
+				}
 			}
 		}`))
 	}))
@@ -110,8 +135,49 @@ func TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument(t *testing.
 	if err != nil {
 		t.Fatalf("ValidatePDF: %v", err)
 	}
-	if report.SubjectGivenName() != "Instance B Signatory" {
-		t.Fatalf("expected the LAST signature's identity (Instance B Signatory), got %+v", report)
+	if report.SubjectGivenName() != "Instance B Signatory" || report.SubjectSurname() != "BDD-Testperson" {
+		t.Fatalf("expected the LAST signature's own certificate identity (Instance B Signatory/BDD-Testperson), got %+v", report)
+	}
+}
+
+// TestValidatePDFResolvesIdentityForASingleSignature is the ordinary,
+// single-signer case (no incremental prior signature to disambiguate from) —
+// it must still resolve GivenName/Surname via diagnosticData, since
+// simpleReport never carries them regardless of how many signatures a
+// document has.
+func TestValidatePDFResolvesIdentityForASingleSignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"simpleReport": {
+				"signatureOrTimestampOrEvidenceRecord": [
+					{"Signature": {
+						"Id": "S-1",
+						"Indication": "TOTAL-PASSED",
+						"SignedBy": "DCS Signatory SignerThirteen"
+					}}
+				]
+			},
+			"diagnosticData": {
+				"Signatures": {
+					"Signature": {"Id": "S-1", "SigningCertificate": {"Certificate": "C-1"}}
+				},
+				"UsedCertificates": {
+					"Certificate": [
+						{"Id": "C-CA", "CommonName": "DCS Wallet Dev Signing CA"},
+						{"Id": "C-1", "CommonName": "DCS Signatory SignerThirteen", "GivenName": "SignerThirteen", "Surname": "BDD-Testperson"}
+					]
+				}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	report, err := New(srv.URL).ValidatePDF(context.Background(), []byte("%PDF fake"), "contract.pdf")
+	if err != nil {
+		t.Fatalf("ValidatePDF: %v", err)
+	}
+	if report.SubjectGivenName() != "SignerThirteen" || report.SubjectSurname() != "BDD-Testperson" {
+		t.Fatalf("expected SignerThirteen/BDD-Testperson, got %+v", report)
 	}
 }
 

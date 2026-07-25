@@ -286,8 +286,16 @@ func parseReport(raw []byte) (*Report, error) {
 		return nil, fmt.Errorf("dss: parse validation response: %w", err)
 	}
 	report := &Report{}
-	if sig := latestSignatureEntry(doc); sig != nil {
+	if sig, sigID := latestSignatureEntry(doc); sig != nil {
 		walkReport(sig, report)
+		// GivenName/Surname/CommonName never appear under simpleReport (per
+		// its XSD, a Signature entry's only certificate-shaped child is
+		// CertificateChain.Certificate.QualifiedName - a display string, not
+		// structured RDN fields) - they live on diagnosticData's own
+		// per-certificate entries, resolved below.
+		if cert := resolveSigningCertificate(doc, sigID); cert != nil {
+			walkReport(cert, report)
+		}
 	} else {
 		// Fallback for DSS response shapes that don't nest under
 		// simpleReport.signatureOrTimestampOrEvidenceRecord the way the JSON
@@ -318,38 +326,158 @@ func parseReport(raw []byte) (*Report, error) {
 // visit first - for an ordered array that is deterministically the OLDEST
 // signature, not the one just submitted, silently validating and attributing
 // the wrong signatory's certificate (ADR-20 cert↔PID sole-control check).
-func latestSignatureEntry(doc any) any {
+// latestSignatureEntry also returns that entry's own Id (a DSS WSReportsDTO
+// token id, e.g. "S-<hash>") — shared verbatim between simpleReport and
+// diagnosticData for the same signature (see resolveSigningCertificate) — so
+// callers can cross-reference the rest of the response for this exact
+// signature. "" if the entry carries no (string) Id.
+func latestSignatureEntry(doc any) (any, string) {
 	root, ok := doc.(map[string]any)
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	simpleReportAny, ok := lookupCI(root, "simpleReport")
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	simpleReport, ok := simpleReportAny.(map[string]any)
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	entriesAny, ok := lookupCI(simpleReport, "signatureOrTimestampOrEvidenceRecord")
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	entries, ok := entriesAny.([]any)
 	if !ok {
-		return nil
+		return nil, ""
 	}
 	var last any
+	var lastID string
 	for _, entry := range entries {
 		obj, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
-		if sig, ok := lookupCI(obj, "Signature"); ok {
-			last = sig
+		sigAny, ok := lookupCI(obj, "Signature")
+		if !ok {
+			continue
+		}
+		last = sigAny
+		lastID = ""
+		if sig, ok := sigAny.(map[string]any); ok {
+			lastID = idString(sig)
 		}
 	}
-	return last
+	return last, lastID
+}
+
+// resolveSigningCertificate returns the diagnosticData.UsedCertificates entry
+// for the certificate that produced signatureID, per DSS's WSReportsDTO
+// schema (dss-diagnostic-jaxb DiagnosticData.xsd, DSS 6.2):
+// diagnosticData.Signatures.Signature[] carries one entry per signature
+// (Id-matched against simpleReport's own entries) whose SigningCertificate
+// attribute "Certificate" is an IDREF into
+// diagnosticData.UsedCertificates.Certificate[] (matched by that entry's own
+// Id) — the certificate entry carrying the GivenName/Surname/CommonName RDN
+// attributes simpleReport never exposes. UsedCertificates is a FLAT list of
+// every certificate in the document (every signature's signing cert, CA
+// certs, TSA certs) — resolving through this Id chain, rather than scanning
+// that flat list for the first GivenName/Surname found, is what keeps a
+// multi-signature document's certificates from being mixed up the same way
+// latestSignatureEntry's scoping fixes simpleReport's own ambiguity.
+func resolveSigningCertificate(doc any, signatureID string) map[string]any {
+	if signatureID == "" {
+		return nil
+	}
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return nil
+	}
+	diagnosticDataAny, ok := lookupCI(root, "diagnosticData")
+	if !ok {
+		return nil
+	}
+	diagnosticData, ok := diagnosticDataAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	certID := ""
+	if signaturesAny, ok := lookupCI(diagnosticData, "Signatures"); ok {
+		for _, sig := range wrappedList(signaturesAny, "Signature") {
+			if idString(sig) != signatureID {
+				continue
+			}
+			scAny, ok := lookupCI(sig, "SigningCertificate")
+			if !ok {
+				break
+			}
+			sc, ok := scAny.(map[string]any)
+			if !ok {
+				break
+			}
+			if v, ok := lookupCI(sc, "Certificate"); ok {
+				if s, ok := v.(string); ok {
+					certID = s
+				}
+			}
+			break
+		}
+	}
+	if certID == "" {
+		return nil
+	}
+
+	usedCertsAny, ok := lookupCI(diagnosticData, "UsedCertificates")
+	if !ok {
+		return nil
+	}
+	for _, cert := range wrappedList(usedCertsAny, "Certificate") {
+		if idString(cert) == certID {
+			return cert
+		}
+	}
+	return nil
+}
+
+// wrappedList normalizes a JAXB list-wrapper element - e.g.
+// {"Signature": [...]} or, for a single item, sometimes {"Signature": {...}}
+// depending on the JSON mapper - to a slice of objects.
+func wrappedList(wrapperAny any, itemKey string) []map[string]any {
+	wrapper, ok := wrapperAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+	itemAny, ok := lookupCI(wrapper, itemKey)
+	if !ok {
+		return nil
+	}
+	switch v := itemAny.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		return []map[string]any{v}
+	default:
+		return nil
+	}
+}
+
+// idString reads a token's "Id" field (an XML attribute in the source XSD,
+// flattened to a plain JSON key like every other attribute in this DTO).
+func idString(m map[string]any) string {
+	if v, ok := lookupCI(m, "Id"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // lookupCI is a case-insensitive map lookup, matching walkReport's existing
