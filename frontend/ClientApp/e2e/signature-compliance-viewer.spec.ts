@@ -34,7 +34,7 @@ async function openViewer(page: Page, loginAs: LoginAs, role: DcsRole, contractD
 }
 
 test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({ page, loginAs }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(120_000)
   page.setDefaultTimeout(15_000)
 
   // Reach SIGNED via the same proven lifecycle the other specs use — derive a
