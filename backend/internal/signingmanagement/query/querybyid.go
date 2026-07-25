@@ -58,7 +58,6 @@ type SignatureEnvelope struct {
 	SignedAt       *string
 	RevokedAt      *string
 	IpfsCID        *string
-	KeyVersion     int
 }
 
 type GetByIDResult struct {
@@ -164,7 +163,6 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		SignedAt:       envelopResult.SignedAt,
 		RevokedAt:      envelopResult.RevokedAt,
 		IpfsCID:        envelopResult.IpfsCID,
-		KeyVersion:     envelopResult.KeyVersion,
 	}
 
 	return &GetByIDResult{

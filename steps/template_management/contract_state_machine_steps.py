@@ -276,10 +276,12 @@ def _apply_signature(context, name):
 
     did, _updated_at = ContractService._contract_data(context, name)
     party_did = ContractService._local_peer_did(context)
-    _ceremony_id, _presentation, subject_did = _run_full_ceremony(
+    ceremony_id, _presentation, subject_did = _run_full_ceremony(
         context, name, party_did, "BDD Counterparty Signer"
     )
-    resp = wallet_sign(context, did, signer_did=subject_did, signatory="BDD Counterparty Signer")
+    resp = wallet_sign(
+        context, did, signer_did=subject_did, signatory="BDD Counterparty Signer", ceremony_id=ceremony_id
+    )
     assert resp.status_code == 200, (
         f"Wallet signing failed while preparing SIGNED state for '{name}': {resp.status_code} {resp.text}"
     )

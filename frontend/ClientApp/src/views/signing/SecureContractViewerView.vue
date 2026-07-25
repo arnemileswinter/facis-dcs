@@ -16,10 +16,15 @@ import {
   signatureManagementService,
   type SignatureValidateResult,
   type SignatureVerifyResult,
+  signingErrorMessage,
 } from '@/services/signature-management-service'
 import { downloadBlob } from '@/utils/download-blob'
 
-// QES is descoped (ADR-12); AES with PoA is the credential the wallet applies.
+// The level requested here is a hint to the wallet only — the backend gates
+// on the contract's OWN declared per-field requirement regardless of what is
+// requested (ADR-20 SM-01). AES covers every contract that doesn't declare a
+// stricter requirement; a contract requiring QES needs a wallet/QTSP capable
+// of producing one, which this desktop-upload path does not orchestrate.
 const CREDENTIAL_TYPE = 'AES'
 
 const route = useRoute()
@@ -48,9 +53,12 @@ const validateResult = ref<SignatureValidateResult | undefined>()
 const provenanceChain = ref<ProvenanceEntry[]>([])
 
 // After prepare, the contract awaits the externally-signed upload; holds the
-// ceremony's signatory DID for the submit call and the to-be-signed PDF so the
-// signer can download it again without re-running the identity ceremony.
+// ceremony's signatory DID and ceremony id for the submit call (submit MUST
+// resolve the SAME ceremony prepare pinned bytes on, ADR-20) and the
+// to-be-signed PDF so the signer can download it again without re-running
+// the identity ceremony.
 const pendingSignerDid = ref<string | null>(null)
+const pendingCeremonyId = ref<string | null>(null)
 const preparedDocument = ref<Blob | null>(null)
 
 const busy = ref(false)
@@ -197,13 +205,16 @@ async function applySignature() {
       did.value,
       outcome.data.signerDid,
       CREDENTIAL_TYPE,
+      signatureFieldName.value,
+      outcome.data.ceremonyId,
     )
     preparedDocument.value = prepared
     downloadBlob(prepared, documentFilename.value)
     pendingSignerDid.value = outcome.data.signerDid
+    pendingCeremonyId.value = outcome.data.ceremonyId
     done.value.apply = true
   } catch (e: unknown) {
-    stepError.value.apply = `Could not prepare the contract for signing: ${message(e)}`
+    stepError.value.apply = `Could not prepare the contract for signing: ${signingErrorMessage(e)}`
   } finally {
     busy.value = false
   }
@@ -213,7 +224,7 @@ async function applySignature() {
 async function submitSigned(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file || !pendingSignerDid.value) return
+  if (!file || !pendingSignerDid.value || !pendingCeremonyId.value) return
   busy.value = true
   delete stepError.value.submit
   try {
@@ -222,12 +233,15 @@ async function submitSigned(event: Event) {
       pendingSignerDid.value,
       CREDENTIAL_TYPE,
       file,
+      signatureFieldName.value,
+      pendingCeremonyId.value,
     )
     pendingSignerDid.value = null
+    pendingCeremonyId.value = null
     done.value.submit = true
     await loadProvenance()
   } catch (e: unknown) {
-    stepError.value.submit = `The signed contract was rejected: ${message(e)}`
+    stepError.value.submit = `The signed contract was rejected: ${signingErrorMessage(e)}`
   } finally {
     busy.value = false
     input.value = ''

@@ -11,6 +11,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
 const python = process.env.E2E_BDD_PYTHON ?? path.join(homedir(), '.dcs-bdd-venv', 'bin', 'python3')
 
+// The single-instance signing identity: MUST be passed explicitly to BOTH
+// complete_signing_webhook.py (the PID) and sign_prepared_pdf.py (the signing
+// certificate) — never left to each script's own env-var default — so the
+// two can never resolve to different signatories (ADR-20's cert-subject to
+// PID name-match gate rejects exactly that mismatch).
+const E2E_SIGNATORY_NAME = 'E2E Vertical Signer'
+
 /**
  * UI lifecycle helpers shared by e2e specs that need a contract in a given
  * state. Extracted from the full-vertical flow: they drive a component
@@ -479,14 +486,17 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
 }
 
 /**
- * Signs an APPROVED contract through the Secure Contract Viewer, as a real
- * signer would (ADR-12): open the contract from the signing list, verify it,
- * run the wallet PID ceremony, download the to-be-signed PDF, sign it
- * externally (the test wallet drives the DSS SCA with its own key, discovering
- * the signature field from the PDF), upload it, and confirm SIGNED. Shared by
- * the full-vertical end-to-end and the specs that need a signed contract.
+ * Opens an APPROVED contract in the Secure Contract Viewer, verifies it, and
+ * runs the ceremony (wallet PID+PoA presentation, then /signature/prepare) up
+ * to — but not including — signing the downloaded PDF. Shared by the correct
+ * happy-path signing flow and the deliberate-rejection variants below, which
+ * differ only in what they do with the prepared bytes.
  */
-export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
+async function startCeremonyAndPrepareDocument(
+  page: Page,
+  loginAs: LoginAs,
+  contractDid: string,
+): Promise<{ preparedPath: string; signField: string; ceremonyId: string }> {
   await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
   const row = page.getByRole('row').filter({ hasText: contractDid })
   await expect(row).toBeVisible()
@@ -520,7 +530,12 @@ export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs
 
   execFileSync(python, [path.join(here, 'complete_signing_webhook.py'), ceremony.wallet_uri], {
     cwd: repoRoot,
-    env: { ...process.env, STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL, BDD_DCS_BASE_URL: E2E_API_BASE },
+    env: {
+      ...process.env,
+      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      BDD_DCS_BASE_URL: E2E_API_BASE,
+      E2E_SIGNATORY: E2E_SIGNATORY_NAME,
+    },
     stdio: 'pipe',
   })
 
@@ -535,14 +550,68 @@ export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
   fs.writeFileSync(preparedPath, preparedBytes)
-  const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
+
+  return { preparedPath, signField, ceremonyId: ceremony.ceremony_id }
+}
+
+/**
+ * Signs an APPROVED contract through the Secure Contract Viewer, as a real
+ * signer would (ADR-12): open the contract from the signing list, verify it,
+ * run the wallet PID ceremony, download the to-be-signed PDF, sign it
+ * externally (the test wallet drives the DSS SCA with its own key, discovering
+ * the signature field from the PDF), upload it, and confirm SIGNED. Shared by
+ * the full-vertical end-to-end and the specs that need a signed contract.
+ */
+export async function signApprovedContractViaViewer(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
+  const { preparedPath, signField, ceremonyId } = await startCeremonyAndPrepareDocument(page, loginAs, contractDid)
+
+  const signedPath = path.join(tmpdir(), `signed-${ceremonyId}.pdf`)
   // No E2E_SIGN_FIELD: the wallet discovers the pre-placed field from the PDF.
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
-    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: 'E2E Vertical Signer', E2E_SIGN_FIELD: signField },
+    env: { ...process.env, DSS_URL: E2E_DSS_URL, E2E_SIGNATORY: E2E_SIGNATORY_NAME, E2E_SIGN_FIELD: signField },
     stdio: 'pipe',
   })
 
   await page.locator('input[type="file"]').setInputFiles(signedPath)
   await expect(page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 120_000 })
+}
+
+/**
+ * Same ceremony as signApprovedContractViaViewer, but the uploaded PDF is
+ * signed with a certificate deliberately naming someone OTHER than the
+ * ceremony's verified PID (ADR-20 item 4 cert↔PID sole-control gate) —
+ * proving both that the DCS rejects it and that the Secure Contract Viewer's
+ * validation-failure view renders the SPECIFIC, typed cert_pid_mismatch
+ * message (backend/design/signature_management.go's Error() results, mapped
+ * by signingErrorMessage() in signature-management-service.ts), not a
+ * generic failure string.
+ */
+export async function signApprovedContractViaViewerWithMismatchedCert(
+  page: Page,
+  loginAs: LoginAs,
+  contractDid: string,
+): Promise<void> {
+  const { preparedPath, signField, ceremonyId } = await startCeremonyAndPrepareDocument(page, loginAs, contractDid)
+
+  const signedPath = path.join(tmpdir(), `mismatched-signed-${ceremonyId}.pdf`)
+  execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      DSS_URL: E2E_DSS_URL,
+      // A fresh `user` (cert cache key) naming someone else entirely — the
+      // ceremony's verified PID is still E2E_SIGNATORY_NAME, so this
+      // certificate cannot match it.
+      E2E_SIGNATORY: 'Someone Else Entirely',
+      E2E_SIGN_FIELD: signField,
+    },
+    stdio: 'pipe',
+  })
+
+  await page.locator('input[type="file"]').setInputFiles(signedPath)
+  await expect(page.getByText('does not identify the verified signatory', { exact: false })).toBeVisible({
+    timeout: 120_000,
+  })
+  await expect(page.getByText('SIGNED', { exact: true })).not.toBeVisible()
 }

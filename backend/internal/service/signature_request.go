@@ -20,8 +20,11 @@ import (
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
@@ -71,7 +74,19 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s has no verified PID presentation to publish a signing request for", req.CeremonyID))
 	}
 
+	// Default to the CONTRACT's own declared level requirement for this field
+	// (SM-01 per-contract level enforcement) rather than a blind "AES": a
+	// caller that omits credential_type is asking the DCS to request whatever
+	// the field actually needs, not "AES regardless" — otherwise a QES-required
+	// field's publish call fails its own fail-fast check inside Prepare below
+	// (comparing "AES" against the QES it itself requires) before the wallet
+	// ever gets a chance to sign, and the JAR's signatureQualifier would have
+	// asked the wallet for the wrong level anyway. An explicit request still
+	// wins (and still meets Prepare's fail-fast check, or is rejected there).
 	credentialType := "AES"
+	if contractData, cErr := s.readContractDataByDID(ctx, ceremony.ContractDID); cErr == nil && contractData != nil {
+		credentialType = validation.RequiredCredentialType(*contractData, ceremony.FieldName)
+	}
 	if req.CredentialType != nil && *req.CredentialType != "" {
 		credentialType = *req.CredentialType
 	}
@@ -96,6 +111,11 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 		AppliedBy:      appliedBy,
 		HolderDID:      holderDID,
 		UserRoles:      roles,
+		// Pin the EXACT ceremony this publish call resolved above (ceremony.ID
+		// from req.CeremonyID), not "the signer's most recent verified ceremony
+		// for this field" — the same ambiguity SubmitSignature's callback path
+		// closes below, here on the prepare/pin side.
+		CeremonyID: ceremony.ID,
 	})
 	if err != nil {
 		return nil, mapSignatureCommandError(err)
@@ -177,11 +197,29 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 }
 
 // buildDocumentRetrievalJAR builds the published-ceremony JAR that asks the
-// wallet to fetch and sign the prepared PDF (ADR-12).
+// wallet to fetch and sign the prepared PDF AND the canonical JSON-LD payload
+// (ADR-12: "document_digests is an array: the PDF and the JSON-LD are offered
+// together, so one ceremony yields both a PAdES and a JAdES over the same
+// content hash"). The payload's digest doubles as the nonce-binding and
+// byte-pin anchor the callback checks the returned JAdES against (ADR-20).
 func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony) (io.ReadCloser, error) {
-	digestBytes, decErr := hex.DecodeString(*ceremony.PreparedPDFSHA256)
+	pdfDigestBytes, decErr := hex.DecodeString(*ceremony.PreparedPDFSHA256)
 	if decErr != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("decode prepared document digest: %w", decErr))
+	}
+	digests := []oid4vprequest.DocumentDigest{
+		{Label: ceremony.FieldName, Hash: base64.StdEncoding.EncodeToString(pdfDigestBytes)},
+	}
+	locations := []oid4vprequest.DocumentLocation{
+		{URI: s.signatureRequestURL(ceremony.ID, "document"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}},
+	}
+	if ceremony.PinnedPayloadSHA256 != nil && *ceremony.PinnedPayloadSHA256 != "" {
+		payloadDigestBytes, decErr := hex.DecodeString(*ceremony.PinnedPayloadSHA256)
+		if decErr != nil {
+			return nil, signaturemanagement.MakeInternalError(fmt.Errorf("decode prepared payload digest: %w", decErr))
+		}
+		digests = append(digests, oid4vprequest.DocumentDigest{Label: ceremony.FieldName + "-payload", Hash: base64.StdEncoding.EncodeToString(payloadDigestBytes)})
+		locations = append(locations, oid4vprequest.DocumentLocation{URI: s.signatureRequestURL(ceremony.ID, "payload"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}})
 	}
 
 	credentialType := "AES"
@@ -195,12 +233,8 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 		Nonce:              *ceremony.RequestNonce,
 		ExpiresAt:          *ceremony.RequestExpiresAt,
 		SignatureQualifier: signatureQualifierFor(credentialType),
-		DocumentDigests: []oid4vprequest.DocumentDigest{
-			{Label: ceremony.FieldName, Hash: base64.StdEncoding.EncodeToString(digestBytes)},
-		},
-		DocumentLocations: []oid4vprequest.DocumentLocation{
-			{URI: s.signatureRequestURL(ceremony.ID, "document"), Method: oid4vprequest.DocumentLocationMethod{Type: "public"}},
-		},
+		DocumentDigests:    digests,
+		DocumentLocations:  locations,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("build signing request object: %w", err))
@@ -250,6 +284,23 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
 }
 
+// SignatureRequestPayload serves the pinned canonical JSON-LD contract payload
+// the wallet fetches from the request object's SECOND document_locations
+// entry, to produce the JAdES twin of the PAdES over the same content hash
+// (ADR-12 SM-02/-11) — and, since it is served byte-for-byte identical to what
+// was pinned at prepare, the same bytes the DCS's byte-pin check (ADR-20)
+// compares the returned JAdES payload against.
+func (s *signatureManagementsrvc) SignatureRequestPayload(ctx context.Context, p *signaturemanagement.SignatureRequestPayloadPayload) (io.ReadCloser, error) {
+	ceremony, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ceremony.PinnedPayload) == 0 {
+		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s has no pinned payload", p.CeremonyID))
+	}
+	return io.NopCloser(bytes.NewReader(ceremony.PinnedPayload)), nil
+}
+
 // SignatureRequestCallback is the OpenID4VP response_uri for a ceremony. While
 // pending it accepts a direct_post vp_token with PID and PoA; after publish it
 // accepts the signed document (ADR-12).
@@ -285,6 +336,11 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	// Fast-fail for the common case; NOT the consumption guard. The atomic
+	// guard is inside Applier.SubmitSignature (ADR-20): its guarded UPDATE ...
+	// WHERE consumed_at IS NULL and the finalize writes commit or roll back in
+	// ONE transaction, so two concurrent callbacks can never both finalize
+	// even though both may pass this early, non-atomic read.
 	if ceremony.ConsumedAt != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
 	}
@@ -329,6 +385,14 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 			AppliedBy:      appliedBy,
 			HolderDID:      holderDID,
 			UserRoles:      roles,
+			// The callback already resolved the EXACT ceremony from the URL's
+			// ceremony_id (loadPublishedCeremony above) — pin submit to it
+			// explicitly rather than falling back to resolveCeremony's "most
+			// recent verified ceremony for this field" heuristic, which can
+			// resolve a DIFFERENT ceremony than the one prepare pinned bytes
+			// onto once more than one has been verified for the same field
+			// (ADR-20 byte pinning).
+			CeremonyID: ceremony.ID,
 		},
 		SignedPDF:      signedPDF,
 		JAdESSignature: jades,
@@ -336,14 +400,14 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return nil, mapSignatureCommandError(err)
 	}
 
+	// SubmitSignature already marked the ceremony consumed atomically, in the
+	// same transaction as finalize (ADR-20) — this is a read-only follow-up
+	// for the response, not a second write.
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.CeremonyRepo.MarkCeremonyConsumed(ctx, tx, ceremony.ID); err != nil {
-		return nil, signaturemanagement.MakeInternalError(err)
-	}
 	processData, err := s.CRepo.ReadProcessDataByDID(ctx, tx, ceremony.ContractDID)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
@@ -398,9 +462,19 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		_ = json.Unmarshal(verifiedPID.RawClaims, &pidClaims)
 	}
 
-	handler := command.WebhookHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
-	verified, err := handler.CompletePresentation(ctx, command.WebhookCmd{
+	// sdHash is extracted (not re-verified — VerifyPID above already did that,
+	// against the ceremony's own nonce and the configured trust anchors) purely
+	// as a record-keeping field for the KB-JWT credential-chain link (SM-26).
+	presentation, err := sdjwt.ParsePresentation(pidPresentation)
+	if err != nil {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("invalid vp_token: %w", err))
+	}
+
+	handler := command.PresentationHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
+	verified, err := handler.CompletePresentation(ctx, command.PresentationCmd{
 		CeremonyID:      ceremonyID,
+		SignerDID:       verifiedPID.SubjectDID,
+		SDHash:          presentation.SDHash,
 		VpToken:         pidPresentation,
 		PidClaims:       pidClaims,
 		PoAOrganization: strings.TrimSpace(verifiedPoA.ParticipantDID),
@@ -436,6 +510,28 @@ func (s *signatureManagementsrvc) getCeremony(ctx context.Context, id string) (*
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 	return ceremony, nil
+}
+
+// readContractDataByDID reads a contract's JSON-LD data in a short read
+// transaction, so PublishSignatureRequest can default credential_type to the
+// contract's OWN declared level requirement before Prepare's fail-fast check
+// runs. Returns (nil, nil) rather than an error for a contract carrying no
+// data yet — the caller falls back to "AES" in that case, and Prepare's own
+// (authoritative) checks reject an actually-broken contract regardless.
+func (s *signatureManagementsrvc) readContractDataByDID(ctx context.Context, did string) (*datatype.JSON, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	contract, err := s.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return nil, err
+	}
+	if contract == nil {
+		return nil, nil
+	}
+	return contract.ContractData, nil
 }
 
 // loadPendingCeremony resolves a pending ceremony that has not yet been

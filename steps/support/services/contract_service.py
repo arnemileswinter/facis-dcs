@@ -322,7 +322,9 @@ class ContractService:
         context.contract_seed_headers[contract_name] = creator_h
 
     @staticmethod
-    def _create_approved_template_with_signature_field(context, signatory_name: str) -> str:
+    def _create_approved_template_with_signature_field(
+        context, signatory_name: str, *, required_credential_type: str | None = None,
+    ) -> str:
         """Like _create_approved_template_for_contract, but the template
         declares a named `dcs:signatureFields` entry (dcs:SignatureField,
         dcs:signatoryName) — the field pdf-core's PAdES signer is expected to
@@ -330,7 +332,19 @@ class ContractService:
         signature field by name: /T == signatoryName from the JSON-LD).
         See docs/semantic-ontology/linkml/tests/valid/signature-fields.jsonld
         for the schema shape this mirrors.
+
+        required_credential_type, when set ("AES"/"QES"), adds
+        dcs:requiredCredentialType to the field — the contract's own declared
+        signature-level requirement the submit gate enforces (ADR-20 SM-01).
         """
+        field_node = {
+            "@id": "urn:uuid:sig-field-1",
+            "@type": "dcs:SignatureField",
+            "dcs:signatoryName": signatory_name,
+        }
+        if required_credential_type:
+            field_node["dcs:requiredCredentialType"] = required_credential_type
+
         creator_h = AuthService.get_headers_for_roles(["Template Creator"])
         create_resp = post_json(
             context,
@@ -341,13 +355,7 @@ class ContractService:
                 "description": "BDD template for real-signing-vertical scenarios",
                 "template_data": {
                     **TemplateService.canonical_document_data("BDD Signature-Field Source Template"),
-                    "dcs:signatureFields": [
-                        {
-                            "@id": "urn:uuid:sig-field-1",
-                            "@type": "dcs:SignatureField",
-                            "dcs:signatoryName": signatory_name,
-                        }
-                    ],
+                    "dcs:signatureFields": [field_node],
                 },
             },
             headers=creator_h,
@@ -412,14 +420,19 @@ class ContractService:
         return t_did
 
     @staticmethod
-    def _create_contract_in_draft_with_signature_field(context, contract_name: str, signatory_name: str):
+    def _create_contract_in_draft_with_signature_field(
+        context, contract_name: str, signatory_name: str, *, required_credential_type: str | None = None,
+    ):
         """Like _create_contract_in_draft, but sourced from a template that
         carries a named dcs:SignatureField (see
         _create_approved_template_with_signature_field) — used by the
         real-signing-vertical scenarios that assert on the
-        PAdES-signed PDF's AcroForm /T field name.
+        PAdES-signed PDF's AcroForm /T field name, and by the ADR-20
+        level-enforcement negative test (required_credential_type="QES").
         """
-        t_did = ContractService._create_approved_template_with_signature_field(context, signatory_name)
+        t_did = ContractService._create_approved_template_with_signature_field(
+            context, signatory_name, required_credential_type=required_credential_type,
+        )
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {

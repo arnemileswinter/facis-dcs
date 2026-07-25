@@ -108,15 +108,11 @@ spec:
               /app/scripts/hsm-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" "$SO_PIN" "$MODULE"
 
               # Store the x5chain + its dev CA inside the token dir so the CA
-              # stays a stable trust anchor across upgrades.
+              # stays a stable trust anchor across upgrades. No second leaf for
+              # a contract-signing cert: the DCS holds no contract-signing key
+              # (ADR-12/ADR-20) — only the C2PA claim-signing chain is provisioned.
               /app/scripts/c2pa-cert-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" \
                 "$TOKEN_DIR/c2pa-x5chain.pem" "$MODULE" "$CRL_URL"
-
-              # Issue a second leaf bound to the dcs-contract-pades token key for
-              # pdf-core's PAdES CMS signing certificate (DCS-IR-SI-10). Same dev
-              # CA, same script, different KEY_LABEL/output file.
-              KEY_LABEL=dcs-contract-pades /app/scripts/c2pa-cert-provision.sh "$TOKEN_DIR" "$LABEL" "$PKCS11_PIN" \
-                "$TOKEN_DIR/pades-x5chain.pem" "$MODULE" "$CRL_URL"
 
               # Derive did.json from the dcs-did token key with the same /app/gendid
               # tool dev-stack.sh uses natively (identity.NewDIDDocument is fatal on
@@ -157,9 +153,8 @@ spec:
                 fi
               }
 
-              # Publish both x5chains as one Secret for pdf-core via the K8s API.
+              # Publish the C2PA x5chain as a Secret for pdf-core via the K8s API.
               x5chain_json="$(jq -Rs . < "$TOKEN_DIR/c2pa-x5chain.pem")"
-              pades_x5chain_json="$(jq -Rs . < "$TOKEN_DIR/pades-x5chain.pem")"
               x5chain_payload="$(cat <<EOF
               {
                 "apiVersion": "v1",
@@ -167,8 +162,7 @@ spec:
                 "metadata": { "name": "${SECRET_NAME}" },
                 "type": "Opaque",
                 "stringData": {
-                  "x5chain-pem": ${x5chain_json},
-                  "pades-x5chain-pem": ${pades_x5chain_json}
+                  "x5chain-pem": ${x5chain_json}
                 }
               }
               EOF

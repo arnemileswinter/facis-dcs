@@ -18,8 +18,11 @@ Endpoint surface (backend/design/contract_workflow_engine.go):
    or `{"did", "correlation_id", "kpi": {"metric", "value"}}` (KPI report),
    protected by the shared-secret header `X-Deployment-Callback-Secret`
    (env `BDD_DEPLOYMENT_CALLBACK_SECRET`, default
-   "bdd-deployment-callback-secret"), mirroring the EUDIPLO-webhook
-   precedent (steps/real_signing_vertical).
+   "bdd-deployment-callback-secret") — a machine-to-machine callback from the
+   Contract Target System, not a wallet, so a shared secret is the right
+   authentication for it (the signing ceremony's callback, by contrast,
+   authenticates by the unguessable ceremony id plus ADR-20 nonce binding,
+   see steps/real_signing_vertical).
 
 3. `GET /contract/retrieve/{did}` carries a `"kpis"` field (list of
    `{"metric", "value", "observed_at", "violation"}`). SLA violations are

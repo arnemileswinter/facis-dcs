@@ -187,6 +187,42 @@ def step_then_signature_view_contents(context, name, status, cred):
     )
 
 
+@then(
+    'the signature view for contract "{name}" shows the achieved level meeting '
+    'the contract\'s required level "{required}", not qualified, '
+    'and a non-empty signing certificate subject'
+)
+def step_then_signature_view_level_and_cert(context, name, required):
+    """ADR-20 SM-01/SM-26: the compliance-viewer fields the sole-control gate
+    and the per-contract level requirement actually feed — required_credential_type,
+    qualified, signer_cert_subject, signer_cert_serial — sourced from the
+    ceremony row (backend/internal/service/signature_management.go's View),
+    not re-derived here; this checks the API contract the frontend's
+    ComplianceViewerView.vue renders from actually carries them."""
+    body = context.requests_response.json()
+    signatures = body.get("signatures") or []
+    assert len(signatures) == 1, f"Expected exactly one signature, got: {signatures}"
+    sig = signatures[0]
+
+    assert sig.get("required_credential_type") == required, (
+        f"Expected required_credential_type {required!r}, got: {sig.get('required_credential_type')!r}"
+    )
+    achieved = sig.get("credential_type")
+    _LEVEL_RANK = {"SES": 0, "AES": 1, "QES": 2}
+    assert _LEVEL_RANK.get(achieved, -1) >= _LEVEL_RANK.get(required, 0), (
+        f"Expected achieved level {achieved!r} to meet required level {required!r}"
+    )
+    assert sig.get("qualified") is False, (
+        f"Expected qualified=False for a non-QES signature, got: {sig.get('qualified')!r}"
+    )
+    assert sig.get("signer_cert_subject"), (
+        f"Expected a non-empty signing certificate subject (ADR-20 sole-control evidence), got: {sig}"
+    )
+    assert sig.get("signer_cert_serial"), (
+        f"Expected a non-empty signing certificate serial, got: {sig}"
+    )
+
+
 @then('the signature audit log for contract "{name}" includes an action of type "{event_type}"')
 def step_then_signature_audit_includes(context, name, event_type):
     # The audit trail is anchored asynchronously by the outbox processor

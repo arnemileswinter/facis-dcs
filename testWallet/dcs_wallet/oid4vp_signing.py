@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import base64
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from dcs_wallet.jades_signer import sign_jades_payload
 from dcs_wallet.remote_signer import sign_pdf
 
 
@@ -68,44 +70,75 @@ def sign_via_document_retrieval(
     dss_url: str,
     keys_dir: Path,
     field: str = "",
+    given_name: str | None = None,
+    family_name: str | None = None,
 ) -> dict:
     """Consume the OID4VP Document-Retrieval request object and return the DCS's
     callback response (JSON). user is the sole-control token: the signing
-    certificate's subject is "CN=DCS Signatory <user>", which the DCS's
-    validation gate requires to identify the ceremony's signatory.
+    certificate's subject identifies the ceremony's signatory (ADR-20 cert↔PID
+    name match) — GIVEN_NAME/SURNAME default to (user, "BDD-Testperson"),
+    matching the ceremony's PID (see signer.ensure_signing_material); pass
+    given_name/family_name explicitly to mint a deliberately mismatched cert.
     """
     request_object = _get(request_uri, accept="application/oauth-authz-req+jwt").decode()
     claims = _decode_jwt_claims(request_object)
 
     locations = claims.get("documentLocations") or []
     response_uri = claims.get("response_uri")
+    nonce = claims.get("nonce")
     if not locations:
         raise RuntimeError("request object carries no documentLocations")
     if not response_uri:
         raise RuntimeError("request object carries no response_uri")
+    if not nonce:
+        raise RuntimeError("request object carries no nonce")
 
     document_uri = _reorigin(locations[0]["uri"], request_uri)
     response_uri = _reorigin(response_uri, request_uri)
 
     to_be_signed = _get(document_uri, accept="application/pdf")
     signed_pdf = sign_pdf(
-        to_be_signed, user=user, dss_url=dss_url, field=field, keys_dir=keys_dir
+        to_be_signed, user=user, dss_url=dss_url, field=field, keys_dir=keys_dir,
+        given_name=given_name, family_name=family_name,
     )
 
     # The EUDI walletdriven-signer direct_post: an application/x-www-form-urlencoded
     # body carrying the PAdES-signed document (enveloped in the PDF) in the
     # documentWithSignature[] list. The ceremony identity is the response_uri path,
     # so no state is echoed.
-    body = urlencode({
+    form = {
         "documentWithSignature[0]": base64.b64encode(signed_pdf).decode(),
-    }).encode()
+    }
+
+    # The SECOND documentLocations entry, when offered (ADR-12), is the
+    # canonical JSON-LD payload: sign it as a JAdES with the ceremony's nonce
+    # bound into the protected header (ADR-20 item 1) and post it as
+    # signatureObject[0] — the DCS's byte-pin check requires the RAW fetched
+    # bytes signed with no re-serialization (see jades_signer.py).
+    if len(locations) > 1:
+        payload_uri = _reorigin(locations[1]["uri"], request_uri)
+        payload_bytes = _get(payload_uri, accept="application/json")
+        jades = sign_jades_payload(
+            payload_bytes, user=user, keys_dir=keys_dir, nonce=nonce,
+            given_name=given_name, family_name=family_name,
+        )
+        form["signatureObject[0]"] = jades
+
+    body = urlencode(form).encode()
     post = urllib.request.Request(
         response_uri,
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
     )
-    with urllib.request.urlopen(post, timeout=120) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(post, timeout=120) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # HTTPError's default str() is just "HTTP Error 400: Bad Request" — the
+        # DCS's typed error body (name/message, ADR-20) is what actually says
+        # WHY, and is otherwise silently discarded.
+        detail = exc.read().decode("utf-8", "replace")[:3000]
+        raise RuntimeError(f"ceremony callback POST {response_uri} returned HTTP {exc.code}: {detail}") from exc
 
 
 def _main() -> None:

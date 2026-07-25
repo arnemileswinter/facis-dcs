@@ -65,6 +65,22 @@ type Report struct {
 	// SigningTime is the claimed/qualified signing time (DCS-FR-SM-18 timestamp
 	// verification).
 	SigningTime string
+	// Qualification is DSS's qualification determination for the signature
+	// (e.g. QESIG for a qualified electronic signature by a natural person,
+	// ADESIG_QC/ADESIG for an advanced signature). It is the QES evidence
+	// AssertValidQES requires TOTAL-PASSED to be paired with — AssertValidAES
+	// never looks at it (ADR-20).
+	Qualification string
+	// SerialNumber is the signing certificate's serial number (sole control
+	// audit trail, DCS-FR-SM-26).
+	SerialNumber string
+	// GivenName/Surname/CommonName are the signing certificate subject's name
+	// attributes, when DSS reports them as structured fields. When DSS reports
+	// only SignedBy as a DN string, ParseSubjectAttributes recovers the same
+	// attributes from it (cert-subject to PID name matching, ADR-20).
+	GivenName  string
+	Surname    string
+	CommonName string
 }
 
 // Passed reports whether the ETSI indication is TOTAL-PASSED.
@@ -108,6 +124,89 @@ func (r *Report) AssertValidAES() error {
 		return fmt.Errorf("dss: signature carries no signing certificate")
 	}
 	return nil
+}
+
+// qualifiedSignatureQualifications are DSS's SignatureQualification values that
+// mean "qualified electronic signature by a natural person" (ETSI TS 119
+// 172-4 QESig) — a qualified certificate on a QSCD, chained to an EU
+// trusted-list CA.
+var qualifiedSignatureQualifications = map[string]bool{
+	"QESIG": true,
+}
+
+// AssertValidQES enforces the DCS's acceptance criteria for a Qualified
+// Electronic Signature (eIDAS Art. 3(12), Annex I): everything AssertValidAES
+// requires, PLUS DSS's TOTAL-PASSED indication (a qualified cert chaining to a
+// trusted-list CA IS required for QES, unlike AES) and a QESig qualification
+// determination (qualified certificate + QSCD, ETSI TS 119 172-4). Unlike
+// AssertValidAES, an INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND result is
+// REJECTED here: a trust-chain gap disqualifies a QES claim even though it is
+// tolerated for AES (ADR-20).
+func (r *Report) AssertValidQES() error {
+	if err := r.AssertValidAES(); err != nil {
+		return err
+	}
+	if !r.Passed() {
+		return fmt.Errorf("dss: QES requires indication TOTAL-PASSED (a qualified cert chaining to a trusted-list CA), got %s/%s", r.Indication, r.SubIndication)
+	}
+	if !qualifiedSignatureQualifications[strings.ToUpper(strings.TrimSpace(r.Qualification))] {
+		return fmt.Errorf("dss: QES requires a QESig qualification determination (qualified certificate + QSCD), got %q", r.Qualification)
+	}
+	return nil
+}
+
+// AssertMeetsLevel enforces the acceptance gate for the required signature
+// level (SM-01 per-contract level enforcement, ADR-20): AssertValidQES for a
+// contract that requires QES, AssertValidAES (the permissive gate, unchanged)
+// for everything else. Applying the wrong gate to a level the contract does
+// not require would either reject a legitimate AES signature against QES
+// criteria it was never meant to satisfy, or accept a QES-required signature
+// on AES's relaxed trust-chain tolerance — this is the single dispatch point
+// that keeps the two gates from being applied to the wrong ceremony.
+func (r *Report) AssertMeetsLevel(required string) error {
+	if strings.EqualFold(strings.TrimSpace(required), "QES") {
+		return r.AssertValidQES()
+	}
+	return r.AssertValidAES()
+}
+
+// ParseSubjectAttributes extracts GIVENNAME/SURNAME/CN/SERIALNUMBER RDN
+// attributes from a certificate subject distinguished name string (DSS's
+// SignedBy, e.g. "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane"). Used as a
+// fallback when DSS does not report GivenName/Surname as structured fields.
+func ParseSubjectAttributes(dn string) map[string]string {
+	attrs := map[string]string{}
+	for _, part := range strings.FieldsFunc(dn, func(r rune) bool { return r == ',' || r == '/' }) {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToUpper(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		attrs[key] = value
+	}
+	return attrs
+}
+
+// SubjectGivenName returns the signing certificate's given name, preferring
+// DSS's structured GivenName field and falling back to parsing SignedBy.
+func (r *Report) SubjectGivenName() string {
+	if strings.TrimSpace(r.GivenName) != "" {
+		return r.GivenName
+	}
+	return ParseSubjectAttributes(r.SignedBy)["GIVENNAME"]
+}
+
+// SubjectSurname returns the signing certificate's surname, preferring DSS's
+// structured Surname field and falling back to parsing SignedBy.
+func (r *Report) SubjectSurname() string {
+	if strings.TrimSpace(r.Surname) != "" {
+		return r.Surname
+	}
+	return ParseSubjectAttributes(r.SignedBy)["SURNAME"]
 }
 
 // ValidatePDF submits pdf to POST {base}/services/rest/validation/validateSignature
@@ -169,21 +268,221 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 	return report, nil
 }
 
-// parseReport extracts the first Indication/SubIndication pair from a DSS
-// WSReportsDTO. The DTO layout differs across DSS versions (simpleReport
-// signature entries vs. XML-derived attribute casing), so the search walks
-// the JSON generically instead of pinning one version's schema.
+// parseReport extracts the Indication/SubIndication pair — and everything
+// else the Report carries — from a DSS WSReportsDTO.
 func parseReport(raw []byte) (*Report, error) {
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("dss: parse validation response: %w", err)
 	}
 	report := &Report{}
-	walkReport(doc, report)
+	if sig, sigID := latestSignatureEntry(doc); sig != nil {
+		walkReport(sig, report)
+		// GivenName/Surname/CommonName never appear under simpleReport (per
+		// its XSD, a Signature entry's only certificate-shaped child is
+		// CertificateChain.Certificate.QualifiedName - a display string, not
+		// structured RDN fields) - they live on diagnosticData's own
+		// per-certificate entries, resolved below.
+		if cert := resolveSigningCertificate(doc, sigID); cert != nil {
+			walkReport(cert, report)
+		}
+	} else {
+		// Fallback for DSS response shapes that don't nest under
+		// simpleReport.signatureOrTimestampOrEvidenceRecord the way the JSON
+		// REST shape does (the DTO layout differs across DSS versions -
+		// simpleReport signature entries vs. XML-derived attribute casing) -
+		// walk the whole document generically as before.
+		walkReport(doc, report)
+	}
 	if report.Indication == "" {
 		return nil, fmt.Errorf("dss: validation response carries no Indication")
 	}
 	return report, nil
+}
+
+// latestSignatureEntry finds simpleReport.signatureOrTimestampOrEvidenceRecord
+// and returns the "Signature" object of its LAST Signature-typed entry
+// (Timestamp/EvidenceRecord entries in the same list are skipped). PAdES
+// incremental updates append a new signature after any already on the
+// document, and DSS reports them in that same order, so the last Signature
+// entry is the one this submission is actually being validated for.
+//
+// A document can carry more than one signature by the time it's submitted
+// (a multi-signer contract's second-and-later signatories always incrementally
+// sign on top of earlier ones), and simpleReport then carries one entry per
+// signature. Walking the whole response tree instead of scoping to this one
+// (the previous implementation) picked up whichever entry's Indication/
+// SubIndication/SignedBy/GivenName/Surname fields the walk order happened to
+// visit first - for an ordered array that is deterministically the OLDEST
+// signature, not the one just submitted, silently validating and attributing
+// the wrong signatory's certificate (ADR-20 cert↔PID sole-control check).
+// latestSignatureEntry also returns that entry's own Id (a DSS WSReportsDTO
+// token id, e.g. "S-<hash>") — shared verbatim between simpleReport and
+// diagnosticData for the same signature (see resolveSigningCertificate) — so
+// callers can cross-reference the rest of the response for this exact
+// signature. "" if the entry carries no (string) Id.
+func latestSignatureEntry(doc any) (any, string) {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return nil, ""
+	}
+	simpleReportAny, ok := lookupCI(root, "simpleReport")
+	if !ok {
+		return nil, ""
+	}
+	simpleReport, ok := simpleReportAny.(map[string]any)
+	if !ok {
+		return nil, ""
+	}
+	entriesAny, ok := lookupCI(simpleReport, "signatureOrTimestampOrEvidenceRecord")
+	if !ok {
+		return nil, ""
+	}
+	entries, ok := entriesAny.([]any)
+	if !ok {
+		return nil, ""
+	}
+	var last any
+	var lastID string
+	for _, entry := range entries {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		sigAny, ok := lookupCI(obj, "Signature")
+		if !ok {
+			continue
+		}
+		last = sigAny
+		lastID = ""
+		if sig, ok := sigAny.(map[string]any); ok {
+			lastID = idString(sig)
+		}
+	}
+	return last, lastID
+}
+
+// resolveSigningCertificate returns the diagnosticData.UsedCertificates entry
+// for the certificate that produced signatureID, per DSS's WSReportsDTO
+// schema (dss-diagnostic-jaxb DiagnosticData.xsd, DSS 6.2):
+// diagnosticData.Signatures.Signature[] carries one entry per signature
+// (Id-matched against simpleReport's own entries) whose SigningCertificate
+// attribute "Certificate" is an IDREF into
+// diagnosticData.UsedCertificates.Certificate[] (matched by that entry's own
+// Id) — the certificate entry carrying the GivenName/Surname/CommonName RDN
+// attributes simpleReport never exposes. UsedCertificates is a FLAT list of
+// every certificate in the document (every signature's signing cert, CA
+// certs, TSA certs) — resolving through this Id chain, rather than scanning
+// that flat list for the first GivenName/Surname found, is what keeps a
+// multi-signature document's certificates from being mixed up the same way
+// latestSignatureEntry's scoping fixes simpleReport's own ambiguity.
+func resolveSigningCertificate(doc any, signatureID string) map[string]any {
+	if signatureID == "" {
+		return nil
+	}
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return nil
+	}
+	diagnosticDataAny, ok := lookupCI(root, "diagnosticData")
+	if !ok {
+		return nil
+	}
+	diagnosticData, ok := diagnosticDataAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	certID := ""
+	if signaturesAny, ok := lookupCI(diagnosticData, "Signatures"); ok {
+		for _, sig := range wrappedList(signaturesAny, "Signature") {
+			if idString(sig) != signatureID {
+				continue
+			}
+			scAny, ok := lookupCI(sig, "SigningCertificate")
+			if !ok {
+				break
+			}
+			sc, ok := scAny.(map[string]any)
+			if !ok {
+				break
+			}
+			if v, ok := lookupCI(sc, "Certificate"); ok {
+				if s, ok := v.(string); ok {
+					certID = s
+				}
+			}
+			break
+		}
+	}
+	if certID == "" {
+		return nil
+	}
+
+	usedCertsAny, ok := lookupCI(diagnosticData, "UsedCertificates")
+	if !ok {
+		return nil
+	}
+	for _, cert := range wrappedList(usedCertsAny, "Certificate") {
+		if idString(cert) == certID {
+			return cert
+		}
+	}
+	return nil
+}
+
+// wrappedList normalizes a JAXB list-wrapper element - e.g.
+// {"Signature": [...]} or, for a single item, sometimes {"Signature": {...}}
+// depending on the JSON mapper - to a slice of objects.
+func wrappedList(wrapperAny any, itemKey string) []map[string]any {
+	wrapper, ok := wrapperAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+	itemAny, ok := lookupCI(wrapper, itemKey)
+	if !ok {
+		return nil
+	}
+	switch v := itemAny.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		return []map[string]any{v}
+	default:
+		return nil
+	}
+}
+
+// idString reads a token's "Id" field (an XML attribute in the source XSD,
+// flattened to a plain JSON key like every other attribute in this DTO).
+func idString(m map[string]any) string {
+	if v, ok := lookupCI(m, "Id"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// lookupCI is a case-insensitive map lookup, matching walkReport's existing
+// case-insensitive key handling (DSS's JSON key casing varies by version).
+func lookupCI(m map[string]any, key string) (any, bool) {
+	if v, ok := m[key]; ok {
+		return v, true
+	}
+	lower := strings.ToLower(key)
+	for k, v := range m {
+		if strings.ToLower(k) == lower {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 // walkReport pulls the first occurrence of each distilled field from a DSS
@@ -209,6 +508,16 @@ func walkReport(node any, report *Report) {
 				setFirst(&report.SignatureFormat, s)
 			case "signingtime":
 				setFirst(&report.SigningTime, s)
+			case "signaturequalification", "qualification":
+				setFirst(&report.Qualification, s)
+			case "serialnumber", "certificateserialnumber":
+				setFirst(&report.SerialNumber, s)
+			case "givenname":
+				setFirst(&report.GivenName, s)
+			case "surname":
+				setFirst(&report.Surname, s)
+			case "commonname":
+				setFirst(&report.CommonName, s)
 			}
 		}
 		for _, val := range v {

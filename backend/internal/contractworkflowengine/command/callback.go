@@ -30,8 +30,10 @@ var ErrDeploymentNotFound = errors.New("deployment correlation id not found")
 
 // DeploymentCallbackSecret returns the shared secret that authenticates the
 // Contract Target System's deployment callback. It is read from
-// DEPLOYMENT_CALLBACK_SECRET, mirroring signingmanagement/command.
-// WebhookSecret's EUDIPLO precedent.
+// DEPLOYMENT_CALLBACK_SECRET — a machine-to-machine callback, unlike the
+// signing ceremony's callback, which authenticates by the unguessable
+// ceremony id plus nonce binding instead (ADR-20; the ceremony no longer has
+// a shared-secret webhook to mirror — EUDIPLO is removed).
 func DeploymentCallbackSecret() string {
 	if v := strings.TrimSpace(os.Getenv("DEPLOYMENT_CALLBACK_SECRET")); v != "" {
 		return v
