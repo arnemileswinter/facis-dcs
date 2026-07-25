@@ -3,9 +3,9 @@
 DCS-OR-C2PA-007).
 
 The swappable trust-anchor scenario (DCS_TRUST_ANCHORS) is @skip in the
-feature file - see its inline comment. The CRL-revocation and key-rotation
-scenarios seed their preconditions directly via the test DB connection
-(context.db); each seam is documented at its point of use.
+feature file - see its inline comment. The CRL-revocation scenario seeds its
+precondition directly via the test DB connection (context.db); the seam is
+documented at its point of use.
 """
 
 import json
@@ -18,9 +18,7 @@ from jwt.algorithms import ECAlgorithm
 
 from steps.support.api_client import (
     did_document_url,
-    get_with_headers,
     post_json,
-    signature_retrieve_url,
     signature_validate_url,
 )
 from steps.support.services.auth_service import AuthService
@@ -325,89 +323,4 @@ def step_then_validate_reports_cert_revoked(context, name):
         f"contractrepository.go's existing 'case \"REVOKED\":' handling) for contract "
         f"'{name}' after revoking its signing certificate in the CRL, got findings: "
         f"{findings}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Key rotation: old signature stays valid, new signature uses the new key,
-# distinguishably
-#
-# Key rotation is an OPS action (scripts/rotate-hsm-key.sh) - it is not
-# triggerable via any HTTP endpoint by design. The Given step below moves
-# the active key-version pointer (the 'pki_active_key_version' settings
-# table, backend/migrations/sql/20260709b_pki_key_versioning.sql) directly
-# via context.db; the Then assertions read the 'key_version' field from
-# GET /signature/retrieve/{did}. The requirement-accurate claim under test
-# is "old and new signatures are distinguishable by key version, and the
-# old one keeps validating".
-# ---------------------------------------------------------------------------
-
-
-@given("the active dcs-contract-pades HSM key version has been rotated to a new version")
-def step_given_rotate_key_version(context):
-    cursor = context.db.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO pki_active_key_version (label, active_version) "
-            "VALUES ('dcs-contract-pades', 2) "
-            "ON CONFLICT (label) DO UPDATE SET "
-            "active_version = pki_active_key_version.active_version + 1"
-        )
-        context.db.commit()
-    except Exception as exc:  # noqa: BLE001
-        context.db.rollback()
-        raise AssertionError(
-            "Could not seed the key-rotation test seam (the "
-            f"'pki_active_key_version' settings table): {exc}"
-        ) from exc
-    finally:
-        cursor.close()
-
-
-@then('signature validation for contract "{name}" reports the signature as still valid after rotation')
-def step_then_still_valid_after_rotation(context, name):
-    did, _ = ContractService._contract_data(context, name)
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    resp = post_json(context, signature_validate_url(context), {"did": did}, headers=manager_h)
-    assert resp.status_code == 200, (
-        f"/signature/validate failed for contract '{name}': {resp.status_code} {resp.text}"
-    )
-    findings = resp.json().get("findings") or []
-    body_text = " ".join(findings).lower()
-    invalidity_markers = ("invalid", "key not found", "unknown key", "expired key", "no such key")
-    hit = [m for m in invalidity_markers if m in body_text]
-    assert not hit, (
-        f"Expected the historical signature for contract '{name}' to remain valid after "
-        f"key rotation (old key material must stay usable for verification in the token/"
-        f"trust store), got findings suggesting "
-        f"invalidity ({hit}): {findings}"
-    )
-
-
-@then(
-    'the applied signatures for contracts "{old_name}" and "{new_name}" are attributed '
-    "to different HSM key versions"
-)
-def step_then_different_key_versions(context, old_name, new_name):
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    versions = {}
-    for name in (old_name, new_name):
-        did, _ = ContractService._contract_data(context, name)
-        resp = get_with_headers(context, signature_retrieve_url(context, did), headers=manager_h)
-        assert resp.status_code == 200, (
-            f"GET /signature/retrieve/{{did}} failed for contract '{name}': "
-            f"{resp.status_code} {resp.text}"
-        )
-        body = resp.json()
-        version = body.get("key_version") if isinstance(body, dict) else None
-        assert version is not None, (
-            f"Expected the signature evidence for contract '{name}' to name the HSM key "
-            f"label/version used (old and new signatures must be "
-            f"distinguishable by key label/version) - no such field found in: {body}"
-        )
-        versions[name] = version
-    assert versions[old_name] != versions[new_name], (
-        f"Expected '{old_name}' (signed before rotation) and '{new_name}' (signed after "
-        f"rotation) to be attributed to different HSM key versions, got the same value "
-        f"'{versions[old_name]}' for both"
     )
