@@ -260,28 +260,22 @@ func TestAssertMeetsLevel(t *testing.T) {
 }
 
 func TestParseSubjectAttributesAndAccessors(t *testing.T) {
-	r := &Report{SignedBy: "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane, SERIALNUMBER=ABC123"}
+	r := &Report{SignedBy: "CN=Jane Doe, SURNAME=Doe, GIVENNAME=Jane"}
 	if got := r.SubjectGivenName(); got != "Jane" {
 		t.Fatalf("SubjectGivenName: got %q", got)
 	}
 	if got := r.SubjectSurname(); got != "Doe" {
 		t.Fatalf("SubjectSurname: got %q", got)
 	}
-	if got := r.SubjectSerialNumber(); got != "ABC123" {
-		t.Fatalf("SubjectSerialNumber: got %q", got)
-	}
 
 	// Structured fields (as real DSS diagnostic data reports them) take
 	// precedence over parsing the SignedBy DN string.
-	structured := &Report{SignedBy: "CN=Jane Doe", GivenName: "Structured", Surname: "Fields", SerialNumber: "999"}
+	structured := &Report{SignedBy: "CN=Jane Doe", GivenName: "Structured", Surname: "Fields"}
 	if got := structured.SubjectGivenName(); got != "Structured" {
 		t.Fatalf("expected structured GivenName to win, got %q", got)
 	}
 	if got := structured.SubjectSurname(); got != "Fields" {
 		t.Fatalf("expected structured Surname to win, got %q", got)
-	}
-	if got := structured.SubjectSerialNumber(); got != "999" {
-		t.Fatalf("expected structured SerialNumber to win, got %q", got)
 	}
 }
 

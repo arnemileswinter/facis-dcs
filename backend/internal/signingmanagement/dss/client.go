@@ -209,16 +209,6 @@ func (r *Report) SubjectSurname() string {
 	return ParseSubjectAttributes(r.SignedBy)["SURNAME"]
 }
 
-// SubjectSerialNumber returns the signing certificate's serial number,
-// preferring DSS's structured SerialNumber field and falling back to parsing
-// SignedBy's DN for a SERIALNUMBER RDN.
-func (r *Report) SubjectSerialNumber() string {
-	if strings.TrimSpace(r.SerialNumber) != "" {
-		return r.SerialNumber
-	}
-	return ParseSubjectAttributes(r.SignedBy)["SERIALNUMBER"]
-}
-
 // ValidatePDF submits pdf to POST {base}/services/rest/validation/validateSignature
 // and returns the simple report's indication. Any transport or protocol
 // failure is an error — the caller treats a configured DSS as required.

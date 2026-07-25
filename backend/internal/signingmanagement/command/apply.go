@@ -359,12 +359,16 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// resolveSigningCertificate/latestSignatureEntry scoped it.
 	pidGiven, pidFamily := pidGivenFamilyName(ceremony.PidClaims)
 	nameMatchRequired := requiredLevel == "QES" || conf.AESCertNameMatchRequired()
+	// Read directly, unconditionally: this is also the source of the
+	// certificate SERIAL NUMBER recorded as sole-control evidence below
+	// (DCS-FR-SM-26), which callers need regardless of whether the name-match
+	// gate itself is administratively enforced for this signature.
+	signerCert, err := signerCertificateFromIncrementalUpdate(cmd.SignedPDF, ceremony.PreparedPDF)
+	if err != nil {
+		return fmt.Errorf("%w: could not read the submitted signature's own certificate: %v", ErrCertPIDMismatch, err)
+	}
 	var certGiven, certSurname string
 	if nameMatchRequired {
-		signerCert, err := signerCertificateFromIncrementalUpdate(cmd.SignedPDF, ceremony.PreparedPDF)
-		if err != nil {
-			return fmt.Errorf("%w: could not read the submitted signature's own certificate: %v", ErrCertPIDMismatch, err)
-		}
 		certGiven, certSurname = certGivenSurname(signerCert)
 	}
 	// The sole-control gate's outcome is a security decision on every
@@ -445,7 +449,7 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if err := h.CeremonyRepo.MarkCeremonyConsumed(ctx, tx, ceremony.ID); err != nil {
 		return fmt.Errorf("%w: %v", ErrCeremonyConsumed, err)
 	}
-	if err := h.CeremonyRepo.RecordSignerCertificate(ctx, tx, ceremony.ID, report.SignedBy, report.SubjectSerialNumber()); err != nil {
+	if err := h.CeremonyRepo.RecordSignerCertificate(ctx, tx, ceremony.ID, report.SignedBy, hex.EncodeToString(signerCert.SerialNumber.Bytes())); err != nil {
 		return err
 	}
 
