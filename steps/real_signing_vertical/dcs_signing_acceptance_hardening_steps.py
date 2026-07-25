@@ -15,7 +15,7 @@ import os
 import requests as _requests
 from behave import given, then, when
 
-from steps.support.api_client import signature_request_leaf_url, signature_request_publish_url, post_json
+from steps.support.api_client import signature_request_leaf_url
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
 from steps.template_management.contract_state_machine_steps import _advance_to_approved
@@ -28,18 +28,6 @@ from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
 )
 
 
-def _publish(context, name):
-    ceremony_id = context.ceremony_ids[name]
-    signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
-    resp = post_json(
-        context, signature_request_publish_url(context, ceremony_id),
-        {"ceremony_id": ceremony_id, "credential_type": "AES"}, headers=signer_h,
-    )
-    assert resp.status_code == 200, f"publish failed for ceremony {ceremony_id!r}: {resp.status_code} {resp.text}"
-    context.published_ceremony = resp.json()
-    return ceremony_id
-
-
 @given('contract "{name}" is APPROVED and has completed a signing ceremony requiring "{level}" for signatory "{signatory_name}"')
 def step_given_approved_ceremony_requiring_level(context, name, level, signatory_name):
     party_did = ContractService._local_peer_did(context)
@@ -50,9 +38,10 @@ def step_given_approved_ceremony_requiring_level(context, name, level, signatory
     _run_full_ceremony(context, name, field_name=party_did, signatory_name=signatory_name)
 
 
-@when('the signer publishes the OID4VP signing request for contract "{name}"')
-def step_when_publish_for_hardening(context, name):
-    _publish(context, name)
+# Publishing the OID4VP signing request re-uses the step already defined in
+# dcs_oid4vp_document_retrieval_steps.py ('the signer publishes the OID4VP
+# signing request for contract "{name}"') — a second identical definition here
+# trips behave's AmbiguousStep at load time, not a semantic difference.
 
 
 @when('the wallet signs contract "{name}" as "{signatory}" with a certificate naming "{given_name}" "{family_name}"')
