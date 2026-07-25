@@ -97,6 +97,11 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 		AppliedBy:      appliedBy,
 		HolderDID:      holderDID,
 		UserRoles:      roles,
+		// Pin the EXACT ceremony this publish call resolved above (ceremony.ID
+		// from req.CeremonyID), not "the signer's most recent verified ceremony
+		// for this field" — the same ambiguity SubmitSignature's callback path
+		// closes below, here on the prepare/pin side.
+		CeremonyID: ceremony.ID,
 	})
 	if err != nil {
 		return nil, mapSignatureCommandError(err)
@@ -366,6 +371,14 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 			AppliedBy:      appliedBy,
 			HolderDID:      holderDID,
 			UserRoles:      roles,
+			// The callback already resolved the EXACT ceremony from the URL's
+			// ceremony_id (loadPublishedCeremony above) — pin submit to it
+			// explicitly rather than falling back to resolveCeremony's "most
+			// recent verified ceremony for this field" heuristic, which can
+			// resolve a DIFFERENT ceremony than the one prepare pinned bytes
+			// onto once more than one has been verified for the same field
+			// (ADR-20 byte pinning).
+			CeremonyID: ceremony.ID,
 		},
 		SignedPDF:      signedPDF,
 		JAdESSignature: jades,
