@@ -1194,7 +1194,7 @@ function contractFieldsToSemanticConditions(
           uiMetadata: { label },
           isRequired: field['dcs:required'],
           operators: operatorsByField.get(field['@id']) ?? [],
-          value: fieldFillScalar(field['dcs:value']),
+          value: fieldFillScalar(field['dcs:value'], field['dcs:datatype']),
         },
       ],
     }

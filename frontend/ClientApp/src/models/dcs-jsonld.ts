@@ -46,13 +46,27 @@ export function typedFieldFill(value: string | number | boolean, datatype: XsdDa
   return { '@value': String(value), '@type': datatype }
 }
 
-/** Reads a fill back to its lexical scalar, accepting the typed-literal
+/** Reads a fill back to the editor's scalar, accepting the typed-literal
  *  serialization and bare scalars alike. Returns undefined for an absent
- *  fill. Typed fills come back as their lexical string — write and read
- *  stay symmetric, so draft dirty-checks never see a phantom change. */
-export function fieldFillScalar(fill: DcsContractField['dcs:value']): string | number | boolean | undefined {
-  if (fill !== null && typeof fill === 'object') return fill['@value']
-  return fill ?? undefined
+ *  fill. A typed fill converts per the declared datatype — a decimal field's
+ *  editor holds a NUMBER — so write and read stay symmetric and draft
+ *  dirty-checks never see a phantom change. */
+export function fieldFillScalar(
+  fill: DcsContractField['dcs:value'],
+  datatype?: XsdDatatype,
+): string | number | boolean | undefined {
+  if (fill === null || fill === undefined) return undefined
+  if (typeof fill !== 'object') return fill
+  const lexical = fill['@value']
+  switch (datatype ?? fill['@type']) {
+    case 'xsd:decimal':
+    case 'xsd:integer':
+      return Number(lexical)
+    case 'xsd:boolean':
+      return lexical === 'true'
+    default:
+      return lexical
+  }
 }
 
 /** A clause references a ContractField only by its @id. */
