@@ -278,21 +278,93 @@ func (c *Client) ValidatePDF(ctx context.Context, pdf []byte, name string) (*Rep
 	return report, nil
 }
 
-// parseReport extracts the first Indication/SubIndication pair from a DSS
-// WSReportsDTO. The DTO layout differs across DSS versions (simpleReport
-// signature entries vs. XML-derived attribute casing), so the search walks
-// the JSON generically instead of pinning one version's schema.
+// parseReport extracts the Indication/SubIndication pair — and everything
+// else the Report carries — from a DSS WSReportsDTO.
 func parseReport(raw []byte) (*Report, error) {
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("dss: parse validation response: %w", err)
 	}
 	report := &Report{}
-	walkReport(doc, report)
+	if sig := latestSignatureEntry(doc); sig != nil {
+		walkReport(sig, report)
+	} else {
+		// Fallback for DSS response shapes that don't nest under
+		// simpleReport.signatureOrTimestampOrEvidenceRecord the way the JSON
+		// REST shape does (the DTO layout differs across DSS versions -
+		// simpleReport signature entries vs. XML-derived attribute casing) -
+		// walk the whole document generically as before.
+		walkReport(doc, report)
+	}
 	if report.Indication == "" {
 		return nil, fmt.Errorf("dss: validation response carries no Indication")
 	}
 	return report, nil
+}
+
+// latestSignatureEntry finds simpleReport.signatureOrTimestampOrEvidenceRecord
+// and returns the "Signature" object of its LAST Signature-typed entry
+// (Timestamp/EvidenceRecord entries in the same list are skipped). PAdES
+// incremental updates append a new signature after any already on the
+// document, and DSS reports them in that same order, so the last Signature
+// entry is the one this submission is actually being validated for.
+//
+// A document can carry more than one signature by the time it's submitted
+// (a multi-signer contract's second-and-later signatories always incrementally
+// sign on top of earlier ones), and simpleReport then carries one entry per
+// signature. Walking the whole response tree instead of scoping to this one
+// (the previous implementation) picked up whichever entry's Indication/
+// SubIndication/SignedBy/GivenName/Surname fields the walk order happened to
+// visit first - for an ordered array that is deterministically the OLDEST
+// signature, not the one just submitted, silently validating and attributing
+// the wrong signatory's certificate (ADR-20 cert↔PID sole-control check).
+func latestSignatureEntry(doc any) any {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return nil
+	}
+	simpleReportAny, ok := lookupCI(root, "simpleReport")
+	if !ok {
+		return nil
+	}
+	simpleReport, ok := simpleReportAny.(map[string]any)
+	if !ok {
+		return nil
+	}
+	entriesAny, ok := lookupCI(simpleReport, "signatureOrTimestampOrEvidenceRecord")
+	if !ok {
+		return nil
+	}
+	entries, ok := entriesAny.([]any)
+	if !ok {
+		return nil
+	}
+	var last any
+	for _, entry := range entries {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if sig, ok := lookupCI(obj, "Signature"); ok {
+			last = sig
+		}
+	}
+	return last
+}
+
+// lookupCI is a case-insensitive map lookup, matching walkReport's existing
+// case-insensitive key handling (DSS's JSON key casing varies by version).
+func lookupCI(m map[string]any, key string) (any, bool) {
+	if v, ok := m[key]; ok {
+		return v, true
+	}
+	lower := strings.ToLower(key)
+	for k, v := range m {
+		if strings.ToLower(k) == lower {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 // walkReport pulls the first occurrence of each distilled field from a DSS

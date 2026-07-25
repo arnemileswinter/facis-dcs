@@ -73,6 +73,48 @@ func TestValidatePDFExtractsSignerIdentity(t *testing.T) {
 	}
 }
 
+// TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument covers a
+// multi-signer contract's second-and-later signatory: by the time they
+// submit, the document already carries an earlier signatory's signature, so
+// simpleReport.signatureOrTimestampOrEvidenceRecord carries one entry per
+// signature, oldest first (PAdES incremental updates only append). The
+// report must attribute to the LAST (just-submitted) signature, not the
+// first — the cert↔PID sole-control check (ADR-20) would otherwise validate
+// a submission against a different signatory's certificate entirely.
+func TestValidatePDFAttributesTheLastSignatureOnAMultiSignedDocument(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"simpleReport": {
+				"signatureOrTimestampOrEvidenceRecord": [
+					{"Signature": {
+						"Indication": "TOTAL-PASSED",
+						"SignedBy": "CN=DCS Signatory Instance A Signatory,GIVENNAME=Instance A Signatory,SURNAME=BDD-Testperson",
+						"SigningTime": "2026-07-18T10:00:00Z"
+					}},
+					{"Timestamp": {
+						"Indication": "PASSED",
+						"SignedBy": "CN=Dev TSA"
+					}},
+					{"Signature": {
+						"Indication": "TOTAL-PASSED",
+						"SignedBy": "CN=DCS Signatory Instance B Signatory,GIVENNAME=Instance B Signatory,SURNAME=BDD-Testperson",
+						"SigningTime": "2026-07-18T10:05:00Z"
+					}}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	report, err := New(srv.URL).ValidatePDF(context.Background(), []byte("%PDF fake"), "contract.pdf")
+	if err != nil {
+		t.Fatalf("ValidatePDF: %v", err)
+	}
+	if report.SubjectGivenName() != "Instance B Signatory" {
+		t.Fatalf("expected the LAST signature's identity (Instance B Signatory), got %+v", report)
+	}
+}
+
 func TestAssertValidAES(t *testing.T) {
 	// A cryptographically sound signature with a signing certificate is a valid
 	// AES. Identifying the signatory is the ceremony PID's job, not a certificate
