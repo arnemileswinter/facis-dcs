@@ -55,6 +55,7 @@ Feature: Signature validation, audit, and compliance
     When the signature view for contract "Signature View Contract" is requested as "Compliance Officer"
     Then get http 200:Success code
     And the signature view for contract "Signature View Contract" shows one "SIGNED" signature with signer identity, credential class "AES", timestamp, and intact integrity
+    And the signature view for contract "Signature View Contract" shows the achieved level meeting the contract's required level "AES", not qualified, and a non-empty signing certificate subject
 
   @clean_db @DCS-FR-SM-26
   Scenario: A role outside the signature-viewing scope cannot request the signature view
