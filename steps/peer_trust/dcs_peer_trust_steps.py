@@ -1037,6 +1037,7 @@ def step_when_sign_cross_instance(context):
             field_name="PeerRevocationSigner",
             credential_type="AES",
             headers=signer_h,
+            ceremony_id=ceremony_id,
         )
         assert apply_resp.status_code == 200, (
             f"wallet signing failed on instance A: {apply_resp.status_code} {apply_resp.text}"

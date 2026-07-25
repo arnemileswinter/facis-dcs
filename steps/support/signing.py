@@ -31,6 +31,7 @@ def wallet_sign(
     headers=None,
     given_name=None,
     family_name=None,
+    ceremony_id=None,
 ):
     """Run prepare -> sign -> submit and return the final HTTP response.
 
@@ -43,12 +44,21 @@ def wallet_sign(
     field_name for a multi-signer contract — we sign whichever field the prepared
     PDF carries (field=""). A precondition failure (no completed ceremony, contract
     not APPROVED) is returned straight from /signature/prepare.
+
+    ceremony_id pins prepare and submit to the SAME verified ceremony (ADR-20):
+    without it, both calls resolve "the signer's most recent verified ceremony
+    [for field_name]", which is only unambiguous while exactly one ceremony has
+    been verified for that signer/field on the contract — a caller that already
+    knows its ceremony_id (almost always true for BDD, which just ran the
+    ceremony itself) should always pass it.
     """
     base = (base_url or context.base_url).rstrip("/")
     signer_headers = headers or AuthService.get_headers_for_roles(["Contract Signer"])
     body = {"did": did, "signer_did": signer_did, "credential_type": credential_type}
     if field_name is not None:
         body["field_name"] = field_name
+    if ceremony_id is not None:
+        body["ceremony_id"] = ceremony_id
 
     prepare_resp = post_json(context, f"{base}/signature/prepare", body, headers=signer_headers)
     if prepare_resp.status_code != 200:

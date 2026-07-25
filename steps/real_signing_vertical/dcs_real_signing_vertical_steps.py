@@ -340,6 +340,7 @@ def _apply_signature(context, name, *, signer_did, credential_type="AES", field_
     # field, which names the party (instance DID) — passed separately as field_name.
     presentation = (getattr(context, "pid_presentations", {}) or {}).get(name) or {}
     signatory = presentation.get("given_name") or name
+    ceremony_id = (getattr(context, "ceremony_ids", {}) or {}).get(name)
     return wallet_sign(
         context,
         did,
@@ -347,6 +348,7 @@ def _apply_signature(context, name, *, signer_did, credential_type="AES", field_
         signatory=signatory,
         field_name=field_name,
         credential_type=credential_type,
+        ceremony_id=ceremony_id,
     )
 
 
