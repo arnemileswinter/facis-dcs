@@ -787,9 +787,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			}
 			credentialType := cmd.CredentialType
 			if f != ceremony.FieldName {
-				// The other signers' signature level is recorded when THEY
-				// apply; their embedded ceremony evidence carries the
-				// required default level (QES is out of scope per SRS).
+				// This is a placeholder, not the other signatory's actual
+				// level: their real credential_type is recorded when THEY
+				// apply their own ceremony, overwriting this entry.
 				credentialType = "AES"
 			}
 			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
