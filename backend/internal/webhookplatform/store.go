@@ -15,6 +15,9 @@ var KnownEvents = []EventInfo{
 	{Name: "contract.rejected", Description: "A contract was rejected"},
 	{Name: "contract.negotiated", Description: "A contract entered negotiation"},
 	{Name: "contract.terminated", Description: "A contract was terminated"},
+	// DCS-FR-CSA-20 / DCS-FR-CWE-10: API-delivered expiry alert; emitted by
+	// the contractworkflowengine expiry cron when it persists EXPIRED.
+	{Name: "contract.expired", Description: "A contract passed its expiration date"},
 	{Name: "template.created", Description: "A new contract template was created"},
 	{Name: "template.approved", Description: "A contract template was approved"},
 	// DCS-FR-TR-22: Template Users subscribe to these to learn that a
@@ -22,6 +25,7 @@ var KnownEvents = []EventInfo{
 	// version; the payload carries the template DID to filter on.
 	{Name: "template.updated", Description: "A contract template was updated"},
 	{Name: "template.registered", Description: "A contract template version was registered (published)"},
+	{Name: "template.deprecated", Description: "A contract template was deprecated (archived)"},
 }
 
 // DCSEventMap maps internal NATS event types to webhook event names.
@@ -32,10 +36,12 @@ var DCSEventMap = map[string]string{
 	"REJECT_CONTRACT":            "contract.rejected",
 	"NEGOTIATE_CONTRACT":         "contract.negotiated",
 	"TERMINATE_CONTRACT":         "contract.terminated",
+	"CONTRACT_EXPIRED":           "contract.expired",
 	"CREATE_CONTRACT_TEMPLATE":   "template.created",
 	"APPROVE_CONTRACT_TEMPLATE":  "template.approved",
 	"UPDATE_CONTRACT_TEMPLATE":   "template.updated",
 	"REGISTER_CONTRACT_TEMPLATE": "template.registered",
+	"ARCHIVE_CONTRACT_TEMPLATE":  "template.deprecated",
 }
 
 // EventInfo describes a subscribable event.
