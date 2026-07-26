@@ -92,6 +92,17 @@ spec:
             - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE
               value: {{ include "digital-contracting-service.pdfCoreX5ChainPath" . | quote }}
             {{- end }}
+          {{- if not .Values.pkcs11.provisioning.publishSecrets }}
+          # The env var above names a path, so this container — not just the
+          # initContainer that waits for the file — has to be able to read it.
+          # Without this mount pdf-core starts and serves /swagger.json, so it
+          # goes READY, and only fails once a request actually needs the
+          # x5chain: it dies mid-request and the caller sees a bare EOF.
+          volumeMounts:
+            - name: hsm-token
+              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
+              readOnly: true
+          {{- end }}
           {{- with .Values.pdfCore.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
