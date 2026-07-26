@@ -191,39 +191,5 @@
         "c9d0e1f2a3b5c6d7"
       ]
     ]
-  },
-  {
-    "id": "a2b3c4d5e6f7a8ba",
-    "type": "http in",
-    "z": "f1a2b3c4d5e6f7a8",
-    "name": "GET /synthetic-peer/did.json (path-based did:web)",
-    "url": "/synthetic-peer/did.json",
-    "method": "get",
-    "upload": false,
-    "swaggerDoc": "",
-    "x": 170,
-    "y": 180,
-    "wires": [
-      [
-        "b3c4d5e6f7a8b9c0"
-      ]
-    ]
-  },
-  {
-    "id": "a7b8c9d0e1f2a3b6",
-    "type": "http in",
-    "z": "f1a2b3c4d5e6f7a8",
-    "name": "GET /synthetic-peer/.well-known/dcs-agreement-credential.json",
-    "url": "/synthetic-peer/.well-known/dcs-agreement-credential.json",
-    "method": "get",
-    "upload": false,
-    "swaggerDoc": "",
-    "x": 250,
-    "y": 280,
-    "wires": [
-      [
-        "b8c9d0e1f2a3b5c6"
-      ]
-    ]
   }
 ]

@@ -67,8 +67,8 @@ flowImport:
 # rules" BDD scenario: a second Service name in front of the SAME Node-RED pod
 # so the flow can distinguish two did:web identities by Host header alone.
 # It is test scaffolding, not a deployment component — off by default so a real
-# install neither ships a fixture nor spends a Service against a namespace quota
-# (the OSC testbed caps services at 10, where this was the difference between
-# fitting and not).
+# install neither ships a fixture nor spends a Service against a namespace quota,
+# which on a quota-capped namespace can be the difference between the release
+# fitting and being refused.
 syntheticPeer:
   enabled: false

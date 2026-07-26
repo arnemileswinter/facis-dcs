@@ -144,9 +144,16 @@ def _orce_synthetic_peer_did() -> str:
     credential endpoint deliberately 404s (layer 3a genuinely fails, not by
     absence of an endpoint that has since been implemented). The exact DID
     string is a live contract with the deployment side — override via
-    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed; the default
-    below matches the currently agreed format."""
-    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880:synthetic-peer")
+    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed.
+
+    A BARE AUTHORITY, deliberately: the flow serves this identity at the host
+    root and distinguishes it from the AC5 mismatch identity by Host header,
+    not by path. It previously carried a ":synthetic-peer" segment, which only
+    resolved because did:web resolution discarded path segments — with
+    resolution following the spec, that segment would point every lookup
+    (did.json, agreement credential, and the peer API the synchronizer ships
+    to) at paths this fixture does not serve."""
+    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880")
 
 
 def _orce_synthetic_peer_credentials(context):

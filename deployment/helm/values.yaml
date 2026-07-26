@@ -223,7 +223,10 @@ pkcs11:
     # SO (security officer) PIN used only during token initialization.
     soPin: "12345678"
     persistence:
-      size: "128Mi"
+      # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
+      # refuse to provision below 1Gi and the claim then never binds, which
+      # surfaces as pods stuck Pending rather than as an install error.
+      size: "1Gi"
       accessModes: ["ReadWriteOnce"]
       storageClassName: ""
     # Provisioning job image; defaults to the DCS image, which bundles
@@ -362,7 +365,7 @@ fcservice:
 
 # Owned Keycloak backing fcservice above (see charts/keycloak). hostname MUST
 # be a real, externally reachable https URL for wallet/browser OIDC flows on
-# environments with real ingress (e.g. IONOS) — see docs/deployment-osc-testbed.md.
+# environments with real ingress — see deployment/README.md.
 # Keep in sync with fcservice.keycloak.hostname above.
 fcKeycloakApp:
   hostname: ""

@@ -123,7 +123,14 @@ spec:
               # startup if the JWK does not match the token's key — SoftHSM2 keys are
               # freshly generated every provisioning run, so a static did.json fixture
               # would mismatch and crash-loop the backend).
-              DID_ID="did:web:$(printf '%s' "$DID_HOSTNAME" | sed 's/:/%3A/g')"
+              # Prefer the configured issuer DID verbatim: it may carry did:web
+              # path segments (several instances on one hostname), which a
+              # hostname-derived identifier cannot express. Falls back to
+              # deriving one from the hostname when no issuer DID is set.
+              DID_ID={{ include "digital-contracting-service.issuerDID" . | quote }}
+              if [ -z "$DID_ID" ]; then
+                DID_ID="did:web:$(printf '%s' "$DID_HOSTNAME" | sed 's/:/%3A/g')"
+              fi
               SOFTHSM2_CONF="$TOKEN_DIR/softhsm2.conf" \
               PKCS11_MODULE_PATH="$MODULE" \
               PKCS11_TOKEN_LABEL="$LABEL" \
