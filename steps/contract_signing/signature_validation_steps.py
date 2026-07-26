@@ -297,15 +297,21 @@ def _signature_audit_entry(context, name, event_type):
 @then('the "{event_type}" signature audit entry for contract "{name}" carries the signer DID, credential type "{cred}", and an RFC3339 timestamp')
 def step_then_audit_entry_apply_fields(context, event_type, name, cred):
     # DCS-FR-SM-19: signer ID, credential used, and timestamp captured in
-    # the log entry itself — the ApplyEvent's applied_by / credential_type /
-    # occurred_at JSON fields (signingmanagement/event/event.go). applied_by
-    # is the participant DID (middleware.GetParticipantID), credential_type
-    # the achieved signature level, occurred_at the signing time.
+    # the log entry itself — the ApplyEvent's fields (signingmanagement/
+    # event/event.go). The signer is identified twice: applied_by is the
+    # PARTICIPANT identifier from the auth context (middleware.
+    # GetParticipantID = the token's ext.iss claim — the organization in the
+    # BDD wallet), and holder_did is the signer's wallet DID.
     _, _, event_data = _signature_audit_entry(context, name, event_type)
     applied_by = event_data.get("applied_by")
-    assert applied_by and str(applied_by).startswith("did:"), (
+    assert applied_by, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to carry the "
+        f"applying participant in 'applied_by', got event_data: {event_data}"
+    )
+    holder_did = event_data.get("holder_did")
+    assert holder_did and str(holder_did).startswith("did:"), (
         f"Expected the '{event_type}' audit entry of contract '{name}' to name the "
-        f"signer by DID in 'applied_by', got event_data: {event_data}"
+        f"signer's wallet DID in 'holder_did', got event_data: {event_data}"
     )
     assert event_data.get("credential_type") == cred, (
         f"Expected the '{event_type}' audit entry of contract '{name}' to record "

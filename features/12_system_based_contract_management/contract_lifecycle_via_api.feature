@@ -34,7 +34,7 @@ Feature: Contract lifecycle driven entirely through the API
 
   # DCS-FR-CWE-28's rate-limits clause: authenticated API interactions are
   # budgeted per credential (middleware.RateLimitAuthenticated, fixed
-  # one-minute window, DCS_API_RATE_LIMIT_PER_MINUTE, default 1200). The
+  # one-minute window, DCS_API_RATE_LIMIT_PER_MINUTE, default 3000). The
   # hammer uses a DEDICATED credential so the rest of the suite's budgets
   # are untouched, and a second credential proves the limit is per-client,
   # not global.
