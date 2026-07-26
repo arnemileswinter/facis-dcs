@@ -158,14 +158,15 @@ def step_checkpoint_head_has_root(context):
 
 @given("a dedicated API credential for rate-limit probing")
 def step_given_ratelimit_credential(context):
-    # A distinct username prefix yields a distinct token, so the hammer
-    # consumes ONLY this credential's one-minute budget
-    # (middleware.RateLimitAuthenticated keys per Authorization header) and
-    # the rest of the suite's tokens stay untouched.
+    # A DEDICATED organization is what yields a distinct token: OID4VP login
+    # derives identity from the presented VP (roles + organization), so only
+    # those two discriminate. The hammer must burn ONLY this credential's
+    # one-minute budget (middleware.RateLimitAuthenticated keys per
+    # Authorization header) — the suite-shared role tokens keep theirs.
     from steps.support.services.auth_service import AuthService  # noqa: PLC0415
 
     context.ratelimit_headers = AuthService.get_headers_for_roles(
-        ["Contract Manager"], username_prefix="ratelimit-probe"
+        ["Contract Manager"], organization="BDD Rate Limit Probe Org"
     )
 
 
@@ -177,9 +178,9 @@ def step_when_hammer_past_rate_limit(context):
     # does not override DCS_API_RATE_LIMIT_PER_MINUTE, so 3300 requests must
     # cross it. The margin over the suite's own busiest per-token minute
     # (~600, measured in run 30194569615) is deliberate: shared cached role
-    # tokens must never brush the ceiling. The probed endpoint 404s cheaply — the limiter counts every
-    # authenticated request before routing, so the response code is
-    # irrelevant to the budget.
+    # tokens must never brush the ceiling. The probed endpoint 404s cheaply —
+    # the limiter counts every authenticated request before routing, so the
+    # response code is irrelevant to the budget.
     total = 3300
     url = f"{context.base_url}/contract/retrieve/did:web:ratelimit-probe-nonexistent"
 

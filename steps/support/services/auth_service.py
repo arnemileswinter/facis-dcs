@@ -554,15 +554,13 @@ class AuthService:
     def set_headers_for_roles(
         context,
         roles: list[str],
-        username_prefix: str = "bdd",
         use_expired_jwt: bool = False,
         organization: str | None = None,
     ):
         """Set context.headers with a bearer token for the given roles."""
-        del username_prefix  # OID4VP login derives identity from VP, not BDD username.
         # TBD: extend issue_credentials.py to support generating expired JWT credentials
         if use_expired_jwt:
-            username = AuthService.username_for_roles(roles, "bdd")
+            username = AuthService.username_for_roles(roles)
             token = AuthService.create_expired_jwt(AuthService.CLIENT_ID, username, roles)
         else:
             api_base = getattr(context, "base_url", os.getenv("BDD_DCS_BASE_URL", "http://localhost:5173/api"))
@@ -581,15 +579,20 @@ class AuthService:
     @staticmethod
     def get_headers_for_roles(
         roles: list[str],
-        username_prefix: str = "bdd",
         use_expired_jwt: bool = False,
         organization: str | None = None,
         api_base: str | None = None,
         timeout: float = 60,
     ) -> dict:
-        """Return auth headers for a given role (without modifying context)."""
+        """Return auth headers for a given role (without modifying context).
+
+        `organization` is the only way to obtain a credential distinct from the
+        suite-shared one for the same roles: the OID4VP login derives identity
+        from the presented VP, so (roles, organization) is the whole identity —
+        both for the token cache and for anything the server keys per client.
+        """
         if use_expired_jwt:
-            username = AuthService.username_for_roles(roles, username_prefix)
+            username = AuthService.username_for_roles(roles)
             token = AuthService.create_expired_jwt(AuthService.CLIENT_ID, username, roles)
         else:
             token = AuthService.exchange_roles_for_access_token(
@@ -631,14 +634,14 @@ class AuthService:
 
     # TBD: credential didn't contain any username info.
     @staticmethod
-    def username_for_roles(roles: list[str], username_prefix: str = "bdd") -> str:
+    def username_for_roles(roles: list[str]) -> str:
         """Convert role names to a deterministic BDD username."""
         role_safe = [
             re.sub(r"[^A-Za-z0-9]+", "-", role.lower()).strip("-")
             for role in roles
             if role and role.strip()
         ]
-        return f"{username_prefix}-{'-'.join(role_safe)}"
+        return f"bdd-{'-'.join(role_safe)}"
 
     @staticmethod
     def create_expired_jwt(client_id, username, roles):

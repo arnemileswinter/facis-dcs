@@ -25,7 +25,7 @@ def step_given_authenticated_with_roles(context, roles):
 @given('a system service is authenticated via API with roles: "{roles}"')
 def step_given_authenticated_service_with_role(context, roles):
     role_list = [role.strip() for role in roles.split(",")]
-    AuthService.set_headers_for_roles(context, role_list, username_prefix="bdd-service")
+    AuthService.set_headers_for_roles(context, role_list)
 
 
 @given("a system service is authenticated via API")
