@@ -48,6 +48,7 @@ Feature: Lifecycle notifications through the webhook platform
     # backdate, and the scenario's whole trigger sits in the Given block.
     Given contract "Notify Expired Contract" has reached contract state "SIGNED"
     And a webhook subscription for "contract.expired" events pointing at the ORCE monitoring flow
+    And contract "Notify Expired Contract" carries the expiration policy "ARCHIVING" (cron-processing test seam)
     And contract "Notify Expired Contract" has an expiry date in the past
     Then the "contract.expired" notification for contract "Notify Expired Contract" is delivered to the ORCE receiver
 

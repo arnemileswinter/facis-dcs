@@ -121,3 +121,20 @@ def step_when_subscribe_unauthenticated(context, event):
 def step_then_subscription_rejected_unauthorized(context):
     resp = context.requests_response
     assert resp.status_code == 401, f"Expected 401 without a token, got {resp.status_code}: {resp.text}"
+
+
+@given('contract "{name}" carries the expiration policy "{policy}" (cron-processing test seam)')
+def step_given_contract_expiration_policy(context, name, policy):
+    """The expiry cron only processes (persists EXPIRED + emits
+    CONTRACT_EXPIRED for) contracts with an expiration policy —
+    callExpirationLogic hard-fails on a nil exp_policy
+    (contractworkflowengine/cronjobs.go). contract/update cannot set the
+    policy on a SIGNED contract (EventUpdate only from Draft), so the same
+    context.db seam the expiry-backdate step uses seeds it."""
+    from steps.support.services.contract_service import ContractService  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    cursor = context.db.cursor()
+    cursor.execute("UPDATE contracts SET exp_policy = %s WHERE did = %s", (policy.strip().upper(), did))
+    context.db.commit()
+    cursor.close()
