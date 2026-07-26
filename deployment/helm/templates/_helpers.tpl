@@ -394,6 +394,20 @@ in-cluster and externally — combined with publicBaseURL's scheme and path.
 {{- end -}}
 {{- end }}
 
+{{/*
+Path the backend reads its OID4VP issuer trust document from. An
+operator-supplied ConfigMap wins over the image's baked-in dev fixture, because
+a deployment that must trust a real credential issuer cannot express that in the
+image. The file is at <mountPath>/<key>, matching the volumeMount.
+*/}}
+{{- define "digital-contracting-service.oid4vpTrustDataPath" -}}
+{{- if .Values.oid4vp.trust.existingConfigMap -}}
+{{- printf "%s/%s" (trimSuffix "/" .Values.oid4vp.trust.existingConfigMapMountPath) .Values.oid4vp.trust.existingConfigMapKey -}}
+{{- else -}}
+{{- .Values.oid4vp.trust.dataPath -}}
+{{- end -}}
+{{- end }}
+
 {{- define "digital-contracting-service.identitySecretName" -}}
 {{- default (printf "%s-identity" (include "digital-contracting-service.fullname" .)) .Values.identity.secretName -}}
 {{- end }}

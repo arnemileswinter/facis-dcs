@@ -150,7 +150,7 @@ spec:
             {{- end }}
             {{- if .Values.oid4vp.trust.enabled }}
             - name: OID4VP_TRUST_DATA_PATH
-              value: {{ .Values.oid4vp.trust.dataPath | quote }}
+              value: {{ include "digital-contracting-service.oid4vpTrustDataPath" . | quote }}
             {{- if .Values.oid4vp.trust.xfscAllowUnsignedFallback }}
             - name: OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK
               value: "true"
@@ -307,6 +307,11 @@ spec:
               mountPath: /etc/dcs/tsa-trust
               readOnly: true
           {{- end }}
+          {{- if and .Values.oid4vp.trust.enabled .Values.oid4vp.trust.existingConfigMap }}
+            - name: oid4vp-trust
+              mountPath: {{ .Values.oid4vp.trust.existingConfigMapMountPath | quote }}
+              readOnly: true
+          {{- end }}
           {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -372,6 +377,16 @@ spec:
             items:
               - key: tsa-cert.pem
                 path: tsa-cert.pem
+      {{- end }}
+      {{- if and .Values.oid4vp.trust.enabled .Values.oid4vp.trust.existingConfigMap }}
+        # NOT optional: an absent or unreadable trust document is fatal at
+        # startup, and failing to mount is the more diagnosable failure.
+        - name: oid4vp-trust
+          configMap:
+            name: {{ .Values.oid4vp.trust.existingConfigMap | quote }}
+            items:
+              - key: {{ .Values.oid4vp.trust.existingConfigMapKey | quote }}
+                path: {{ .Values.oid4vp.trust.existingConfigMapKey | quote }}
       {{- end }}
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
