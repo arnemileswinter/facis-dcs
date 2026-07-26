@@ -3,7 +3,6 @@ package qry
 import (
 	"context"
 	"database/sql"
-	"digital-contracting-service/internal/base/validation"
 	"errors"
 	"fmt"
 	"log"
@@ -44,13 +43,6 @@ const RiskTypeUnauthorizedAccess = "UNAUTHORIZED_ACCESS"
 // in force: the violation is reported, not blocked, because the contract
 // exists and the breach is a fact to be recorded and acted on.
 const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
-
-// inForceStates are the states in which a contract is live enough for its
-// agreed boundaries to be measurable against reported values.
-var inForceStates = []string{
-	contractstate.Signed.String(),
-	contractstate.Active.String(),
-}
 
 // approvalPendingStates are the contract states in which an OPEN approval
 // task means the contract is waiting on a required approval decision.
@@ -214,56 +206,61 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	return &MonitorResult{CheckedAt: checkedAt, Risks: risks}, nil
 }
 
-// underperformanceRisks evaluates the ODRL policies of every contract in force
-// against the values currently reported on it, and maps each blocking finding
-// to a compliance risk. It reuses the same evaluator the approval gate uses, so
-// a boundary reads identically whether it is checked before approval or
-// monitored afterwards.
+// underperformanceRisks reads back the KPI values the contract TARGET reported
+// over the deployment callback channel and flags every one already marked as
+// violating its contract's obligations. It deliberately does not re-evaluate
+// anything: callback.go evaluates each reported value against the contract's
+// own ODRL when it arrives (validation.EvaluateKPIViolation) and persists the
+// verdict, so the monitor reports the same judgement rather than forming a
+// second, possibly divergent one.
+//
+// Reading reported values is the whole point: the inline values carried on the
+// contract's fields cannot change once it is in force, and a contract already
+// violating them could never have been approved — so evaluating those would
+// produce an alert that never fires.
 func (h *ComplianceMonitor) underperformanceRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
-	risks := make([]event2.ComplianceRisk, 0)
+	const violatingKPIQuery = `
+        SELECT COALESCE(did, '') AS did,
+               COALESCE(metric, '') AS metric,
+               COALESCE(value, '') AS value,
+               observed_at
+        FROM contract_kpis
+        WHERE violation = true
+        ORDER BY observed_at, id
+    `
+	var reported []violatingKPI
+	if err := tx.SelectContext(ctx, &reported, violatingKPIQuery); err != nil {
+		return nil, fmt.Errorf("could not read violating KPI reports: %w", err)
+	}
+	return underperformanceRisksFromKPIs(reported, checkedAt), nil
+}
 
-	query, args, err := sqlx.In(`SELECT did FROM contracts WHERE state IN (?) ORDER BY did`, inForceStates)
-	if err != nil {
-		return nil, fmt.Errorf("could not build in-force contract query: %w", err)
-	}
-	var dids []string
-	if err := tx.SelectContext(ctx, &dids, tx.Rebind(query), args...); err != nil {
-		return nil, fmt.Errorf("could not read in-force contracts: %w", err)
-	}
+// violatingKPI is one persisted target-reported KPI already judged to breach
+// its contract's obligations.
+type violatingKPI struct {
+	DID        string    `db:"did"`
+	Metric     string    `db:"metric"`
+	Value      string    `db:"value"`
+	ObservedAt time.Time `db:"observed_at"`
+}
 
-	for _, did := range dids {
-		data, err := h.CRepo.ReadDataByDID(ctx, tx, did)
-		if err != nil {
-			return nil, fmt.Errorf("could not read contract %s for performance monitoring: %w", did, err)
-		}
-		if data == nil || data.ContractData == nil {
+// underperformanceRisksFromKPIs maps violating KPI reports to compliance risks.
+// The detail names the metric and the value observed: an alert that only says
+// "underperforming" tells an operator something is wrong without telling them
+// what missed, or by how much.
+func underperformanceRisksFromKPIs(reported []violatingKPI, checkedAt time.Time) []event2.ComplianceRisk {
+	risks := make([]event2.ComplianceRisk, 0, len(reported))
+	for _, kpi := range reported {
+		if strings.TrimSpace(kpi.DID) == "" {
 			continue
 		}
-		// A contract carrying no evaluable policy is not a finding.
-		err = validation.ValidateContractPolicySatisfaction(*data.ContractData,
-			validation.ContractContentAuditMetadata{ContractDID: did, AuditedBy: "compliance-monitor"})
-		if err == nil {
-			continue
-		}
-		var policyErr validation.ContractPolicySatisfactionError
-		if !errors.As(err, &policyErr) {
-			// An evaluation failure is an operational problem with the monitor,
-			// not evidence about the contract — do not report it as a breach.
-			log.Printf("performance monitoring skipped contract %s: %v", did, err)
-			continue
-		}
-		for _, finding := range policyErr.Findings {
-			detail := finding.Message
-			if strings.TrimSpace(finding.Title) != "" {
-				detail = finding.Title + ": " + detail
-			}
-			risks = append(risks, event2.ComplianceRisk{
-				DID:        did,
-				RiskType:   RiskTypeUnderperformance,
-				Detail:     detail,
-				DetectedAt: checkedAt,
-			})
-		}
+		risks = append(risks, event2.ComplianceRisk{
+			DID:      kpi.DID,
+			RiskType: RiskTypeUnderperformance,
+			Detail: fmt.Sprintf("reported KPI %q = %q violates the contract's agreed obligation (observed %s)",
+				kpi.Metric, kpi.Value, kpi.ObservedAt.UTC().Format(time.RFC3339)),
+			DetectedAt: checkedAt,
+		})
 	}
-	return risks, nil
+	return risks
 }

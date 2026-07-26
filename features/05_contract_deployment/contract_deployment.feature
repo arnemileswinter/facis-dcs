@@ -128,3 +128,21 @@ Feature: Contract deployment, execution evidence, and KPIs
     Then get http 200:Success code
     And the contract detail for "KPI Violation Contract" shows a KPI violation flag for its ODRL-bound field
     And the semantic KPI observations for "KPI Violation Contract" record a violated observation for its ODRL-bound field
+
+  # DCS-FR-CWE-31 requires more than recording the breach: "Alerts MUST be
+  # raised for underperformance or missed targets". A violation flag sitting on
+  # a contract nobody opens is not an alert, so the compliance monitor — the
+  # surface an officer actually watches — must surface it too.
+  @DCS-FR-CWE-31 @DCS-FR-PACM-03 @DCS-IR-PACM-03
+  Scenario: A breached KPI raises an underperformance alert on the compliance monitor
+    Given contract "KPI Alert Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
+    And contract "KPI Alert Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And an authorized user deploys contract "KPI Alert Contract" to the configured contract target
+    And get http 200:Success code
+    And the contract target acknowledges the deployment of contract "KPI Alert Contract"
+    And the target reports a KPI value for the ODRL-bound field of contract "KPI Alert Contract" = "80"
+    And get http 200:Success code
+    When the Compliance Officer requests continuous monitoring
+    Then get http 200:Success code
+    And the monitoring sweep flags contract "KPI Alert Contract" with a "CONTRACT_UNDERPERFORMANCE" compliance risk
+    And the flagged risk for contract "KPI Alert Contract" is recorded in the PAC audit trail

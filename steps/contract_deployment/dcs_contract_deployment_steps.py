@@ -396,7 +396,9 @@ def step_when_target_reports_kpi(context, metric, value, name):
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
-@when('the target reports a KPI value for the ODRL-bound field of contract "{name}" = "{value}"')
+# @step, not @when: a scenario that asserts something AFTER a breach needs the
+# breach as part of its Given block, so this must bind in any block.
+@step('the target reports a KPI value for the ODRL-bound field of contract "{name}" = "{value}"')
 def step_when_target_reports_kpi_for_bound_field(context, name, value):
     # The metric IS the bound placeholder's @id, so EvaluateKPIViolation binds
     # it to the ODRL constraint by node IRI (DCS-FR-CWE-09).

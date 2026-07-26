@@ -32,6 +32,11 @@ const runMonitoringSweep = async () => {
 }
 
 const contractDid = ref('')
+// A contract in force that no longer meets its own agreed boundaries is the
+// one risk here that is about the contract UNDERPERFORMING rather than about a
+// process step being missed, so it is called out visually (DCS-FR-CWE-31).
+const isUnderperformance = (risk: PACComplianceRisk) => risk.risk_type === 'CONTRACT_UNDERPERFORMANCE'
+
 const riskType = ref('')
 const detail = ref('')
 const incidentSubmitting = ref(false)
@@ -113,9 +118,19 @@ const submitIncidentReport = async () => {
             v-for="risk in filteredRisks"
             :key="`${risk.did}-${risk.risk_type}-${risk.detected_at}`"
             data-testid="monitor-risk-row"
+            :class="isUnderperformance(risk) ? 'bg-warning/10' : ''"
           >
             <td data-testid="monitor-risk-did">{{ risk.did }}</td>
-            <td data-testid="monitor-risk-type">{{ risk.risk_type }}</td>
+            <td data-testid="monitor-risk-type">
+              <span
+                v-if="isUnderperformance(risk)"
+                class="mr-2 badge badge-sm badge-warning"
+                data-testid="monitor-risk-underperformance-badge"
+              >
+                Underperformance
+              </span>
+              {{ risk.risk_type }}
+            </td>
             <td data-testid="monitor-risk-detail">{{ risk.detail }}</td>
             <td data-testid="monitor-risk-detected-at">{{ risk.detected_at }}</td>
           </tr>
