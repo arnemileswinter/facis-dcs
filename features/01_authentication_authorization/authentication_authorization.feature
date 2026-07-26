@@ -43,3 +43,13 @@ Feature: User Authentication & Authorization
     And I present a wallet credential with roles: "Template Creator"
     And I complete the federated session and obtain an access token
     Then the login presentation audit event records the actor and timestamp
+
+  @clean_db @DCS-NFR-BR-01 @DCS-IR-SI-09
+  Scenario: A login presentation with a revoked credential status is rejected
+    # Client Auflage (2026-07-26): credential status and revocation are
+    # checked at every login. The presentation is otherwise perfectly valid
+    # — only its status-list index is revoked — isolating the status check.
+    When I initiate a federated login
+    And I bind the Hydra login challenge to the pending presentation
+    And I present a wallet credential with roles "Template Creator" whose status-list index is revoked
+    Then the login presentation is rejected for a revoked credential

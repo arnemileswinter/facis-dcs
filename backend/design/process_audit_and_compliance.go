@@ -168,7 +168,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	})
 
 	Method("monitor", func() {
-		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval, DCS-FR-PACM-03) and records the sweep in the audit trail.")
+		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. Technical/contractual conformance only — autonomous legal-conformity assessment (DCS-FR-PACM-03) is descoped per the client decision of 2026-07-26 (ADR-24).")
 		Meta("dcs:requirements", "DCS-IR-PACM-03")
 		Meta("dcs:ui", "Non-Compliance Investigation")
 		Meta("dcs:pacm:components", "")

@@ -35,7 +35,7 @@ import (
 // for a wallet to fetch, sign, and post the signed document back.
 const signingRequestTTL = 15 * time.Minute
 
-// signatureQualifierFor maps a DCS credential type to the CSC/rQES
+// signatureQualifierFor maps a DCS credential type to the CSC
 // signatureQualifier the wallet honours (the value the EUDI walletdriven-signer
 // advertises in the request object). QES is descoped (SRS §199); an unknown type
 // defaults to the AES qualifier.

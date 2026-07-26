@@ -225,3 +225,58 @@ def step_then_login_presentation_audited(context):
     )
     created_at = entry.get("created_at") or ""
     datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+
+@when('I present a wallet credential with roles "{roles}" whose status-list index is revoked')
+def step_when_present_revoked_wallet_credential(context, roles):
+    """Builds the same vp_token the happy-path presentation step builds,
+    revokes ITS credential's status-list index, then posts the direct_post
+    raw — the login callback verifies synchronously (auth_login.go
+    PresentationCallback -> oid4vp.Verify, status-list step), so the
+    rejection arrives on this response."""
+    import json as _json  # noqa: PLC0415
+
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.credential import decode_jwt_payload  # noqa: PLC0415
+    from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
+    from dcs_wallet.status_list import credential_status_from_claims, revoke_status_index  # noqa: PLC0415
+
+    timeout = _federated_timeout(context)
+    credentials = AuthService.parse_auth_credentials([role.strip() for role in roles.split(",")])
+    auth_request = AuthService.fetch_authorization_request(
+        context.federated_session,
+        context.federated_initiation.request_uri,
+        timeout=timeout,
+    )
+    vp_token = AuthService.build_vp_token(
+        credentials,
+        nonce=auth_request.nonce,
+        client_id=auth_request.client_id,
+    )
+
+    claims = decode_jwt_payload(split_sd_jwt(vp_token)[0])
+    idx_uri = credential_status_from_claims(claims)
+    assert idx_uri, f"login credential carries no status claim to revoke: {claims}"
+    idx, uri = idx_uri
+    revoke_status_index(idx, service_base=uri.split("/v1/")[0], tenant=uri.split("/tenants/")[1].split("/")[0])
+
+    context.requests_response = context.federated_session.post(
+        auth_request.response_uri,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "state": auth_request.state,
+            "vp_token": _json.dumps({auth_request.query_id: [vp_token]}, separators=(",", ":")),
+        },
+        timeout=timeout,
+    )
+
+
+@then("the login presentation is rejected for a revoked credential")
+def step_then_login_rejected_revoked(context):
+    resp = context.requests_response
+    assert resp.status_code >= 400, (
+        f"expected the revoked-credential login to be rejected, got {resp.status_code}: {resp.text}"
+    )
+    body = resp.text.lower()
+    assert "status" in body or "revoked" in body, (
+        f"expected the rejection to name the credential-status check, got: {resp.text}"
+    )

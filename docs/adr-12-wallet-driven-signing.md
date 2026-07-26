@@ -105,7 +105,7 @@ The boundary between the DCS (our product) and the wallet/QTSP (ecosystem) is
         document_locations[]  ◀────────────────────┼─── wallet GETs the to-be-signed documents
         response_uri, nonce, state                 │
                                                     │    wallet → QTSP: present PID/PoA (OID4VP),
-                                                    │      authorize per-document signature (CSC/rQES)
+                                                    │      authorize per-document signature (CSC)
                                                     │    wallet → SCA (DSS): calculate_hash / assemble
                                                     │    QTSP HSM signs the hash with the signatory's key
    receive signed PDF + JAdES  ◀────────────────────┼─── wallet POSTs signed documents to response_uri
@@ -143,7 +143,7 @@ URL, and trust the QTSP's issuing CA instead of the dev CA. No DCS code change.
 ## Out of scope (explicitly not built by FACIS.DCS)
 
 - A wallet or signature-creation application (SM-06 is a wallet requirement).
-- A QTSP / RSSP or the CSC/rQES credential-authorization service.
+- A QTSP / RSSP or the CSC credential-authorization service.
 - Deploying the EUDI reference QTSP/SCA/verifier stack — the test stand-in
   proves DCS conformance without it.
 - Qualified electronic **seals** by a legal person (see ADR-17) — QES by a

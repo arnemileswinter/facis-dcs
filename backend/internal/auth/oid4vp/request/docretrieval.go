@@ -42,7 +42,7 @@ type DocRetrievalParams struct {
 	ResponseURI string
 	Nonce       string
 	ExpiresAt   time.Time
-	// SignatureQualifier is the eIDAS level requested (CSC/rQES vocabulary,
+	// SignatureQualifier is the eIDAS level requested (CSC vocabulary,
 	// e.g. "eu_eidas_aes" for an AES, "eu_eidas_qes" for a QES).
 	SignatureQualifier string
 	DocumentDigests    []DocumentDigest
