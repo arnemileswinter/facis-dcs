@@ -70,6 +70,66 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Then the contract appears on instance B in state OFFERED within a few seconds
 
   # ---------------------------------------------------------------------
+  # DCS-IR-SI-06 / DCS-FR-SM-02: GET /peer/contracts/provenance
+  # (backend/design/dcs_to_dcs.go, get_provenance) is the read-only peer
+  # contract-information endpoint: it answers with the stored JAdES
+  # provenance artifact for a contract received from a peer, so instance B
+  # can prove WHO shipped it the contract content it holds.
+  #
+  # @skip — documented gap, kept for traceability (same convention as
+  # 19_c2pa_conformance's @skip scenarios): the ADR-13 PDF-exchange rewrite
+  # (commit 54f9e122) deleted the post_sync handler that persisted the
+  # received JAdES via SyncRepository.UpsertSyncSignature, and PostPdf
+  # (backend/internal/service/dcs_to_dcs.go) never reads
+  # req.JadesSignature — contract_sync_signatures has no writer left, so
+  # get_provenance can only answer not_found today. A proposal ship also
+  # carries no JAdES by design ("empty for a proposal",
+  # DCSToDCSContractPdfRequest), so the artifact can only ever exist after
+  # a signature ship. Un-skip once PostPdf verifies and persists a
+  # signature ship's JAdES again — and then drive instance A to SIGNED
+  # before the provenance assertion instead of stopping at the offer.
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-SI-06 @DCS-FR-SM-02 @two-instance @skip
+  Scenario: A contract received from instance A carries instance A's verifiable JAdES provenance on B
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    And instance B stores a JAdES sync-provenance artifact for that contract signed by instance A
+
+  # ---------------------------------------------------------------------
+  # DCS-NFR-BR-06 Revocation & Termination Propagation: revoking a
+  # signature MUST take immediate effect and be propagated across dependent
+  # systems — including the counterparty instance.
+  #
+  # @skip — documented gap, kept for traceability: cross-instance
+  # revocation propagation existed under the single-writer post_sync model
+  # (commit b3534359 broadcast REVOKE_SIGNATURE through post_sync) and was
+  # dropped by the ADR-13 PDF-exchange rewrite. Today the synchronizer
+  # (backend/internal/dcstodcs/synchronizer.go) ships only on
+  # PDF_REGENERATED/Offer/APPLIED_SIGNATURE and gates on the shippable
+  # states OFFERED/NEGOTIATION/SIGNED, so a REVOKED transition never
+  # ships; the receiver (contractworkflowengine/command/receivepdf.go)
+  # keeps its own intrinsic state on every re-ship, so instance B cannot
+  # observe A's revocation at all. The intermediate APPROVED-replication
+  # steps below additionally assume the removed origin-forwarding of B's
+  # negotiate/respond/approve calls (deleted in 54f9e122). Un-skip once
+  # the PDF-exchange model ships a revocation and the receive side adopts
+  # it.
+  # ---------------------------------------------------------------------
+
+  @DCS-NFR-BR-06 @two-instance @skip
+  Scenario: Signature revocation on instance A propagates REVOKED to instance B
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When the parties complete negotiation acceptance, submit, review, and approval on both sides
+    Then the contract state APPROVED is replicated on both instance A and instance B
+    When instance A applies a ceremony-backed signature to the contract
+    And instance A revokes the applied signature of the cross-instance contract
+    Then the contract state "REVOKED" is replicated on both instance A and instance B
+
+  # ---------------------------------------------------------------------
   # AC4: PostPdf rejects a peer with a missing agreement credential. The
   # shipping peer is the orce trust-PDP flow's synthetic-peer route
   # (deployment/helm/charts/orce/flows/): it mirrors this instance's own
