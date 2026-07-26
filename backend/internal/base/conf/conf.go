@@ -89,6 +89,20 @@ func SyncFailCronJobTimeOut() time.Duration {
 	return 5 * time.Minute
 }
 
+// ArchiveExpiringWindow is how far ahead the archive dashboard's
+// expiring-contracts list looks (DCS-FR-CSA-04, DCS-FR-CSA-21).
+// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS (a positive integer number of days)
+// overrides the 30-day default; any non-positive or unparsable value keeps
+// the default, like the other env-overridable accessors in this package.
+func ArchiveExpiringWindow() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_EXPIRING_WINDOW_DAYS")); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return 30 * 24 * time.Hour
+}
+
 // AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
 // enforces cert-subject to PID name matching for an AES-level signature. It
 // is mandatory and non-configurable for QES (eIDAS Annex I requires a

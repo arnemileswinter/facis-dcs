@@ -13,10 +13,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
-// archiveExpiringWindow is how far ahead the dashboard's expiring-contracts
-// list looks (DCS-FR-CSA-21).
-const archiveExpiringWindow = 30 * 24 * time.Hour
-
 // archiveRecentActionLimit caps the dashboard's recent-actions list.
 const archiveRecentActionLimit = 10
 
@@ -73,13 +69,16 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 	}
 	res.ArchivedContracts = len(distinct)
 
+	// The expiring-contracts look-ahead window is configurable via
+	// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS, default 30 days (DCS-FR-CSA-04).
+	expiringWindow := conf.ArchiveExpiringWindow()
 	now := time.Now().UTC()
 	for _, contract := range archivedContracts {
 		if contract.ExpDate == nil {
 			continue
 		}
 		expires := contract.ExpDate.UTC()
-		if expires.Before(now) || expires.After(now.Add(archiveExpiringWindow)) {
+		if expires.Before(now) || expires.After(now.Add(expiringWindow)) {
 			continue
 		}
 		res.ExpiringContracts = append(res.ExpiringContracts, &contractstoragearchive.ArchiveExpiringContract{
