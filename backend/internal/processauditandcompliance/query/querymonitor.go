@@ -15,6 +15,7 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	event2 "digital-contracting-service/internal/processauditandcompliance/event"
 )
@@ -25,11 +26,49 @@ import (
 // review; the missing approval is the policy violation being monitored).
 const RiskTypeMissingApproval = "MISSING_APPROVAL"
 
+// RiskTypeUnauthorizedAccess flags a contract carrying a persisted
+// access-denial audit artifact (CONTRACT_ACCESS_DENIED, committed by the
+// party read-scoping denial branch in query/contract/querybyid.go before the
+// 403 is returned): the denied attempt is the unauthorized-access violation
+// being monitored (DCS-FR-PACM-02).
+const RiskTypeUnauthorizedAccess = "UNAUTHORIZED_ACCESS"
+
 // approvalPendingStates are the contract states in which an OPEN approval
 // task means the contract is waiting on a required approval decision.
 var approvalPendingStates = map[contractstate.ContractState]bool{
 	contractstate.Submitted: true,
 	contractstate.Reviewed:  true,
+}
+
+// accessDenial is one persisted CONTRACT_ACCESS_DENIED artifact read back
+// from the outbox audit rows; RetrievedBy is the denied actor (the
+// OID4VP-disclosed organization claim the read path persists).
+type accessDenial struct {
+	DID         string `db:"did"`
+	RetrievedBy string `db:"retrieved_by"`
+}
+
+// unauthorizedAccessRisks maps persisted access denials to compliance risks,
+// one per distinct (contract, actor) pair, mirroring the MISSING_APPROVAL
+// per-(contract, approver) dedup.
+func unauthorizedAccessRisks(denials []accessDenial, checkedAt time.Time) []event2.ComplianceRisk {
+	risks := make([]event2.ComplianceRisk, 0)
+	seen := make(map[string]bool)
+	for _, denial := range denials {
+		if denial.DID == "" || seen[denial.DID+"|"+denial.RetrievedBy] {
+			continue
+		}
+		seen[denial.DID+"|"+denial.RetrievedBy] = true
+		risks = append(risks, event2.ComplianceRisk{
+			DID:      denial.DID,
+			RiskType: RiskTypeUnauthorizedAccess,
+			Detail: fmt.Sprintf(
+				"unauthorized access to contract %s was attempted by %s and denied",
+				denial.DID, denial.RetrievedBy),
+			DetectedAt: checkedAt,
+		})
+	}
+	return risks
 }
 
 type MonitorQry struct {
@@ -50,9 +89,11 @@ type ComplianceMonitor struct {
 }
 
 // Handle sweeps all OPEN approval tasks and flags those whose contract is in
-// an approval-pending state as MISSING_APPROVAL risks. The sweep itself is
-// recorded in the audit trail via ComplianceMonitorEvent, risks included, so
-// a detected risk is both flagged (response) and reported (audit trail).
+// an approval-pending state as MISSING_APPROVAL risks, then reads back the
+// persisted access-denial artifacts and flags the affected contracts as
+// UNAUTHORIZED_ACCESS risks. The sweep itself is recorded in the audit trail
+// via ComplianceMonitorEvent, risks included, so a detected risk is both
+// flagged (response) and reported (audit trail).
 func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*MonitorResult, error) {
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -99,6 +140,19 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 			DetectedAt: checkedAt,
 		})
 	}
+
+	denialQuery := `
+        SELECT COALESCE(did, '') AS did,
+               COALESCE(event_data ->> 'retrieved_by', '') AS retrieved_by
+        FROM outbox_events
+        WHERE event_type = $1
+        ORDER BY id
+    `
+	var denials []accessDenial
+	if err := tx.SelectContext(ctx, &denials, denialQuery, eventtype.AccessDenied.String()); err != nil {
+		return nil, fmt.Errorf("could not read persisted access denials: %w", err)
+	}
+	risks = append(risks, unauthorizedAccessRisks(denials, checkedAt)...)
 
 	evt := event2.ComplianceMonitorEvent{
 		MonitoredBy: query.MonitoredBy,
