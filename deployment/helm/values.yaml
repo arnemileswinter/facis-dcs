@@ -65,6 +65,17 @@ oid4vp:
     enabled: true
     # Baked into the container image (see deployment/docker/Dockerfile).
     dataPath: /app/config/oid4vp/trust.dev.json
+    # Name of an operator-supplied ConfigMap holding the trust document, for
+    # deployments that must trust a REAL credential issuer rather than the dev
+    # fixture baked into the image. When set it is mounted read-only and
+    # dataPath above is ignored in favour of the mounted file, so the issuer
+    # registry is deployment state rather than a hand-applied patch that the
+    # next upgrade silently reverts. Unset keeps the in-image default.
+    existingConfigMap: ""
+    # Key within that ConfigMap; also the mounted file name.
+    existingConfigMapKey: trust.json
+    # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
+    existingConfigMapMountPath: /etc/dcs/oid4vp
     xfscAllowUnsignedFallback: false
     # Optional: trust anchors an x5c-bearing credential's certificate chain
     # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means

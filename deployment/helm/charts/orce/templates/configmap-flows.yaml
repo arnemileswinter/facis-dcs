@@ -5,8 +5,10 @@ metadata:
   name: {{ .Release.Name }}-orce-flows
 data:
   {{- range $path, $_ := .Files.Glob "flows/*.json" }}
+  {{- if or $.Values.syntheticPeer.enabled (ne (base $path) "synthetic-peer-flow.json") }}
   {{ base $path }}: |
     {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
   {{- end }}
 {{- end }}{{- if and .Values.flowsFile.enabled (.Files.Glob "flows/*.json") }}
 ---
@@ -24,7 +26,14 @@ data:
   flows.json: |
     {{- $merged := list }}
     {{- range $path, $_ := .Files.Glob "flows/*.json" }}
+    {{- /* The synthetic-peer fixture claims GET /.well-known/did.json. Two
+           http-in nodes on one method+path collide in Node-RED, and a real
+           deployment that also hosts a credential issuer here needs that route
+           for the issuer's own DID document — so the fixture follows the same
+           gate its Service already does. */}}
+    {{- if or $.Values.syntheticPeer.enabled (ne (base $path) "synthetic-peer-flow.json") }}
     {{- $merged = concat $merged ($.Files.Get $path | fromJsonArray) }}
+    {{- end }}
     {{- end }}
     {{- $merged | toJson | nindent 4 }}
 {{- end }}
