@@ -40,8 +40,7 @@ Feature: Signature validation, audit, and compliance
     Given contract "Signing Retrieval Contract" has reached contract state "SIGNED"
     When the contract signer retrieves contract "Signing Retrieval Contract" for signing
     Then get http 200:Success code
-    And the signature audit log for contract "Signing Retrieval Contract" includes an action of type "RETRIEVE_CONTRACT_BY_ID"
-    And the "RETRIEVE_CONTRACT_BY_ID" signature audit entry for contract "Signing Retrieval Contract" records the retrieving signer, a timestamp, and the contract ID
+    And the retrieval of contract "Signing Retrieval Contract" is recorded with the retrieving signer, a timestamp, and the contract ID
 
   # /signature/compliance computes its findings (DCS-FR-SM-21:
   # signature level SES/AES/QES, signature status, active signed

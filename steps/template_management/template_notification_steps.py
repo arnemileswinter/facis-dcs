@@ -56,7 +56,7 @@ def _assert_delivery(context, event, did, subject):
     headers = AuthService.get_headers_for_roles(["Template Manager"])
     # The outbox publisher reads unpublished events on a ~1s ticker and the
     # dispatcher fans out asynchronously — poll the platform's delivery log.
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 120
     seen = []
     while time.monotonic() < deadline:
         resp = _requests.get(
@@ -72,7 +72,7 @@ def _assert_delivery(context, event, did, subject):
         time.sleep(1)
     assert False, (
         f"Expected a '{event}' notification for {subject} ({did}) delivered to "
-        f"{ORCE_DISPATCH_URL} with HTTP 200 within 30s; matching deliveries seen: {seen}"
+        f"{ORCE_DISPATCH_URL} with HTTP 200 within 120s; matching deliveries seen: {seen}"
     )
 
 

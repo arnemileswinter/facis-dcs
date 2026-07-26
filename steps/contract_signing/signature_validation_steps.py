@@ -306,23 +306,43 @@ def step_then_audit_entry_apply_fields(context, event_type, name):
         )
 
 
-@then('the "{event_type}" signature audit entry for contract "{name}" records the retrieving signer, a timestamp, and the contract ID')
-def step_then_audit_entry_retrieve_fields(context, event_type, name):
+@then('the retrieval of contract "{name}" is recorded with the retrieving signer, a timestamp, and the contract ID')
+def step_then_retrieval_recorded(context, name):
     # DCS-FR-SM-15: the retrieval is logged with timestamp, signer ID, and
-    # contract ID — the RetrieveByIDEvent's retrieved_by / occurred_at / did
-    # fields (signingmanagement/event/event.go).
-    did, entry, event_data = _signature_audit_entry(context, name, event_type)
+    # contract ID — the RetrieveByIDEvent (signingmanagement/event/event.go)
+    # persisted through the transactional outbox. Read-only RETRIEVE_* events
+    # are deliberately filtered OUT of the audit-result presentation
+    # (base.IsAuditVisibleEventType: operational traces, not findings), so
+    # the recording itself is asserted on the persisted outbox row.
+    import json as _json  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    deadline = time.monotonic() + 30
+    row = None
+    while time.monotonic() < deadline:
+        cursor = context.db.cursor()
+        cursor.execute(
+            """SELECT event_data FROM outbox_events
+               WHERE component = 'SIGNATURE_MANAGEMENT'
+                 AND event_type = 'RETRIEVE_CONTRACT_BY_ID' AND did = %s
+               ORDER BY id DESC LIMIT 1""",
+            (did,),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            break
+        time.sleep(1)
+    assert row, f"Expected a persisted RETRIEVE_CONTRACT_BY_ID record for contract '{name}' ({did})"
+    event_data = row[0] if isinstance(row[0], dict) else _json.loads(row[0])
     assert event_data.get("retrieved_by"), (
-        f"Expected the '{event_type}' audit entry of contract '{name}' to record the "
-        f"retrieving signer (retrieved_by), got event_data: {event_data}"
+        f"Expected the retrieval record to name the retrieving signer (retrieved_by), got: {event_data}"
     )
     assert event_data.get("occurred_at"), (
-        f"Expected the '{event_type}' audit entry of contract '{name}' to record a "
-        f"timestamp (occurred_at), got event_data: {event_data}"
+        f"Expected the retrieval record to carry a timestamp (occurred_at), got: {event_data}"
     )
     assert event_data.get("did") == did, (
-        f"Expected the '{event_type}' audit entry to record contract ID '{did}', "
-        f"got event_data: {event_data}"
+        f"Expected the retrieval record to carry contract ID '{did}', got: {event_data}"
     )
 
 
