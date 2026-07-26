@@ -140,11 +140,19 @@ spec:
               if [ -z "$DID_ID" ]; then
                 DID_ID="did:web:$(printf '%s' "$DID_HOSTNAME" | sed 's/:/%3A/g')"
               fi
+              # The endpoint a peer dials after resolving this DID, so it has to
+              # carry the scheme callers actually reach us on: hardcoding http
+              # publishes a plaintext endpoint for every TLS deployment. Falls
+              # back to the hostname-derived form when no public base URL is set.
+              ENDPOINT_URL={{ include "digital-contracting-service.publicAnchorBaseURL" . | quote }}
+              if [ -z "$ENDPOINT_URL" ]; then
+                ENDPOINT_URL="http://${DID_HOSTNAME}/api"
+              fi
               SOFTHSM2_CONF="$TOKEN_DIR/softhsm2.conf" \
               PKCS11_MODULE_PATH="$MODULE" \
               PKCS11_TOKEN_LABEL="$LABEL" \
               PKCS11_PIN="$PKCS11_PIN" \
-                /app/gendid -out "$TOKEN_DIR/did.json" -did "$DID_ID" -endpoint "http://${DID_HOSTNAME}/api"
+                /app/gendid -out "$TOKEN_DIR/did.json" -did "$DID_ID" -endpoint "$ENDPOINT_URL"
 
               # Let the non-root backend container read/write the token.
               chmod -R a+rwX "$TOKEN_DIR"
