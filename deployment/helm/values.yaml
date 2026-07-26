@@ -229,6 +229,9 @@ pkcs11:
       size: "1Gi"
       accessModes: ["ReadWriteOnce"]
       storageClassName: ""
+    # Resource block for the provisioning job itself. Set it on namespaces with a
+    # limits.cpu quota — see the template for why an unset block blocks install.
+    resources: {}
     # Provisioning job image; defaults to the DCS image, which bundles
     # softhsm2/opensc/openssl and the provisioning scripts.
     image:
@@ -348,6 +351,10 @@ fcservice:
   # realm files this size (keycloak/keycloak#37745).
   realmProvision:
     enabled: false
+    # Sizes the provisioning hook Job, a separate pod from the services. Falls
+    # back to the top-level `resources` when unset; set it on namespaces with a
+    # limits.cpu quota, where an unsized hook inherits the LimitRange default.
+    resources: {}
     keycloakHost: "fc-keycloak-http"
     adminUser: "admin"
     adminPassword: "admin"
@@ -389,6 +396,10 @@ fcPostgres:
 # PDF-Core: C2PA-aware PDF compiler and verifier (DCS-OR-C2PA-*)
 pdfCore:
   enabled: true
+  # Every other component honours a resources block; without one here a
+  # LimitRange default (commonly 1 CPU) applies, which on a namespace with a
+  # low limits.cpu quota is enough to stop the release scheduling.
+  resources: {}
   image:
     repository: ""     # set to your registry image, e.g. registry.example.com/facis/pdf-core
     tag: ""            # set to the image tag; falls back to .Chart.AppVersion

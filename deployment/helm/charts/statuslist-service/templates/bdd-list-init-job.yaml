@@ -24,6 +24,10 @@ spec:
       containers:
         - name: bdd-list-init
           image: natsio/nats-box:0.14.3
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: STATUSLIST_URL
               value: http://{{ .Release.Name }}-statuslist-service:{{ .Values.service.port | default 8080 }}

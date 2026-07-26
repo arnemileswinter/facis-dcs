@@ -85,6 +85,15 @@ spec:
           # dir is chmod'd afterwards so the non-root backend can open it.
           securityContext:
             runAsUser: 0
+          {{- with .Values.pkcs11.provisioning.resources }}
+          # Without a block here the job inherits the namespace LimitRange
+          # default (commonly 1 CPU). On a namespace whose limits.cpu quota is
+          # already consumed by the release's own containers the job is refused
+          # outright, and since it provisions the signing identity the install
+          # never completes.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: PKCS11_PIN
               valueFrom:

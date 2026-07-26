@@ -43,6 +43,14 @@ spec:
                 sleep 3
               done
               echo "C2PA x5chain cert is ready."
+          {{- with .Values.pdfCore.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so an unlimited init container makes the whole pod count
+          # as the LimitRange default — enough on a namespace with a low
+          # limits.cpu quota to exhaust it and stop the release scheduling.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             {{- if .Values.pkcs11.provisioning.publishSecrets }}
             - name: x5chain-cert
@@ -84,6 +92,10 @@ spec:
             - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE
               value: {{ include "digital-contracting-service.pdfCoreX5ChainPath" . | quote }}
             {{- end }}
+          {{- with .Values.pdfCore.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /swagger.json
