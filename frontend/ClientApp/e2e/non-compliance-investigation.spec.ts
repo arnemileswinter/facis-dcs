@@ -2,8 +2,8 @@ import { expect, test } from './dcs-test'
 import {
   buildContractPendingApproval,
   buildDraftContractFixture,
-  gotoAs,
   type DraftContractFixture,
+  gotoAs,
 } from './lifecycle-helpers'
 
 /**
@@ -49,6 +49,7 @@ import {
  */
 
 test('@REQ-non-compliance-investigation-ui-AC1 @DCS-IR-PACM-03 @UC-08-02 compliance officer triggers a monitoring sweep and sees a detected risk', async ({
+  // DCS-FR-UC-06-1
   page,
   loginAs,
 }) => {
@@ -142,6 +143,7 @@ test.describe('non-compliance incident report submission', () => {
   })
 
   test('@REQ-non-compliance-investigation-ui-AC5 @DCS-IR-PACM-04 the submitted report links the finding typed to a contract DID', async ({
+    // DCS-FR-PACM-05
     page,
     loginAs,
   }) => {
@@ -163,7 +165,7 @@ test.describe('non-compliance incident report submission', () => {
     // process_audit_and_compliance.feature) asserts gets persisted.
     const payload = resp.request().postDataJSON() as {
       contract_did?: string
-      findings?: Array<{ risk_type?: string; detail?: string }>
+      findings?: { risk_type?: string; detail?: string }[]
     }
     expect(payload.contract_did).toBe(fixture.contractDid)
     expect(payload.findings?.length).toBeGreaterThan(0)

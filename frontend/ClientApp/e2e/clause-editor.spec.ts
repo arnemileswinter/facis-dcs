@@ -1,5 +1,5 @@
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
+import type { Page } from '@playwright/test'
 
 type LoginAs = (role: DcsRole) => Promise<void>
 
@@ -24,7 +24,7 @@ interface Rule {
 }
 interface TemplateData {
   'dcs:policies': { 'odrl:permission'?: Rule[] }
-  'dcs:contractData': { '@id': string }[]
+  'dcs:contractFields': { '@id': string }[]
   'dcs:documentStructure': { 'dcs:blocks': { '@list': { 'dcs:title'?: string }[] } }
 }
 
@@ -74,8 +74,8 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     await row.locator('select').nth(1).selectOption({ label: operator })
     await row.locator('select').nth(2).selectOption({ index: boundaryIndex })
   }
-  await addContext('access region (spatial)', 'must equal', 1)
-  await addContext('access time (dateTime)', 'must be at most', 2)
+  await addContext('access region (spatial)', 'equal to', 1)
+  await addContext('access time (dateTime)', 'less than or equal to', 2)
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
   await expect(editor.getByPlaceholder('Clause title')).toHaveValue('')
@@ -89,9 +89,9 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     'prose block persisted',
   ).toBeTruthy()
 
-  // The two boundaries are declared as fillable typed placeholders.
-  const fieldIds = new Set(doc['dcs:contractData'].map((ph) => ph['@id']))
-  expect(fieldIds.size, 'two negotiated placeholders declared').toBeGreaterThanOrEqual(2)
+  // The two boundaries are declared as fillable typed contract fields.
+  const fieldIds = new Set(doc['dcs:contractFields'].map((field) => field['@id']))
+  expect(fieldIds.size, 'two negotiated fields declared').toBeGreaterThanOrEqual(2)
 
   // The Permission's spatial + temporal constraints reference those fields as
   // their boundaries — resolved to the filled values at negotiation.
@@ -146,11 +146,11 @@ test('the builder emits a logical (or) constraint when constraints are combined 
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const row = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addSpatial('DE')
-  await addSpatial('FR')
+  await addSpatial('Germany (DEU)')
+  await addSpatial('Austria (AUT)')
   await editor.locator('select[title="How the constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -196,11 +196,11 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
     await duty.getByRole('button', { name: '+ constraint' }).click()
     const row = duty.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addDutyRegion('DE')
-  await addDutyRegion('FR')
+  await addDutyRegion('Germany (DEU)')
+  await addDutyRegion('Austria (AUT)')
   await duty.locator('select[title="How the duty\'s constraints combine"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -255,8 +255,8 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const topRow = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await topRow.locator('select').nth(0).selectOption({ label: 'purpose' })
-  await topRow.locator('select').nth(1).selectOption({ label: 'must equal' })
-  await topRow.locator('input[placeholder="value"]').fill('research')
+  await topRow.locator('select').nth(1).selectOption({ label: 'equal to' })
+  await topRow.locator('select').nth(3).selectOption({ label: 'Research (RESEARCH)' })
 
   await editor.getByRole('button', { name: '+ group' }).click()
   const group = editor.locator('.border-dashed').last()
@@ -264,11 +264,11 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
     await group.getByRole('button', { name: '+ constraint' }).click()
     const row = group.locator('.flex.flex-wrap.items-center.gap-1').last()
     await row.locator('select').nth(0).selectOption({ label: 'access region (spatial)' })
-    await row.locator('select').nth(1).selectOption({ label: 'must equal' })
-    await row.locator('input[placeholder="value"]').fill(value)
+    await row.locator('select').nth(1).selectOption({ label: 'equal to' })
+    await row.locator('select').nth(3).selectOption({ label: value })
   }
-  await addGroupRegion('DE')
-  await addGroupRegion('FR')
+  await addGroupRegion('Germany (DEU)')
+  await addGroupRegion('Austria (AUT)')
   await group.locator('select[title="How this group combines"]').selectOption('or')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()

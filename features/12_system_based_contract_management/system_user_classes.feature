@@ -27,14 +27,14 @@ Feature: SRS System User classes authenticate as machine clients
     When the system client "dcs-orce-manager" obtains an access token
     Then the system client holds a machine access token
 
-  @DCS-IR-PACM-01 @ADR-16
+  @DCS-IR-PACM-01 @ADR-16 @DCS-FR-CSA-03 @DCS-FR-PACM-01 @DCS-NFR-BR-05
   Scenario: The System Auditor reads the audit checkpoint head it anchors externally
     Given contract "Anchored Audit Contract" has reached contract state "APPROVED"
     When the system client "dcs-orce-notary" obtains an access token
     And the system client requests GET "/pac/audit/checkpoint/head"
     Then the audit checkpoint head carries a Merkle root
 
-  @DCS-IR-PACM-01 @ADR-16
+  @DCS-IR-PACM-01 @ADR-16 @DCS-NFR-BR-07
   Scenario: The System Auditor reaches the tamper-evidence surface and nothing else
     When the system client "dcs-orce-notary" obtains an access token
     And the system client requests GET "/contract/retrieve"
@@ -45,7 +45,7 @@ Feature: SRS System User classes authenticate as machine clients
   # body would return 400 and prove nothing about authorization. The values are
   # arbitrary — the refusal happens before the handler looks anything up.
 
-  @UC-04 @DCS-FR-SM-03 @ADR-17
+  @UC-04 @DCS-FR-SM-03 @ADR-17 @DCS-NFR-BR-07
   Scenario: A System Contract Signer cannot start a signing ceremony
     When the system client "dcs-orce-signer" obtains an access token
     And the system client requests POST "/signature/request" with body

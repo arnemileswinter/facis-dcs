@@ -47,13 +47,16 @@ type DCSToDCSSynchronizer struct {
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
-// counterparty (ADR-13): a first offer, each negotiation counter, and the
-// signed agreement. Internal states (DRAFT, SUBMITTED, REVIEWED, APPROVED,
-// ACTIVE, TERMINATED) stay local — review/approval never cross the boundary.
+// counterparty (ADR-13): a first offer, each negotiation counter, the signed
+// agreement, and a revocation of the applied signature (DCS-NFR-BR-06 —
+// revocation must propagate to the counterparty immediately). Internal states
+// (DRAFT, SUBMITTED, REVIEWED, APPROVED, ACTIVE, TERMINATED) stay local —
+// review/approval never cross the boundary.
 var shippableStates = map[string]bool{
 	contractstate.Offered.String():     true,
 	contractstate.Negotiation.String(): true,
 	contractstate.Signed.String():      true,
+	contractstate.Revoked.String():     true,
 }
 
 func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client *event.CloudEventSubClient) {
@@ -82,8 +85,12 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 				return
 			}
 		case componenttype.SignatureManagement:
+			// APPLIED_SIGNATURE ships the signed PDF; REVOKE_SIGNATURE ships
+			// the revocation (the contract is in REVOKED by the time the
+			// outbox publishes the event, so shipContractPDF reads and
+			// declares that state — DCS-NFR-BR-06).
 			smType, err := smeventtype.NewEventType(evt.Type())
-			if err != nil || smType != smeventtype.Applied {
+			if err != nil || (smType != smeventtype.Applied && smType != smeventtype.Revoke) {
 				return
 			}
 		default:
@@ -308,6 +315,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			SecretValue:    secretValue,
 			SecretHash:     secretHash,
 			JadesSignature: &jadesSignature,
+			ContractState:  &state,
 		}); err != nil {
 			return err
 		}

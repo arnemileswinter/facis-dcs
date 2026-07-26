@@ -10,6 +10,7 @@ import BuilderPreviewDialog from '@template-repository/components/builder-editor
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
 import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -92,6 +93,7 @@ function buildCurrentContractData(): ContractData | undefined {
     description: contract.value.description,
     blocks: dcsDraftStore.blocks,
     layout: dcsDraftStore.layout,
+    contractFields: dcsDraftStore.contractFields,
     contractData: dcsDraftStore.contractData,
     policies: dcsDraftStore.policies,
     semanticConditionValues: contractContentValuesStore.semanticConditionValues,
@@ -304,6 +306,7 @@ function applyContractDataToDraft(contractData?: unknown) {
       documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
       blocks: cd.blocks,
       layout: cd.layout,
+      contractFields: cd.contractFields,
       contractData: cd.contractData,
       policies: cd.policies,
     })
@@ -434,6 +437,15 @@ onBeforeRouteLeave(() => {
                         :set-semantic-condition-value="setSemanticConditionValue"
                       />
                     </div>
+                    <template v-if="dcsDraftStore.contractData.length">
+                      <div class="divider text-xs text-base-content/40">semantic data objects</div>
+                      <DataObjectsEditor
+                        mode="contract"
+                        :editable="!!setSemanticConditionValue"
+                        :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                        :set-semantic-condition-value="setSemanticConditionValue ?? undefined"
+                      />
+                    </template>
                   </div>
                 </div>
               </div>

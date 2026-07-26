@@ -28,18 +28,17 @@ type GetHistoryByIDQry struct {
 }
 
 type GetHistoryByIDResult struct {
-	ID             string
-	DID            string
-	DocumentNumber *string
-	Version        int
-	State          contracttemplatestate.ContractTemplateState
-	TemplateType   contracttemplatetype.ContractTemplateType
-	Name           *string
-	Description    *string
-	CreatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	TemplateData   *datatype.JSON
+	ID           string
+	DID          string
+	Version      int
+	State        contracttemplatestate.ContractTemplateState
+	TemplateType contracttemplatetype.ContractTemplateType
+	Name         *string
+	Description  *string
+	CreatedBy    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	TemplateData *datatype.JSON
 }
 
 type GetHistoryByIDHandler struct {
@@ -96,18 +95,17 @@ func (h *GetHistoryByIDHandler) Handle(ctx context.Context, query GetHistoryByID
 		}
 
 		result[idx] = GetHistoryByIDResult{
-			ID:             entry.ID,
-			DID:            entry.DID,
-			DocumentNumber: entry.DocumentNumber,
-			Version:        entry.Version,
-			State:          state,
-			Name:           entry.Name,
-			Description:    entry.Description,
-			CreatedBy:      entry.CreatedBy,
-			CreatedAt:      entry.CreatedAt,
-			UpdatedAt:      entry.UpdatedAt,
-			TemplateData:   entry.TemplateData,
-			TemplateType:   ctType,
+			ID:           entry.ID,
+			DID:          entry.DID,
+			Version:      entry.Version,
+			State:        state,
+			Name:         entry.Name,
+			Description:  entry.Description,
+			CreatedBy:    entry.CreatedBy,
+			CreatedAt:    entry.CreatedAt,
+			UpdatedAt:    entry.UpdatedAt,
+			TemplateData: entry.TemplateData,
+			TemplateType: ctType,
 		}
 	}
 

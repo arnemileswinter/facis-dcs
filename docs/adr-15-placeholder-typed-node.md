@@ -1,7 +1,13 @@
 # ADR-15: One typed placeholder node — SHACL-typed, @id-linked, self-contained
 
-Status: Accepted (2026-07-20). Implementation: in progress on branch
-`refactor/clean_jsonld_placeholders`.
+Status: Accepted (2026-07-20).
+
+> **Superseded by [ADR-22](adr-22-contract-field-model.md) (2026-07-24).**
+> The typed node survives, renamed `dcs:Placeholder` → `dcs:ContractField`
+> (a finalized contract carries no placeholders — its terms are agreed), and
+> the flat registry moves from `dcs:contractData` to `dcs:contractFields`;
+> `dcs:contractData` now holds typed domain objects that bind to fields by
+> bare `@id` reference.
 
 ## Context
 

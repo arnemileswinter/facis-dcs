@@ -38,6 +38,11 @@ type PeerPdfReceiveCmd struct {
 	// instance's copy (not regenerated), so the counterparty's C2PA provenance
 	// chain embedded in it is preserved (ADR-13).
 	Pdf []byte
+	// AdoptRevoked is set when the authenticated counterparty declared the
+	// shipped contract REVOKED: it revoked its own applied signature, which
+	// voids the agreement regardless of this instance's own workflow progress
+	// (DCS-NFR-BR-06). The sole exception to intrinsic-state privacy.
+	AdoptRevoked bool
 }
 
 // PeerPdfReceiver upserts a peer-shipped contract into this instance's own
@@ -92,7 +97,13 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// A re-ship (a counteroffer or a settled/signed version) refreshes the
 		// content but must not clobber this instance's own local RBAC progress —
 		// its intrinsic state is private and advances through its own workflow.
+		// The one exception is a revocation ship (DCS-NFR-BR-06): the
+		// counterparty voided the agreement, so the local copy hard-stops in
+		// REVOKED no matter where its own workflow stood.
 		data.State = existing.State
+		if cmd.AdoptRevoked {
+			data.State = contractstate.Revoked.String()
+		}
 		data.Origin = existing.Origin
 		data.CreatedBy = existing.CreatedBy
 		data.ContractVersion = existing.ContractVersion + 1
@@ -104,8 +115,13 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// starts at OFFERED (an offer on our table, awaiting our own review),
 		// which its local review/approval tasks then advance. The peer-facing
 		// extrinsic lifecycle (offered → accepted → executed) is inferred from
-		// this plus the shipped PDF.
+		// this plus the shipped PDF. A first receipt that already declares a
+		// revocation (this instance never saw the offer) lands directly in
+		// REVOKED — there is nothing left to review.
 		data.State = contractstate.Offered.String()
+		if cmd.AdoptRevoked {
+			data.State = contractstate.Revoked.String()
+		}
 
 		// The two parties are objective on both copies: the origin (the peer that
 		// created and offered the contract) and this instance. This instance's own

@@ -208,18 +208,17 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 
 		evt := templateevents.SubmitEvent{
-			DID:            cmd.DID,
-			DocumentNumber: processData.DocumentNumber,
-			Version:        processData.Version,
-			SubmittedBy:    cmd.SubmittedBy,
-			PreviousState:  processData.State,
-			NewState:       nextTemplateState.String(),
-			ActionFlag:     cmd.ActionFlag,
-			Comments:       cmd.Comments,
-			OccurredAt:     time.Now().UTC(),
-			Responsible:    responsible,
-			HolderDID:      cmd.HolderDID,
-			UserRoles:      cmd.UserRoles,
+			DID:           cmd.DID,
+			Version:       processData.Version,
+			SubmittedBy:   cmd.SubmittedBy,
+			PreviousState: processData.State,
+			NewState:      nextTemplateState.String(),
+			ActionFlag:    cmd.ActionFlag,
+			Comments:      cmd.Comments,
+			OccurredAt:    time.Now().UTC(),
+			Responsible:   responsible,
+			HolderDID:     cmd.HolderDID,
+			UserRoles:     cmd.UserRoles,
 		}
 		err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 		if err != nil {

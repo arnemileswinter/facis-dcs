@@ -35,6 +35,7 @@ testWallet/.venv
 testWallet/dcs_wallet/__pycache__/
 
 # BDD test build artifacts
+tests/integration/artifacts/generated/
 bdd-executor
 tests/bdd/.coverage*
 tests/bdd/.tmp
@@ -53,3 +54,7 @@ tests/bdd/.coverage.*
 docs/anforderung.md
 /AGENTS.md
 testWallet/keys/signing/
+.agents/skills/bdd-anforderung/SKILL.md
+.agents/skills/bdd-anforderung/agents/openai.yaml
+.agents/skills/ui-improvement/SKILL.md
+.agents/skills/ui-improvement/agents/openai.yaml

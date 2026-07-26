@@ -9,7 +9,7 @@
 @UC-04 @DCS-FR-SM-03 @DCS-FR-SM-04 @DCS-FR-SM-26 @ADR-12
 Feature: Power of Attorney at signing
 
-  @DCS-FR-SM-03 @UC-14
+  @DCS-FR-SM-03 @UC-14 @DCS-NFR-SEC-18
   Scenario: A signatory with a Power of Attorney for their party signs and is compliant
     Given contract "PoA Happy Contract" is APPROVED and has completed a signing ceremony for signatory "SignerPoaHappy"
     When the signer publishes the OID4VP signing request for contract "PoA Happy Contract"

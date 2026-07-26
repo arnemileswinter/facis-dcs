@@ -24,14 +24,17 @@ export const CONSTRAINT_COMBINATORS = [
 ] as const
 export type ConstraintCombinator = (typeof CONSTRAINT_COMBINATORS)[number]['op']
 
+export type OperandDraftValue = JsonLdReference | JsonLdTypedValue
+
 export interface AtomicDraft {
   kind: 'atomic'
   leftOperand: string
   operator: string
-  /** '' = a fixed literal boundary (use `value`); otherwise a field @id whose
+  /** '' = a fixed literal boundary (use `value` or `values`); otherwise a field @id whose
    *  value is agreed during contract negotiation. */
   rightSource: string
   value: string
+  values: OperandDraftValue[]
 }
 
 export interface GroupDraft {
@@ -47,7 +50,7 @@ export function isGroupDraft(node: ConstraintNodeDraft): node is GroupDraft {
 }
 
 export function newAtomic(leftOperand: string, operator: string): AtomicDraft {
-  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '' }
+  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [] }
 }
 
 export function newGroup(): GroupDraft {
@@ -60,13 +63,35 @@ function typed(value: string): JsonLdTypedValue {
   return { '@value': value, '@type': isNumber ? 'xsd:decimal' : 'xsd:string' }
 }
 
+function isSetOperator(operator: string): boolean {
+  return operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf' || operator === 'odrl:isAllOf'
+}
+
 function literalRightOperand(value: string, operator: string): JsonLdTypedValue | JsonLdTypedValue[] | undefined {
   const trimmed = value.trim()
   if (!trimmed) return undefined
-  if (operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf' || operator === 'odrl:isAllOf') {
-    return trimmed.split(',').map((part) => typed(part.trim()))
+  if (isSetOperator(operator)) {
+    // A set operand is an unordered JSON-LD set (bare array): the policy
+    // audit expands and matches each member individually, while an @list
+    // would reach it as a single nested list value.
+    const values = trimmed
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map(typed)
+    return values.length ? values : undefined
   }
   return typed(trimmed)
+}
+
+function nonEmptyOperand(value: OperandDraftValue): boolean {
+  return '@id' in value ? !!value['@id'] : value['@value'] !== ''
+}
+
+function fixedRightOperand(atomic: AtomicDraft): JsonLdTypedValue | JsonLdReference | OperandDraftValue[] | undefined {
+  const values = atomic.values.filter(nonEmptyOperand)
+  if (values.length) return isSetOperator(atomic.operator) ? values : values[0]
+  return literalRightOperand(atomic.value, atomic.operator)
 }
 
 function buildAtomic(atomic: AtomicDraft): OdrlConstraint {
@@ -75,9 +100,7 @@ function buildAtomic(atomic: AtomicDraft): OdrlConstraint {
     'odrl:leftOperand': { '@id': atomic.leftOperand },
     'odrl:operator': { '@id': atomic.operator },
   }
-  const right: JsonLdTypedValue | JsonLdTypedValue[] | JsonLdReference | undefined = atomic.rightSource
-    ? { '@id': atomic.rightSource }
-    : literalRightOperand(atomic.value, atomic.operator)
+  const right = atomic.rightSource ? { '@id': atomic.rightSource } : fixedRightOperand(atomic)
   if (right !== undefined) constraint['odrl:rightOperand'] = right
   return constraint
 }
@@ -122,6 +145,10 @@ export function composeConstraintTree(root: GroupDraft): OdrlConstraintNode[] | 
   return [logicalConstraint(root.combine, children)]
 }
 
+function operandLabel(value: OperandDraftValue): string {
+  return '@id' in value ? value['@id'] : String(value['@value'])
+}
+
 function readAtomic(constraint: OdrlConstraint): AtomicDraft {
   const right = constraint['odrl:rightOperand']
   if (right && '@id' in right) {
@@ -131,15 +158,22 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
       operator: constraint['odrl:operator']['@id'],
       rightSource: right['@id'],
       value: '',
+      values: [],
     }
   }
-  const value = Array.isArray(right) ? right.map((r) => r['@value']).join(', ') : (right?.['@value'] ?? '')
+  const values = Array.isArray(right) ? right.map((item) => ({ ...item })) : []
+  const value = values.length
+    ? values.map(operandLabel).join(', ')
+    : right && '@value' in right
+      ? String(right['@value'])
+      : ''
   return {
     kind: 'atomic',
     leftOperand: constraint['odrl:leftOperand']['@id'],
     operator: constraint['odrl:operator']['@id'],
     rightSource: '',
     value,
+    values: values.length ? values : right && '@value' in right ? [{ ...right }] : [],
   }
 }
 

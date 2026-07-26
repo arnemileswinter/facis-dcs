@@ -39,7 +39,7 @@ func (r *PostgresContractTemplateRepo) ReadContractTemplateDataByID(ctx context.
 func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx) ([]db.ContractTemplateMetadata, error) {
 	query := `
     WITH ranked_templates AS (
-        SELECT did, document_number, version, state, template_type, name, description,
+        SELECT did, version, state, template_type, name, description,
                created_by, created_at, updated_at, base_template,
                ROW_NUMBER() OVER (
                    PARTITION BY COALESCE(base_template, did)
@@ -48,7 +48,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
         FROM contract_templates
         WHERE state = 'REGISTERED' OR state = 'PUBLISHED'
     )
-    SELECT did, document_number, version, state, template_type, name, description,
+    SELECT did, version, state, template_type, name, description,
            created_by, created_at, updated_at, base_template
     FROM ranked_templates
     WHERE rn = 1

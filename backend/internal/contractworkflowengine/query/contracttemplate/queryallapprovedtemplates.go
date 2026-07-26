@@ -33,16 +33,15 @@ type GetAllApprovedTemplatesQry struct {
 }
 
 type GetApprovedTemplateResult struct {
-	DID            string
-	DocumentNumber *string
-	Version        int
-	State          contracttemplatestate.ContractTemplateState
-	TemplateType   contracttemplatetype.ContractTemplateType
-	Name           *string
-	Description    *string
-	CreatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	DID          string
+	Version      int
+	State        contracttemplatestate.ContractTemplateState
+	TemplateType contracttemplatetype.ContractTemplateType
+	Name         *string
+	Description  *string
+	CreatedBy    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 	*db.Responsible
 	MetaData datatype.JSON
 }
@@ -99,16 +98,15 @@ func (h *GetAllApprovedTemplateHandler) Handle(ctx context.Context, query GetAll
 		}
 
 		metadata := GetApprovedTemplateResult{
-			DID:            data.DID,
-			DocumentNumber: data.DocumentNumber,
-			Version:        data.Version,
-			State:          state,
-			TemplateType:   templateType,
-			Name:           data.Name,
-			Description:    data.Description,
-			CreatedBy:      data.CreatedBy,
-			CreatedAt:      data.CreatedAt,
-			UpdatedAt:      data.UpdatedAt,
+			DID:          data.DID,
+			Version:      data.Version,
+			State:        state,
+			TemplateType: templateType,
+			Name:         data.Name,
+			Description:  data.Description,
+			CreatedBy:    data.CreatedBy,
+			CreatedAt:    data.CreatedAt,
+			UpdatedAt:    data.UpdatedAt,
 		}
 		contractTemplatesItems = append(contractTemplatesItems, metadata)
 	}

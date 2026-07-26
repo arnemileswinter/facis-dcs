@@ -1,10 +1,10 @@
-@UC-03-01 @FR-CWE-13 @FR-CWE-03 @FR-CWE-30 @FR-CWE-07
+@UC-03-01 @FR-CWE-13 @FR-CWE-03 @FR-CWE-30 @FR-CWE-07 @DCS-FR-UC-03-1
 Feature: Contract Creation
   Contract Creators generate contracts from predefined templates with
   auto-filled metadata. The system supports dynamic contract assembling
   from reusable clauses and contract package bundling.
 
-  @clean_db
+  @clean_db @DCS-IR-CWE-01
   Scenario: Create contract from template
     Given I am authenticated with roles: "Contract Creator"
     And template "Service Agreement Template" is approved and available

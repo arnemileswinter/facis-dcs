@@ -113,9 +113,8 @@ func CleanupAllAssets(t *testing.T, ctx context.Context, fc *fcclient.FederatedC
 
 // TemplateSeed describes a template resource posted to the Federated Catalogue.
 type TemplateSeed struct {
-	DID            string
-	Version        int
-	DocumentNumber string
+	DID     string
+	Version int
 }
 
 // SeedTemplateResource posts a catalogue template asset to the Federated Catalogue.

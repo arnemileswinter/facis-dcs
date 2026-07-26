@@ -42,10 +42,10 @@ func TestConvertTemplateDataToContractDataKeepsCanonicalContent(t *testing.T) {
 				},
 			},
 		},
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
 				"@id":          "did:web:facis.example:template:1#field-cond-1-percent",
-				"@type":        "dcs:Placeholder",
+				"@type":        "dcs:ContractField",
 				"dcs:label":    "Availability",
 				"dcs:datatype": "xsd:decimal",
 				"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-service-sla-availability"},
@@ -95,7 +95,7 @@ func TestConvertTemplateDataToContractDataKeepsCanonicalContent(t *testing.T) {
 	require.Equal(t, "provider", provider["dcs:role"])
 	structure := data["dcs:documentStructure"].(map[string]any)
 	require.Len(t, structure["dcs:blocks"].(map[string]any)["@list"], 1)
-	require.Len(t, data["dcs:contractData"], 1)
+	require.Len(t, data["dcs:contractFields"], 1)
 
 	persisted, err := validation.NormalizeContractDataForPersistence(
 		converted,
@@ -108,11 +108,11 @@ func TestConvertTemplateDataToContractDataKeepsCanonicalContent(t *testing.T) {
 	structure = data["dcs:documentStructure"].(map[string]any)
 	block := structure["dcs:blocks"].(map[string]any)["@list"].([]any)[0].(map[string]any)
 	require.Equal(t, "did:web:facis.example:contract:1#block-clause-1", block["@id"])
-	placeholder := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
+	fieldReference := block["dcs:content"].(map[string]any)["@list"].([]any)[1].(map[string]any)
 	require.Equal(
 		t,
 		"did:web:facis.example:contract:1#field-cond-1-percent",
-		placeholder["@id"],
+		fieldReference["@id"],
 	)
 	policySet := data["dcs:policies"].(map[string]any)
 	policy := policySet["odrl:obligation"].([]any)[0].(map[string]any)

@@ -13,7 +13,7 @@
 @UC-04 @DCS-FR-SM-07 @DCS-FR-SM-17 @UC-03-06
 Feature: Multi-signer signing workflow
 
-  @clean_db @DCS-FR-SM-07 @DCS-FR-SM-17
+  @clean_db @DCS-FR-SM-07 @DCS-FR-SM-17 @DCS-FR-CWE-19 @DCS-FR-SM-24
   Scenario: Both declared signature fields must be signed before the contract activates
     Given contract "Dual Signer Contract" is a fresh draft declaring signature fields "SignerOne" and "SignerTwo"
     And contract "Dual Signer Contract" is submitted, reviewed, and approved via the standard workflow

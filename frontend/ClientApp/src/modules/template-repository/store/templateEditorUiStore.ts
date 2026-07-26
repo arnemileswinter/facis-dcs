@@ -16,6 +16,7 @@ const defaultState: Readonly<TemplateEditorUiState> = {
     { id: 'details', label: 'Details' },
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
+    { id: 'data', label: 'Data' },
     { id: 'meta', label: 'Meta Data' },
     { id: 'audit', label: 'Audit History' },
   ],

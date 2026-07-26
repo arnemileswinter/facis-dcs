@@ -1,25 +1,13 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, useId } from 'vue'
-import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
-import { TemplateState } from '@/types/contract-template-state'
 
 const store = useDcsDraftStore()
 const uiStore = useTemplateEditorUiStore()
-const { templateType, state, version } = storeToRefs(store)
-
-const { isManager } = useTemplatePermissions()
-
-const stateId = useId()
-
-const document_number = computed({
-  get: () => store.document_number,
-  set: (value: string) => store.updateDocumentNumber(value),
-})
-const document_numberId = useId()
+const { templateType, version } = storeToRefs(store)
 
 const name = computed({
   get: () => store.name,
@@ -36,7 +24,6 @@ const descriptionId = useId()
 
 <template>
   <div class="grid grid-cols-1 gap-4">
-    <!-- Contract Kind -->
     <fieldset class="fieldset border-none p-0">
       <legend class="fieldset-legend">Version: {{ version }}</legend>
     </fieldset>
@@ -64,40 +51,6 @@ const descriptionId = useId()
           </div>
         </div>
       </div>
-    </fieldset>
-
-    <fieldset v-if="isManager" class="fieldset border-none p-0">
-      <legend class="fieldset-legend">Template State</legend>
-      <label :for="stateId" class="sr-only">Template State</label>
-      <select
-        :id="stateId"
-        v-model="state"
-        class="input-bordered select w-full"
-        required
-        :disabled="!uiStore.isTemplateEditable"
-      >
-        <option>DRAFT</option>
-        <option>REJECTED</option>
-        <option>SUBMITTED</option>
-        <option>REVIEWED</option>
-        <option>APPROVED</option>
-        <option>DELETED</option>
-        <option v-if="state == TemplateState.registered">REGISTERED</option>
-        <option v-if="state == TemplateState.published">PUBLISHED</option>
-      </select>
-    </fieldset>
-
-    <fieldset class="fieldset border-none p-0">
-      <legend class="fieldset-legend">Document number</legend>
-      <label :for="document_numberId" class="sr-only">Document number</label>
-      <input
-        :id="document_numberId"
-        v-model="document_number"
-        class="input-bordered input w-full"
-        type="text"
-        required
-        :disabled="!uiStore.isTemplateEditable"
-      />
     </fieldset>
 
     <fieldset class="fieldset border-none p-0">

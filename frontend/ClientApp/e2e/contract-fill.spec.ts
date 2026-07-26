@@ -4,7 +4,7 @@ import { buildDraftContractFixture, type DraftContractFixture } from './lifecycl
 /**
  * The contract fill flow's semantic boundary, through the real edit UI: a
  * value typed into a placeholder input is carried inline on the typed
- * dcs:Placeholder it fills (dcs:value on the placeholder an ODRL constraint
+ * dcs:ContractField it fills (dcs:value on the field an ODRL constraint
  * names as its odrl:leftOperand), with the editor-internal (blockId,
  * placeholder @id) tuple never leaking as a separate values array, and the
  * unsigned contract's policy set staying an odrl:Offer.
@@ -51,17 +51,21 @@ test('filling a placeholder writes the value inline on the placeholder of an odr
   await page.getByRole('button', { name: 'Update', exact: true }).click()
   const payload = (await updateRequest).postDataJSON() as {
     contract_data: {
-      'dcs:contractData'?: Placeholder[]
+      'dcs:contractFields'?: Placeholder[]
       'dcs:policies': { '@type': string }
     }
   }
 
-  const placeholders = payload.contract_data['dcs:contractData'] ?? []
+  const placeholders = payload.contract_data['dcs:contractFields'] ?? []
   const amount = placeholders.find((ph) => /amount/i.test(ph['dcs:label'] ?? ''))
   expect(amount, 'the payment amount placeholder is in the document').toBeTruthy()
-  // The value lives inline on the placeholder, not in a separate values array;
-  // the decimal-typed placeholder yields a NUMBER, not a string.
-  expect(amount!['dcs:value'], 'the filled value is carried inline on the placeholder').toBe(250)
+  // The value lives inline on the field, not in a separate values array —
+  // serialized as a typed literal carrying the field's declared datatype,
+  // with the exact lexical token the user agreed to.
+  expect(amount!['dcs:value'], 'the filled value is carried inline as a typed literal').toEqual({
+    '@value': '250',
+    '@type': 'xsd:decimal',
+  })
 
   expect(payload.contract_data['dcs:policies']['@type'], 'unsigned contracts stay an odrl:Offer').toBe('odrl:Offer')
 })

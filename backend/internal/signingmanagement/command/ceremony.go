@@ -92,6 +92,13 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 // ceremony.
 var ErrCeremonyNotFound = errors.New("ceremony not found")
 
+// ErrCeremonyExpired rejects a presentation that arrives after the ceremony's
+// deadline (DCS-FR-SM-13): the signing workflow enforces the deadline issued
+// at ceremony start (expires_at, ceremonyTTL) — a late wallet presentation
+// does not verify, and the signer must request a fresh ceremony (the
+// workflow's retry).
+var ErrCeremonyExpired = errors.New("ceremony deadline has passed; request a new signing ceremony")
+
 // ErrPoAUnauthorized is returned when the signing presentation carries no Power
 // of Attorney, or a PoA that authorizes a different organization than the party
 // (signature field) being signed — signing is not authorized (UC-14, FR-SM-03).
@@ -140,6 +147,9 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 	}
 	if ceremony == nil {
 		return nil, ErrCeremonyNotFound
+	}
+	if time.Now().UTC().After(ceremony.ExpiresAt) {
+		return nil, fmt.Errorf("%w (expired %s)", ErrCeremonyExpired, ceremony.ExpiresAt.UTC().Format(time.RFC3339))
 	}
 
 	if strings.TrimSpace(cmd.SignerDID) == "" {

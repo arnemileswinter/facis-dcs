@@ -1,12 +1,13 @@
-# Signature validate/audit/compliance (DCS-FR-SM-18, DCS-FR-SM-19,
-# DCS-FR-SM-21, UC-04): POST /signature/validate, GET /signature/audit,
+# Signature retrieve/validate/audit/compliance (DCS-FR-SM-15, DCS-FR-SM-18,
+# DCS-FR-SM-19, DCS-FR-SM-21, UC-04): GET /signature/retrieve/{did},
+# POST /signature/validate, GET /signature/audit,
 # POST /signature/compliance (backend/design/signature_management.go). All
 # three are already implemented; only /signature/verify (contract integrity &
 # envelope check, used as a setup step by other packs) and /signature/apply
 # (the signing ceremony itself, covered by 22_real_signing_vertical) had
 # scenario coverage before this file.
 
-@UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21
+@UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21 @DCS-FR-UC-04-2
 Feature: Signature validation, audit, and compliance
 
   @clean_db @DCS-FR-SM-18
@@ -25,19 +26,36 @@ Feature: Signature validation, audit, and compliance
     # (signingmanagement/event/event.go); the APPLY_SIGNATURE constant in
     # eventtype.go is defined but never published.
     And the signature audit log for contract "Signature Audit Contract" includes an action of type "APPLIED_SIGNATURE"
+    # DCS-FR-SM-19: the log entry itself must capture signer ID, credential
+    # used, and timestamp — the ApplyEvent's applied_by / credential_type /
+    # occurred_at fields (signingmanagement/event/event.go). applied_by is the
+    # participant DID from the auth context, credential_type the achieved
+    # signature level, occurred_at the RFC3339 signing time.
+    And the "APPLIED_SIGNATURE" signature audit entry for contract "Signature Audit Contract" carries the signer DID, credential type "AES", and an RFC3339 timestamp
+
+  # DCS-FR-SM-15: retrieving a contract for signing is itself an audited
+  # read — GET /signature/retrieve/{did} records a RETRIEVE_CONTRACT_BY_ID
+  # event (signingmanagement/query/querybyid.go) carrying the retrieving
+  # signer, the timestamp, and the contract ID.
+  @clean_db @DCS-FR-SM-15
+  Scenario: Retrieving a contract for signing is logged with signer ID, timestamp, and contract ID
+    Given contract "Signing Retrieval Contract" has reached contract state "SIGNED"
+    When the contract signer retrieves contract "Signing Retrieval Contract" for signing
+    Then get http 200:Success code
+    And the retrieval of contract "Signing Retrieval Contract" is recorded with the retrieving signer, a timestamp, and the contract ID
 
   # /signature/compliance computes its findings (DCS-FR-SM-21:
   # signature level SES/AES/QES, signature status, active signed
   # credentials) and records the check — findings included — as a
   # ComplianceValidationEvent in the audit trail.
-  @clean_db @DCS-FR-SM-21
+  @clean_db @DCS-FR-SM-21 @DCS-IR-SM-07
   Scenario: Contract Manager requests a compliance check for a signed contract
     Given contract "Signature Compliance Contract" has reached contract state "SIGNED"
     When the contract manager requests a compliance check for contract "Signature Compliance Contract"
     Then get http 200:Success code
     And the compliance check for contract "Signature Compliance Contract" reports that all checks passed
 
-  @clean_db @DCS-FR-SM-21 @DCS-FR-SM-20
+  @clean_db @DCS-FR-SM-21 @DCS-FR-SM-20 @DCS-IR-SM-06
   Scenario: The compliance check flags a revoked signature
     Given contract "Revoked Compliance Contract" has reached contract state "SIGNED"
     When the applied signature of contract "Revoked Compliance Contract" is revoked

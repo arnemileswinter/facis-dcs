@@ -39,7 +39,7 @@
 @DCS-IR-HI-01 @DCS-NFR-SEC-02
 Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rotation
 
-  @DCS-IR-HI-01
+  @DCS-IR-HI-01 @DCS-IR-SI-12 @DCS-NFR-SEC-06
   Scenario: A correctly PKCS#11-configured backend is reachable and serves its HSM-backed DID document
     # See the header comment for why only the positive path is modeled: a
     # reachable, 200-responding /.well-known/did.json can only happen if
@@ -114,7 +114,7 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     # of pass/fail counts.
     Given I am authenticated with roles: "Contract Manager"
 
-  @DCS-OR-C2PA-007
+  @DCS-OR-C2PA-007 @DCS-IR-CI-09
   Scenario: Revoking the dev signing certificate in the CRL flips a previously valid signature to invalid
     Given contract "PKI CRL Revocation Contract" has reached contract state "SIGNED"
     And signature validation for contract "PKI CRL Revocation Contract" currently reports no certificate-revocation finding

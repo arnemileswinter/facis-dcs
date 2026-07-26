@@ -59,7 +59,7 @@ Feature: C2PA Lifecycle Assertions on Exported Contract PDFs
     And the second assertion's prev_manifest_hash matches the first assertion's hash
 
   # DCS-FR-CWE-04 — verify endpoint confirms MR/HR hash match after export
-  @DCS-FR-CWE-04
+  @DCS-FR-CWE-04 @DCS-NFR-SEC-10
   Scenario: Verify endpoint confirms MR/HR hash match on freshly exported PDF
     Given contract "Service Agreement" is in "Draft" status
     And contract "Service Agreement" has an exported PDF

@@ -183,14 +183,13 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		}(tx)
 
 		_, err = h.CTRepo.Create(ctx, tx, db.ContractTemplate{
-			DID:            *newDID,
-			DocumentNumber: fcTemplate.DocumentNumber,
-			State:          contracttemplatestate.Draft.String(),
-			TemplateType:   templateType.String(),
-			Name:           fcTemplate.Name,
-			Description:    fcTemplate.Description,
-			CreatedBy:      cmd.RegisteredBy,
-			TemplateData:   templateData,
+			DID:          *newDID,
+			State:        contracttemplatestate.Draft.String(),
+			TemplateType: templateType.String(),
+			Name:         fcTemplate.Name,
+			Description:  fcTemplate.Description,
+			CreatedBy:    cmd.RegisteredBy,
+			TemplateData: templateData,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("could not create registered contract template: %w", err)

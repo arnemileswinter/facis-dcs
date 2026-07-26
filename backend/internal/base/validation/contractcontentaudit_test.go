@@ -95,10 +95,10 @@ func wrapODRLSet(rules []any) any {
 
 func odrlContract(fieldID, _ /*conditionID*/, parameterName string, policies []any, actualValue any) map[string]any {
 	return map[string]any{
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
 				"@id":          fieldID,
-				"@type":        "dcs:Placeholder",
+				"@type":        "dcs:ContractField",
 				"dcs:label":    parameterName,
 				"dcs:datatype": "xsd:string",
 				"dcs:value":    actualValue,
@@ -116,7 +116,7 @@ func setInlineFieldValue(node any, fieldID string, value any) bool {
 	switch n := node.(type) {
 	case map[string]any:
 		if id, _ := n["@id"].(string); id == fieldID {
-			if n["@type"] == "dcs:Placeholder" {
+			if n["@type"] == "dcs:ContractField" {
 				n["dcs:value"] = value
 				return true
 			}
@@ -155,7 +155,7 @@ func deleteInlineFieldValue(node any, fieldID string) bool {
 	switch n := node.(type) {
 	case map[string]any:
 		if id, _ := n["@id"].(string); id == fieldID {
-			if n["@type"] == "dcs:Placeholder" {
+			if n["@type"] == "dcs:ContractField" {
 				delete(n, "dcs:value")
 				return true
 			}
@@ -232,10 +232,10 @@ func TestAuditContractContentAcceptsCompliantContract(t *testing.T) {
 		"@context": map[string]any{"sla": "https://w3id.org/facis/sla/ontology#"},
 		"@id":      "urn:facis:dcs:contract:sla:example-001",
 		"@type":    []any{"dcs:Contract", "sla:ServiceLevelAgreement"},
-		"dcs:contractData": []any{
-			map[string]any{"@id": countryFieldID, "@type": "dcs:Placeholder", "dcs:label": "country", "dcs:datatype": "xsd:string"},
-			map[string]any{"@id": lawFieldID, "@type": "dcs:Placeholder", "dcs:label": "governingLaw", "dcs:datatype": "xsd:string"},
-			map[string]any{"@id": paymentFieldID, "@type": "dcs:Placeholder", "dcs:label": "amount", "dcs:datatype": "xsd:decimal"},
+		"dcs:contractFields": []any{
+			map[string]any{"@id": countryFieldID, "@type": "dcs:ContractField", "dcs:label": "country", "dcs:datatype": "xsd:string"},
+			map[string]any{"@id": lawFieldID, "@type": "dcs:ContractField", "dcs:label": "governingLaw", "dcs:datatype": "xsd:string"},
+			map[string]any{"@id": paymentFieldID, "@type": "dcs:ContractField", "dcs:label": "amount", "dcs:datatype": "xsd:decimal"},
 		},
 		"dcs:policies": wrapODRLSet([]any{
 			odrlDuty("FACIS-CONTRACT-STATIC-001", countryFieldID, "odrl:isNoneOf", []any{"RUS"}),
@@ -298,11 +298,11 @@ func TestAuditContractContentAcceptsValidJurisdiction(t *testing.T) {
 
 func TestAuditContractContentLoadsDefaultPolicyDocument(t *testing.T) {
 	contract := canonicalAuditContract()
-	data := contract["dcs:contractData"].([]any)
+	data := contract["dcs:contractFields"].([]any)
 	data = append(data, slaRequirement("condition-legal", "contract.jurisdiction")...)
 	data = append(data, slaRequirement("condition-service", "service.sla.availability", "service.sla.responseTime", "service.sla.resolutionTime")...)
 	data = append(data, slaRequirement("condition-signature", "signature.requiredLevel")...)
-	contract["dcs:contractData"] = data
+	contract["dcs:contractFields"] = data
 	applyInlineFieldValues(contract, []any{
 		map[string]any{"forField": slaFieldID("condition-legal", "contract.jurisdiction"), "parameterValue": "DEU"},
 		map[string]any{"forField": slaFieldID("condition-service", "service.sla.availability"), "parameterValue": 99.95},
@@ -729,10 +729,10 @@ func canonicalAuditContract() map[string]any {
 				},
 			},
 		},
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
 				"@id":          countryFieldID,
-				"@type":        "dcs:Placeholder",
+				"@type":        "dcs:ContractField",
 				"dcs:label":    "country",
 				"dcs:datatype": "xsd:string",
 				"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"},
@@ -741,7 +741,7 @@ func canonicalAuditContract() map[string]any {
 			},
 			map[string]any{
 				"@id":          postalCodeFieldID,
-				"@type":        "dcs:Placeholder",
+				"@type":        "dcs:ContractField",
 				"dcs:label":    "postalCode",
 				"dcs:datatype": "xsd:string",
 				"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-postalCode"},
@@ -760,21 +760,21 @@ func canonicalAuditContract() map[string]any {
 	}
 }
 
-// slaRequirement declares placeholders whose dcs:label carries the dotted
+// slaRequirement declares contractFields whose dcs:label carries the dotted
 // semantic-path name, matching how SLA statement rules address runtime values.
 func slaRequirement(conditionID string, parameterNames ...string) []any {
-	placeholders := make([]any, 0, len(parameterNames))
+	contractFields := make([]any, 0, len(parameterNames))
 	for _, parameterName := range parameterNames {
-		placeholders = append(placeholders, map[string]any{
+		contractFields = append(contractFields, map[string]any{
 			"@id":          slaFieldID(conditionID, parameterName),
-			"@type":        "dcs:Placeholder",
+			"@type":        "dcs:ContractField",
 			"dcs:label":    parameterName,
 			"dcs:datatype": "xsd:string",
 			"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#" + conditionID},
 			"dcs:required": true,
 		})
 	}
-	return placeholders
+	return contractFields
 }
 
 func slaFieldID(conditionID, parameterName string) string {
@@ -794,7 +794,7 @@ func canonicalAuditContractWithTemplateParties() map[string]any {
 	)
 	contractData = append(contractData, slaRequirement("condition-service", "service.sla.availability")...)
 	contractData = append(contractData, slaRequirement("condition-legal", "contract.jurisdiction")...)
-	contract["dcs:contractData"] = contractData
+	contract["dcs:contractFields"] = contractData
 	applyInlineFieldValues(contract, []any{
 		map[string]any{"forField": "urn:uuid:field-condition-customer-legal-name", "parameterValue": "Firma A"},
 		map[string]any{"forField": "urn:uuid:field-condition-customer-country", "parameterValue": "DEU"},
@@ -810,7 +810,7 @@ func companyPartyRequirement(conditionID string, _ string) []any {
 	return []any{
 		map[string]any{
 			"@id":          "urn:uuid:field-" + conditionID + "-legal-name",
-			"@type":        "dcs:Placeholder",
+			"@type":        "dcs:ContractField",
 			"dcs:label":    "company.legalName",
 			"dcs:datatype": "xsd:string",
 			"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-legalName"},
@@ -818,7 +818,7 @@ func companyPartyRequirement(conditionID string, _ string) []any {
 		},
 		map[string]any{
 			"@id":          "urn:uuid:field-" + conditionID + "-country",
-			"@type":        "dcs:Placeholder",
+			"@type":        "dcs:ContractField",
 			"dcs:label":    "company.location.country",
 			"dcs:datatype": "xsd:string",
 			"dcs:shape":    map[string]any{"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-company-location-country"},
@@ -1061,9 +1061,9 @@ func TestAuditContractAcceptsTempoSpatialAccessPolicy(t *testing.T) {
 	contract := map[string]any{
 		"@id":   "urn:facis:dcs:contract:appendix-c",
 		"@type": "dcs:Contract",
-		"dcs:contractData": []any{
-			map[string]any{"@id": countryFieldID, "@type": "dcs:Placeholder", "dcs:label": "permittedCountry", "dcs:datatype": "xsd:string", "dcs:value": "DE"},
-			map[string]any{"@id": deadlineFieldID, "@type": "dcs:Placeholder", "dcs:label": "accessDeadline", "dcs:datatype": "xsd:dateTime", "dcs:value": "2025-05-10T23:59:59"},
+		"dcs:contractFields": []any{
+			map[string]any{"@id": countryFieldID, "@type": "dcs:ContractField", "dcs:label": "permittedCountry", "dcs:datatype": "xsd:string", "dcs:value": "DE"},
+			map[string]any{"@id": deadlineFieldID, "@type": "dcs:ContractField", "dcs:label": "accessDeadline", "dcs:datatype": "xsd:dateTime", "dcs:value": "2025-05-10T23:59:59"},
 		},
 		"dcs:policies": map[string]any{
 			"@type":           "odrl:Agreement",
@@ -1092,4 +1092,26 @@ func TestAuditContractAcceptsTempoSpatialAccessPolicy(t *testing.T) {
 	require.NotNil(t, temporal, "dateTime context constraint audited")
 	require.Contains(t, fmt.Sprint(spatial.ExpectedValue), "DE", "negotiated region boundary resolved to the filled value")
 	require.Equal(t, "lte", temporal.Operator)
+}
+
+// A fill serialized as a typed {"@value"} lexical must evaluate numerically:
+// the rego to_num coerces the string lexical, so "150000"^^xsd:decimal still
+// exceeds an odrl:lteq 100000 bound, and "9500" satisfies it.
+func TestAuditContractContentEvaluatesTypedValueFillNumerically(t *testing.T) {
+	fieldID := "urn:dcs:field:liability-cap"
+	exceeded := odrlContract(fieldID, "liability", "capAmount",
+		[]any{odrlDuty("FACIS-CONTRACT-STATIC-003", fieldID, "odrl:lteq", float64(100000))},
+		map[string]any{"@value": "150000", "@type": "xsd:decimal"},
+	)
+	findings, err := AuditContractContent(context.Background(), exceeded, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.True(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-003", "error"))
+
+	within := odrlContract(fieldID, "liability", "capAmount",
+		[]any{odrlDuty("FACIS-CONTRACT-STATIC-003", fieldID, "odrl:lteq", float64(100000))},
+		map[string]any{"@value": "9500", "@type": "xsd:decimal"},
+	)
+	findings, err = AuditContractContent(context.Background(), within, emptyPolicy(), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.False(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-003", "error"))
 }

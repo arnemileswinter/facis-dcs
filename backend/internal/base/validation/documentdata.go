@@ -216,6 +216,9 @@ func NormalizeContractData(raw *datatype.JSON, _ bool) (*datatype.JSON, error) {
 		return nil, err
 	}
 	normalizeCanonicalEnvelope(data, "dcs:Contract")
+	if err := validateContractMetadataType(data); err != nil {
+		return nil, err
+	}
 	if err := validateExternalContextsResolvable(data); err != nil {
 		return nil, err
 	}
@@ -281,7 +284,19 @@ func addDocumentIdentity(raw *datatype.JSON, did string, aliases ...string) (*da
 	}
 	if strings.TrimSpace(did) != "" {
 		previousID, _ := data["@id"].(string)
+		// derivedFromTemplate is a cross-document provenance reference, not
+		// an identifier owned by the document being anchored. A freshly
+		// converted contract still carries the template as its temporary
+		// document @id, so the generic rebase would otherwise rewrite this
+		// reference to the new contract DID as collateral damage.
+		derivedFromTemplateID := ""
+		if provenance, ok := data["derivedFromTemplate"].(map[string]any); ok {
+			derivedFromTemplateID, _ = provenance["@id"].(string)
+		}
 		rebaseDocumentIDs(map[string]any(data), previousID, did, aliases)
+		if derivedFromTemplateID != "" {
+			data["derivedFromTemplate"].(map[string]any)["@id"] = derivedFromTemplateID
+		}
 		data["@id"] = did
 		if metadata, ok := topLevelValue(data, "metadata").(map[string]any); ok {
 			metadata["@id"] = did + "#metadata"
@@ -381,6 +396,11 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 			setTopLevelValue(data, "dcs:contractData", []any{})
 		}
 	}
+	if _, ok := topLevelValue(data, "contractFields").([]any); !ok {
+		if _, exists := topLevelValueExists(data, "contractFields"); !exists {
+			setTopLevelValue(data, "dcs:contractFields", []any{})
+		}
+	}
 	if _, ok := topLevelValue(data, "policies").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "policies"); !exists {
 			setTopLevelValue(data, "dcs:policies", []any{})
@@ -397,7 +417,11 @@ func typeLayoutNodes(data documentData) {
 	if !ok {
 		return
 	}
-	nodes, ok := topLevelValue(documentData(structure), "layout").([]any)
+	rawLayout := topLevelValue(documentData(structure), "layout")
+	nodes, ok := jsonLDList(rawLayout)
+	if !ok {
+		nodes, ok = rawLayout.([]any)
+	}
 	if !ok {
 		return
 	}
@@ -482,6 +506,11 @@ func validateCanonicalEnvelope(data documentData, policyTypes []string) error {
 	if contractData, exists := topLevelValueExists(data, "contractData"); exists {
 		if _, ok := contractData.([]any); !ok {
 			return errors.New("contractData must be an array")
+		}
+	}
+	if contractFields, exists := topLevelValueExists(data, "contractFields"); exists {
+		if _, ok := contractFields.([]any); !ok {
+			return errors.New("contractFields must be an array")
 		}
 	}
 	if policies, exists := topLevelValueExists(data, "policies"); exists {
@@ -573,44 +602,57 @@ func validateCanonicalReferences(data documentData, documentStructure map[string
 	}
 	for _, rawBlock := range blocks {
 		block := rawBlock.(map[string]any)
-		if err := validateBlockPlaceholders(block, fieldIDs); err != nil {
+		if err := validateBlockFieldReferences(block, fieldIDs); err != nil {
 			return err
 		}
+	}
+	if err := validateContractDataGraph(data, fieldIDs); err != nil {
+		return err
 	}
 	return validatePolicyOperands(data, fieldIDs)
 }
 
-// canonicalFieldIDs indexes the document's top-level dcs:Placeholder nodes by
-// @id. dcs:contractData is a flat, self-contained registry of typed placeholder
-// nodes; each carries its own dcs:datatype (resolved from its SHACL shape), so
-// render and pdf-core resolve a clause reference by @id with no field/shape
-// chasing. A placeholder with no datatype is rejected outright.
+// canonicalFieldIDs indexes the document's top-level dcs:ContractField
+// declarations. Contract data objects, clause content and ODRL operands refer
+// to these declarations by bare {"@id": ...} references.
 func canonicalFieldIDs(data documentData) (map[string]bool, error) {
-	contractData, _ := topLevelValue(data, "contractData").([]any)
+	contractFields, _ := topLevelValue(data, "contractFields").([]any)
 	fieldIDs := map[string]bool{}
-	for index, rawPlaceholder := range contractData {
-		placeholder, ok := rawPlaceholder.(map[string]any)
+	for index, rawField := range contractFields {
+		field, ok := rawField.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("contractData.%d must be a placeholder object", index)
+			return nil, fmt.Errorf("contractFields.%d must be a ContractField object", index)
 		}
-		id, _ := placeholder["@id"].(string)
+		id, _ := field["@id"].(string)
 		if strings.TrimSpace(id) == "" {
-			return nil, fmt.Errorf("contractData.%d.@id is required", index)
+			return nil, fmt.Errorf("contractFields.%d.@id is required", index)
 		}
 		if fieldIDs[id] {
-			return nil, fmt.Errorf("duplicate contract data placeholder @id %q", id)
+			return nil, fmt.Errorf("duplicate contract field @id %q", id)
 		}
-		if strings.TrimSpace(stringMapValue(placeholder, "dcs:datatype")) == "" {
-			return nil, fmt.Errorf("contract data placeholder %q has no dcs:datatype", id)
+		if compactTerm(fmt.Sprint(field["@type"])) != "ContractField" {
+			return nil, fmt.Errorf("contract field %q must have @type dcs:ContractField", id)
+		}
+		if strings.TrimSpace(stringMapValue(field, "dcs:label")) == "" {
+			return nil, fmt.Errorf("contract field %q has no dcs:label", id)
+		}
+		if strings.TrimSpace(stringMapValue(field, "dcs:datatype")) == "" {
+			return nil, fmt.Errorf("contract field %q has no dcs:datatype", id)
+		}
+		if _, exists := field["dcs:required"]; !exists {
+			return nil, fmt.Errorf("contract field %q has no dcs:required", id)
+		}
+		if _, ok := field["dcs:required"].(bool); !ok {
+			return nil, fmt.Errorf("contract field %q dcs:required must be boolean", id)
 		}
 		fieldIDs[id] = true
 	}
 	return fieldIDs, nil
 }
 
-// validateBlockPlaceholders checks that every placeholder a clause references
-// (a bare {"@id"} node in dcs:content) resolves to a top-level placeholder.
-func validateBlockPlaceholders(block map[string]any, fieldIDs map[string]bool) error {
+// validateBlockFieldReferences checks that every field reference in clause
+// content resolves to a top-level ContractField declaration.
+func validateBlockFieldReferences(block map[string]any, fieldIDs map[string]bool) error {
 	content, ok := jsonLDList(block["dcs:content"])
 	if !ok {
 		return nil
@@ -625,10 +667,73 @@ func validateBlockPlaceholders(block map[string]any, fieldIDs map[string]bool) e
 			continue
 		}
 		if !fieldIDs[id] {
-			return fmt.Errorf("placeholder references nonexistent contract data field %q", id)
+			return fmt.Errorf("clause content references nonexistent contract field %q", id)
 		}
 	}
 	return nil
+}
+
+// validateContractDataGraph enforces the contract-data object graph: every
+// domain object is a typed node named by @id; a property value is a literal
+// (fixed data), a reference to a declared ContractField (a negotiable leaf),
+// or a reference to another domain object (structure, arbitrary depth). Every
+// reference must resolve in-document — the graph stays self-contained, so
+// SHACL traversal and rendering never consult anything outside the document.
+func validateContractDataGraph(data documentData, fieldIDs map[string]bool) error {
+	contractData, _ := topLevelValue(data, "contractData").([]any)
+	objectIDs := map[string]bool{}
+	for index, rawObject := range contractData {
+		object, ok := rawObject.(map[string]any)
+		if !ok {
+			return fmt.Errorf("contractData.%d must be a domain object", index)
+		}
+		id, _ := object["@id"].(string)
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("contractData.%d needs an @id: a domain object is an addressable graph node", index)
+		}
+		if objectType, _ := object["@type"].(string); strings.TrimSpace(objectType) == "" {
+			return fmt.Errorf("contractData.%d.@type is required", index)
+		}
+		objectIDs[id] = true
+	}
+	for index, rawObject := range contractData {
+		object := rawObject.(map[string]any)
+		for property, rawValue := range object {
+			if strings.HasPrefix(property, "@") {
+				continue
+			}
+			values, _ := asArray(rawValue)
+			if values == nil {
+				values = []any{rawValue}
+			}
+			for _, value := range values {
+				if err := validateContractDataValue(value, fieldIDs, objectIDs); err != nil {
+					return fmt.Errorf("contractData.%d.%s %w", index, property, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateContractDataValue admits the three value kinds of the contract-data
+// graph — a JSON literal, a typed {"@value"} literal, or a single-key {"@id"}
+// reference into the document — and nothing else.
+func validateContractDataValue(value any, fieldIDs, objectIDs map[string]bool) error {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil // a bare JSON literal: fixed data
+	}
+	if id, isRef := object["@id"].(string); isRef && len(object) == 1 {
+		if !fieldIDs[id] && !objectIDs[id] {
+			return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
+		}
+		return nil
+	}
+	if _, isLiteral := object["@value"]; isLiteral {
+		return nil // a typed literal
+	}
+	return errors.New("must be a literal, a contract-field reference, or a {\"@id\"} reference to another domain object — an embedded blank node is not addressable")
 }
 
 func validatePolicyOperands(data documentData, fieldIDs map[string]bool) error {

@@ -14,6 +14,7 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("contract_iri", String, "IRI of the contract the PDF represents")
 	Attribute("pdf", Bytes, "The contract PDF")
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
+	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })

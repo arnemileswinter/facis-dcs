@@ -16,12 +16,10 @@
   a owl:Ontology, odrl:Profile ;
   rdfs:label "FACIS DCS ODRL Profile" ;
   dcterms:description """ODRL 2.2 profile for FACIS Digital Contracting
-Service policies. Constraint left operands are dcs:RequirementField
-instances declared in the same document's dcs:contractData. A constraint
-governs the submitted value whose dcs:semanticConditionValues entry
-references the constraint's odrl:leftOperand via dcs:forField. Reported
-KPI metrics bind to constraints by dcs:parameterName equality between the
-metric name and the left-operand field.""" ;
+Service policies. Constraint left operands are dcs:ContractField
+instances declared in the same document's dcs:contractFields. A constraint
+governs the field's optional inline dcs:value. Reported KPI metrics bind to
+constraints by the left-operand field IRI.""" ;
   dcs:defaultConstraintAction dcs:provideCompliantValue ;
   owl:imports <http://www.w3.org/ns/odrl/2/> .
 
@@ -33,7 +31,7 @@ dcs:defaultConstraintAction
 dcs:appliesToParameterType
   a owl:AnnotationProperty ;
   rdfs:label "applies to parameter type" ;
-  skos:definition "The dcs:RequirementField parameter types (string, decimal, integer, boolean, date, enum) whose value constraints may use this operator." .
+  skos:definition "The dcs:ContractField parameter types (string, decimal, integer, boolean, date, enum) whose value constraints may use this operator." .
 
 dcs:provideCompliantValue
   a odrl:Action ;
@@ -42,10 +40,9 @@ dcs:provideCompliantValue
   skos:inScheme <https://w3id.org/facis/dcs/ontology/v1/odrl-profile> ;
   odrl:includedIn odrl:use .
 
-# A dcs:RequirementField referenced as odrl:leftOperand is a left operand:
-# its runtime value is the dcs:semanticConditionValues entry whose
-# dcs:forField references it.
-dcs:RequirementField rdfs:subClassOf odrl:LeftOperand .
+# A dcs:ContractField referenced as odrl:leftOperand is a left operand:
+# its runtime value is carried as dcs:value on that field.
+dcs:ContractField rdfs:subClassOf odrl:LeftOperand .
 
 # The constraint operators this profile supports, with the parameter types
 # each applies to. Declaration order is the order operator choices are

@@ -78,15 +78,42 @@ func (h HubShapeSource) ContextAt(ctx context.Context, version int) (string, err
 	return content, nil
 }
 
-// withClauseCatalog appends the clause catalog's active shapes to a
-// canonical shapes document; both declare identical @prefix headers, so
-// the concatenation parses as one Turtle graph.
+// withClauseCatalog appends the clause catalog's active shapes and every
+// other ACTIVE registered shape library to a canonical shapes document.
+// Each document declares its own @prefix headers, so the concatenation
+// parses as one Turtle graph. Registered libraries are arbitrary SHACL
+// uploaded through the hub — they target their own classes, and the
+// validation pass dereferences contract-field references so the libraries
+// see plain instance data.
 func (h HubShapeSource) withClauseCatalog(ctx context.Context, canonicalShapesTTL string) (string, error) {
 	catalog, _, err := h.active(ctx, ClauseCatalogName, "shapes")
 	if err != nil {
 		return "", fmt.Errorf("clause catalog: %w", err)
 	}
-	return canonicalShapesTTL + "\n\n" + catalog, nil
+	libraries, err := h.activeShapeLibraries(ctx)
+	if err != nil {
+		return "", err
+	}
+	merged := canonicalShapesTTL + "\n\n" + catalog
+	for _, library := range libraries {
+		merged += "\n\n" + library
+	}
+	return merged, nil
+}
+
+// activeShapeLibraries returns the content of every ACTIVE kind="shapes"
+// schema other than the canonical shapes and the clause catalog, in stable
+// name order.
+func (h HubShapeSource) activeShapeLibraries(ctx context.Context) ([]string, error) {
+	var libraries []string
+	err := h.DB.SelectContext(ctx, &libraries, `
+        SELECT content FROM semantic_schemas
+        WHERE kind = 'shapes' AND active AND name NOT IN ($1, $2)
+        ORDER BY name`, ShapesName, ClauseCatalogName)
+	if err != nil {
+		return nil, fmt.Errorf("semantic hub: active shape libraries: %w", err)
+	}
+	return libraries, nil
 }
 
 // active resolves the entry's active version, then reads that version's

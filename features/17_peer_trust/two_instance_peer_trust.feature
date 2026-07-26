@@ -48,7 +48,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Then the agreement credential is a W3C Verifiable Credential whose issuer is this instance's own DID
     And the agreement credential's termsOfUse names the federation rules by policyId and hash
 
-  @REQ-fed-agreement-AC2
+  @REQ-fed-agreement-AC2 @DCS-IR-SI-12
   Scenario: The agreement credential's signature verifies against the instance's own published VC key
     Given I fetch this instance's own agreement credential
     Then the credential's proof verifies against the second verificationMethod key published in this instance's own did.json
@@ -63,11 +63,61 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Given instance A and instance B are both running and trust each other
     Then instance A and instance B's agreement credentials name the identical federation rules hash
 
-  @NFR-BR-08 @REQ-fed-agreement-AC3 @two-instance
+  @NFR-BR-08 @REQ-fed-agreement-AC3 @two-instance @DCS-NFR-SQ-06
   Scenario: A contract offered on instance A appears on its counterparty B
     Given instance A and instance B are both running and trust each other
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
+
+  # ---------------------------------------------------------------------
+  # DCS-IR-SI-06 / DCS-FR-SM-02: GET /peer/contracts/provenance
+  # (backend/design/dcs_to_dcs.go, get_provenance) is the read-only peer
+  # contract-information endpoint: it answers with the stored JAdES
+  # provenance artifact for a contract received from a peer, so instance B
+  # can prove WHO shipped it the contract content it holds.
+  #
+  # A proposal ship carries no JAdES by design ("empty for a proposal",
+  # DCSToDCSContractPdfRequest), so the artifact exists only after a
+  # signature ship: A signs, the synchronizer attaches its instance-key
+  # JAdES over the contract (jadesForSignedContract), and B's PostPdf
+  # verifies it against A's published did:web key and the PDF's own
+  # embedded payload before persisting it (verifyShippedJades →
+  # SyncRepository.UpsertSyncSignature).
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-SI-06 @DCS-FR-SM-02 @two-instance
+  Scenario: A contract received from instance A carries instance A's verifiable JAdES provenance on B
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance B stores a JAdES sync-provenance artifact for that contract signed by instance A
+
+  # ---------------------------------------------------------------------
+  # DCS-NFR-BR-06 Revocation & Termination Propagation: revoking a
+  # signature MUST take immediate effect and be propagated across dependent
+  # systems — including the counterparty instance.
+  #
+  # Under the PDF-exchange model (ADR-13) each instance runs its own
+  # workflow, so A drives review/approval locally, signs, and revokes; the
+  # synchronizer ships the revocation (REVOKE_SIGNATURE trigger, REVOKED in
+  # shippableStates, declared via contract_state on the wire) and the
+  # receiver adopts REVOKED as the single exception to intrinsic-state
+  # privacy — the authenticated counterparty revoking its own signature
+  # voids the agreement regardless of B's local workflow progress
+  # (receivepdf.go AdoptRevoked).
+  # ---------------------------------------------------------------------
+
+  @DCS-NFR-BR-06 @two-instance
+  Scenario: Signature revocation on instance A propagates REVOKED to instance B
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    And instance A revokes the applied signature of the cross-instance contract
+    Then the contract state "REVOKED" is replicated on both instance A and instance B
 
   # ---------------------------------------------------------------------
   # AC4: PostPdf rejects a peer with a missing agreement credential. The
@@ -88,7 +138,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # analyst/architect rather than forced into a fake scenario.
   # ---------------------------------------------------------------------
 
-  @REQ-fed-agreement-AC4
+  @REQ-fed-agreement-AC4 @DCS-NFR-BR-02
   Scenario: PostPdf rejects a peer that publishes no agreement credential at all
     Given a cryptographically valid peer identity
     And that peer publishes no agreement credential

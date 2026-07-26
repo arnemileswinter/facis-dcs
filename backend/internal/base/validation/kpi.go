@@ -7,7 +7,7 @@ import (
 
 // EvaluateKPIViolation reports whether a target-reported KPI value violates
 // an obligation the contract's own ODRL policies declare for it
-// (DCS-FR-CWE-09/-31). The metric is the @id of the contract-data placeholder
+// (DCS-FR-CWE-09/-31). The metric is the @id of the contract-data field
 // node the KPI reports on — the same IRI the ODRL odrl:leftOperand names — so
 // the binding is by node IRI, exactly like the content-audit enforcement path
 // (no fragile label-string hop). Every constraint whose odrl:leftOperand

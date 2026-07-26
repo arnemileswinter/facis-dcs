@@ -63,7 +63,7 @@ test.describe.configure({ retries: 0 })
 
 let bInstance: Awaited<ReturnType<typeof openInstanceB>> | undefined
 test.afterEach(async () => {
-  await bInstance?.context.close().catch(() => {})
+  await bInstance?.context.close().catch(() => undefined)
   bInstance = undefined
 })
 
@@ -213,6 +213,7 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // double-signed artifact CONVERGES on both: two AcroForm sigs, banner active,
   // veraPDF PDF/A-3a PASS, c2patool valid, DSS validates both as AES + PAdES-B-T.
   await test.step('Stage 8 [DCS-IR-SM-03, DCS-IR-SI-04, ADR-12]: both sign; double-signed artifact verifies', async () => {
+    // DCS-FR-CWE-01
     await signOnInstance(a, contractDid, 'Instance A Signatory')
     // A's signature ships to B, but only the ARTIFACT replicates: the intrinsic
     // state is each instance's own RBAC progress, which a re-ship deliberately

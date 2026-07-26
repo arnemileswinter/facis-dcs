@@ -20,16 +20,15 @@ import (
 )
 
 type SearchQry struct {
-	DID            string
-	DocumentNumber string
-	Version        int
-	Name           string
-	Description    string
-	Offset         int
-	Limit          int
-	RetrievedBy    string
-	HolderDID      string
-	UserRoles      userrole.UserRoles
+	DID         string
+	Version     int
+	Name        string
+	Description string
+	Offset      int
+	Limit       int
+	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type SearchHandler struct {

@@ -89,7 +89,7 @@ Feature: C2PA remote manifest, verifier banner completeness
     When contract "C2PA Stripped Contract" is verified via the backend verify endpoint
     Then the verification result reports c2pa_manifest_found is true, served from the remote manifest fallback
 
-  @DCS-OR-C2PA-006
+  @DCS-OR-C2PA-006 @DCS-IR-CWE-13
   Scenario Outline: The verify endpoint reports the matching lifecycle_status banner for each state
     Given contract "<name>" has reached contract state "<contract_state>"
     When contract "<name>" is exported and verified as PDF
@@ -103,7 +103,7 @@ Feature: C2PA remote manifest, verifier banner completeness
       | C2PA Banner Terminated        | TERMINATED      | terminated |
       | C2PA Banner Suspended         | REVOKED         | suspended  |
 
-  @DCS-OR-C2PA-006
+  @DCS-OR-C2PA-006 @DCS-FR-CWE-10
   Scenario: The verify endpoint reports the "expired" lifecycle_status banner after the expiry cron fires
     # "Expired" needs an extra Given step beyond the shared
     # "has reached contract state" one-liner (see the header comment above):

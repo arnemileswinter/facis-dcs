@@ -44,11 +44,35 @@ classes:
         required: true
     slots:
       - documentTitle
+      - contractFields
       - contractData
       - documentStructure
       - metadata
       - policies
       - signatureFields
+
+  Contract:
+    class_uri: dcs:Contract
+    is_a: ContractTemplate
+    slot_usage:
+      metadata:
+        range: ContractMetadata
+
+  ContractField:
+    class_uri: dcs:ContractField
+    slot_usage:
+      label:
+        required: true
+      datatype:
+        required: true
+      required:
+        required: true
+    slots:
+      - label
+      - datatype
+      - shape
+      - required
+      - value
 
   SignatureField:
     class_uri: dcs:SignatureField
@@ -61,8 +85,6 @@ classes:
 
   DocumentStructure:
     class_uri: dcs:DocumentStructure
-    slots:
-      - layout
 
   Clause:
     class_uri: dcs:Clause
@@ -85,13 +107,14 @@ classes:
     slots:
       - text
 
-  Placeholder:
-    class_uri: dcs:Placeholder
+  ContractMetadata:
+    class_uri: dcs:ContractMetadata
+    slot_usage:
+      title:
+        required: true
     slots:
-      - label
-      - datatype
-      - shape
-      - required
+      - title
+      - description
 
   TemplateMetadata:
     class_uri: dcs:TemplateMetadata
@@ -149,7 +172,13 @@ slots:
 
   contractData:
     slot_uri: dcs:contractData
-    range: Placeholder
+    range: uriorcurie
+    multivalued: true
+    description: Typed domain objects whose properties reference ContractField nodes by @id; validated by the DCS document gate.
+
+  contractFields:
+    slot_uri: dcs:contractFields
+    range: ContractField
     multivalued: true
 
   documentStructure:
@@ -328,7 +357,22 @@ slots:
     list_elements_ordered: true
     any_of:
       - range: string
-      - range: Placeholder
+      - range: uriorcurie
+
+  value:
+    slot_uri: dcs:value
+    description: Optional filled scalar value of a ContractField; validated against dcs:datatype by the DCS document gate.
+    # double is listed because a fractional JSON number is xsd:double in
+    # JSON-LD; the DCS document gate still checks the fill against the
+    # field's declared dcs:datatype.
+    any_of:
+      - range: string
+      - range: decimal
+      - range: double
+      - range: integer
+      - range: boolean
+      - range: date
+      - range: datetime
 
   wasDerivedFrom:
     abstract: true

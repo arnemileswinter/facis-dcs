@@ -129,6 +129,7 @@ function buildCurrentContractData(): ContractData | undefined {
     description: editedContract.value?.description ?? contract.value.description,
     blocks: dcsDraftStore.blocks,
     layout: dcsDraftStore.layout,
+    contractFields: dcsDraftStore.contractFields,
     contractData: dcsDraftStore.contractData,
     policies: dcsDraftStore.policies,
     semanticConditionValues: contractContentValuesStore.semanticConditionValues,
@@ -376,6 +377,7 @@ function applyContractDataToDraft(contractData?: unknown) {
       documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
       blocks: cd.blocks,
       layout: cd.layout,
+      contractFields: cd.contractFields,
       contractData: cd.contractData,
       policies: cd.policies,
     })

@@ -83,8 +83,8 @@ func creationPipelineTemplate() map[string]any {
 			"dcs:blocks": map[string]any{"@list": creationPipelineBlocks()},
 			"dcs:layout": creationPipelineLayout(),
 		},
-		"dcs:contractData": creationPipelineRequirements(),
-		"dcs:policies":     creationPipelinePolicyDefinitions(),
+		"dcs:contractFields": creationPipelineRequirements(),
+		"dcs:policies":       creationPipelinePolicyDefinitions(),
 	}
 }
 
@@ -311,7 +311,7 @@ func creationPipelineField(conditionID string, parameterName string, domainField
 	}
 	return map[string]any{
 		"@id":          creationPipelineFieldID(conditionID, parameterName),
-		"@type":        "dcs:Placeholder",
+		"@type":        "dcs:ContractField",
 		"dcs:label":    parameterName,
 		"dcs:datatype": datatype,
 		"dcs:shape": map[string]any{

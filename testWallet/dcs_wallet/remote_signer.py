@@ -2,7 +2,7 @@
 
 The wallet holds the signatory's key (sole control). Given a prepared PDF (the
 DCS has embedded the PoA + placed the AcroForm field), the wallet drives its
-EXTERNAL SCA — an EU DSS — through the rQES two-call flow and signs the
+EXTERNAL SCA — an EU DSS — through the CSC two-call flow and signs the
 data-to-be-signed itself with the signatory's key. The DCS never sees the key
 and never calls the wallet; the wallet returns the finished signed document.
 

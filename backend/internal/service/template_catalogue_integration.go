@@ -86,16 +86,15 @@ func (s *templateCatalogueIntegrationsrvc) SearchTemplate(ctx context.Context, r
 	}
 
 	qry := templatequery.SearchQry{
-		DID:            base.DerefString(req.Did),
-		DocumentNumber: base.DerefString(req.DocumentNumber),
-		Version:        base.DerefInt(req.Version),
-		Name:           base.DerefString(req.Name),
-		Description:    base.DerefString(req.Description),
-		Offset:         req.Offset,
-		Limit:          req.Limit,
-		RetrievedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:      middleware.GetHolderDID(ctx),
-		UserRoles:      middleware.GetUserRoles(ctx),
+		DID:         base.DerefString(req.Did),
+		Version:     base.DerefInt(req.Version),
+		Name:        base.DerefString(req.Name),
+		Description: base.DerefString(req.Description),
+		Offset:      req.Offset,
+		Limit:       req.Limit,
+		RetrievedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)

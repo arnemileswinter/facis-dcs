@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
@@ -15,6 +16,19 @@ const reportLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingFormat = ref<AuditReportFormat | null>(null)
 const selectedScope = ref<AuditScope>('contracts')
 const didFilter = ref('')
+
+// Deep-link drill-down (DCS-FR-CSA-21): the archive dashboard links here
+// with ?scope=archive&did=<did> so a row lands on that contract's trail.
+const route = useRoute()
+if (
+  typeof route.query.scope === 'string' &&
+  ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)
+) {
+  selectedScope.value = route.query.scope as AuditScope
+}
+if (typeof route.query.did === 'string' && route.query.did) {
+  didFilter.value = route.query.did
+}
 const justification = ref('')
 const authStore = useAuthStore()
 const isArchiveManagerOnly = computed(

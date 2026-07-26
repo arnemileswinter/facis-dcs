@@ -129,6 +129,10 @@ def archive_audit_url(context) -> str:
     return f"{context.base_url}/archive/audit"
 
 
+def archive_statistics_url(context) -> str:
+    return f"{context.base_url}/archive/statistics"
+
+
 def archive_delete_url(context) -> str:
     return f"{context.base_url}/archive/delete"
 
@@ -244,6 +248,10 @@ def template_submit_url(context) -> str:
 
 def template_update_url(context) -> str:
     return f"{context.base_url}/template/update"
+
+
+def template_update_manage_url(context) -> str:
+    return f"{context.base_url}/template/update_manage"
 
 
 def template_verify_url(context) -> str:

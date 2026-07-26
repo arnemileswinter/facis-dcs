@@ -200,6 +200,7 @@ function applyContractDataToDraft(contractData?: unknown) {
       documentIri: ((contractData as Record<string, unknown>)['@id'] as string | undefined) ?? null,
       blocks: cd.blocks,
       layout: cd.layout,
+      contractFields: cd.contractFields,
       contractData: cd.contractData,
       policies: cd.policies,
     })

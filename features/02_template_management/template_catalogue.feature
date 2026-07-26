@@ -10,7 +10,7 @@
 @DCS-IR-SI-01 @DCS-NFR-BR-09 @UC-02
 Feature: Template catalogue integration
 
-  @clean_db
+  @clean_db @DCS-NFR-SQ-06
   Scenario: Template Manager publishes a registered template to the catalogue
     Given I am authenticated with roles: "Template Manager"
     And template "Catalogue Publish Template" is in "Registered" status

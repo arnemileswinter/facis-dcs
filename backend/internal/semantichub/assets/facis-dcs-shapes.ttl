@@ -73,18 +73,32 @@ dcs:OdrlProhibitionProseShape
     sh:message "An ODRL Prohibition requires dcs:prose referencing the human-readable clause it is backed by." ;
   ] .
 
-dcs:RequirementFieldShape
+dcs:ContractFieldShape
     a sh:NodeShape ;
-    sh:targetClass dcs:RequirementField ;
+    sh:targetClass dcs:ContractField ;
     sh:property [
-        sh:path dcs:parameterName ;
+        sh:path dcs:label ;
         sh:datatype xsd:string ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
-        sh:message "A requirement field must declare the parameter it binds (dcs:parameterName)." ;
+        sh:message "A contract field must declare dcs:label." ;
     ] ;
     sh:property [
-        sh:path dcs:parameterValue ;
+        sh:path dcs:datatype ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
         sh:maxCount 1 ;
-        sh:message "A requirement field carries at most one inline submitted value (dcs:parameterValue)." ;
+        sh:message "A contract field must declare dcs:datatype." ;
+    ] ;
+    sh:property [
+        sh:path dcs:required ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A contract field must declare boolean dcs:required." ;
+    ] ;
+    sh:property [
+        sh:path dcs:value ;
+        sh:maxCount 1 ;
+        sh:message "A contract field carries at most one inline dcs:value." ;
     ] .

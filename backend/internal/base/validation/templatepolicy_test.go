@@ -43,8 +43,8 @@ func TestAuditTemplatePoliciesFlagsCanonicalClauseWithoutContractDataBinding(t *
 	blocks := structure["dcs:blocks"].(map[string]any)["@list"].([]any)
 	clause := blocks[0].(map[string]any)
 	content := clause["dcs:content"].(map[string]any)["@list"].([]any)
-	placeholder := content[1].(map[string]any)
-	placeholder["@id"] = "urn:uuid:missing-field"
+	field := content[1].(map[string]any)
+	field["@id"] = "urn:uuid:missing-field"
 	raw, err := datatype.NewJSON(decoded)
 	require.NoError(t, err)
 
@@ -82,9 +82,9 @@ func TestAuditTemplatePoliciesAcceptsRequiredDomainFields(t *testing.T) {
 	data := canonicalTemplateData(t)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(*data, &decoded))
-	decoded["dcs:contractData"] = append(decoded["dcs:contractData"].([]any),
-		canonicalRequirementField("jurisdiction"),
-		canonicalRequirementField("signature-level"),
+	decoded["dcs:contractFields"] = append(decoded["dcs:contractFields"].([]any),
+		canonicalContractField("jurisdiction"),
+		canonicalContractField("signature-level"),
 	)
 	raw, err := datatype.NewJSON(decoded)
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestAuditTemplatePoliciesDoesNotApplyCompletenessRulesToComponents(t *testi
 	data := canonicalTemplateData(t)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(*data, &decoded))
-	delete(decoded, "dcs:contractData")
+	delete(decoded, "dcs:contractFields")
 	delete(decoded, "dcs:policies")
 	structure := decoded["dcs:documentStructure"].(map[string]any)
 	delete(structure, "dcs:layout")
@@ -155,14 +155,14 @@ func TestAuditTemplatePoliciesFlagsComponentInternalPolicyReferences(t *testing.
 	require.False(t, hasFindingSeverity(findings, "FACIS-TPL-POLICY-001", "error"))
 }
 
-func canonicalRequirementField(id string) map[string]any {
+func canonicalContractField(id string) map[string]any {
 	ontologyIRIs := map[string]string{
 		"jurisdiction":    "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction",
 		"signature-level": "https://w3id.org/facis/dcs/taxonomy/v1#field-signature-requiredLevel",
 	}
 	return map[string]any{
 		"@id":          "urn:uuid:field-" + id,
-		"@type":        "dcs:Placeholder",
+		"@type":        "dcs:ContractField",
 		"dcs:label":    id,
 		"dcs:datatype": "xsd:string",
 		"dcs:shape":    map[string]any{"@id": ontologyIRIs[id]},

@@ -16,7 +16,7 @@ import os
 import time
 
 import requests
-from behave import then, when
+from behave import given, then, when
 
 # One client per capability (values.bdd.yml hydra.clients + systemClients).
 SYSTEM_CLIENT_SECRETS = {
@@ -149,3 +149,76 @@ def step_checkpoint_head_has_root(context):
     for leaked in ("leaf_cids", "leaf_hashes", "event_data", "did"):
         assert leaked not in head, f"checkpoint head leaks '{leaked}': {head}"
     context.checkpoint_head = head
+
+
+# ---------------------------------------------------------------------------
+# API rate limiting (DCS-FR-CWE-28)
+# ---------------------------------------------------------------------------
+
+
+@given("a dedicated API credential for rate-limit probing")
+def step_given_ratelimit_credential(context):
+    # A DEDICATED organization is what yields a distinct token: OID4VP login
+    # derives identity from the presented VP (roles + organization), so only
+    # those two discriminate. The hammer must burn ONLY this credential's
+    # one-minute budget (middleware.RateLimitAuthenticated keys per
+    # Authorization header) — the suite-shared role tokens keep theirs.
+    from steps.support.services.auth_service import AuthService  # noqa: PLC0415
+
+    context.ratelimit_headers = AuthService.get_headers_for_roles(
+        ["Contract Manager"], organization="BDD Rate Limit Probe Org"
+    )
+
+
+@when("that credential issues more API requests within a minute than the configured rate limit")
+def step_when_hammer_past_rate_limit(context):
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    # Default budget is 3000/min (conf.APIRateLimitPerMinute); the deployment
+    # does not override DCS_API_RATE_LIMIT_PER_MINUTE, so 3300 requests must
+    # cross it. The margin over the suite's own busiest per-token minute
+    # (~600, measured in run 30194569615) is deliberate: shared cached role
+    # tokens must never brush the ceiling. The probed endpoint 404s cheaply —
+    # the limiter counts every authenticated request before routing, so the
+    # response code is irrelevant to the budget.
+    total = 3300
+    url = f"{context.base_url}/contract/retrieve/did:web:ratelimit-probe-nonexistent"
+
+    def probe(_):
+        r = requests.get(url, headers=context.ratelimit_headers, timeout=30)
+        return r.status_code, r.text
+
+    started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        context.ratelimit_results = list(pool.map(probe, range(total)))
+    elapsed = time.monotonic() - started
+    assert elapsed < 60, (
+        f"The hammer took {elapsed:.0f}s — slower than the one-minute window, "
+        f"so the budget can never be exceeded and this scenario cannot judge the limiter"
+    )
+
+
+@then("at least one request is rejected with http 429 naming the rate limit")
+def step_then_some_requests_429(context):
+    over_budget = [(code, body) for code, body in context.ratelimit_results if code == 429]
+    codes = sorted({code for code, _ in context.ratelimit_results})
+    assert over_budget, (
+        f"Expected requests beyond the per-credential budget to be rejected with 429 "
+        f"(DCS-FR-CWE-28), observed only status codes {codes} across "
+        f"{len(context.ratelimit_results)} requests"
+    )
+    assert "rate limit" in over_budget[0][1].lower(), (
+        f"Expected the 429 body to name the rate limit, got: {over_budget[0][1][:200]}"
+    )
+
+
+@then("API requests with a different credential still succeed")
+def step_then_other_credential_unaffected(context):
+    from steps.support.services.auth_service import AuthService  # noqa: PLC0415
+
+    other_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    r = requests.get(f"{context.base_url}/contract/retrieve", headers=other_h, timeout=30)
+    assert r.status_code == 200, (
+        f"Expected the per-credential limit not to affect other credentials, got "
+        f"{r.status_code}: {r.text[:200]}"
+    )

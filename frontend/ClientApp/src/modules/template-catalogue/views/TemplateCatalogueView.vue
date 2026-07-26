@@ -108,7 +108,6 @@ watch(
         description: data.description ?? '',
         templateType: toTemplateType(data.template_type),
         state: TemplateState.draft,
-        document_number: data.document_number ?? null,
         version: data.version ?? null,
         updated_at: data.updated_at ?? null,
         created_by: '',

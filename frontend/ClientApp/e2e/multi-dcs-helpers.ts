@@ -153,10 +153,10 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   })
 
   const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
-  const prepared = await preparedResponse.catch((e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e)
+  const prepared = await preparedResponse.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `${msg}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
+      `${message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
     )
   })
   expect(
@@ -555,7 +555,7 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
-  await constraint.locator('select').nth(1).selectOption({ label: 'must be at most' })
+  await constraint.locator('select').nth(1).selectOption({ label: 'less than or equal to' })
   // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
   // 15000). Carried over from the single-instance component (which fills 250),
   // 500 made every negotiated value violate the contract's own ODRL rule, so the

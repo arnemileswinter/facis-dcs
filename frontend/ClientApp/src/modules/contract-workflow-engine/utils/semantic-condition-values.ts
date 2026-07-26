@@ -1,52 +1,55 @@
+import { type DcsContractData, type DcsContractField, fieldFillScalar, typedFieldFill } from '@/models/dcs-jsonld'
 import type { SemanticConditionValue } from '@/models/contract-data'
-import type { DcsContractData, DcsPlaceholder } from '@/models/dcs-jsonld'
 
 /**
  * Boundary between the editor's (blockId, conditionId, parameterName)
  * view-model and the canonical document shape, where a submitted value is
- * carried inline on its dcs:Placeholder (dcs:value) — the same node an ODRL
- * constraint names as its odrl:leftOperand. conditionId is the placeholder @id,
- * so a value is matched to its placeholder by @id.
+ * carried inline on its dcs:ContractField (dcs:value) — the same node an ODRL
+ * constraint names as its odrl:leftOperand.
  */
 
-/** The document's declared placeholders. */
-export function collectDeclaredRequirements(cd: Partial<DcsContractData>): DcsPlaceholder[] {
-  return [...(cd['dcs:contractData'] ?? [])]
+/** The document's declared contract fields. */
+export function collectDeclaredRequirements(cd: Partial<DcsContractData>): DcsContractField[] {
+  return [...(cd['dcs:contractFields'] ?? [])]
 }
 
 /**
- * Writes each submitted value inline onto the dcs:Placeholder it targets
- * (matched by @id), returning new placeholder objects. A placeholder with no
+ * Writes each submitted value inline onto the dcs:ContractField it targets
+ * (matched by @id), returning new field objects. A field with no
  * submitted value carries no dcs:value.
  */
 export function applyInlineSemanticValues(
-  placeholders: DcsPlaceholder[],
+  fields: DcsContractField[],
   values: SemanticConditionValue[],
-): DcsPlaceholder[] {
+): DcsContractField[] {
   const byId = new Map<string, SemanticConditionValue>()
   for (const value of values) {
     byId.set(value.conditionId, value)
   }
-  return placeholders.map((placeholder) => {
-    const value = byId.get(placeholder['@id'])
-    const { 'dcs:value': _value, ...rest } = placeholder
+  return fields.map((field) => {
+    const value = byId.get(field['@id'])
+    const { 'dcs:value': _value, ...rest } = field
     if (value?.parameterValue === undefined) {
       return rest
     }
-    return { ...rest, 'dcs:value': value.parameterValue }
+    return {
+      ...rest,
+      'dcs:value': typedFieldFill(value.parameterValue, field['dcs:datatype']),
+    }
   })
 }
 
-/** The editor view-model reconstructed from the placeholders' inline values. */
-export function fromDocumentSemanticValues(placeholders: DcsPlaceholder[]): SemanticConditionValue[] {
+/** The editor view-model reconstructed from contract fields' inline values. */
+export function fromDocumentSemanticValues(fields: DcsContractField[]): SemanticConditionValue[] {
   const values: SemanticConditionValue[] = []
-  for (const placeholder of placeholders) {
-    if (placeholder['dcs:value'] === undefined) continue
+  for (const field of fields) {
+    const scalar = fieldFillScalar(field['dcs:value'], field['dcs:datatype'])
+    if (scalar === undefined) continue
     values.push({
       blockId: '',
-      conditionId: placeholder['@id'],
-      parameterName: placeholder['dcs:label'],
-      parameterValue: placeholder['dcs:value'],
+      conditionId: field['@id'],
+      parameterName: field['dcs:label'],
+      parameterValue: scalar,
     })
   }
   return values

@@ -34,6 +34,17 @@ Feature: Semantic Hub — versioned schema storage, anchoring, and enforcement
     When the ontology "facis-dcs" is resolved from the Semantic Hub without authentication
     Then get http 200:Success code
 
+  @REQ-semantic-catalog-grouped-constraints-AC6 @DCS-FR-TR-03
+  Scenario Outline: The default ontology provides multiple grouped catalogs for a constraint operand
+    When the ontology "facis-sla" is resolved from the Semantic Hub without authentication
+    Then get http 200:Success code
+    And the ontology defines at least 2 labeled value catalogs with labeled concepts for ODRL left operand "<operand>"
+
+    Examples:
+      | operand |
+      | purpose |
+      | spatial |
+
   # Registered versions persist across suite runs (the hub is seeded once at
   # startup, not per run), so the assertions are relative to the versions
   # that existed when the scenario started — only the rollback target is

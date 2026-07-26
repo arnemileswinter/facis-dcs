@@ -27,6 +27,46 @@ var ArchiveSearchRequest = Type("ArchiveSearchRequest", func() {
 	Attribute("description", String, "A description for that contract")
 	Attribute("contract_data", String, "Search value for full text search in contract data")
 	Attribute("tag", String, "Return only archive entries carrying this annotation tag (DCS-FR-CSA-11)")
+	Attribute("party", String, "Return only contracts where this DID is a contract party — creator or counterparty (DCS-FR-CSA-10, DCS-FR-CSA-13)")
+	Attribute("valid_from", String, "Return only contracts whose validity period starts at or after this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
+	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
+})
+
+var ArchiveRecentAction = Type("ArchiveRecentAction", func() {
+	Description("One recent archive-affecting audit event")
+
+	Attribute("actor", String, "Who performed the operation")
+	Attribute("occurred_at", String, "When the operation happened (RFC3339)")
+	Attribute("event_type", String, "The archive operation (store/retrieve/search/delete/annotate)")
+	Attribute("did", String, "The archived contract the operation concerned")
+
+	Required("actor", "occurred_at", "event_type", "did")
+})
+
+var ArchiveExpiringContract = Type("ArchiveExpiringContract", func() {
+	Description("An archived contract whose expiration date is approaching")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("name", String, "The contract's name")
+	Attribute("exp_date", String, "The contract's expiration timestamp (RFC3339)")
+
+	Required("did", "exp_date")
+})
+
+var ArchiveStatisticsResponse = Type("ArchiveStatisticsResponse", func() {
+	Description("Archive dashboard overview (DCS-FR-CSA-21): archived-contract statistics, recent actions, storage volume, expiring contracts, and compliance status")
+
+	Attribute("archived_total", Int, "Number of stored archive entries, all contract versions")
+	Attribute("archived_contracts", Int, "Number of distinct archived contracts")
+	Attribute("deleted_total", Int, "Number of soft-deleted archive entries")
+	Attribute("storage_bytes", Int64, "Storage volume of archived snapshots, evidence, and receipts, in bytes")
+	Attribute("compliant_total", Int, "Archive entries carrying complete evidence (content hash, TSA receipt, signature metadata)")
+	Attribute("flagged_total", Int, "Archive entries with incomplete evidence — flagged per DCS-FR-CSA-19")
+	Attribute("recent_actions", ArrayOfRequired(ArchiveRecentAction), "Most recent archive-affecting audit events, newest first")
+	Attribute("expiring_contracts", ArrayOfRequired(ArchiveExpiringContract), "Archived contracts expiring within the next 30 days, soonest first")
+
+	Required("archived_total", "archived_contracts", "deleted_total", "storage_bytes",
+		"compliant_total", "flagged_total", "recent_actions", "expiring_contracts")
 })
 
 var ArchiveAnnotationResponse = Type("ArchiveAnnotationResponse", func() {
@@ -70,7 +110,7 @@ var _ = Service("ContractStorageArchive", func() {
 
 	Method("search", func() {
 		Description("search archived records. search records by criteria.")
-		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05")
+		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05", "DCS-FR-CSA-10", "DCS-FR-CSA-13")
 		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
 		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
@@ -92,6 +132,9 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("description")
 			Param("contract_data")
 			Param("tag")
+			Param("party")
+			Param("valid_from")
+			Param("valid_until")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -171,6 +214,29 @@ var _ = Service("ContractStorageArchive", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
+	})
+
+	Method("statistics", func() {
+		Description("Archive dashboard overview (DCS-FR-CSA-21): archived-contract statistics, recent actions, storage volume, expiring contracts, and compliance status. Drill-down happens per contract via the retrieve/audit methods.")
+		Meta("dcs:requirements", "DCS-FR-CSA-21")
+		Meta("dcs:ui", "Archive Manager Dashboard")
+		Meta("dcs:csa:components", "")
+		Security(JWTAuth, func() {
+			Scope("Auditor")
+			Scope("Archive Manager")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/statistics")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+		Result(ArchiveStatisticsResponse)
 	})
 
 	Method("audit", func() {

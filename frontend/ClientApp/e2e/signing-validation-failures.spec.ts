@@ -17,6 +17,7 @@ import { buildApprovedContract, signApprovedContractViaViewerWithMismatchedCert 
  */
 
 test('the signing view renders the specific rejection reason for a cert/PID mismatch', async ({ page, loginAs }) => {
+  // DCS-FR-CWE-26 // DCS-FR-SM-23
   test.setTimeout(90_000)
   page.setDefaultTimeout(15_000)
 

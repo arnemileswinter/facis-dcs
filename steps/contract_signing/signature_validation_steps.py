@@ -9,20 +9,39 @@ Given, reused rather than re-invented here).
 """
 
 import time
+from datetime import datetime
 
 import requests
 from behave import then, when
+
+import json
 
 from steps.support.api_client import (
     post_json,
     signature_audit_url,
     signature_compliance_url,
+    signature_retrieve_url,
     signature_revoke_url,
     signature_view_url,
     signature_validate_url,
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+
+
+@when('the contract signer retrieves contract "{name}" for signing')
+def step_when_signer_retrieves(context, name):
+    # DCS-FR-SM-15: the retrieval a signer performs before signing —
+    # GET /signature/retrieve/{did} — as the "Contract Signer" role the
+    # endpoint scopes to (backend/design/signature_management.go
+    # retrieve_by_id).
+    did, _ = ContractService._contract_data(context, name)
+    signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
+    context.requests_response = requests.get(
+        signature_retrieve_url(context, did),
+        headers=signer_h,
+        timeout=context.http_timeout_seconds,
+    )
 
 
 @when('the contract manager validates the signature for contract "{name}"')
@@ -248,6 +267,108 @@ def step_then_signature_audit_includes(context, name, event_type):
         time.sleep(1)
     assert event_type.upper() in event_types, (
         f"Expected a '{event_type}' signature audit event for contract '{name}', got event types: {event_types}"
+    )
+
+
+def _signature_audit_entry(context, name, event_type):
+    """Fetches the audit entry of the given event type for the contract.
+    Presence is guaranteed by the polling step above (the outbox processor
+    has already anchored the entry), so a single read suffices; event_data
+    arrives either JSON-decoded or as a JSON string depending on the
+    transport, both are handled."""
+    did, _ = ContractService._contract_data(context, name)
+    auditor_h = AuthService.get_headers_for_roles(["Auditor"])
+    resp = requests.get(
+        signature_audit_url(context),
+        params={"did": did},
+        headers=auditor_h,
+        timeout=context.http_timeout_seconds,
+    )
+    assert resp.status_code == 200, f"Signature audit query failed for '{name}': {resp.status_code} {resp.text}"
+    entries = [e for e in resp.json() if str(e.get("event_type", "")).upper() == event_type.upper()]
+    assert entries, f"Expected a '{event_type}' signature audit entry for contract '{name}'"
+    entry = entries[-1]
+    event_data = entry.get("event_data")
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    return did, entry, event_data or {}
+
+
+@then('the "{event_type}" signature audit entry for contract "{name}" carries the signer DID, credential type "{cred}", and an RFC3339 timestamp')
+def step_then_audit_entry_apply_fields(context, event_type, name, cred):
+    # DCS-FR-SM-19: signer ID, credential used, and timestamp captured in
+    # the log entry itself — the ApplyEvent's fields (signingmanagement/
+    # event/event.go). The signer is identified twice: applied_by is the
+    # PARTICIPANT identifier from the auth context (middleware.
+    # GetParticipantID = the token's ext.iss claim — the organization in the
+    # BDD wallet), and holder_did is the signer's wallet DID.
+    _, _, event_data = _signature_audit_entry(context, name, event_type)
+    applied_by = event_data.get("applied_by")
+    assert applied_by, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to carry the "
+        f"applying participant in 'applied_by', got event_data: {event_data}"
+    )
+    holder_did = event_data.get("holder_did")
+    assert holder_did and str(holder_did).startswith("did:"), (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to name the "
+        f"signer's wallet DID in 'holder_did', got event_data: {event_data}"
+    )
+    assert event_data.get("credential_type") == cred, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to record "
+        f"credential_type {cred!r}, got: {event_data.get('credential_type')!r} "
+        f"(event_data: {event_data})"
+    )
+    occurred_at = event_data.get("occurred_at")
+    assert occurred_at, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to carry a "
+        f"non-empty 'occurred_at', got event_data: {event_data}"
+    )
+    try:
+        datetime.fromisoformat(str(occurred_at).replace("Z", "+00:00"))
+    except ValueError:
+        raise AssertionError(
+            f"Expected the '{event_type}' audit entry timestamp of contract '{name}' "
+            f"to parse as RFC3339, got occurred_at: {occurred_at!r}"
+        )
+
+
+@then('the retrieval of contract "{name}" is recorded with the retrieving signer, a timestamp, and the contract ID')
+def step_then_retrieval_recorded(context, name):
+    # DCS-FR-SM-15: the retrieval is logged with timestamp, signer ID, and
+    # contract ID — the RetrieveByIDEvent (signingmanagement/event/event.go)
+    # persisted through the transactional outbox. Read-only RETRIEVE_* events
+    # are deliberately filtered OUT of the audit-result presentation
+    # (base.IsAuditVisibleEventType: operational traces, not findings), so
+    # the recording itself is asserted on the persisted outbox row.
+    import json as _json  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    deadline = time.monotonic() + 30
+    row = None
+    while time.monotonic() < deadline:
+        cursor = context.db.cursor()
+        cursor.execute(
+            """SELECT event_data FROM outbox_events
+               WHERE component = 'SIGNATURE_MANAGEMENT'
+                 AND event_type = 'RETRIEVE_CONTRACT_BY_ID' AND did = %s
+               ORDER BY id DESC LIMIT 1""",
+            (did,),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if row:
+            break
+        time.sleep(1)
+    assert row, f"Expected a persisted RETRIEVE_CONTRACT_BY_ID record for contract '{name}' ({did})"
+    event_data = row[0] if isinstance(row[0], dict) else _json.loads(row[0])
+    assert event_data.get("retrieved_by"), (
+        f"Expected the retrieval record to name the retrieving signer (retrieved_by), got: {event_data}"
+    )
+    assert event_data.get("occurred_at"), (
+        f"Expected the retrieval record to carry a timestamp (occurred_at), got: {event_data}"
+    )
+    assert event_data.get("did") == did, (
+        f"Expected the retrieval record to carry contract ID '{did}', got: {event_data}"
     )
 
 

@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -44,9 +43,9 @@ func expandCanonicalIRI(compact string) string {
 	return compact
 }
 
-// requirementFieldValue extracts a field's filled value from parameterValue,
+// contractFieldValue extracts a field's filled value,
 // accepting a bare scalar, a JSON number, or a typed {"@value":…} literal.
-func requirementFieldValue(raw json.RawMessage) string {
+func contractFieldValue(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -65,50 +64,6 @@ func requirementFieldValue(raw json.RawMessage) string {
 		}
 	}
 	return ""
-}
-
-// placeholderFillValue resolves a Placeholder's dcs:bindsTo reference to the
-// bound field's filled value ("" when unbound or unfilled).
-func placeholderFillValue(item ContentItem, fields map[string]string) string {
-	if len(item.Raw) == 0 {
-		return ""
-	}
-	var raw map[string]any
-	if json.Unmarshal(item.Raw, &raw) != nil {
-		return ""
-	}
-	binds, ok := raw["bindsTo"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	id, _ := binds["@id"].(string)
-	return fields[id]
-}
-
-// inlinedPlaceholderText reports whether a content item is a DCS-inlined
-// placeholder reference — a node carrying a dcs:label the DCS copied from the
-// top-level dcs:Placeholder registry — and returns its filling. The value is
-// read with json.Number so a numeric filling keeps its exact source token
-// (e.g. 15000 stays "15000"), making the render a deterministic function of the
-// bytes. An empty string with ok=true means an unfilled placeholder (empty slot).
-func inlinedPlaceholderText(raw json.RawMessage) (string, bool) {
-	if len(raw) == 0 || raw[0] != '{' {
-		return "", false
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var obj map[string]any
-	if dec.Decode(&obj) != nil {
-		return "", false
-	}
-	if _, labelled := obj["label"]; !labelled {
-		return "", false
-	}
-	value, present := obj["value"]
-	if !present {
-		return "", true
-	}
-	return scalarText(value), true
 }
 
 // scalarText renders a JSON scalar to its deterministic display text.
@@ -138,29 +93,6 @@ func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSeg
 
 	// Decode raw JSON for schema: properties (schema:url, schema:name).
 
-	// Placeholder: renders its bound field's filled value in a contract, or the
-	// empty slot ("_____") in a template / when the field is unfilled.
-	if item.Datatype == "Placeholder" || item.Datatype == "dcs:Placeholder" {
-		if v := placeholderFillValue(item, fields); v != "" {
-			return clauseSegment{Type: "prose", Text: v}
-		}
-		return clauseSegment{Type: "prose", Text: "_____"}
-	}
-
-	// Clean ADR-15 placeholder reference: the clause references a top-level
-	// dcs:Placeholder by @id, and the DCS has copied the placeholder's dcs:label
-	// (always) and its dcs:value (once filled) onto this node so the renderer
-	// resolves the visible text without chasing the registry. Render the filled
-	// value, or the empty slot when unfilled — never the @id. This is a pure,
-	// ordered function of the segment bytes, so a recompile from the embedded
-	// payload reproduces the same visible text.
-	if value, ok := inlinedPlaceholderText(item.Raw); ok {
-		if value != "" {
-			return clauseSegment{Type: "prose", Text: value}
-		}
-		return clauseSegment{Type: "prose", Text: "_____"}
-	}
-
 	var raw map[string]any
 	if len(item.Raw) > 0 && item.Raw[0] == '{' {
 		json.Unmarshal(item.Raw, &raw) //nolint:errcheck // best-effort parse for segment properties
@@ -188,6 +120,12 @@ func parseCanonicalSegment(item ContentItem, fields map[string]string) clauseSeg
 
 	// IRI reference: object carries @id.
 	if item.ID != "" {
+		if value, fieldReference := fields[item.ID]; fieldReference {
+			if value == "" {
+				value = "_____"
+			}
+			return clauseSegment{Type: "prose", Text: value}
+		}
 		fullIRI := expandCanonicalIRI(item.ID)
 		text := fullIRI
 		if raw != nil {
@@ -332,12 +270,8 @@ func extractDocumentModelFromCanonical(canonical []byte, hashHex string) (docume
 	model.Title = strings.TrimSpace(tmpl.Metadata.Title)
 
 	fields := map[string]string{}
-	for _, dr := range tmpl.ContractData {
-		for _, f := range dr.Fields {
-			if v := requirementFieldValue(f.ParameterValue); v != "" {
-				fields[f.ID] = v
-			}
-		}
+	for _, field := range tmpl.ContractFields {
+		fields[field.ID] = contractFieldValue(field.Value)
 	}
 
 	if tmpl.DocumentStructure != nil {
@@ -435,8 +369,8 @@ var listValuedTerms = map[string]bool{
 	"children":        true,
 	"content":         true,
 	"signatureFields": true,
+	"contractFields":  true,
 	"contractData":    true,
-	"fields":          true,
 }
 
 // idRefListTerms are list properties the model reads as []string of bare IRIs,

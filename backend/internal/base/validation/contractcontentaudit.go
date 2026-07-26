@@ -621,7 +621,7 @@ func normalizeObject(raw any) (map[string]any, error) {
 }
 
 // contractValue resolves a validation-profile rule target (a document
-// property path like "contract.jurisdiction", or a placeholder dcs:label) to
+// property path like "contract.jurisdiction", or a field dcs:label) to
 // the document's runtime value.
 func contractValue(contract map[string]any, target string) (any, bool) {
 	if value, ok := contractSHACLAliasValue(contract, target); ok {
@@ -661,8 +661,8 @@ func firstExistingValue(contract map[string]any, keys ...string) (any, bool) {
 	return nil, false
 }
 
-// contractDataFieldValue pairs a declared placeholder with the value it
-// carries inline (dcs:value); the placeholder @id is the IRI an ODRL
+// contractDataFieldValue pairs a declared ContractField with its inline
+// dcs:value; the field @id is the IRI an ODRL
 // constraint's odrl:leftOperand references, and dcs:label is its human name.
 type contractDataFieldValue struct {
 	label    string
@@ -670,7 +670,7 @@ type contractDataFieldValue struct {
 	hasValue bool
 }
 
-// contractDataFieldValues walks the document's declared placeholders in
+// contractDataFieldValues walks the document's declared ContractFields in
 // document order (including composed sub-templates'), yielding each once with
 // the value it carries inline.
 func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
@@ -680,19 +680,19 @@ func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
 	walk = func(current any) {
 		switch value := current.(type) {
 		case map[string]any:
-			if rawPlaceholders, ok := topLevelValue(documentData(value), "contractData").([]any); ok {
-				for _, rawPlaceholder := range rawPlaceholders {
-					placeholder, ok := rawPlaceholder.(map[string]any)
+			if rawFields, ok := topLevelValue(documentData(value), "contractFields").([]any); ok {
+				for _, rawField := range rawFields {
+					field, ok := rawField.(map[string]any)
 					if !ok {
 						continue
 					}
-					fieldID, _ := placeholder["@id"].(string)
+					fieldID, _ := field["@id"].(string)
 					if fieldID == "" || seen[fieldID] {
 						continue
 					}
 					seen[fieldID] = true
-					fieldValue, hasValue := inlineFieldValue(placeholder)
-					label, _ := firstOf(placeholder, "dcs:label", "label").(string)
+					fieldValue, hasValue := inlineFieldValue(field)
+					label, _ := firstOf(field, "dcs:label", "label").(string)
 					out = append(out, contractDataFieldValue{
 						label:    label,
 						value:    fieldValue,
@@ -713,7 +713,7 @@ func contractDataFieldValues(contract map[string]any) []contractDataFieldValue {
 	return out
 }
 
-// inlineFieldValue reads the value a placeholder carries inline (dcs:value),
+// inlineFieldValue reads the value a field carries inline (dcs:value),
 // treating an empty value as absent.
 func inlineFieldValue(field map[string]any) (any, bool) {
 	for _, key := range []string{"dcs:value", "value"} {
@@ -747,7 +747,7 @@ func semanticConditionValuesByParameterName(contract map[string]any, parameterNa
 }
 
 // companyPartiesFromSemanticValues no longer derives parties from filled
-// placeholders: the flat, self-contained placeholder registry carries no
+// contractFields: the flat, self-contained field registry carries no
 // entity grouping, and a contract's parties are materialized from its ODRL
 // rules (materializeRuleParties) and stored in dcs:parties.
 func companyPartiesFromSemanticValues(_ map[string]any) ([]any, bool) {
