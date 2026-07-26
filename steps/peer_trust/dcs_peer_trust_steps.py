@@ -24,31 +24,46 @@ Untrusted-peer single-instance testing technique
 ------------------------------------------------
 The did:web challenge-response signature (see backend/internal/service/
 dcs_to_dcs.go's PostPdf): the caller signs a fresh `secret_value` with its
-private key, and the receiving instance resolves
-`https://<hostname>/.well-known/did.json` (hostname derived ONLY from the
-did:web host component — see `identity.DIDWebToHostname`, which stops at the
-first ":" after the "did:web:" prefix and ignores everything after) to fetch
-the matching public key.
+private key, and the receiving instance resolves the peer's did:web
+identifier to a document URL (`identity.FetchDIDDocument` ->
+`DIDWebPath`/`DIDWebDocumentPath`) to fetch the matching public key.
 
-That means a did:web identifier of the shape
-`<this-instance's-own-did:web-id>:<arbitrary-suffix>` resolves, hostname-wise,
-to THIS SAME running instance's own `/.well-known/did.json` (AND, per
-ADR-19, its own `/.well-known/dcs-agreement-credential.json`) and dev private
-key — so signing with that key produces a genuinely valid signature for that
-synthetic identifier, without needing a second real DCS process. Crucially
-the synthetic identifier is a DIFFERENT STRING than the instance's real DID
-id, so it does not trip PostPdf's separate same-peer guard
+Resolution follows did-method-web, so PATH SEGMENTS ARE PART OF THE
+IDENTITY: `did:web:<host>:<suffix>` resolves to
+`https://<host>/<suffix>/did.json`, NOT to `<host>`'s
+`/.well-known/did.json`. A synthetic peer therefore cannot be minted by
+appending an arbitrary suffix to this instance's own DID — that names a
+document this instance does not serve, and PostPdf then fails at its very
+first step (FetchDIDDocument) long before any trust-gate layer runs.
+
+What DOES yield a self-resolving synthetic peer is percent-encoding: the
+resolver percent-decodes each component (`url.QueryUnescape` per part), so
+re-encoding one already-ASCII character of the host produces a DIFFERENT DID
+STRING that decodes to the SAME authority (see
+`_self_resolving_peer_variant`). Such an identifier resolves to THIS SAME
+running instance's own `/.well-known/did.json`, its own
+`/.well-known/dcs-agreement-credential.json` and its own signing key, so
+layers 1/2 (challenge-response) and layer 3a (agreement credential: valid
+signature, issuer resolving to the same target, matching rules hash) all pass
+GENUINELY, leaving layer 3b — the PDP — as the only gate under test. Being a
+different string, it also does not trip PostPdf's separate same-peer guard
 (`req.FromPeerDid == localPeer`), which would otherwise reject
-self-simulated same-DID requests for an unrelated reason and make the
-untrusted-peer test dishonest.
+self-simulated same-DID requests for an unrelated reason and make the test
+dishonest.
 
-Because the synthetic peer's agreement credential resolves to THIS
-instance's own (not yet implemented) endpoint, "missing credential" is
-directly and honestly simulatable today (the endpoint 404s). A
-"signature-invalid" or "hash-mismatched" peer credential is NOT simulatable
-this way, since we cannot make our own instance publish a broken credential
-about itself without touching backend code — those sub-cases are flagged as
-open points at their respective scenarios rather than faked.
+Consequence: this identity is CONSTANT per instance rather than unique per
+scenario (uniqueness would require a distinguishing path segment, which is
+exactly what resolution now makes meaningful). Nothing here needs a unique
+peer — every assertion is scoped by the scenario's own contract DID, and
+`RecordDenialIncidentTxDeduped` dedupes on (contract DID, peer DID,
+direction), whose contract-DID component is already per-scenario unique.
+
+A peer with a MISSING credential (layer 3a fails) is simulated separately via
+the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), and one
+with a valid-but-wrong-hash credential via a second orce route
+(`_orce_mismatch_peer_credentials`) — this instance cannot be made to publish
+a broken credential about itself. A "signature-invalid" credential remains
+uncovered and is flagged as an open point at its scenario rather than faked.
 
 This technique is the natural single-instance extension of the self-peer
 simulation used by the contract-state-machine pack (see
@@ -121,13 +136,48 @@ def _own_identity(context):
     return real_did, token_dir
 
 
-def _synthetic_peer_credentials(context, marker: str):
+def _self_resolving_peer_variant(real_did: str) -> str:
+    """Re-encode one character of a did:web identifier's host component, so the
+    result is a DIFFERENT DID STRING that resolves to exactly the SAME target.
+
+    did:web resolution percent-decodes each colon-separated component
+    (identity.DIDWebPath -> url.QueryUnescape), so "%64cs.example%3A8080" and
+    "dcs.example%3A8080" denote one and the same authority. That is what makes
+    a single-instance synthetic peer possible at all now that path segments are
+    part of the identity (see module docstring): the peer's did.json,
+    agreement credential and rules hash are this instance's own real,
+    self-consistent ones, while the identifier is still not the instance's own
+    DID string and so clears PostPdf's same-peer guard.
+
+    The first host character is the one re-encoded — always present (an empty
+    host is rejected by the resolver) and, for a hostname, always ASCII, so a
+    single %XX byte is a faithful encoding of it.
+    """
+    prefix = "did:web:"
+    assert real_did.startswith(prefix), f"not a did:web identifier: {real_did}"
+    rest = real_did[len(prefix):]
+    host_encoded, _, suffix = rest.partition(":")
+    assert host_encoded, f"did:web identifier has empty host component: {real_did}"
+    first = host_encoded[0]
+    assert first != "%", (
+        f"host component of {real_did} already starts with a percent-escape; re-encoding its "
+        "first character would corrupt that escape rather than rename it"
+    )
+    assert first.isascii(), (
+        f"host component of {real_did} starts with non-ASCII {first!r}; a single-byte %XX escape "
+        "would not faithfully encode it (expected an IDNA/ASCII hostname)"
+    )
+    variant_host = f"%{ord(first):02X}{host_encoded[1:]}"
+    return prefix + variant_host + (f":{suffix}" if suffix else "")
+
+
+def _synthetic_peer_credentials(context):
     """Build a syntactically valid, cryptographically genuine did:web peer
     identity that is NOT this instance's own DID string (see module
     docstring) and a matching challenge-response signature over a fresh
     secret_value."""
     real_did, token_dir = _own_identity(context)
-    synthetic_did = f"{real_did}:{marker}-{uuid.uuid4()}"
+    synthetic_did = _self_resolving_peer_variant(real_did)
     secret_value = str(uuid.uuid4())
     signature = _sign_secret_value_with_dev_key(token_dir, secret_value)
     secret_hash = base64.b64encode(signature).decode()
@@ -144,9 +194,16 @@ def _orce_synthetic_peer_did() -> str:
     credential endpoint deliberately 404s (layer 3a genuinely fails, not by
     absence of an endpoint that has since been implemented). The exact DID
     string is a live contract with the deployment side — override via
-    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed; the default
-    below matches the currently agreed format."""
-    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880:synthetic-peer")
+    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed.
+
+    A BARE AUTHORITY, deliberately: the flow serves this identity at the host
+    root and distinguishes it from the AC5 mismatch identity by Host header,
+    not by path. It previously carried a ":synthetic-peer" segment, which only
+    resolved because did:web resolution discarded path segments — with
+    resolution following the spec, that segment would point every lookup
+    (did.json, agreement credential, and the peer API the synchronizer ships
+    to) at paths this fixture does not serve."""
+    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880")
 
 
 def _orce_synthetic_peer_credentials(context):
@@ -236,7 +293,7 @@ def step_given_peer_identity(context):
     3a) and the PDP (layer 3b), each exercised by its own dedicated Given
     step (this file's "...publishes no agreement credential..." below;
     steps/peer_trust/dcs_trust_pdp_steps.py's PDP-stub Givens)."""
-    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context, "bdd-peer")
+    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context)
     context.peer_from_did = synthetic_did
     context.peer_secret_value = secret_value
     context.peer_secret_hash = secret_hash

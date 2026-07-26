@@ -23,6 +23,13 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           command: ["/bin/sh", "-c", "[ -f /seed/settings.js ] || cp -a /data/. /seed/"]
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: orce-data
               mountPath: /seed
@@ -33,6 +40,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           command: ["/bin/sh", "-c", "[ -f /data/tsa-state/serial ] || echo 01 > /data/tsa-state/serial"]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: tsa-state
               mountPath: /data/tsa-state

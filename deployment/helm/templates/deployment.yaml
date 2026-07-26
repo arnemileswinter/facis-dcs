@@ -189,10 +189,23 @@ spec:
               {{- end }}
             {{- if .Values.identity.enabled }}
             # DID identity (DCS_DID is fatal on startup when missing): did.json
-            # is mounted from the Secret the hsm-provision post-install hook
-            # publishes (see the 'identitySecretName' helper).
+            # comes from the Secret the hsm-provision post-install hook publishes
+            # (see the 'identitySecretName' helper), or — when that hook may not
+            # touch the API (provisioning.publishSecrets=false) — straight off the
+            # token volume the hook writes it to and this pod already mounts.
             - name: DCS_DID
+              {{- if .Values.pkcs11.provisioning.publishSecrets }}
               value: {{ printf "%s/did.json" .Values.identity.mountPath | quote }}
+              {{- else }}
+              value: {{ printf "%s/did.json" .Values.pkcs11.provisioning.tokenDir | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.federation.trustPdpURL }}
+            # ADR-19 federation trust gate. Emitted only when set so a deployment
+            # that configures it through extraEnv instead does not end up with two
+            # DCS_TRUST_PDP_URL entries.
+            - name: DCS_TRUST_PDP_URL
+              value: {{ .Values.federation.trustPdpURL | quote }}
             {{- end }}
             - name: TSA_URL
               value: {{ .Values.signing.tsaURL | quote }}
@@ -284,7 +297,7 @@ spec:
             - name: hsm-token
               mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
           {{- end }}
-          {{- if .Values.identity.enabled }}
+          {{- if and .Values.identity.enabled .Values.pkcs11.provisioning.publishSecrets }}
             - name: identity
               mountPath: {{ .Values.identity.mountPath | quote }}
               readOnly: true
@@ -340,7 +353,7 @@ spec:
           configMap:
             name: {{ include "digital-contracting-service.fullname" . }}-statuslist-localhost-proxy
       {{- end }}
-      {{- if .Values.identity.enabled }}
+      {{- if and .Values.identity.enabled .Values.pkcs11.provisioning.publishSecrets }}
         - name: identity
           secret:
             secretName: {{ include "digital-contracting-service.identitySecretName" . | quote }}

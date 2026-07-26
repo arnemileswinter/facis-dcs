@@ -160,6 +160,20 @@ serviceDiscovery:
 # DCS never holds raw private keys (DCS-IR-HI-01): every key lives in the
 # PKCS#11 token configured under `pkcs11` below.
 
+# DCS-to-DCS federation (ADR-19). The trust gate consults this policy endpoint
+# for every inbound and outbound federated interaction and is FAIL-CLOSED: while
+# it is empty nothing ships and nothing is accepted, so an instance meant to
+# federate is not configured until this is set. Each instance consults only its
+# OWN endpoint — never the counterparty's.
+#
+# The bundled orce chart serves a permissive stand-in at
+# http://<release>-orce:1880/trust-pdp; operators are expected to replace it with
+# a real decision function (peer allowlist as policy, a trust list, a Gaia-X
+# Clearing House). Left empty by default so federation is opt-in rather than
+# silently permissive.
+federation:
+  trustPdpURL: ""
+
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
   issuerDID: ""
@@ -190,14 +204,34 @@ pkcs11:
     key: "PKCS11_PIN"
   provisioning:
     enabled: true
+    # Publish the provisioned did.json and C2PA x5chain as Secrets via the
+    # Kubernetes API, which requires the job to carry its own ServiceAccount +
+    # Role + RoleBinding.
+    #
+    # Set false on clusters that do not grant the installer rbac.authorization
+    # (a common on-prem namespace restriction — the install otherwise fails on
+    # "cannot create resource roles"). The job then writes nothing to the API:
+    # every artifact stays on the shared token volume it already writes them to,
+    # the backend reads DCS_DID from there, and pdf-core mounts the same volume
+    # read-only for the x5chain. That co-mount is why pdf-core is pinned to the
+    # backend's node in this mode — a ReadWriteOnce volume admits multiple pods
+    # only on one node. Supply persistence.accessModes: ["ReadWriteMany"] to
+    # drop the pinning.
+    publishSecrets: true
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
     # SO (security officer) PIN used only during token initialization.
     soPin: "12345678"
     persistence:
-      size: "128Mi"
+      # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
+      # refuse to provision below 1Gi and the claim then never binds, which
+      # surfaces as pods stuck Pending rather than as an install error.
+      size: "1Gi"
       accessModes: ["ReadWriteOnce"]
       storageClassName: ""
+    # Resource block for the provisioning job itself. Set it on namespaces with a
+    # limits.cpu quota — see the template for why an unset block blocks install.
+    resources: {}
     # Provisioning job image; defaults to the DCS image, which bundles
     # softhsm2/opensc/openssl and the provisioning scripts.
     image:
@@ -317,6 +351,10 @@ fcservice:
   # realm files this size (keycloak/keycloak#37745).
   realmProvision:
     enabled: false
+    # Sizes the provisioning hook Job, a separate pod from the services. Falls
+    # back to the top-level `resources` when unset; set it on namespaces with a
+    # limits.cpu quota, where an unsized hook inherits the LimitRange default.
+    resources: {}
     keycloakHost: "fc-keycloak-http"
     adminUser: "admin"
     adminPassword: "admin"
@@ -334,7 +372,7 @@ fcservice:
 
 # Owned Keycloak backing fcservice above (see charts/keycloak). hostname MUST
 # be a real, externally reachable https URL for wallet/browser OIDC flows on
-# environments with real ingress (e.g. IONOS) — see docs/deployment-osc-testbed.md.
+# environments with real ingress — see deployment/README.md.
 # Keep in sync with fcservice.keycloak.hostname above.
 fcKeycloakApp:
   hostname: ""
@@ -358,6 +396,10 @@ fcPostgres:
 # PDF-Core: C2PA-aware PDF compiler and verifier (DCS-OR-C2PA-*)
 pdfCore:
   enabled: true
+  # Every other component honours a resources block; without one here a
+  # LimitRange default (commonly 1 CPU) applies, which on a namespace with a
+  # low limits.cpu quota is enough to stop the release scheduling.
+  resources: {}
   image:
     repository: ""     # set to your registry image, e.g. registry.example.com/facis/pdf-core
     tag: ""            # set to the image tag; falls back to .Chart.AppVersion

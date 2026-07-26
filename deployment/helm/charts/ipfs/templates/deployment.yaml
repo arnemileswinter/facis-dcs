@@ -35,6 +35,13 @@ spec:
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '{{ toJson .Values.api.cors.allowHeaders }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["{{ .Values.api.cors.allowCredentials }}"]'
               chown -R 1000:100 /data/ipfs
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: ipfs-data
               mountPath: /data/ipfs

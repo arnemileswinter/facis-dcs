@@ -38,14 +38,28 @@ spec:
             - /bin/sh
             - -c
             - |
-              until [ -s /x5chain/{{ include "digital-contracting-service.pdfCoreX5ChainSecretKey" . }} ]; do
+              until [ -s {{ include "digital-contracting-service.pdfCoreX5ChainPath" . }} ]; do
                 echo "Waiting for C2PA x5chain cert secret..."
                 sleep 3
               done
               echo "C2PA x5chain cert is ready."
+          {{- with .Values.pdfCore.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so an unlimited init container makes the whole pod count
+          # as the LimitRange default — enough on a namespace with a low
+          # limits.cpu quota to exhaust it and stop the release scheduling.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
+            {{- if .Values.pkcs11.provisioning.publishSecrets }}
             - name: x5chain-cert
               mountPath: /x5chain
+            {{- else }}
+            - name: hsm-token
+              mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
+              readOnly: true
+            {{- end }}
       containers:
         - name: pdf-core
           image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}"
@@ -65,12 +79,23 @@ spec:
             # (public cert) in the COSE protected header. optional so the pod
             # schedules; the wait-for-x5chain initContainer guarantees the secret
             # exists before this container starts, so the ref always resolves.
+            {{- if .Values.pkcs11.provisioning.publishSecrets }}
             - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM
               valueFrom:
                 secretKeyRef:
                   name: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
                   key: {{ include "digital-contracting-service.pdfCoreX5ChainSecretKey" . | quote }}
                   optional: true
+            {{- else }}
+            # No Secret to read when the provisioning hook may not touch the API;
+            # the cert is taken from the token volume it wrote instead.
+            - name: DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE
+              value: {{ include "digital-contracting-service.pdfCoreX5ChainPath" . | quote }}
+            {{- end }}
+          {{- with .Values.pdfCore.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /swagger.json
@@ -83,9 +108,29 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+      {{- if not .Values.pkcs11.provisioning.publishSecrets }}
+      {{- if not (has "ReadWriteMany" (.Values.pkcs11.provisioning.persistence.accessModes | default (list "ReadWriteOnce"))) }}
+      # A ReadWriteOnce token volume admits several pods only when they share a
+      # node, and this pod co-mounts it with the backend to read the x5chain.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "digital-contracting-service.selectorLabels" . | nindent 18 }}
+                  app.kubernetes.io/component: backend
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- end }}
       volumes:
+        {{- if .Values.pkcs11.provisioning.publishSecrets }}
         - name: x5chain-cert
           secret:
             secretName: {{ include "digital-contracting-service.pdfCoreX5ChainSecretName" . }}
             optional: true
+        {{- else }}
+        - name: hsm-token
+          persistentVolumeClaim:
+            claimName: {{ include "digital-contracting-service.fullname" . }}-hsm-token
+        {{- end }}
 {{- end }}

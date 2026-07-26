@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted (2026-07-24). Revised same day after the OSC-testbed deployment
-(`docs/deployment-osc-testbed.md`) showed the co-deployed assumption below
-doesn't hold everywhere.
+Accepted (2026-07-24). Revised same day after a quota-capped testbed
+deployment showed the co-deployed assumption below does not hold everywhere.
 
 ## Context
 
@@ -61,9 +60,9 @@ for the per-deployment client above, not the end state.
   narrower per-deployment-client fix above is a well-scoped, low-risk
   follow-up whenever someone picks it up — it no longer requires the
   larger per-user designs this ADR previously proposed.
-- **OSC-testbed is the concrete reason this can't stay "co-deployed always."**
-  Its `services` quota (10, see `docs/deployment-osc-testbed.md`) means a
-  second DCS deployment there realistically has to point at a *first*
+- **A quota-capped namespace is the concrete reason this cannot stay
+  "co-deployed always."** Where a `ResourceQuota` caps Services (10 is a real
+  example) a second DCS deployment realistically has to point at a *first*
   deployment's already-running FC instead of co-deploying its own full
   Keycloak+Fuseki+Postgres+FC stack. That's cross-tenant: today, any DCS
   instance sharing that FC would hold `ADMIN_ALL` and could edit every other

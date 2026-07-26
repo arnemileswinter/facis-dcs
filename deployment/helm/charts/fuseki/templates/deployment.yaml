@@ -25,6 +25,13 @@ spec:
         - name: init-tdb-dir
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["sh", "-c", "mkdir -p /fuseki/databases/{{ .Values.dataset }}"]
+          {{- with .Values.resources }}
+          # A pod's effective limit is max(sum of containers, max of init
+          # containers), so mirroring the main block here costs nothing while an
+          # unset one lets a LimitRange default size the whole pod.
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: fuseki-data
               mountPath: /fuseki/databases

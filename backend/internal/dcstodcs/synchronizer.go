@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/conf"
@@ -298,16 +299,20 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		if err := s.TrustGate.Check(ctx, peer, Outbound, did, state); err != nil {
 			return err
 		}
-		hostname, err := identity.DIDWebToHostname(peer)
+		hostname, segments, err := identity.DIDWebPath(peer)
 		if err != nil {
 			return err
+		}
+		peerPrefix := ""
+		if len(segments) > 0 {
+			peerPrefix = "/" + strings.Join(segments, "/")
 		}
 		secretValue := rand.Text()
 		secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
 		if err != nil {
 			return err
 		}
-		client := NewDCSToDCSHttpClient(hostname)
+		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
 		if _, err := client.PostPdf(ctx, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
