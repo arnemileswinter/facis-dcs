@@ -48,7 +48,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Then the agreement credential is a W3C Verifiable Credential whose issuer is this instance's own DID
     And the agreement credential's termsOfUse names the federation rules by policyId and hash
 
-  @REQ-fed-agreement-AC2
+  @REQ-fed-agreement-AC2 @DCS-IR-SI-12
   Scenario: The agreement credential's signature verifies against the instance's own published VC key
     Given I fetch this instance's own agreement credential
     Then the credential's proof verifies against the second verificationMethod key published in this instance's own did.json
@@ -63,7 +63,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Given instance A and instance B are both running and trust each other
     Then instance A and instance B's agreement credentials name the identical federation rules hash
 
-  @NFR-BR-08 @REQ-fed-agreement-AC3 @two-instance
+  @NFR-BR-08 @REQ-fed-agreement-AC3 @two-instance @DCS-NFR-SQ-06
   Scenario: A contract offered on instance A appears on its counterparty B
     Given instance A and instance B are both running and trust each other
     When the initiator on instance A creates and offers a contract with instance B as counterparty
@@ -88,7 +88,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # analyst/architect rather than forced into a fake scenario.
   # ---------------------------------------------------------------------
 
-  @REQ-fed-agreement-AC4
+  @REQ-fed-agreement-AC4 @DCS-NFR-BR-02
   Scenario: PostPdf rejects a peer that publishes no agreement credential at all
     Given a cryptographically valid peer identity
     And that peer publishes no agreement credential

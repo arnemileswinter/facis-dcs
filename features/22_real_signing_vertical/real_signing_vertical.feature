@@ -32,7 +32,7 @@
 # rendering claims are recorded as an explicit coverage gap via the final
 # @skip scenario, not fabricated.
 
-@DCS-FR-SM-16 @DCS-IR-SI-10
+@DCS-FR-SM-16 @DCS-IR-SI-10 @DCS-FR-UC-04-1
 Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID binding
 
   # ---------------------------------------------------------------------
@@ -47,7 +47,7 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Then the signed PDF for contract "RSV AcroForm Contract" contains a PAdES signature naming the signing party AcroForm field
     And the signed PDF for contract "RSV AcroForm Contract" has a structurally valid PAdES ByteRange
 
-  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010
+  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010 @DCS-FR-SM-02 @DCS-IR-CI-08
   Scenario: The PAdES signature declares SubFilter ETSI.CAdES.detached with a full embedded x5chain
     Given contract "RSV SubFilter Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerTwo"
     Then the signed PDF for contract "RSV SubFilter Contract" declares SubFilter ETSI.CAdES.detached
@@ -85,13 +85,13 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Then get http 200:Success code
     And the signature envelope for contract "RSV Apply Fields Contract" reflects the ceremony's signer_did and credential_type "AES"
 
-  @DCS-FR-SM-16 @FR-SM-25 @UC-04-02
+  @DCS-FR-SM-16 @FR-SM-25 @UC-04-02 @DCS-FR-UC-11-1
   Scenario: Apply is refused with a typed error until a completed PID presentation exists for the signer
     Given contract "RSV Ceremony Gate Contract" has reached contract state "APPROVED"
     When contract signer applies a signature to contract "RSV Ceremony Gate Contract" without a prior signing ceremony
     Then the apply request is rejected with a typed ceremony-required error
 
-  @DCS-FR-CWE-04
+  @DCS-FR-CWE-04 @DCS-FR-SM-11
   Scenario: The signature record binds both the PDF hash and the JSON-LD content hash
     Given contract "RSV Dual Hash Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerSix"
     Then the contract_signatures row for contract "RSV Dual Hash Contract" records both a PDF hash and a JSON-LD content hash
@@ -113,7 +113,7 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     When I start a signing ceremony for contract "RSV Ceremony Denied Contract" field "SignerEight" as "Contract Observer"
     Then the ceremony start request is denied for that role
 
-  @FR-SM-14
+  @FR-SM-14 @DCS-FR-CWE-19 @DCS-FR-SM-24
   Scenario: GET /signature/request/{id} reports the ceremony's lifecycle status as it progresses
     Given contract "RSV Ceremony Status Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerNine"
     When I poll the signing ceremony status for contract "RSV Ceremony Status Contract"
@@ -151,7 +151,7 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
   # embedded — personal data stays out of the shared PDF (eIDAS/GDPR).
   # ---------------------------------------------------------------------
 
-  @DCS-FR-SM-08 @NFR-SEC-18
+  @DCS-FR-SM-08 @NFR-SEC-18 @DCS-NFR-SEC-18 @DCS-NFR-SQ-04
   Scenario: The signer PID is NOT embedded in the signed PDF (privacy), only the pseudonymous binding
     Given contract "RSV Verbatim Presentation Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerThirteen"
     Then the signer PID for contract "RSV Verbatim Presentation Contract" is NOT embedded in the signed PDF, only the pseudonymous binding

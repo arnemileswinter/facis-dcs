@@ -17,7 +17,7 @@ Feature: Template integrity verification and audit log
     Then get http 200:Success code
     And the template verification reports no findings
 
-  @clean_db @DCS-FR-TR-21 @DCS-FR-TR-05
+  @clean_db @DCS-FR-TR-21 @DCS-FR-TR-05 @DCS-FR-TR-08
   Scenario: Template audit log records a verify action
     Given I am authenticated with roles: "Template Manager"
     And template "Audit Log Template" is in "Approved" status

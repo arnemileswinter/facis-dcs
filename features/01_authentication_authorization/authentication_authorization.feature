@@ -2,13 +2,13 @@
 Feature: User Authentication & Authorization
   Users authenticate securely and are authorized based on roles and credentials.
 
-  @clean_db
+  @clean_db @DCS-IR-CI-04 @DCS-IR-CI-05 @DCS-IR-SI-07 @DCS-NFR-BR-02
   Scenario: Authorization denied for expired credential
     Given I hold an expired credential with roles: "Template Creator"
     When I try to create a template "Standard NDA" in category "Legal"
     Then the request is denied because of credential expiration
 
-  @clean_db
+  @clean_db @DCS-IR-SI-08
   Scenario: Role enforcement prevents unauthorized actions
     Given I am authenticated with roles: "Contract Creator"
     When I try to create a template "Standard NDA" in category "Legal"

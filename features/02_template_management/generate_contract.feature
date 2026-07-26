@@ -5,6 +5,7 @@ Feature: Generate Contract from Template
   
   # contract/create only accepts templates in state REGISTERED or PUBLISHED
   # (backend ReadContractTemplateDataByID) — APPROVED alone is not enough.
+  @DCS-IR-TR-06
   Scenario: Generate contract from approved template
     Given I am authenticated with roles: "Contract Creator"
     And template "Standard NDA" is in "Registered" status

@@ -1,4 +1,4 @@
-@UC-02-10 @REQ-remove-free-template-state-selection-AC5
+@UC-02-10 @REQ-remove-free-template-state-selection-AC5 @DCS-FR-UC-02-1
 Feature: Template Approval Workflow
   Templates progress through submission, review, and approval
   before becoming available for contract generation.
@@ -10,7 +10,7 @@ Feature: Template Approval Workflow
     When I submit template "Standard NDA"
     Then the template status is "Submitted"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-03
   Scenario: Approve submitted template
     Given I am authenticated with roles: "Template Reviewer"
     And template "Standard NDA" is in "Submitted" status
@@ -34,7 +34,7 @@ Feature: Template Approval Workflow
     And I retrieve template "Standard NDA" by did
     Then the template status is "Reviewed"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-05 @DCS-FR-TR-15
   Scenario: Reject reviewed template with reason
     Given I am authenticated with roles: "Template Approver"
     And template "Standard NDA" is in "Reviewed" status
@@ -42,21 +42,21 @@ Feature: Template Approval Workflow
     Then the template status is "Rejected"
     And the rejection reason is recorded
 
-  @clean_db
+  @clean_db @DCS-IR-TR-05
   Scenario: Resubmit reviewed template
     Given I am authenticated with roles: "Template Approver"
     And template "Standard NDA" is in "Reviewed" status
     When I resubmit template "Standard NDA"
     Then the template status is "Submitted"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-05 @DCS-FR-TR-15
   Scenario: Approve reviewed template
     Given I am authenticated with roles: "Template Approver"
     And template "Standard NDA" is in "Reviewed" status
     When I approve template "Standard NDA"
     Then the template status is "Approved"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-06
   Scenario: Register approved template
     Given I am authenticated with roles: "Template Manager"
     And template "Standard NDA" is in "Approved" status
@@ -84,7 +84,7 @@ Feature: Template Approval Workflow
     When I delete template "Standard NDA"
     Then the template status is "Deprecated"
 
-  @clean_db
+  @clean_db @DCS-FR-TR-06
   Scenario: Unauthorized role cannot approve template
     Given I am authenticated with roles: "Template Creator"
     And template "Standard NDA" is in "Reviewed" status

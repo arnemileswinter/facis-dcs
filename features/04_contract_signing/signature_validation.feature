@@ -6,7 +6,7 @@
 # (the signing ceremony itself, covered by 22_real_signing_vertical) had
 # scenario coverage before this file.
 
-@UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21
+@UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21 @DCS-FR-UC-04-2
 Feature: Signature validation, audit, and compliance
 
   @clean_db @DCS-FR-SM-18
@@ -30,14 +30,14 @@ Feature: Signature validation, audit, and compliance
   # signature level SES/AES/QES, signature status, active signed
   # credentials) and records the check — findings included — as a
   # ComplianceValidationEvent in the audit trail.
-  @clean_db @DCS-FR-SM-21
+  @clean_db @DCS-FR-SM-21 @DCS-IR-SM-07
   Scenario: Contract Manager requests a compliance check for a signed contract
     Given contract "Signature Compliance Contract" has reached contract state "SIGNED"
     When the contract manager requests a compliance check for contract "Signature Compliance Contract"
     Then get http 200:Success code
     And the compliance check for contract "Signature Compliance Contract" reports that all checks passed
 
-  @clean_db @DCS-FR-SM-21 @DCS-FR-SM-20
+  @clean_db @DCS-FR-SM-21 @DCS-FR-SM-20 @DCS-IR-SM-06
   Scenario: The compliance check flags a revoked signature
     Given contract "Revoked Compliance Contract" has reached contract state "SIGNED"
     When the applied signature of contract "Revoked Compliance Contract" is revoked

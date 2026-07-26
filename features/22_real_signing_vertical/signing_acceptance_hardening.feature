@@ -24,7 +24,7 @@ Feature: Signing acceptance-path hardening
     When the wallet signs a byte-tampered copy of the to-be-signed document for contract "SAH Byte Tamper Contract" as "SAHByteTamper"
     Then the ceremony callback for contract "SAH Byte Tamper Contract" rejects the signature
 
-  @ADR-20
+  @ADR-20 @DCS-FR-SM-02
   Scenario: An invalid JAdES is rejected even when the PAdES signature is genuinely valid
     Given contract "SAH Invalid JAdES Contract" is APPROVED and has completed a signing ceremony for signatory "SAHInvalidJAdES"
     When the signer publishes the OID4VP signing request for contract "SAH Invalid JAdES Contract"
@@ -32,14 +32,14 @@ Feature: Signing acceptance-path hardening
     When a raw invalid JAdES is submitted for the signed document on contract "SAH Invalid JAdES Contract"
     Then the ceremony callback for contract "SAH Invalid JAdES Contract" rejects the signature
 
-  @ADR-20 @DCS-FR-SM-18
+  @ADR-20 @DCS-FR-SM-18 @DCS-IR-CI-09 @DCS-IR-SI-09
   Scenario: A revoked PID is rejected at the ceremony presentation
     Given contract "SAH Revoked PID Contract" has reached contract state "APPROVED"
     When I start a signing ceremony for contract "SAH Revoked PID Contract" field "SAHRevokedPidField" as "Contract Signer"
     And the PID for contract "SAH Revoked PID Contract"'s ceremony is revoked before it is presented
     Then the ceremony presentation for contract "SAH Revoked PID Contract" is rejected
 
-  @ADR-20 @SM-01
+  @ADR-20 @SM-01 @DCS-NFR-BR-03
   Scenario: An AES signature is rejected on a field requiring QES
     Given contract "SAH QES Required Contract" is APPROVED and has completed a signing ceremony requiring "QES" for signatory "SAHQesRequired"
     When the signer publishes the OID4VP signing request for contract "SAH QES Required Contract"

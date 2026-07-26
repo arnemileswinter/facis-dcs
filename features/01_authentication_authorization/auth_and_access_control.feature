@@ -16,6 +16,7 @@ Feature: Authentication Endpoints
     When the system sends "GET" request to endpoint "/auth/logout" without payload
     Then the response status is 401
 
+  @DCS-IR-SI-03
   Scenario Outline: Access restricted endpoint responds with access denied (CWE)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
     Then the response status is 401
@@ -55,6 +56,7 @@ Feature: Authentication Endpoints
       # required justification before the JWT check; placeholders reach 401.
       | GET    | /archive/audit?justification=placeholder | {} |
 
+  @DCS-FR-TR-06
   Scenario Outline: Access restricted endpoint responds with access denied (Template Repository)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
     Then the response status is 401

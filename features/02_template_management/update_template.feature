@@ -1,4 +1,4 @@
-@UC-02-04
+@UC-02-04 @DCS-FR-UC-02-1
 Feature: Update Contract Template
   Template Creators update existing templates
   with full version history preserved.
@@ -17,7 +17,7 @@ Feature: Update Contract Template
     When I update template "Standard NDA" description to "Test Description"
     Then the result is a template with description "Test Description"
 
-  @clean_db
+  @clean_db @DCS-IR-TR-03
   Scenario: Update an existing template as reviewer
     Given I am authenticated with roles: "Template Reviewer"
     And template "Standard NDA" is in "Submitted" status with name "Standard NDA" and description "Template Description"

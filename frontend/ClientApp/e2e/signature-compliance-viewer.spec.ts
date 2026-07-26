@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { Page } from '@playwright/test'
 
 /**
  * Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26).
@@ -71,6 +71,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
   })
 
   await test.step('compliance checks tab flags signature level + credential status', async () => {
+    // DCS-IR-SM-07
     await page.getByRole('tab', { name: 'Compliance Checks' }).click()
 
     const checked = page.waitForResponse(
@@ -112,9 +113,10 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
   })
 
   await test.step('export compliance report as JSON and PDF', async () => {
+    // DCS-IR-SM-08
     const jsonDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Export JSON' }).click()
-    const jsonPath = (await (await jsonDownload).path())!
+    const jsonPath = await (await jsonDownload).path()
     const report = JSON.parse(readFileSync(jsonPath, 'utf-8')) as {
       contract_did: string
       signatures: unknown[]
@@ -154,6 +156,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
   // ---- Revocation (destructive — last) ----
   await test.step('revocation tab revokes the signature', async () => {
+    // DCS-IR-SM-06
     await openViewer(page, loginAs, 'Contract Manager', contractDid)
     await page.getByRole('tab', { name: 'Revocation' }).click()
 

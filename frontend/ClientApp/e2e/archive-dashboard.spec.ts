@@ -15,6 +15,7 @@ import { buildApprovedContract, signApprovedContractViaViewer } from './lifecycl
  */
 
 test('the archive dashboard shows the SRS overview and drills down into a contract', async ({ page, loginAs }) => {
+  // DCS-FR-UC-07-3
   test.setTimeout(600_000)
 
   let contractDid = ''

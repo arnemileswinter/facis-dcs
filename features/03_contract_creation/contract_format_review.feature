@@ -20,7 +20,7 @@ Feature: Machine-Readable and Human-Readable Contract Review
     Then the PDF or document view is displayed
     And the content is readable
 
-  @clean_db
+  @clean_db @DCS-FR-CSA-06
   Scenario: Synchronized view of both formats
     Given I am authenticated with roles: "Contract Manager"
     And contract "Service Agreement" exists
@@ -95,7 +95,7 @@ Feature: Machine-Readable and Human-Readable Contract Review
     When I attempt to access the synchronized view of contract "Service Agreement"
     Then the request is denied with an authorization error
 
-  @DCS-FR-CWE-04
+  @DCS-FR-CWE-04 @DCS-FR-CSA-06 @DCS-FR-TR-04 @DCS-IR-CI-02
   Scenario: Export contract as PDF and verify MR/HR hash match
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" exists in "Under Review" state
@@ -104,7 +104,7 @@ Feature: Machine-Readable and Human-Readable Contract Review
     And the PDF contains an embedded JSON-LD attachment named "contract.jsonld"
     And the embedded JSON-LD matches the contract source
 
-  @DCS-FR-CWE-04 @DCS-FR-CWE-05
+  @DCS-FR-CWE-04 @DCS-FR-CWE-05 @DCS-FR-CSA-06 @DCS-FR-TR-04
   Scenario: Verify MR/HR content hash consistency
     Given I am authenticated with roles: "Contract Manager"
     And contract "Service Agreement" is in "Draft" status
@@ -113,7 +113,7 @@ Feature: Machine-Readable and Human-Readable Contract Review
     Then the verification result shows match is true
     And the response includes jsonld_hash and base_pdf_hash
 
-  @DCS-FR-CWE-04
+  @DCS-FR-CWE-04 @DCS-FR-CSA-01
   Scenario: Tampered PDF fails hash verification
     # Real integration-level tampering detection: the tampered PDF is
     # injected into the shared in-cluster IPFS node and the contract's

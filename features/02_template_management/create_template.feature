@@ -1,4 +1,4 @@
-@UC-02-01
+@UC-02-01 @DCS-FR-UC-02-1
 Feature: Create Contract Template
   Template Creators create reusable contract templates
   that serve as the basis for contract generation.
@@ -16,6 +16,7 @@ Feature: Create Contract Template
     When I create a template with a legacy document number
     Then the template is identified by DID and version without a document number
 
+  @DCS-FR-TR-06
   Scenario: Unauthorized role cannot create template
     Given I am authenticated with roles: "Template Reviewer"
     When I attempt to create a template

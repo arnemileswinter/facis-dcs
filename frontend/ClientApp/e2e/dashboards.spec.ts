@@ -28,6 +28,7 @@ test.describe('dashboards backed by an authored fixture', () => {
   })
 
   test('contract dashboard lists contracts with their lifecycle state', async ({ page, loginAs }) => {
+    // DCS-FR-CWE-27 // DCS-FR-UC-06-1 // DCS-IR-CWE-13 (comment citation)
     await loginAs('Contract Manager')
     await page.goto('/ui/contracts')
 

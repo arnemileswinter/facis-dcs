@@ -10,6 +10,7 @@ import { buildApprovedContract, gotoAs } from './lifecycle-helpers'
  */
 
 test('secure contract viewer shows the real contract content and guides the signer', async ({ page, loginAs }) => {
+  // DCS-FR-CWE-26 // DCS-FR-SM-09
   test.setTimeout(60_000)
   page.setDefaultTimeout(15_000)
   page.on('console', (m) => {

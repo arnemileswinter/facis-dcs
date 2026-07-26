@@ -5,24 +5,24 @@
 # the /archive/* endpoints themselves, which the deployment pack does not
 # exercise.
 
-@UC-07 @DCS-IR-CSA-01 @DCS-IR-CSA-05
+@UC-07 @DCS-IR-CSA-01 @DCS-IR-CSA-05 @DCS-FR-UC-07-1
 Feature: Contract storage and archive retrieval
 
-  @UC-07-01 @DCS-IR-CSA-01
+  @UC-07-01 @DCS-IR-CSA-01 @DCS-FR-CSA-12 @DCS-FR-CWE-21 @DCS-FR-CSA-25
   Scenario: Archive Manager retrieves the full archive list
     Given contract "Archive Retrieve Contract" has reached contract state "SIGNED"
     When the Archive Manager retrieves the archive
     Then get http 200:Success code
     And the archive retrieval result includes contract "Archive Retrieve Contract"
 
-  @UC-07-01 @DCS-IR-CSA-01
+  @UC-07-01 @DCS-IR-CSA-01 @DCS-FR-CSA-12 @DCS-FR-CWE-21
   Scenario: Archive search filters by contract state
     Given contract "Archive Search Contract" has reached contract state "SIGNED"
     When the Archive Manager searches the archive with state filter "SIGNED"
     Then get http 200:Success code
     And the archive search result includes contract "Archive Search Contract"
 
-  @UC-07-02 @DCS-IR-CSA-05
+  @UC-07-02 @DCS-IR-CSA-05 @DCS-FR-CSA-02 @DCS-FR-CSA-12 @DCS-FR-CWE-21 @DCS-FR-UC-07-2 @DCS-FR-CSA-25
   Scenario: A role outside the archive scope cannot retrieve the archive
     Given I am authenticated with roles: "Template Creator"
     When I attempt to retrieve the archive with my current role
@@ -35,14 +35,14 @@ Feature: Contract storage and archive retrieval
     Then get http 200:Success code
     And the archive audit log is a non-empty list
 
-  @UC-07-03 @DCS-FR-CSA-17
+  @UC-07-03 @DCS-FR-CSA-17 @DCS-FR-CSA-02 @DCS-IR-CSA-03
   Scenario: Archive Manager deletes an archived contract with a logged justification
     Given contract "Archive Deletion Contract" has reached contract state "SIGNED"
     When the Archive Manager deletes the archived contract "Archive Deletion Contract" with justification "no longer needed for compliance retention"
     Then get http 200:Success code
     And the archive deletion of contract "Archive Deletion Contract" is recorded in the archive audit log
 
-  @UC-07-03 @DCS-FR-CSA-17
+  @UC-07-03 @DCS-FR-CSA-17 @DCS-IR-CSA-03
   Scenario: A role outside the archive scope cannot delete an archived contract
     Given contract "Unauthorized Archive Deletion Contract" has reached contract state "SIGNED"
     And I am authenticated with roles: "Template Creator"
@@ -55,7 +55,7 @@ Feature: Contract storage and archive retrieval
   # while /archive/store and /archive/delete are Archive Manager only
   # (backend/design/contract_storage_archive.go) — this scenario asserts
   # both halves of that contract against the running service.
-  @UC-07-03 @DCS-IR-CSA-06
+  @UC-07-03 @DCS-IR-CSA-06 @DCS-FR-CSA-02
   Scenario: A read-only Observer can view the archive but cannot delete from it
     Given contract "Observer Readonly Archive Contract" has reached contract state "SIGNED"
     And I am authenticated with roles: "Contract Observer"
@@ -91,7 +91,7 @@ Feature: Contract storage and archive retrieval
   # discovery. Annotation is Archive Manager-scoped, mutates ONLY the
   # annotation columns (the archive entry's snapshot/evidence stay immutable,
   # enforced by DB trigger), and is recorded in the archive audit log.
-  @UC-07-01 @DCS-FR-CSA-11
+  @UC-07-01 @DCS-FR-CSA-11 @DCS-FR-CSA-25
   Scenario: Archive Manager annotates an archived contract with a manual summary and tags
     Given contract "Annotated Archive Contract" has reached contract state "SIGNED"
     When the Archive Manager annotates the archived contract "Annotated Archive Contract" with summary "Pilot supply agreement archived for the BDD suite" and tags "pilot-agreement,bdd-supply"
@@ -126,7 +126,7 @@ Feature: Contract storage and archive retrieval
     When I attempt to annotate the archived contract "Unauthorized Annotation Contract" with my current role
     Then the request is denied with a client error
 
-  @UC-07-01 @DCS-FR-CSA-21
+  @UC-07-01 @DCS-FR-CSA-21 @DCS-FR-CWE-10 @DCS-FR-UC-07-3
   Scenario: Archive dashboard statistics reflect the archive and flag expiring contracts
     Given contract "Archive Statistics Contract" has reached contract state "SIGNED"
     And contract "Archive Statistics Contract" is set to expire in 7 days directly in the database (expiry-window test seam)

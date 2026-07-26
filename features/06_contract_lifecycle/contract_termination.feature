@@ -16,10 +16,10 @@
 # The scenarios below assert that honest model, not an in-place expiry-date
 # mutation.
 
-@UC-06-02 @DCS-FR-CWE-11 @DCS-FR-CWE-12
+@UC-06-02 @DCS-FR-CWE-11 @DCS-FR-CWE-12 @DCS-FR-UC-06-2
 Feature: Contract termination
 
-  @UC-06-02
+  @UC-06-02 @DCS-FR-CWE-23 @DCS-IR-CWE-12
   Scenario: Contract Manager terminates an approved contract
     Given contract "Termination Contract" has reached contract state "APPROVED"
     When the contract manager terminates contract "Termination Contract" with reason "BDD termination test"
@@ -27,7 +27,7 @@ Feature: Contract termination
     And the contract "Termination Contract" is in state "TERMINATED"
     And the contract "Termination Contract" has an audit event of type "TERMINATE_CONTRACT"
 
-  @UC-06-02
+  @UC-06-02 @DCS-FR-CWE-23
   Scenario: A terminated contract cannot be terminated again
     Given contract "Double Termination Contract" has reached contract state "TERMINATED"
     When the contract manager terminates contract "Double Termination Contract" with reason "second attempt"

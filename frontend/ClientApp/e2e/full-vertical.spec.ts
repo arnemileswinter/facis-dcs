@@ -119,6 +119,7 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
 }
 
 test('full vertical through the real UI', async ({ page, loginAs }) => {
+  // DCS-FR-UC-04-1
   test.setTimeout(90_000)
   page.setDefaultTimeout(15_000)
 
@@ -195,6 +196,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 3: Contract Template composing the approved component ----
   let contractTemplateDid = ''
   await test.step('create contract template from approved component', async () => {
+    // DCS-FR-TR-25
     await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
     await page.getByRole('button', { name: /parent for other contracts/ }).click()
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(contractTemplateName)
@@ -243,6 +245,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 5: Contract Creator derives a contract ----
   let contractDid = ''
   await test.step('create contract from registered template', async () => {
+    // DCS-IR-CWE-01 (step-title/comment citation)
     await gotoAs(page, loginAs, 'Contract Creator', '/ui/contracts/new')
     // The template picker is a plain <select> with "Version {n} - {name}" options.
     const picker = page.locator('select').first()
@@ -344,6 +347,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   // ---- Stage 8: signing through the Secure Contract Viewer, wallet leg over
   // its own channel (ADR-12) ----
   await test.step('sign contract', async () => {
+    // DCS-FR-SM-23
     await signApprovedContractViaViewer(page, loginAs, contractDid)
   })
 
