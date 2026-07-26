@@ -20,7 +20,10 @@ const didFilter = ref('')
 // Deep-link drill-down (DCS-FR-CSA-21): the archive dashboard links here
 // with ?scope=archive&did=<did> so a row lands on that contract's trail.
 const route = useRoute()
-if (typeof route.query.scope === 'string' && ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)) {
+if (
+  typeof route.query.scope === 'string' &&
+  ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)
+) {
   selectedScope.value = route.query.scope as AuditScope
 }
 if (typeof route.query.did === 'string' && route.query.did) {

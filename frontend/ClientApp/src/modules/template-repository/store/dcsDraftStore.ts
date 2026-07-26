@@ -303,7 +303,13 @@ export const useDcsDraftStore = defineStore(storeId, {
      * (the negotiation/fill/closedness machinery picks it up from there)
      * and binds the property to it by @id. Returns the field id.
      */
-    makeDataLeafNegotiable(objectId: string, path: string, label: string, datatype: XsdDatatype, required: boolean): string {
+    makeDataLeafNegotiable(
+      objectId: string,
+      path: string,
+      label: string,
+      datatype: XsdDatatype,
+      required: boolean,
+    ): string {
       const object = this.contractData.find((entry) => entry['@id'] === objectId)
       if (!object) return ''
       const documentId = this.documentIri ?? this.did ?? undefined

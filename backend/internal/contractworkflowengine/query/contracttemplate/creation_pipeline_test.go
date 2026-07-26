@@ -84,7 +84,7 @@ func creationPipelineTemplate() map[string]any {
 			"dcs:layout": creationPipelineLayout(),
 		},
 		"dcs:contractFields": creationPipelineRequirements(),
-		"dcs:policies":     creationPipelinePolicyDefinitions(),
+		"dcs:policies":       creationPipelinePolicyDefinitions(),
 	}
 }
 
