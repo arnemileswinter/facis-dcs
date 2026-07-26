@@ -80,11 +80,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 // extract the embedded JSON-LD, and upserts this instance's own local copy of
 // the contract. No tasks cross the boundary — each DCS runs its own workflow.
 func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (res *dcstodcs.DCSToDCSContractPdfResponse, err error) {
-	senderHostname, err := identity.DIDWebToHostname(req.FromPeerDid)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	remoteDIDDocument, err := identity.FetchDIDDocumentFromHostname(senderHostname)
+	remoteDIDDocument, err := identity.FetchDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}

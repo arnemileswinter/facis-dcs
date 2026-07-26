@@ -112,11 +112,7 @@ func vcVerificationMethodID(did string) string {
 // from), and compares its termsOfUse.hash against this instance's own
 // embedded federation rules hash.
 func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, error) {
-	hostname, err := identity.DIDWebToHostname(peerDID)
-	if err != nil {
-		return nil, fmt.Errorf("agreement credential: %w", err)
-	}
-	peerDIDDocument, err := identity.FetchDIDDocumentFromHostname(hostname)
+	peerDIDDocument, err := identity.FetchDIDDocument(peerDID)
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: fetch peer did.json: %w", err)
 	}
@@ -140,7 +136,7 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 		return nil, fmt.Errorf("agreement credential: peer VC verificationMethod key: %w", err)
 	}
 
-	credential, err := fetchAgreementCredential(hostname)
+	credential, err := fetchAgreementCredential(peerDID)
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: %w", err)
 	}
@@ -170,13 +166,20 @@ func (g *TrustGate) verifyAgreementCredential(peerDID string) (json.RawMessage, 
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: %w", err)
 	}
-	issuerHostname, err := identity.DIDWebToHostname(issuer)
+	// Compared as full resolution targets, not hostnames: with path-segmented
+	// identifiers several instances share one host, so a hostname match would
+	// accept a credential issued by a different instance on the same host.
+	issuerTarget, err := didWebTarget(issuer)
 	if err != nil {
 		return nil, fmt.Errorf("agreement credential: issuer: %w", err)
 	}
-	if issuerHostname != hostname {
-		return nil, fmt.Errorf("agreement credential: issuer %q resolves to hostname %q, not the peer's own %q",
-			issuer, issuerHostname, hostname)
+	peerTarget, err := didWebTarget(peerDID)
+	if err != nil {
+		return nil, fmt.Errorf("agreement credential: peer: %w", err)
+	}
+	if issuerTarget != peerTarget {
+		return nil, fmt.Errorf("agreement credential: issuer %q resolves to %q, not the peer's own %q",
+			issuer, issuerTarget, peerTarget)
 	}
 	if parsed.Proof.VerificationMethod != vcMethod.ID {
 		return nil, fmt.Errorf("agreement credential: proof.verificationMethod %q does not reference the peer's dedicated VC key %q",
@@ -275,20 +278,34 @@ func denialQry(contractDID string, direction Direction, gateErr *GateError) qry.
 }
 
 // fetchAgreementCredential fetches a peer's agreement credential via
-// /.well-known/dcs-agreement-credential.json, first over https, then
-// falling back to http — the same resolution order
-// identity.FetchDIDDocumentFromHostname uses for did.json.
-func fetchAgreementCredential(hostname string) (json.RawMessage, error) {
+// /.well-known/dcs-agreement-credential.json under the peer's own did:web base,
+// first over https, then falling back to http — the same resolution order
+// identity.FetchDIDDocument uses for did.json.
+func fetchAgreementCredential(peerDID string) (json.RawMessage, error) {
+	host, segments, err := identity.DIDWebPath(peerDID)
+	if err != nil {
+		return nil, err
+	}
 	var lastErr error
 	for _, scheme := range []string{"https", "http"} {
-		url := fmt.Sprintf("%s://%s/.well-known/dcs-agreement-credential.json", scheme, hostname)
+		url := identity.DIDWebBaseURL(scheme, host, segments) + "/.well-known/dcs-agreement-credential.json"
 		body, err := fetchAgreementCredentialFromURL(url)
 		if err == nil {
 			return body, nil
 		}
 		lastErr = err
 	}
-	return nil, fmt.Errorf("fetching agreement credential from %s failed: %w", hostname, lastErr)
+	return nil, fmt.Errorf("fetching agreement credential for %s failed: %w", peerDID, lastErr)
+}
+
+// didWebTarget is a did:web identifier reduced to what it actually resolves to,
+// so two identifiers can be compared without being byte-identical strings.
+func didWebTarget(did string) (string, error) {
+	host, segments, err := identity.DIDWebPath(did)
+	if err != nil {
+		return "", err
+	}
+	return identity.DIDWebBaseURL("https", host, segments), nil
 }
 
 // agreementCredentialFetchClient bounds the peer fetch the same way
