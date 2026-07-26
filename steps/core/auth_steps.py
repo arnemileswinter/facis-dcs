@@ -241,7 +241,15 @@ def step_when_present_revoked_wallet_credential(context, roles):
     from dcs_wallet.status_list import credential_status_from_claims, revoke_status_index  # noqa: PLC0415
 
     timeout = _federated_timeout(context)
-    credentials = AuthService.parse_auth_credentials([role.strip() for role in roles.split(",")])
+    # A DEDICATED organization isolates this credential's deterministic
+    # status-list index (status_list_index_seed = sub+org+roles): revoking it
+    # must poison ONLY this probe identity, never the suite-shared login
+    # credentials that use the default organization — the status service
+    # keeps revocations for the whole run.
+    credentials = AuthService.parse_auth_credentials(
+        [role.strip() for role in roles.split(",")],
+        organization="BDD Revocation Probe Org",
+    )
     auth_request = AuthService.fetch_authorization_request(
         context.federated_session,
         context.federated_initiation.request_uri,
