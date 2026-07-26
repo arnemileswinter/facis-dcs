@@ -70,6 +70,21 @@ Normalize a route base path to always start with "/" and never end with "/".
 {{- end }}
 
 {{/*
+The /.well-known documents this instance publishes at the HOST ROOT, as a YAML array.
+
+Root-relative on purpose and not derived from route.basePath: a peer resolves a
+did:web by appending /.well-known/did.json to the bare hostname, so these three
+have no base path to inherit. The backend mounts each of them (backend/design/did.go)
+and the ingress must route them to the backend ahead of any broader /.well-known
+claim (Hydra's OIDC discovery, notably).
+*/}}
+{{- define "digital-contracting-service.wellKnownPaths" -}}
+- /.well-known/did.json
+- /.well-known/dcs-agreement-credential.json
+- /.well-known/dcs-federation-rules.md
+{{- end }}
+
+{{/*
 Resolve PostgreSQL host (explicit override or in-chart default).
 */}}
 {{- define "digital-contracting-service.postgresqlHost" -}}
