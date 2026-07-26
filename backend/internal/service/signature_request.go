@@ -519,6 +519,8 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		switch {
 		case errors.Is(err, command.ErrPoAUnauthorized):
 			return nil, signaturemanagement.MakeBadRequest(err)
+		case errors.Is(err, command.ErrCeremonyExpired):
+			return nil, signaturemanagement.MakeBadRequest(err)
 		case errors.Is(err, command.ErrCeremonyNotFound):
 			return nil, signaturemanagement.MakeNotFound(err)
 		default:

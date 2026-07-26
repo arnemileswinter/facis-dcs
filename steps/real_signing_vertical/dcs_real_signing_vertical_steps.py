@@ -1046,6 +1046,34 @@ def step_then_presentation_nonce_rejected(context):
     )
 
 
+@when('the signing ceremony deadline for contract "{name}" has already passed')
+def step_when_ceremony_deadline_passed(context, name):
+    # DB seam: the ceremony TTL is 15 minutes (command/ceremony.go
+    # ceremonyTTL), unreachable as a real wait — backdate expires_at so the
+    # presentation genuinely arrives after the issued deadline.
+    ceremony_id = context.ceremony_ids[name]
+    cursor = context.db.cursor()
+    cursor.execute(
+        "UPDATE signature_ceremonies SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = %s",
+        (ceremony_id,),
+    )
+    assert cursor.rowcount == 1, f"Expected to backdate exactly one ceremony row, got {cursor.rowcount}"
+    context.db.commit()
+
+
+@then("the ceremony presentation is rejected because the signing deadline has passed")
+def step_then_presentation_deadline_rejected(context):
+    resp = context.requests_response
+    assert resp.status_code == 400, (
+        f"Expected the ceremony callback to reject a presentation arriving after the ceremony "
+        f"deadline (DCS-FR-SM-13), got {resp.status_code}: {resp.text}"
+    )
+    body = resp.text.lower()
+    assert "deadline" in body or "expired" in body, (
+        f"Expected the rejection to name the passed deadline, got: {resp.text}"
+    )
+
+
 @then('the signature validation findings for contract "{name}" cross-check the embedded signer binding')
 def step_then_validate_crosschecks_signer_binding(context, name):
     resp = context.requests_response

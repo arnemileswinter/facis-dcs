@@ -138,6 +138,19 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     When a caller posts a ceremony presentation for contract "RSV Webhook Bad Secret Contract" with an incorrect request nonce
     Then the ceremony presentation is rejected for the incorrect request nonce
 
+  # DCS-FR-SM-13: the signing workflow enforces deadlines — the ceremony's
+  # expires_at (issued at start, ceremonyTTL) is a hard gate at the
+  # presentation callback: a late wallet presentation does not verify and
+  # the signer must start a fresh ceremony (the workflow's retry).
+  @DCS-FR-SM-13 @ADR-20
+  Scenario: The ceremony callback rejects a presentation that arrives after the ceremony deadline
+    Given contract "RSV Ceremony Deadline Contract" has reached contract state "APPROVED"
+    When I start a signing ceremony for contract "RSV Ceremony Deadline Contract" field "SignerDeadline" as "Contract Signer"
+    Then get http 200:Success code
+    When the signing ceremony deadline for contract "RSV Ceremony Deadline Contract" has already passed
+    And the wallet presentation confirms the ceremony for contract "RSV Ceremony Deadline Contract" with the correct request nonce
+    Then the ceremony presentation is rejected because the signing deadline has passed
+
   @UC-04-02
   Scenario: The ceremony completes headlessly by fulfilling the OID4VP presentation contract, no wallet UI involved
     Given contract "RSV Headless Ceremony Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerTwelve"
