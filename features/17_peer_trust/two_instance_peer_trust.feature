@@ -76,56 +76,46 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # provenance artifact for a contract received from a peer, so instance B
   # can prove WHO shipped it the contract content it holds.
   #
-  # @skip — documented gap, kept for traceability (same convention as
-  # 19_c2pa_conformance's @skip scenarios): the ADR-13 PDF-exchange rewrite
-  # (commit 54f9e122) deleted the post_sync handler that persisted the
-  # received JAdES via SyncRepository.UpsertSyncSignature, and PostPdf
-  # (backend/internal/service/dcs_to_dcs.go) never reads
-  # req.JadesSignature — contract_sync_signatures has no writer left, so
-  # get_provenance can only answer not_found today. A proposal ship also
-  # carries no JAdES by design ("empty for a proposal",
-  # DCSToDCSContractPdfRequest), so the artifact can only ever exist after
-  # a signature ship. Un-skip once PostPdf verifies and persists a
-  # signature ship's JAdES again — and then drive instance A to SIGNED
-  # before the provenance assertion instead of stopping at the offer.
+  # A proposal ship carries no JAdES by design ("empty for a proposal",
+  # DCSToDCSContractPdfRequest), so the artifact exists only after a
+  # signature ship: A signs, the synchronizer attaches its instance-key
+  # JAdES over the contract (jadesForSignedContract), and B's PostPdf
+  # verifies it against A's published did:web key and the PDF's own
+  # embedded payload before persisting it (verifyShippedJades →
+  # SyncRepository.UpsertSyncSignature).
   # ---------------------------------------------------------------------
 
-  @DCS-IR-SI-06 @DCS-FR-SM-02 @two-instance @skip
+  @DCS-IR-SI-06 @DCS-FR-SM-02 @two-instance
   Scenario: A contract received from instance A carries instance A's verifiable JAdES provenance on B
     Given instance A and instance B are both running and trust each other
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
-    And instance B stores a JAdES sync-provenance artifact for that contract signed by instance A
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance B stores a JAdES sync-provenance artifact for that contract signed by instance A
 
   # ---------------------------------------------------------------------
   # DCS-NFR-BR-06 Revocation & Termination Propagation: revoking a
   # signature MUST take immediate effect and be propagated across dependent
   # systems — including the counterparty instance.
   #
-  # @skip — documented gap, kept for traceability: cross-instance
-  # revocation propagation existed under the single-writer post_sync model
-  # (commit b3534359 broadcast REVOKE_SIGNATURE through post_sync) and was
-  # dropped by the ADR-13 PDF-exchange rewrite. Today the synchronizer
-  # (backend/internal/dcstodcs/synchronizer.go) ships only on
-  # PDF_REGENERATED/Offer/APPLIED_SIGNATURE and gates on the shippable
-  # states OFFERED/NEGOTIATION/SIGNED, so a REVOKED transition never
-  # ships; the receiver (contractworkflowengine/command/receivepdf.go)
-  # keeps its own intrinsic state on every re-ship, so instance B cannot
-  # observe A's revocation at all. The intermediate APPROVED-replication
-  # steps below additionally assume the removed origin-forwarding of B's
-  # negotiate/respond/approve calls (deleted in 54f9e122). Un-skip once
-  # the PDF-exchange model ships a revocation and the receive side adopts
-  # it.
+  # Under the PDF-exchange model (ADR-13) each instance runs its own
+  # workflow, so A drives review/approval locally, signs, and revokes; the
+  # synchronizer ships the revocation (REVOKE_SIGNATURE trigger, REVOKED in
+  # shippableStates, declared via contract_state on the wire) and the
+  # receiver adopts REVOKED as the single exception to intrinsic-state
+  # privacy — the authenticated counterparty revoking its own signature
+  # voids the agreement regardless of B's local workflow progress
+  # (receivepdf.go AdoptRevoked).
   # ---------------------------------------------------------------------
 
-  @DCS-NFR-BR-06 @two-instance @skip
+  @DCS-NFR-BR-06 @two-instance
   Scenario: Signature revocation on instance A propagates REVOKED to instance B
     Given instance A and instance B are both running and trust each other
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
-    When the parties complete negotiation acceptance, submit, review, and approval on both sides
-    Then the contract state APPROVED is replicated on both instance A and instance B
-    When instance A applies a ceremony-backed signature to the contract
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
     And instance A revokes the applied signature of the cross-instance contract
     Then the contract state "REVOKED" is replicated on both instance A and instance B
 

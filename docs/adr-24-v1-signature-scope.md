@@ -24,11 +24,12 @@ upgrades the same flow toward QES without architectural change.
    BGB) cannot be demonstrated in v1**, because they require a qualified
    electronic signature. The limitation is one of provider integration, not
    of the signing path.
-2. **Signature formats: PAdES focus** (client-accepted). JAdES is in
-   progress — the ceremony already offers the JAdES payload as a second
-   document, but peer-side persistence of the JAdES proof regressed and is
-   pinned by skip-scenarios in `features/17_peer_trust` — and CAdES is not
-   implemented. Both are recorded deviations.
+2. **Signature formats: PAdES focus** (client-accepted). JAdES ships in two
+   places: the ceremony offers the JAdES payload as a second wallet-signed
+   document, and the federation layer signs each cross-instance signature
+   ship with an instance-key JAdES that the receiving peer verifies and
+   persists as provenance (`features/17_peer_trust`, DCS-FR-SM-02). CAdES
+   is not implemented — a recorded deviation.
 3. **No WebAuthn step-up** (client-accepted as a documented QA exception).
    Login is exclusively wallet-based (OpenID4VP with PoA credentials), as
    the SRS user-management chapter mandates; credential status and
