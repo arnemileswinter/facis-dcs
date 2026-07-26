@@ -1,5 +1,11 @@
 import { expect, test } from './dcs-test'
-import { buildDraftContractFixture, type DraftContractFixture } from './lifecycle-helpers'
+import {
+  buildApprovedContract,
+  buildDraftContractFixture,
+  type DraftContractFixture,
+  gotoAs,
+  signApprovedContractViaViewer,
+} from './lifecycle-helpers'
 
 /**
  * The workspace dashboards render their backing APIs' data for the roles the
@@ -55,11 +61,92 @@ test.describe('dashboards backed by an authored fixture', () => {
   })
 })
 
-test('signing list renders for the signer role', async ({ page, loginAs }) => {
-  await loginAs('Contract Signer')
-  await page.goto('/ui/signing')
+test('signer dashboard shows pending, signed, and revoked status with credential + timestamp', async ({
+  page,
+  loginAs,
+}) => {
+  // DCS-FR-SM-22: the signer dashboard covers the full signing lifecycle —
+  // pending, completed, and revoked — with the credential used, signer,
+  // timestamps, and validation results per signature.
+  test.setTimeout(300_000)
+  page.setDefaultTimeout(15_000)
 
-  await expect(page.getByRole('heading', { name: 'Signing', exact: true })).toBeVisible()
+  const contractDid = await buildApprovedContract(page, loginAs)
+
+  await test.step('an approved contract awaits signature as PENDING', async () => {
+    await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
+    await expect(page.getByRole('heading', { name: 'Signing', exact: true })).toBeVisible()
+
+    const row = page.getByTestId('signing-row').filter({ hasText: contractDid })
+    await expect(row).toBeVisible()
+    await expect(row.getByTestId('signing-status')).toHaveText('PENDING')
+  })
+
+  await signApprovedContractViaViewer(page, loginAs, contractDid)
+
+  await test.step('the signed contract shows SIGNED with credential, signer, and timestamp', async () => {
+    await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
+    const row = page.getByTestId('signing-row').filter({ hasText: contractDid })
+    await expect(row).toBeVisible()
+    await expect(row.getByTestId('signing-status')).toHaveText('SIGNED')
+
+    // Expanding the row loads GET /signature/view: per-signature credential,
+    // signer, timestamps, plus the contract's validation results.
+    const viewLoaded = page.waitForResponse(
+      (r) => r.url().includes('/signature/view') && r.request().method() === 'GET' && r.ok(),
+      { timeout: 60_000 },
+    )
+    await row.getByTestId('signing-details-toggle').click()
+    await viewLoaded
+
+    const details = page.getByTestId('signing-signatures')
+    const entry = details.getByTestId('signature-entry').first()
+    await expect(entry).toBeVisible()
+    await expect(entry.getByTestId('signature-credential')).toHaveText('AES')
+    await expect(entry.getByTestId('signature-status')).toHaveText('SIGNED')
+    await expect(entry.getByTestId('signature-signer')).not.toBeEmpty()
+    // The signing timestamp renders as the recorded RFC 3339 instant.
+    await expect(entry.getByTestId('signature-timestamp')).toContainText(/Signed at: \d{4}-\d{2}-\d{2}T/)
+    await expect(details.getByTestId('signing-validation')).toBeVisible()
+  })
+
+  await test.step('revoke the signature through the compliance viewer', async () => {
+    // The revocation action lives in the Signature Compliance Viewer's
+    // Revocation tab (Contract Manager) — the same UI flow
+    // signature-compliance-viewer.spec.ts exercises.
+    await gotoAs(page, loginAs, 'Contract Manager', '/ui/compliance')
+    await page.getByPlaceholder('Search DID or name…').fill(contractDid)
+    const item = page.getByRole('button').filter({ hasText: contractDid })
+    await expect(item.first()).toBeVisible()
+    await item.first().click()
+    await page.getByRole('tab', { name: 'Revocation' }).click()
+
+    const sigRow = page.getByRole('row').filter({ hasText: 'ACTIVE' }).first()
+    await expect(sigRow).toBeVisible()
+    const revoked = page.waitForResponse(
+      (r) => r.url().includes('/signature/revoke') && r.request().method() === 'POST' && r.ok(),
+    )
+    await sigRow.getByRole('button', { name: 'Revoke', exact: true }).click()
+    await revoked
+  })
+
+  await test.step('the revoked contract stays on the dashboard, marked REVOKED', async () => {
+    await gotoAs(page, loginAs, 'Contract Signer', '/ui/signing')
+    const row = page.getByTestId('signing-row').filter({ hasText: contractDid })
+    await expect(row).toBeVisible()
+    await expect(row.getByTestId('signing-status')).toHaveText('REVOKED')
+
+    const viewLoaded = page.waitForResponse(
+      (r) => r.url().includes('/signature/view') && r.request().method() === 'GET' && r.ok(),
+      { timeout: 60_000 },
+    )
+    await row.getByTestId('signing-details-toggle').click()
+    await viewLoaded
+
+    const entry = page.getByTestId('signing-signatures').getByTestId('signature-entry').first()
+    await expect(entry.getByTestId('signature-status')).toHaveText('REVOKED')
+    await expect(entry.getByTestId('signature-timestamp')).toContainText(/Revoked at: \d{4}-\d{2}-\d{2}T/)
+  })
 })
 
 test('audit view renders scoped audits for the auditor role', async ({ page, loginAs }) => {
