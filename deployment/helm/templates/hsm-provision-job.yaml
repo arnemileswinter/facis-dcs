@@ -5,6 +5,7 @@
 # a Secret that pdf-core mounts (pdf-core signs COSE bytes via the backend's
 # PKCS#11 key and only needs the public x5chain, DCS-IR-HI-01). Idempotent; runs
 # on every install/upgrade after the token PVC exists.
+{{- if .Values.pkcs11.provisioning.publishSecrets }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -48,6 +49,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -67,7 +69,9 @@ spec:
         {{- include "digital-contracting-service.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: hsm-provision
     spec:
+      {{- if .Values.pkcs11.provisioning.publishSecrets }}
       serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
+      {{- end }}
       restartPolicy: OnFailure
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -128,6 +132,15 @@ spec:
 
               # Let the non-root backend container read/write the token.
               chmod -R a+rwX "$TOKEN_DIR"
+
+              {{- if not .Values.pkcs11.provisioning.publishSecrets }}
+              # publishSecrets=false: every artifact above already lives on the
+              # shared token volume (did.json, c2pa-x5chain.pem), which the
+              # backend and pdf-core mount directly. Touching the Kubernetes API
+              # here is what would need RBAC, so we stop.
+              echo "hsm-provision done (artifacts on ${TOKEN_DIR}, Secret publication disabled)."
+              exit 0
+              {{- end }}
 
               k8s_host="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
               ca_path="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"

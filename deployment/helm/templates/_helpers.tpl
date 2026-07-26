@@ -85,6 +85,19 @@ claim (Hydra's OIDC discovery, notably).
 {{- end }}
 
 {{/*
+Where pdf-core reads the C2PA x5chain from: the projected Secret when the
+provisioning hook publishes one, otherwise the file the hook leaves on the
+shared token volume.
+*/}}
+{{- define "digital-contracting-service.pdfCoreX5ChainPath" -}}
+{{- if .Values.pkcs11.provisioning.publishSecrets -}}
+{{- printf "/x5chain/%s" (include "digital-contracting-service.pdfCoreX5ChainSecretKey" .) -}}
+{{- else -}}
+{{- printf "%s/c2pa-x5chain.pem" .Values.pkcs11.provisioning.tokenDir -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve PostgreSQL host (explicit override or in-chart default).
 */}}
 {{- define "digital-contracting-service.postgresqlHost" -}}
