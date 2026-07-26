@@ -3,9 +3,11 @@ package qry
 import (
 	"context"
 	"database/sql"
+	"digital-contracting-service/internal/base/validation"
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -32,6 +34,23 @@ const RiskTypeMissingApproval = "MISSING_APPROVAL"
 // 403 is returned): the denied attempt is the unauthorized-access violation
 // being monitored (DCS-FR-PACM-02).
 const RiskTypeUnauthorizedAccess = "UNAUTHORIZED_ACCESS"
+
+// RiskTypeUnderperformance flags a contract already in force whose own ODRL
+// policies are no longer satisfied by the values reported against it — a
+// missed delivery target, a breached service level, a financial term not met
+// (DCS-FR-CWE-31: "Alerts MUST be raised for underperformance or missed
+// targets"). Unlike the approval-time gate, which REFUSES to approve a
+// contract whose terms are already violated, this is monitoring of a contract
+// in force: the violation is reported, not blocked, because the contract
+// exists and the breach is a fact to be recorded and acted on.
+const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
+
+// inForceStates are the states in which a contract is live enough for its
+// agreed boundaries to be measurable against reported values.
+var inForceStates = []string{
+	contractstate.Signed.String(),
+	contractstate.Active.String(),
+}
 
 // approvalPendingStates are the contract states in which an OPEN approval
 // task means the contract is waiting on a required approval decision.
@@ -141,6 +160,12 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 		})
 	}
 
+	perfRisks, err := h.underperformanceRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, perfRisks...)
+
 	denialQuery := `
         SELECT COALESCE(did, '') AS did,
                COALESCE(event_data ->> 'retrieved_by', '') AS retrieved_by
@@ -187,4 +212,58 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	}
 
 	return &MonitorResult{CheckedAt: checkedAt, Risks: risks}, nil
+}
+
+// underperformanceRisks evaluates the ODRL policies of every contract in force
+// against the values currently reported on it, and maps each blocking finding
+// to a compliance risk. It reuses the same evaluator the approval gate uses, so
+// a boundary reads identically whether it is checked before approval or
+// monitored afterwards.
+func (h *ComplianceMonitor) underperformanceRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
+	risks := make([]event2.ComplianceRisk, 0)
+
+	query, args, err := sqlx.In(`SELECT did FROM contracts WHERE state IN (?) ORDER BY did`, inForceStates)
+	if err != nil {
+		return nil, fmt.Errorf("could not build in-force contract query: %w", err)
+	}
+	var dids []string
+	if err := tx.SelectContext(ctx, &dids, tx.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("could not read in-force contracts: %w", err)
+	}
+
+	for _, did := range dids {
+		data, err := h.CRepo.ReadDataByDID(ctx, tx, did)
+		if err != nil {
+			return nil, fmt.Errorf("could not read contract %s for performance monitoring: %w", did, err)
+		}
+		if data == nil || data.ContractData == nil {
+			continue
+		}
+		// A contract carrying no evaluable policy is not a finding.
+		err = validation.ValidateContractPolicySatisfaction(*data.ContractData,
+			validation.ContractContentAuditMetadata{ContractDID: did, AuditedBy: "compliance-monitor"})
+		if err == nil {
+			continue
+		}
+		var policyErr validation.ContractPolicySatisfactionError
+		if !errors.As(err, &policyErr) {
+			// An evaluation failure is an operational problem with the monitor,
+			// not evidence about the contract — do not report it as a breach.
+			log.Printf("performance monitoring skipped contract %s: %v", did, err)
+			continue
+		}
+		for _, finding := range policyErr.Findings {
+			detail := finding.Message
+			if strings.TrimSpace(finding.Title) != "" {
+				detail = finding.Title + ": " + detail
+			}
+			risks = append(risks, event2.ComplianceRisk{
+				DID:        did,
+				RiskType:   RiskTypeUnderperformance,
+				Detail:     detail,
+				DetectedAt: checkedAt,
+			})
+		}
+	}
+	return risks, nil
 }

@@ -115,6 +115,15 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
+	// A contract whose own ODRL policies are not satisfied is a rejected
+	// request, not a server fault: the caller asked to approve a contract whose
+	// reported values violate its agreed boundaries, and the finding already
+	// names the rule and the comparison. Returning 500 made a legitimate policy
+	// refusal read as an outage.
+	var policyErr validation.ContractPolicySatisfactionError
+	if errors.As(err, &policyErr) {
+		return contractworkflowengine.MakeBadRequest(err)
+	}
 	return contractworkflowengine.MakeInternalError(err)
 }
 
