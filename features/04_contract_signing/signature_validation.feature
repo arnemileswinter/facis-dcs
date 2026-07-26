@@ -28,8 +28,10 @@ Feature: Signature validation, audit, and compliance
     And the signature audit log for contract "Signature Audit Contract" includes an action of type "APPLIED_SIGNATURE"
     # DCS-FR-SM-19: the log entry itself must capture signer ID, credential
     # used, and timestamp — the ApplyEvent's applied_by / credential_type /
-    # occurred_at fields (signingmanagement/event/event.go).
-    And the "APPLIED_SIGNATURE" signature audit entry for contract "Signature Audit Contract" carries applied_by, credential_type, and occurred_at
+    # occurred_at fields (signingmanagement/event/event.go). applied_by is the
+    # participant DID from the auth context, credential_type the achieved
+    # signature level, occurred_at the RFC3339 signing time.
+    And the "APPLIED_SIGNATURE" signature audit entry for contract "Signature Audit Contract" carries the signer DID, credential type "AES", and an RFC3339 timestamp
 
   # DCS-FR-SM-15: retrieving a contract for signing is itself an audited
   # read — GET /signature/retrieve/{did} records a RETRIEVE_CONTRACT_BY_ID

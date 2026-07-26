@@ -33,17 +33,18 @@ Feature: Contract termination
     When the contract manager terminates contract "Double Termination Contract" with reason "second attempt"
     Then the request is denied with a client error
 
-  # DCS-FR-CSA-16: the termination record (reason, initiating identity,
-  # timestamp) lives on the TERMINATE_CONTRACT audit event — see
-  # TerminateEvent's reason/terminated_by/occurred_at JSON tags in
-  # backend/internal/contractworkflowengine/event/event.go.
+  # DCS-FR-CSA-16: the termination record (reason, initiating identity and
+  # role, effective timestamp) lives on the TERMINATE_CONTRACT audit event —
+  # see TerminateEvent's reason/terminated_by/occurred_at/user_roles JSON tags
+  # in backend/internal/contractworkflowengine/event/event.go. terminated_by
+  # is the caller's participant DID (middleware.GetParticipantID).
   @UC-06-02 @DCS-FR-CSA-16
-  Scenario: Termination records reason, initiating identity, and timestamp
+  Scenario: Termination records reason, initiating identity and role, and timestamp
     Given contract "Termination Evidence Contract" has reached contract state "APPROVED"
     When the contract manager terminates contract "Termination Evidence Contract" with reason "Budget for the engagement was withdrawn"
     Then get http 200:Success code
     And the contract "Termination Evidence Contract" is in state "TERMINATED"
-    And the TERMINATE_CONTRACT audit event for contract "Termination Evidence Contract" records reason "Budget for the engagement was withdrawn", the terminating identity, and a timestamp
+    And the TERMINATE_CONTRACT audit event for contract "Termination Evidence Contract" records reason "Budget for the engagement was withdrawn", the terminating identity and role, and an effective timestamp
 
   # DCS-FR-CSA-16: TERMINATED has no outgoing update/negotiate edges in the
   # transition table (backend/internal/contractworkflowengine/datatype/

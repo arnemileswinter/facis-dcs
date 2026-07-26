@@ -9,6 +9,7 @@ Given, reused rather than re-invented here).
 """
 
 import time
+from datetime import datetime
 
 import requests
 from behave import then, when
@@ -293,16 +294,35 @@ def _signature_audit_entry(context, name, event_type):
     return did, entry, event_data or {}
 
 
-@then('the "{event_type}" signature audit entry for contract "{name}" carries applied_by, credential_type, and occurred_at')
-def step_then_audit_entry_apply_fields(context, event_type, name):
+@then('the "{event_type}" signature audit entry for contract "{name}" carries the signer DID, credential type "{cred}", and an RFC3339 timestamp')
+def step_then_audit_entry_apply_fields(context, event_type, name, cred):
     # DCS-FR-SM-19: signer ID, credential used, and timestamp captured in
-    # the log entry itself — the ApplyEvent's JSON fields
-    # (signingmanagement/event/event.go).
+    # the log entry itself — the ApplyEvent's applied_by / credential_type /
+    # occurred_at JSON fields (signingmanagement/event/event.go). applied_by
+    # is the participant DID (middleware.GetParticipantID), credential_type
+    # the achieved signature level, occurred_at the signing time.
     _, _, event_data = _signature_audit_entry(context, name, event_type)
-    for field in ("applied_by", "credential_type", "occurred_at"):
-        assert event_data.get(field), (
-            f"Expected the '{event_type}' audit entry of contract '{name}' to carry a "
-            f"non-empty '{field}', got event_data: {event_data}"
+    applied_by = event_data.get("applied_by")
+    assert applied_by and str(applied_by).startswith("did:"), (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to name the "
+        f"signer by DID in 'applied_by', got event_data: {event_data}"
+    )
+    assert event_data.get("credential_type") == cred, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to record "
+        f"credential_type {cred!r}, got: {event_data.get('credential_type')!r} "
+        f"(event_data: {event_data})"
+    )
+    occurred_at = event_data.get("occurred_at")
+    assert occurred_at, (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to carry a "
+        f"non-empty 'occurred_at', got event_data: {event_data}"
+    )
+    try:
+        datetime.fromisoformat(str(occurred_at).replace("Z", "+00:00"))
+    except ValueError:
+        raise AssertionError(
+            f"Expected the '{event_type}' audit entry timestamp of contract '{name}' "
+            f"to parse as RFC3339, got occurred_at: {occurred_at!r}"
         )
 
 

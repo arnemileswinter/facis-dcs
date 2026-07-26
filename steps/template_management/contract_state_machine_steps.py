@@ -20,6 +20,7 @@ import re
 import shlex
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -596,6 +597,13 @@ def step_when_apply_signature(context, name):
 def step_when_terminate_contract_with_reason(context, name, reason):
     did, updated_at = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    # The backend records TerminatedBy = middleware.GetParticipantID, which the
+    # OIDC validator reads from the token's ext.iss claim (oidc.go
+    # ValidateToken); capture it here so the audit-event step can match the
+    # recorded identity against the actual caller.
+    manager_token = manager_h["Authorization"].removeprefix("Bearer ").strip()
+    manager_claims = AuthService.decode_jwt_payload(manager_token)
+    context.terminating_participant = (manager_claims.get("ext") or {}).get("iss")
     context.requests_response = post_json(
         context,
         contract_terminate_url(context),
@@ -820,16 +828,28 @@ def step_then_contract_has_audit_event(context, name, event_type):
     )
 
 
-@then('the TERMINATE_CONTRACT audit event for contract "{name}" records reason "{reason}", the terminating identity, and a timestamp')
+def _parse_rfc3339(value):
+    # Go time.Time marshals as RFC3339Nano ("...T...Z" with 0-9 fractional
+    # digits); Python 3.10 fromisoformat accepts neither "Z" nor fractions
+    # other than 3/6 digits, so normalize both before parsing.
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), text)
+    return datetime.fromisoformat(text)
+
+
+@then('the TERMINATE_CONTRACT audit event for contract "{name}" records reason "{reason}", the terminating identity and role, and an effective timestamp')
 def step_then_terminate_event_records_payload(context, name, reason):
     # DCS-FR-CSA-16: the termination record is the TERMINATE_CONTRACT audit
-    # event's payload — reason/terminated_by/occurred_at JSON tags on
-    # TerminateEvent (backend/internal/contractworkflowengine/event/event.go).
-    # Same async-outbox polling rationale as the generic audit-event step
-    # above.
+    # event's payload — reason/terminated_by/occurred_at/user_roles JSON tags
+    # on TerminateEvent (backend/internal/contractworkflowengine/event/
+    # event.go). Same async-outbox polling rationale as the generic
+    # audit-event step above.
     did, _ = ContractService._contract_data(context, name)
     auditor_h = AuthService.get_headers_for_roles(["Auditor"])
     events = []
+    record = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
@@ -842,18 +862,43 @@ def step_then_terminate_event_records_payload(context, name, reason):
             if str(entry.get("event_type", "")).upper() != "TERMINATE_CONTRACT":
                 continue
             data = entry.get("event_data") or {}
-            if data.get("reason") == reason and data.get("terminated_by") and data.get("occurred_at"):
-                return
+            if data.get("reason") == reason:
+                record = data
+                break
+        if record is not None:
+            break
         time.sleep(2)
-    terminate_payloads = [
-        e.get("event_data") for e in events
-        if str(e.get("event_type", "")).upper() == "TERMINATE_CONTRACT"
-    ]
-    raise AssertionError(
-        f"Expected a TERMINATE_CONTRACT audit event for contract '{name}' carrying "
-        f"reason '{reason}', a terminated_by identity, and an occurred_at timestamp, "
-        f"got TERMINATE_CONTRACT payloads: {terminate_payloads}"
+    if record is None:
+        terminate_payloads = [
+            e.get("event_data") for e in events
+            if str(e.get("event_type", "")).upper() == "TERMINATE_CONTRACT"
+        ]
+        raise AssertionError(
+            f"Expected a TERMINATE_CONTRACT audit event for contract '{name}' carrying "
+            f"reason '{reason}', got TERMINATE_CONTRACT payloads: {terminate_payloads}"
+        )
+
+    expected_participant = getattr(context, "terminating_participant", None)
+    assert expected_participant, (
+        "context.terminating_participant is unset — the terminate When step must "
+        "run first so the recorded identity can be matched against the caller"
     )
+    assert record.get("terminated_by") == expected_participant, (
+        f"terminated_by should be the initiating participant '{expected_participant}', "
+        f"got: {record.get('terminated_by')!r}"
+    )
+    assert "Contract Manager" in (record.get("user_roles") or []), (
+        f"user_roles should record the initiating role 'Contract Manager', "
+        f"got: {record.get('user_roles')!r}"
+    )
+    occurred_at = record.get("occurred_at")
+    assert occurred_at, f"occurred_at missing from termination record: {record}"
+    try:
+        _parse_rfc3339(occurred_at)
+    except ValueError as exc:
+        raise AssertionError(
+            f"occurred_at {occurred_at!r} does not parse as an RFC3339 timestamp: {exc}"
+        ) from exc
 
 
 @then('the SUBMIT_CONTRACT audit event for contract "{name}" records the reviewer finding "{finding}"')
