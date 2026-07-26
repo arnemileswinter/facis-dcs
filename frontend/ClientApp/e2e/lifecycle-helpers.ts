@@ -52,7 +52,12 @@ async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
 }
 
 /** DRAFT → SUBMITTED → REVIEWED → APPROVED for one template, via the UI. */
-async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
+export async function submitReviewApproveTemplate(
+  page: Page,
+  loginAs: LoginAs,
+  did: string,
+  name: string,
+): Promise<void> {
   await test.step(`submit template ${name} for review`, async () => {
     await gotoAs(page, loginAs, 'Template Creator', `/ui/templates/view/${did}`)
     const submitted = page.waitForResponse(
@@ -205,7 +210,7 @@ async function authorContractTemplateFrom(
 
 /** Registers an approved contract template (publishes it to the Federated
  *  Catalogue) so contracts can be derived from it. */
-async function registerContractTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
+export async function registerContractTemplate(page: Page, loginAs: LoginAs, did: string, name: string): Promise<void> {
   await gotoAs(page, loginAs, 'Template Manager', `/ui/templates/view/${did}`)
   await waitForTemplateLoaded(page, name)
   const registered = page.waitForResponse(
@@ -221,7 +226,7 @@ async function registerContractTemplate(page: Page, loginAs: LoginAs, did: strin
 
 /** Derives a purely local contract from a registered template (no counterparty:
  *  the R6 dialog is applied empty). The contract lands in DRAFT. Returns its DID. */
-async function deriveLocalContract(page: Page, loginAs: LoginAs, templateName: string): Promise<string> {
+export async function deriveLocalContract(page: Page, loginAs: LoginAs, templateName: string): Promise<string> {
   await gotoAs(page, loginAs, 'Contract Creator', '/ui/contracts/new')
   const picker = page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })

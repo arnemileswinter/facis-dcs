@@ -39,6 +39,12 @@ export interface DcsContractField {
   'dcs:valueConstraint'?: import('@template-repository/models/contract-template').SemanticValueConstraint
 }
 
+/** The local name of an IRI or compact term — its part after the last
+ *  '#', '/' or ':'. */
+export function localNameOf(iri: string): string {
+  return iri.replace(/^.*[#/:]/, '')
+}
+
 /** Serializes a fill as a typed literal carrying the field's declared
  *  datatype. The lexical form is a string, so the document carries the
  *  exact token the user agreed to — deterministic across round trips. */

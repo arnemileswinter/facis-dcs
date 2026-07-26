@@ -25,6 +25,7 @@ import {
   type OdrlRule,
   type OdrlSet,
   typedFieldFill,
+  type XsdDatatype,
 } from '@/models/dcs-jsonld'
 import type { SemanticConditionValue } from '@/models/contract-data'
 import type { ContractTemplate } from '@/models/contract-template'
@@ -268,6 +269,106 @@ export const useDcsDraftStore = defineStore(storeId, {
           ],
         } satisfies OdrlRule)
       })
+    },
+    /**
+     * Clicks a typed domain object into dcs:contractData from a hub shape
+     * class (ADR-23 graph authoring). Property keys and @type use absolute
+     * IRIs — external vocabularies carry no prefix in the document context.
+     * Returns the new object's @id.
+     */
+    addDataObject(classIri: string): string {
+      const documentId = this.documentIri ?? this.did ?? undefined
+      const id = objectIri('object', crypto.randomUUID(), documentId)
+      this.contractData.push({ '@id': id, '@type': classIri })
+      return id
+    },
+    /** Adds a nested typed object and links it from the parent's property. */
+    addNestedDataObject(parentId: string, path: string, classIri: string): string {
+      const parent = this.contractData.find((object) => object['@id'] === parentId)
+      if (!parent) return ''
+      const id = this.addDataObject(classIri)
+      parent[path] = { '@id': id }
+      return id
+    },
+    /** Sets a fixed literal on a domain-object property, serialized as a
+     *  typed {@value} literal of the property's datatype. */
+    setDataObjectLiteral(objectId: string, path: string, value: string, datatype: XsdDatatype): void {
+      const object = this.contractData.find((entry) => entry['@id'] === objectId)
+      if (!object) return
+      if (value === '') delete object[path]
+      else object[path] = typedFieldFill(value, datatype)
+    },
+    /**
+     * Makes a domain-object leaf negotiable: declares a dcs:ContractField
+     * (the negotiation/fill/closedness machinery picks it up from there)
+     * and binds the property to it by @id. Returns the field id.
+     */
+    makeDataLeafNegotiable(objectId: string, path: string, label: string, datatype: XsdDatatype, required: boolean): string {
+      const object = this.contractData.find((entry) => entry['@id'] === objectId)
+      if (!object) return ''
+      const documentId = this.documentIri ?? this.did ?? undefined
+      const fieldId = objectIri('field', crypto.randomUUID(), documentId)
+      this.contractFields.push({
+        '@id': fieldId,
+        '@type': 'dcs:ContractField',
+        'dcs:label': label,
+        'dcs:datatype': datatype,
+        'dcs:required': required,
+      })
+      object[path] = { '@id': fieldId }
+      return fieldId
+    },
+    /** Reverts a negotiable leaf to fixed authoring: unbinds the property
+     *  and withdraws the field declaration. */
+    makeDataLeafFixed(objectId: string, path: string): void {
+      const object = this.contractData.find((entry) => entry['@id'] === objectId)
+      if (!object) return
+      const ref = object[path]
+      delete object[path]
+      const fieldId = typeof ref === 'object' && ref !== null && !Array.isArray(ref) && '@id' in ref ? ref['@id'] : ''
+      if (fieldId && this.contractFields.some((field) => field['@id'] === fieldId)) {
+        this.contractFields = this.contractFields.filter((field) => field['@id'] !== fieldId)
+      }
+    },
+    /** Removes a domain object, its nested objects, the fields its leaves
+     *  declared, and every reference to any of them — the graph stays
+     *  closed (validateContractDataGraph rejects dangling references). */
+    removeDataObject(objectId: string): void {
+      const removedObjects = new Set<string>()
+      const collect = (id: string) => {
+        if (removedObjects.has(id)) return
+        removedObjects.add(id)
+        const object = this.contractData.find((entry) => entry['@id'] === id)
+        if (!object) return
+        for (const [property, value] of Object.entries(object)) {
+          if (property.startsWith('@')) continue
+          const members = Array.isArray(value) ? value : [value]
+          for (const member of members) {
+            if (typeof member === 'object' && member !== null && '@id' in member) {
+              const target = member['@id']
+              if (this.contractData.some((entry) => entry['@id'] === target)) collect(target)
+            }
+          }
+        }
+      }
+      collect(objectId)
+      const removedFields = new Set<string>()
+      for (const id of removedObjects) {
+        const object = this.contractData.find((entry) => entry['@id'] === id)
+        if (!object) continue
+        for (const [property, value] of Object.entries(object)) {
+          if (property.startsWith('@')) continue
+          const members = Array.isArray(value) ? value : [value]
+          for (const member of members) {
+            if (typeof member === 'object' && member !== null && '@id' in member) {
+              const target = member['@id']
+              if (this.contractFields.some((field) => field['@id'] === target)) removedFields.add(target)
+            }
+          }
+        }
+      }
+      this.contractData = this.contractData.filter((entry) => !removedObjects.has(entry['@id']))
+      this.contractFields = this.contractFields.filter((field) => !removedFields.has(field['@id']))
     },
     addSemanticCondition(payload: Omit<SemanticCondition, 'conditionId'>): void {
       const conditionId = crypto.randomUUID()

@@ -25,7 +25,7 @@ const XSD = 'http://www.w3.org/2001/XMLSchema#'
 const DCS = 'https://w3id.org/facis/dcs/ontology/v1#'
 const SH = 'http://www.w3.org/ns/shacl#'
 
-class OntologyGraph {
+export class OntologyGraph {
   private bySubject = new Map<string, Quad[]>()
   private readonly quads: Quad[]
 
@@ -84,7 +84,7 @@ interface SchemaListEntry {
 // import time (top-level await below), before Pinia exists — and the http
 // client's auth interceptor needs an active Pinia. The hub's resolve and
 // list routes are public.
-async function fetchJson<T>(route: string): Promise<T> {
+export async function fetchHubJson<T>(route: string): Promise<T> {
   const response = await fetch(route, { headers: { Accept: 'application/json' } })
   if (!response.ok) {
     throw new Error(`Semantic Hub route ${route} is unavailable: HTTP ${response.status}`)
@@ -108,15 +108,15 @@ function schemaContentRoute(kind: string, name: string): string | null {
 async function loadSchemaGraph(kind: string, name: string): Promise<OntologyGraph> {
   const route = schemaContentRoute(kind, name)
   if (!route) throw new Error(`No content route for schema kind ${kind}`)
-  const body = await fetchJson<{ content: string }>(route)
+  const body = await fetchHubJson<{ content: string }>(route)
   return new OntologyGraph(new Parser().parse(body.content))
 }
 
-function localName(iri: string): string {
+export function localName(iri: string): string {
   return iri.replace(/^.*[:#/]/, '')
 }
 
-function formatOntologyLabel(value: string): string {
+export function formatOntologyLabel(value: string): string {
   const spaced = value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ')
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
@@ -361,7 +361,7 @@ async function loadHub(): Promise<{
   assets: HubAsset[]
   constraints: SemanticValueConstraint[]
 }> {
-  const inventory = await fetchJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
   const loadedSources = await Promise.all(
     inventory
       .filter((entry) => entry.kind === 'ontology' || entry.kind === 'shapes')

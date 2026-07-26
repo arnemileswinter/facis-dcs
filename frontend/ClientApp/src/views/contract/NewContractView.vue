@@ -10,6 +10,7 @@ import BuilderPreviewDialog from '@template-repository/components/builder-editor
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
 import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -436,6 +437,15 @@ onBeforeRouteLeave(() => {
                         :set-semantic-condition-value="setSemanticConditionValue"
                       />
                     </div>
+                    <template v-if="dcsDraftStore.contractData.length">
+                      <div class="divider text-xs text-base-content/40">semantic data objects</div>
+                      <DataObjectsEditor
+                        mode="contract"
+                        :editable="!!setSemanticConditionValue"
+                        :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                        :set-semantic-condition-value="setSemanticConditionValue ?? undefined"
+                      />
+                    </template>
                   </div>
                 </div>
               </div>
