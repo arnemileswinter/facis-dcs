@@ -31,3 +31,16 @@ Feature: Contract lifecycle driven entirely through the API
     Given contract "API Query Contract" has reached contract state "APPROVED"
     When the contract search endpoint is queried with state filter "APPROVED"
     Then the search results include contract "API Query Contract"
+
+  # DCS-FR-CWE-28's rate-limits clause: authenticated API interactions are
+  # budgeted per credential (middleware.RateLimitAuthenticated, fixed
+  # one-minute window, DCS_API_RATE_LIMIT_PER_MINUTE, default 600). The
+  # hammer uses a DEDICATED credential so the rest of the suite's budgets
+  # are untouched, and a second credential proves the limit is per-client,
+  # not global.
+  @DCS-FR-CWE-28
+  Scenario: API requests beyond the per-credential rate limit are rejected with 429
+    Given a dedicated API credential for rate-limit probing
+    When that credential issues more API requests within a minute than the configured rate limit
+    Then at least one request is rejected with http 429 naming the rate limit
+    And API requests with a different credential still succeed

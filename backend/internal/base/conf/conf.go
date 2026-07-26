@@ -103,6 +103,19 @@ func ArchiveExpiringWindow() time.Duration {
 	return 30 * 24 * time.Hour
 }
 
+// APIRateLimitPerMinute is the per-credential request budget for
+// authenticated API interactions (DCS-FR-CWE-28). DCS_API_RATE_LIMIT_PER_MINUTE
+// (a positive integer) overrides the default; any non-positive or unparsable
+// value keeps the default, like the other env-overridable accessors here.
+func APIRateLimitPerMinute() int {
+	if v := strings.TrimSpace(os.Getenv("DCS_API_RATE_LIMIT_PER_MINUTE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 600
+}
+
 // AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
 // enforces cert-subject to PID name matching for an AES-level signature. It
 // is mandatory and non-configurable for QES (eIDAS Annex I requires a
