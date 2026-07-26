@@ -160,6 +160,20 @@ serviceDiscovery:
 # DCS never holds raw private keys (DCS-IR-HI-01): every key lives in the
 # PKCS#11 token configured under `pkcs11` below.
 
+# DCS-to-DCS federation (ADR-19). The trust gate consults this policy endpoint
+# for every inbound and outbound federated interaction and is FAIL-CLOSED: while
+# it is empty nothing ships and nothing is accepted, so an instance meant to
+# federate is not configured until this is set. Each instance consults only its
+# OWN endpoint — never the counterparty's.
+#
+# The bundled orce chart serves a permissive stand-in at
+# http://<release>-orce:1880/trust-pdp; operators are expected to replace it with
+# a real decision function (peer allowlist as policy, a trust list, a Gaia-X
+# Clearing House). Left empty by default so federation is opt-in rather than
+# silently permissive.
+federation:
+  trustPdpURL: ""
+
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
   issuerDID: ""

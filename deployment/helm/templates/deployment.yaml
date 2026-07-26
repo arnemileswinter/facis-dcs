@@ -200,6 +200,13 @@ spec:
               value: {{ printf "%s/did.json" .Values.pkcs11.provisioning.tokenDir | quote }}
               {{- end }}
             {{- end }}
+            {{- if .Values.federation.trustPdpURL }}
+            # ADR-19 federation trust gate. Emitted only when set so a deployment
+            # that configures it through extraEnv instead does not end up with two
+            # DCS_TRUST_PDP_URL entries.
+            - name: DCS_TRUST_PDP_URL
+              value: {{ .Values.federation.trustPdpURL | quote }}
+            {{- end }}
             - name: TSA_URL
               value: {{ .Values.signing.tsaURL | quote }}
             {{- if .Values.signing.tsaTrustCertSecret }}
