@@ -173,12 +173,12 @@ def step_given_ratelimit_credential(context):
 def step_when_hammer_past_rate_limit(context):
     from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
-    # Default budget is 600/min (conf.APIRateLimitPerMinute); the deployment
-    # does not override DCS_API_RATE_LIMIT_PER_MINUTE, so 660 requests must
+    # Default budget is 1200/min (conf.APIRateLimitPerMinute); the deployment
+    # does not override DCS_API_RATE_LIMIT_PER_MINUTE, so 1320 requests must
     # cross it. The probed endpoint 404s cheaply — the limiter counts every
     # authenticated request before routing, so the response code is
     # irrelevant to the budget.
-    total = 660
+    total = 1320
     url = f"{context.base_url}/contract/retrieve/did:web:ratelimit-probe-nonexistent"
 
     def probe(_):

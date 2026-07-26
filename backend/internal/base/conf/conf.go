@@ -113,7 +113,7 @@ func APIRateLimitPerMinute() int {
 			return n
 		}
 	}
-	return 600
+	return 1200
 }
 
 // AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
