@@ -14,6 +14,7 @@ from behave import given, then, when
 
 from steps.support.api_client import origin_url
 from steps.support.services.auth_service import AuthService
+from steps.support.services.contract_service import ContractService
 from steps.support.services.template_service import TemplateService
 
 ORCE_DISPATCH_URL = os.getenv("BDD_ORCE_DISPATCH_URL", "http://dcs-orce:1880/dcs-dispatch")
@@ -51,10 +52,7 @@ def step_given_webhook_subscription(context, event):
     context.add_cleanup(_unsubscribe)
 
 
-@then('the "{event}" notification for template "{name}" is delivered to the ORCE receiver')
-def step_then_notification_delivered(context, event, name):
-    t = TemplateService.named(context, name)
-    did = t["did"]
+def _assert_delivery(context, event, did, subject):
     headers = AuthService.get_headers_for_roles(["Template Manager"])
     # The outbox publisher reads unpublished events on a ~1s ticker and the
     # dispatcher fans out asynchronously — poll the platform's delivery log.
@@ -73,9 +71,23 @@ def step_then_notification_delivered(context, event, name):
             return
         time.sleep(1)
     assert False, (
-        f"Expected a '{event}' notification for template '{name}' ({did}) delivered to "
+        f"Expected a '{event}' notification for {subject} ({did}) delivered to "
         f"{ORCE_DISPATCH_URL} with HTTP 200 within 30s; matching deliveries seen: {seen}"
     )
+
+
+@then('the "{event}" notification for template "{name}" is delivered to the ORCE receiver')
+def step_then_notification_delivered(context, event, name):
+    t = TemplateService.named(context, name)
+    _assert_delivery(context, event, t["did"], f"template '{name}'")
+
+
+@then('the "{event}" notification for contract "{name}" is delivered to the ORCE receiver')
+def step_then_contract_notification_delivered(context, event, name):
+    # DCS-FR-CSA-20 / DCS-FR-CWE-10: the expiry cron's CONTRACT_EXPIRED
+    # event reaches API subscribers as a "contract.expired" alert.
+    did, _ = ContractService._contract_data(context, name)
+    _assert_delivery(context, event, did, f"contract '{name}'")
 
 
 @when('a webhook subscription for the unknown event "{event}" is attempted')

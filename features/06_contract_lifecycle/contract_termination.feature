@@ -33,6 +33,32 @@ Feature: Contract termination
     When the contract manager terminates contract "Double Termination Contract" with reason "second attempt"
     Then the request is denied with a client error
 
+  # DCS-FR-CSA-16: the termination record (reason, initiating identity,
+  # timestamp) lives on the TERMINATE_CONTRACT audit event — see
+  # TerminateEvent's reason/terminated_by/occurred_at JSON tags in
+  # backend/internal/contractworkflowengine/event/event.go.
+  @UC-06-02 @DCS-FR-CSA-16
+  Scenario: Termination records reason, initiating identity, and timestamp
+    Given contract "Termination Evidence Contract" has reached contract state "APPROVED"
+    When the contract manager terminates contract "Termination Evidence Contract" with reason "Budget for the engagement was withdrawn"
+    Then get http 200:Success code
+    And the contract "Termination Evidence Contract" is in state "TERMINATED"
+    And the TERMINATE_CONTRACT audit event for contract "Termination Evidence Contract" records reason "Budget for the engagement was withdrawn", the terminating identity, and a timestamp
+
+  # DCS-FR-CSA-16: TERMINATED has no outgoing update/negotiate edges in the
+  # transition table (backend/internal/contractworkflowengine/datatype/
+  # contractstate/transition.go), so mutations are rejected while retrieval
+  # keeps working — the final state assertion below is itself a successful
+  # authenticated retrieve of the terminated contract.
+  @UC-06-02 @DCS-FR-CSA-16
+  Scenario: A terminated contract is read-only: mutations are rejected but retrieval still works
+    Given contract "Read-Only Terminated Contract" has reached contract state "TERMINATED"
+    When the initiator attempts to update terminated contract "Read-Only Terminated Contract"
+    Then the request is denied with a client error
+    When the initiator attempts to negotiate a change on terminated contract "Read-Only Terminated Contract"
+    Then the request is denied with a client error
+    And the contract "Read-Only Terminated Contract" is in state "TERMINATED"
+
   @UC-06-02 @DCS-FR-CWE-11 @DCS-FR-CWE-22
   Scenario: Contract Manager renews a contract before its expiry notice period
     Given contract "Renewal Contract" with a contract term has reached contract state "SIGNED"

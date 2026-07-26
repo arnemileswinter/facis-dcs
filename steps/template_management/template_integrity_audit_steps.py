@@ -5,6 +5,7 @@ implemented — this module only adds coverage that neither
 template_workflow.feature nor template_archive.feature exercises.
 """
 
+import json
 import time
 
 import requests
@@ -52,4 +53,44 @@ def step_then_template_audit_includes_action(context, name, event_type):
         time.sleep(1)
     assert event_type.upper() in event_types, (
         f"Expected a '{event_type}' audit event for template '{name}', got event types: {event_types}"
+    )
+
+
+@then('the template audit log for "{name}" records the review comment "{comment}"')
+def step_then_template_audit_records_review_comment(context, name, comment):
+    # DCS-IR-TR-04: a reviewer's return-to-draft comments ride the
+    # SUBMIT_CONTRACT_TEMPLATE event's payload (command/submit.go persists
+    # cmd.Comments on the emitted SubmitEvent). Same outbox polling convention
+    # as the action-type step above.
+    t = TemplateService.named(context, name)
+    headers = AuthService.get_headers_for_roles(["Auditor"])
+    recorded_comments = []
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        resp = requests.get(
+            template_audit_url(context),
+            params={"did": t["did"]},
+            headers=headers,
+            timeout=context.http_timeout_seconds,
+        )
+        assert resp.status_code == 200, f"Template audit query failed for '{name}': {resp.status_code} {resp.text}"
+        entries = resp.json()
+        assert isinstance(entries, list), f"Expected a list of template audit entries, got: {entries}"
+        recorded_comments = []
+        for entry in entries:
+            if str(entry.get("event_type", "")).upper() != "SUBMIT_CONTRACT_TEMPLATE":
+                continue
+            data = entry.get("event_data") or {}
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError:
+                    continue
+            recorded_comments.extend(data.get("comments") or [])
+        if comment in recorded_comments:
+            return
+        time.sleep(1)
+    assert comment in recorded_comments, (
+        f"Expected review comment '{comment}' in the template audit log for '{name}', "
+        f"got comments: {recorded_comments}"
     )

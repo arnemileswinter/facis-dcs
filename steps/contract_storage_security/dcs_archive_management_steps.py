@@ -107,6 +107,24 @@ def step_then_archive_audit_nonempty(context):
     )
 
 
+def _archive_store_url(context) -> str:
+    # /archive/store has no helper in steps/support/api_client.py yet; the
+    # route is POST /archive/store (backend/design/contract_storage_archive.go).
+    return f"{context.base_url}/archive/store"
+
+
+@when("the Archive Manager stores a contract in the archive")
+def step_when_archive_manager_stores(context):
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+
+
+@when("I attempt to store a contract in the archive with my current role")
+def step_when_attempt_store_archive(context):
+    headers = getattr(context, "headers", {})
+    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+
+
 @when('the Archive Manager deletes the archived contract "{name}" with justification "{justification}"')
 def step_when_archive_manager_deletes(context, name, justification):
     did, _ = ContractService._contract_data(context, name)
@@ -328,8 +346,8 @@ def step_then_archive_annotation_audited(context, name):
 # ---------------------------------------------------------------------------
 
 
-@given('contract "{name}" is set to expire in 7 days directly in the database (expiry-window test seam)')
-def step_given_contract_expires_soon(context, name):
+@given('contract "{name}" is set to expire in {days:d} days directly in the database (expiry-window test seam)')
+def step_given_contract_expires_soon(context, name, days):
     """The UI has no expiration editor yet (CSA-23 surface) and contract
     update only accepts EventUpdate from Draft, so the expiry window is
     seeded via the shared test DB connection — the same accepted seam
@@ -338,7 +356,7 @@ def step_given_contract_expires_soon(context, name):
     from datetime import datetime, timedelta, timezone  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
-    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    expires = datetime.now(timezone.utc) + timedelta(days=days)
     cursor = context.db.cursor()
     cursor.execute("UPDATE contracts SET exp_date = %s WHERE did = %s", (expires, did))
     context.db.commit()
@@ -382,13 +400,36 @@ def step_then_statistics_expiring(context, name):
     assert did in expiring, f"expected {did} in expiring contracts, got: {expiring}"
 
 
-@then('the archive statistics include a recent archive action for contract "{name}"')
-def step_then_statistics_recent_action(context, name):
+@then('the archive statistics do not list contract "{name}" as expiring')
+def step_then_statistics_not_expiring(context, name):
     did, _ = ContractService._contract_data(context, name)
     body = context.requests_response.json()
-    actions = body.get("recent_actions", [])
-    matching = [action for action in actions if action.get("did") == did]
-    assert matching, f"expected a recent archive action for {did}, got: {actions}"
-    assert all(action.get("actor") for action in matching), (
-        f"recent actions must name their actor: {matching}"
+    expiring = [entry.get("did") for entry in body.get("expiring_contracts", [])]
+    assert did not in expiring, (
+        f"expected {did} NOT to be listed as expiring (outside the configured "
+        f"window), got: {expiring}"
     )
+
+
+@then('the archive statistics include a recent archive action for contract "{name}"')
+def step_then_statistics_recent_action(context, name):
+    """The archive audit trail is anchored asynchronously (outbox -> IPFS),
+    so the statistics are re-read until the contract's own archive action
+    surfaces — the same polling convention every audit-trail assertion in
+    this suite uses."""
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    deadline = time.time() + 90
+    actions = []
+    while time.time() < deadline:
+        response = get_with_headers(context, archive_statistics_url(context), headers=headers)
+        if response.status_code == 200:
+            actions = response.json().get("recent_actions", [])
+            matching = [action for action in actions if action.get("did") == did]
+            if matching:
+                assert all(action.get("actor") for action in matching), (
+                    f"recent actions must name their actor: {matching}"
+                )
+                return
+        time.sleep(3)
+    raise AssertionError(f"expected a recent archive action for {did} within 90s, got: {actions}")

@@ -27,3 +27,19 @@ Feature: User Authentication & Authorization
     And the request is denied because of too many failed attempts
     When I am authenticated with roles: "Contract Creator"
     Then the request is denied because of too many failed attempts
+
+  @clean_db @DCS-NFR-SEC-16
+  Scenario: Federated login through Hydra and the wallet issues a usable access token
+    When I initiate a federated login
+    And I bind the Hydra login challenge to the pending presentation
+    And I present a wallet credential with roles: "Template Creator"
+    And I complete the federated session and obtain an access token
+    Then the access token authorizes an authenticated API call
+
+  @clean_db @DCS-FR-UC-09-2
+  Scenario: Successful authentication is logged with actor and timestamp
+    When I initiate a federated login
+    And I bind the Hydra login challenge to the pending presentation
+    And I present a wallet credential with roles: "Template Creator"
+    And I complete the federated session and obtain an access token
+    Then the login presentation audit event records the actor and timestamp

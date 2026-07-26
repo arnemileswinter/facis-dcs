@@ -23,3 +23,14 @@ Feature: Generate Contract from Template
     And template "Standard NDA" is in "Registered" status
     When I generate a contract from template "Standard NDA"
     Then the request is denied with an authorization error
+
+  # DCS-NFR-BR-04: every contract MUST originate from an approved, versioned
+  # template — contract/create resolves the template DID against REGISTERED/
+  # PUBLISHED rows only (backend ReadContractTemplateDataByID), so a template
+  # still in Draft is not usable for contract creation.
+  @DCS-FR-TR-07 @DCS-NFR-BR-04
+  Scenario: Contract creation from an unapproved draft template is denied
+    Given I am authenticated with roles: "Contract Creator"
+    And template "Unapproved Draft NDA" is in "Draft" status
+    When I generate a contract from template "Unapproved Draft NDA"
+    Then contract creation from the unapproved template is denied

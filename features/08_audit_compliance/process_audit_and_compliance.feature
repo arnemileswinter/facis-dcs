@@ -36,6 +36,23 @@ Feature: Process audit and compliance management
     # 03_contract_creation/contract_approval.feature.
     And the monitoring response reports a checked_at timestamp and a risks list
 
+  # UNAUTHORIZED_ACCESS rule (querymonitor.go): the sweep reads back the
+  # persisted CONTRACT_ACCESS_DENIED artifacts written by the party
+  # read-scoping denial branch (query/contract/querybyid.go) and flags the
+  # affected contract, attributing the risk to the denied actor (the
+  # OID4VP-disclosed organization persisted as retrieved_by). The denial
+  # event is committed before the 403 is returned, so the monitor sees it
+  # without polling.
+  @UC-08-02 @DCS-IR-PACM-03 @DCS-FR-PACM-02
+  Scenario: Continuous monitoring flags a persisted access denial as an unauthorized-access risk
+    Given I am authenticated with roles: "Contract Creator"
+    And I have created contract "PAC Denied Access Contract" with parties "Acme Corp" and "TechVendor Inc"
+    When a representative of unrelated party "UnrelatedCorp" attempts to access contract "PAC Denied Access Contract"
+    Then the access is denied with a "not authorized to access this contract" error
+    When the Compliance Officer requests continuous monitoring
+    Then get http 200:Success code
+    And the monitoring sweep flags contract "PAC Denied Access Contract" with an "UNAUTHORIZED_ACCESS" compliance risk attributed to actor "UnrelatedCorp"
+
   @UC-08-02 @DCS-IR-PACM-04
   Scenario: Compliance Officer submits a non-compliance incident report
     When the Compliance Officer submits a non-compliance incident report

@@ -1,5 +1,6 @@
-# Signature validate/audit/compliance (DCS-FR-SM-18, DCS-FR-SM-19,
-# DCS-FR-SM-21, UC-04): POST /signature/validate, GET /signature/audit,
+# Signature retrieve/validate/audit/compliance (DCS-FR-SM-15, DCS-FR-SM-18,
+# DCS-FR-SM-19, DCS-FR-SM-21, UC-04): GET /signature/retrieve/{did},
+# POST /signature/validate, GET /signature/audit,
 # POST /signature/compliance (backend/design/signature_management.go). All
 # three are already implemented; only /signature/verify (contract integrity &
 # envelope check, used as a setup step by other packs) and /signature/apply
@@ -25,6 +26,22 @@ Feature: Signature validation, audit, and compliance
     # (signingmanagement/event/event.go); the APPLY_SIGNATURE constant in
     # eventtype.go is defined but never published.
     And the signature audit log for contract "Signature Audit Contract" includes an action of type "APPLIED_SIGNATURE"
+    # DCS-FR-SM-19: the log entry itself must capture signer ID, credential
+    # used, and timestamp — the ApplyEvent's applied_by / credential_type /
+    # occurred_at fields (signingmanagement/event/event.go).
+    And the "APPLIED_SIGNATURE" signature audit entry for contract "Signature Audit Contract" carries applied_by, credential_type, and occurred_at
+
+  # DCS-FR-SM-15: retrieving a contract for signing is itself an audited
+  # read — GET /signature/retrieve/{did} records a RETRIEVE_CONTRACT_BY_ID
+  # event (signingmanagement/query/querybyid.go) carrying the retrieving
+  # signer, the timestamp, and the contract ID.
+  @clean_db @DCS-FR-SM-15
+  Scenario: Retrieving a contract for signing is logged with signer ID, timestamp, and contract ID
+    Given contract "Signing Retrieval Contract" has reached contract state "SIGNED"
+    When the contract signer retrieves contract "Signing Retrieval Contract" for signing
+    Then get http 200:Success code
+    And the signature audit log for contract "Signing Retrieval Contract" includes an action of type "RETRIEVE_CONTRACT_BY_ID"
+    And the "RETRIEVE_CONTRACT_BY_ID" signature audit entry for contract "Signing Retrieval Contract" records the retrieving signer, a timestamp, and the contract ID
 
   # /signature/compliance computes its findings (DCS-FR-SM-21:
   # signature level SES/AES/QES, signature status, active signed

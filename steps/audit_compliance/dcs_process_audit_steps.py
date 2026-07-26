@@ -123,6 +123,26 @@ def step_then_monitor_flags_risk(context, name, risk_type):
     assert matching[0].get("detail"), f"Expected the flagged risk to carry a detail message, got: {matching[0]}"
 
 
+@then(
+    'the monitoring sweep flags contract "{name}" with an "{risk_type}" '
+    'compliance risk attributed to actor "{actor}"'
+)
+def step_then_monitor_flags_risk_with_actor(context, name, risk_type, actor):
+    """DCS-FR-PACM-02 unauthorized-access rule: beyond the flagged risk
+    itself, its detail must attribute the denial to the denied actor
+    (retrieved_by on the persisted CONTRACT_ACCESS_DENIED artifact — the
+    OID4VP-disclosed organization claim, see querymonitor.go
+    unauthorizedAccessRisks)."""
+    step_then_monitor_flags_risk(context, name, risk_type)
+    did, _ = ContractService._contract_data(context, name)
+    risks = context.requests_response.json().get("risks") or []
+    matching = [r for r in risks if r.get("did") == did and r.get("risk_type") == risk_type]
+    assert any(actor in (r.get("detail") or "") for r in matching), (
+        f"Expected the {risk_type} risk for contract '{name}' (did={did}) to attribute "
+        f"the denial to actor '{actor}' in its detail, got: {matching}"
+    )
+
+
 @then('the flagged risk for contract "{name}" is recorded in the PAC audit trail')
 def step_then_flagged_risk_audited(context, name):
     # Each flagged risk is anchored per affected contract as a

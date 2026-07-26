@@ -13,16 +13,34 @@ import time
 import requests
 from behave import then, when
 
+import json
+
 from steps.support.api_client import (
     post_json,
     signature_audit_url,
     signature_compliance_url,
+    signature_retrieve_url,
     signature_revoke_url,
     signature_view_url,
     signature_validate_url,
 )
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
+
+
+@when('the contract signer retrieves contract "{name}" for signing')
+def step_when_signer_retrieves(context, name):
+    # DCS-FR-SM-15: the retrieval a signer performs before signing —
+    # GET /signature/retrieve/{did} — as the "Contract Signer" role the
+    # endpoint scopes to (backend/design/signature_management.go
+    # retrieve_by_id).
+    did, _ = ContractService._contract_data(context, name)
+    signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
+    context.requests_response = requests.get(
+        signature_retrieve_url(context, did),
+        headers=signer_h,
+        timeout=context.http_timeout_seconds,
+    )
 
 
 @when('the contract manager validates the signature for contract "{name}"')
@@ -248,6 +266,63 @@ def step_then_signature_audit_includes(context, name, event_type):
         time.sleep(1)
     assert event_type.upper() in event_types, (
         f"Expected a '{event_type}' signature audit event for contract '{name}', got event types: {event_types}"
+    )
+
+
+def _signature_audit_entry(context, name, event_type):
+    """Fetches the audit entry of the given event type for the contract.
+    Presence is guaranteed by the polling step above (the outbox processor
+    has already anchored the entry), so a single read suffices; event_data
+    arrives either JSON-decoded or as a JSON string depending on the
+    transport, both are handled."""
+    did, _ = ContractService._contract_data(context, name)
+    auditor_h = AuthService.get_headers_for_roles(["Auditor"])
+    resp = requests.get(
+        signature_audit_url(context),
+        params={"did": did},
+        headers=auditor_h,
+        timeout=context.http_timeout_seconds,
+    )
+    assert resp.status_code == 200, f"Signature audit query failed for '{name}': {resp.status_code} {resp.text}"
+    entries = [e for e in resp.json() if str(e.get("event_type", "")).upper() == event_type.upper()]
+    assert entries, f"Expected a '{event_type}' signature audit entry for contract '{name}'"
+    entry = entries[-1]
+    event_data = entry.get("event_data")
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    return did, entry, event_data or {}
+
+
+@then('the "{event_type}" signature audit entry for contract "{name}" carries applied_by, credential_type, and occurred_at')
+def step_then_audit_entry_apply_fields(context, event_type, name):
+    # DCS-FR-SM-19: signer ID, credential used, and timestamp captured in
+    # the log entry itself — the ApplyEvent's JSON fields
+    # (signingmanagement/event/event.go).
+    _, _, event_data = _signature_audit_entry(context, name, event_type)
+    for field in ("applied_by", "credential_type", "occurred_at"):
+        assert event_data.get(field), (
+            f"Expected the '{event_type}' audit entry of contract '{name}' to carry a "
+            f"non-empty '{field}', got event_data: {event_data}"
+        )
+
+
+@then('the "{event_type}" signature audit entry for contract "{name}" records the retrieving signer, a timestamp, and the contract ID')
+def step_then_audit_entry_retrieve_fields(context, event_type, name):
+    # DCS-FR-SM-15: the retrieval is logged with timestamp, signer ID, and
+    # contract ID — the RetrieveByIDEvent's retrieved_by / occurred_at / did
+    # fields (signingmanagement/event/event.go).
+    did, entry, event_data = _signature_audit_entry(context, name, event_type)
+    assert event_data.get("retrieved_by"), (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to record the "
+        f"retrieving signer (retrieved_by), got event_data: {event_data}"
+    )
+    assert event_data.get("occurred_at"), (
+        f"Expected the '{event_type}' audit entry of contract '{name}' to record a "
+        f"timestamp (occurred_at), got event_data: {event_data}"
+    )
+    assert event_data.get("did") == did, (
+        f"Expected the '{event_type}' audit entry to record contract ID '{did}', "
+        f"got event_data: {event_data}"
     )
 
 

@@ -35,7 +35,30 @@ Feature: Contract storage and archive retrieval
     Then get http 200:Success code
     And the archive audit log is a non-empty list
 
-  @UC-07-03 @DCS-FR-CSA-17 @DCS-FR-CSA-02 @DCS-IR-CSA-03
+  # DCS-IR-CSA-02: the dashboard's store-into-archive surface. The
+  # /archive/store implementation is currently a stub (it logs and returns a
+  # placeholder — backend/internal/service/contract_storage_archive.go; the
+  # real archive entry is written automatically at SIGNED), so the assertable
+  # contract here is the endpoint's RBAC gate: Archive Manager scope gets a
+  # 200, any role outside the archive scope is refused.
+  @UC-07-01 @DCS-IR-CSA-02
+  Scenario: Archive Manager can invoke the archive store endpoint
+    When the Archive Manager stores a contract in the archive
+    Then get http 200:Success code
+
+  @UC-07-02 @DCS-IR-CSA-02 @DCS-FR-CSA-02
+  Scenario: A role outside the archive scope cannot store into the archive
+    Given I am authenticated with roles: "Template Creator"
+    When I attempt to store a contract in the archive with my current role
+    Then the request is denied with a client error
+
+  # DCS-NFR-SEC-13 (secure data disposal): a successful delete also removes
+  # the entries' archived snapshots from the IPFS store, and that removal is
+  # a hard failure — so the 200 asserted here covers the disposal call. The
+  # snapshot-CID selection and the hard-fail removal semantics are unit
+  # tested in backend/internal/service/contract_storage_archive_delete_test.go
+  # (no existing BDD step pattern reads raw IPFS CIDs).
+  @UC-07-03 @DCS-FR-CSA-17 @DCS-FR-CSA-02 @DCS-IR-CSA-03 @DCS-NFR-SEC-13
   Scenario: Archive Manager deletes an archived contract with a logged justification
     Given contract "Archive Deletion Contract" has reached contract state "SIGNED"
     When the Archive Manager deletes the archived contract "Archive Deletion Contract" with justification "no longer needed for compliance retention"
@@ -142,3 +165,21 @@ Feature: Contract storage and archive retrieval
     Given I am authenticated with roles: "Template Creator"
     When I attempt to retrieve the archive statistics with my current role
     Then the request is denied with a client error
+
+  # DCS-FR-CSA-04: expiration alerts follow a configurable threshold — the
+  # expiring-contracts window is DCS_ARCHIVE_EXPIRING_WINDOW_DAYS
+  # (backend/internal/base/conf), default 30 days. The suite must not change
+  # the deployed environment, so this asserts both sides of the default
+  # window's boundary: a contract expiring inside it is flagged, one expiring
+  # beyond it is not. The accessor's override behavior is unit tested in
+  # backend/internal/base/conf/conf_test.go.
+  @UC-07-01 @DCS-FR-CSA-04 @DCS-FR-CSA-21
+  Scenario: Expiring-contract alerts respect the configured expiry window
+    Given contract "Expiry Window Inside Contract" has reached contract state "SIGNED"
+    And contract "Expiry Window Outside Contract" has reached contract state "SIGNED"
+    And contract "Expiry Window Inside Contract" is set to expire in 7 days directly in the database (expiry-window test seam)
+    And contract "Expiry Window Outside Contract" is set to expire in 90 days directly in the database (expiry-window test seam)
+    When the Archive Manager retrieves the archive statistics
+    Then get http 200:Success code
+    And the archive statistics list contract "Expiry Window Inside Contract" as expiring
+    And the archive statistics do not list contract "Expiry Window Outside Contract" as expiring
