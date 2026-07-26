@@ -17,6 +17,7 @@ import (
 
 	dcstodcs2 "digital-contracting-service/internal/dcstodcs"
 	pq2 "digital-contracting-service/internal/dcstodcs/db/pg"
+	"digital-contracting-service/internal/processauditandcompliance/configattest"
 
 	didservice "digital-contracting-service/gen/did_service"
 
@@ -393,6 +394,18 @@ func main() {
 	did, err := didDocument.GetID()
 	if err != nil {
 		log.Fatalf(ctx, err, "could not read DID")
+	}
+
+	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
+	// security-critical mounted config files, enforce any operator pins, and
+	// record the attestation in the audit outbox. A pin mismatch or an
+	// unreadable configured file aborts startup.
+	if err := configattest.Attest(ctx, db, did, map[string]string{
+		"did-document":      os.Getenv("DCS_DID"),
+		"oid4vp-trust-data": os.Getenv("OID4VP_TRUST_DATA_PATH"),
+		"x5c-trust-anchors": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH"),
+	}, os.Getenv("DCS_CONFIG_SHA256_PINS")); err != nil {
+		log.Fatalf(ctx, err, "Config integrity verification failed")
 	}
 
 	outboxProcessor := event.OutboxProcessor{

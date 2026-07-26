@@ -68,3 +68,15 @@ Feature: Process audit and compliance management
     When the Compliance Officer submits a non-compliance incident report linking contract "PAC Incident Contract" with risk type "UNAUTHORIZED_CLAUSE_CHANGE" and detail "Clause altered outside the approved negotiation window"
     Then get http 200:Success code
     And the incident report is recorded as a PAC audit event for contract "PAC Incident Contract" with risk type "UNAUTHORIZED_CLAUSE_CHANGE"
+
+  # DCS-NFR-SEC-04: the deployment's file-based configuration (DID document,
+  # OID4VP trust data, x5c trust anchors) is hashed at every startup and the
+  # attestation recorded in the audit outbox
+  # (processauditandcompliance/configattest, wired in cmd/dcs/main.go).
+  # Operator hash pins (DCS_CONFIG_SHA256_PINS) turn the attestation into an
+  # enforced gate — the abort path is covered by the package's unit tests;
+  # this scenario asserts the running deployment produced the verification
+  # log the requirement's measurement names.
+  @DCS-NFR-SEC-04
+  Scenario: Startup records a config integrity attestation with per-file hashes
+    Then the audit outbox holds a CONFIG_INTEGRITY_ATTESTATION record hashing the DID document

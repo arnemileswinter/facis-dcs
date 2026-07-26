@@ -3,6 +3,8 @@ backend/design/process_audit_and_compliance.go): /pac/audit, /pac/report
 (GET report + POST incident), /pac/monitor.
 """
 
+import json
+
 from behave import given, then, when
 
 from steps.support.api_client import (
@@ -273,4 +275,29 @@ def step_then_audit_response_includes_contract(context, name):
     assert did in all_dids, (
         f"Expected the CONTRACT_WORKFLOW_ENGINE audit trail to include an entry for contract "
         f"'{name}' (did={did}), got dids: {all_dids}"
+    )
+
+
+@then("the audit outbox holds a CONFIG_INTEGRITY_ATTESTATION record hashing the DID document")
+def step_then_config_attestation_recorded(context):
+    # The attestation is written once at process startup (DCS-NFR-SEC-04), so
+    # it is already committed by the time any scenario runs — no polling.
+    cursor = context.db.cursor()
+    cursor.execute(
+        """SELECT event_data FROM outbox_events
+           WHERE component = 'PROCESS_AUDIT_AND_COMPLIANCE'
+             AND event_type = 'CONFIG_INTEGRITY_ATTESTATION'
+           ORDER BY id DESC LIMIT 1"""
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    assert row, "Expected a CONFIG_INTEGRITY_ATTESTATION outbox record from startup (DCS-NFR-SEC-04)"
+    event_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    hashes = event_data.get("file_hashes") or {}
+    did_hash = hashes.get("did-document")
+    assert did_hash and len(did_hash) == 64 and all(c in "0123456789abcdef" for c in did_hash), (
+        f"Expected the attestation to carry a 64-hex SHA-256 for the DID document, got: {event_data}"
+    )
+    assert event_data.get("did", "").startswith("did:"), (
+        f"Expected the attestation to name the attesting instance by DID, got: {event_data}"
     )
