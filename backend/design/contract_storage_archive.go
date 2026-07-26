@@ -27,6 +27,9 @@ var ArchiveSearchRequest = Type("ArchiveSearchRequest", func() {
 	Attribute("description", String, "A description for that contract")
 	Attribute("contract_data", String, "Search value for full text search in contract data")
 	Attribute("tag", String, "Return only archive entries carrying this annotation tag (DCS-FR-CSA-11)")
+	Attribute("party", String, "Return only contracts where this DID is a contract party — creator or counterparty (DCS-FR-CSA-10, DCS-FR-CSA-13)")
+	Attribute("valid_from", String, "Return only contracts whose validity period starts at or after this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
+	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before this RFC3339 timestamp (DCS-FR-CSA-10, DCS-FR-CSA-13)")
 })
 
 var ArchiveRecentAction = Type("ArchiveRecentAction", func() {
@@ -107,7 +110,7 @@ var _ = Service("ContractStorageArchive", func() {
 
 	Method("search", func() {
 		Description("search archived records. search records by criteria.")
-		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05")
+		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05", "DCS-FR-CSA-10", "DCS-FR-CSA-13")
 		Meta("dcs:ui", "Archive Manager Dashboard", "Archive Access")
 		Meta("dcs:csa:components", "Signed Contract Archive")
 		Security(JWTAuth, func() {
@@ -129,6 +132,9 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("description")
 			Param("contract_data")
 			Param("tag")
+			Param("party")
+			Param("valid_from")
+			Param("valid_until")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

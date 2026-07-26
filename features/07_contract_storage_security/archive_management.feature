@@ -109,6 +109,45 @@ Feature: Contract storage and archive retrieval
     Then get http 200:Success code
     And the archive search result does not include contract "Fulltext Corpus Archive Contract"
 
+  # DCS-FR-CSA-10 / DCS-FR-CSA-13: structured search over the indexed party
+  # metadata. The contract's two parties (creator/counterparty) live in the
+  # responsible JSONB column and /archive/search?party=... matches either
+  # slot. The counterparty is seeded via the shared test DB connection (the
+  # same accepted seam the expiry-window step uses) because the
+  # single-instance BDD creation flow assigns no distinct counterparty DID.
+  @UC-07-01 @DCS-FR-CSA-10 @DCS-FR-CSA-13
+  Scenario: Archive search by party returns only contracts with that party
+    Given contract "Party Search Match Contract" has reached contract state "SIGNED"
+    And contract "Party Search Other Contract" has reached contract state "SIGNED"
+    And contract "Party Search Match Contract" has counterparty "did:web:party-search-bdd.example" set directly in the database (party-search test seam)
+    When the Archive Manager searches the archive by party "did:web:party-search-bdd.example"
+    Then get http 200:Success code
+    And the archive search result includes contract "Party Search Match Contract"
+    And the archive search result does not include contract "Party Search Other Contract"
+
+  # DCS-FR-CSA-10 / DCS-FR-CSA-13: structured search over the indexed
+  # validity period. valid_from/valid_until bound the contract's
+  # start_date/exp_date: a contract matches when its validity period lies
+  # within the queried range. Validity dates are seeded via the shared test
+  # DB connection (no API path sets start_date/exp_date post-creation) and
+  # kept in the future so the expiry cron never touches these contracts.
+  @UC-07-01 @DCS-FR-CSA-10 @DCS-FR-CSA-13
+  Scenario: Archive search by validity period returns only contracts valid within the range
+    Given contract "Validity Range Inside Contract" has reached contract state "SIGNED"
+    And contract "Validity Range Outside Contract" has reached contract state "SIGNED"
+    And contract "Validity Range Inside Contract" has validity period "2027-01-01T00:00:00Z" to "2027-12-31T00:00:00Z" set directly in the database (validity-search test seam)
+    And contract "Validity Range Outside Contract" has validity period "2029-01-01T00:00:00Z" to "2029-12-31T00:00:00Z" set directly in the database (validity-search test seam)
+    When the Archive Manager searches the archive with validity period from "2026-12-01T00:00:00Z" until "2028-01-01T00:00:00Z"
+    Then get http 200:Success code
+    And the archive search result includes contract "Validity Range Inside Contract"
+    And the archive search result does not include contract "Validity Range Outside Contract"
+
+  # An unparsable date parameter is a hard 400, never silently ignored.
+  @UC-07-01 @DCS-FR-CSA-10 @DCS-FR-CSA-13
+  Scenario: Archive search with an unparsable validity date is rejected
+    When the Archive Manager searches the archive with validity period from "not-a-date" until "2028-01-01T00:00:00Z"
+    Then the request is denied with a client error
+
   # DCS-FR-CSA-11: each archived contract can carry a summary (manual or
   # system-generated) and user-assigned tags for thematic categorization and
   # discovery. Annotation is Archive Manager-scoped, mutates ONLY the

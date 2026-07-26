@@ -40,6 +40,9 @@ type SearchArchivedContractsQry struct {
 	Description     string
 	ContractData    string
 	Tag             string
+	Party           string
+	ValidFrom       *time.Time
+	ValidUntil      *time.Time
 }
 
 func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchivedContractsQry) (*GetArchivedContractsResult, error) {
@@ -110,6 +113,9 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		Description:     query.Description,
 		ContractData:    query.ContractData,
 		Tag:             query.Tag,
+		Party:           query.Party,
+		ValidFrom:       query.ValidFrom,
+		ValidUntil:      query.ValidUntil,
 	}
 
 	archivedContractsMetadata, err := h.CRepo.ReadArchivedContractsByFilter(ctx, tx, searchValues)

@@ -92,6 +92,15 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		state = &tState
 	}
 
+	validFrom, err := parseSearchTime("valid_from", p.ValidFrom)
+	if err != nil {
+		return nil, contractstoragearchive.MakeBadRequest(err)
+	}
+	validUntil, err := parseSearchTime("valid_until", p.ValidUntil)
+	if err != nil {
+		return nil, contractstoragearchive.MakeBadRequest(err)
+	}
+
 	qry := contract.SearchArchivedContractsQry{
 		DID:             stringValue(p.Did),
 		ContractVersion: intValue(p.ContractVersion),
@@ -101,6 +110,9 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		Description:     stringValue(p.Description),
 		ContractData:    stringValue(p.ContractData),
 		Tag:             stringValue(p.Tag),
+		Party:           stringValue(p.Party),
+		ValidFrom:       validFrom,
+		ValidUntil:      validUntil,
 	}
 	queryHandler := contract.GetArchivedContractsHandler{
 		DB:    s.DB,
@@ -413,6 +425,19 @@ func archiveEvidenceValue(evidence *datatype.JSON) any {
 		return nil
 	}
 	return value
+}
+
+// parseSearchTime parses an optional RFC3339 search parameter
+// (DCS-FR-CSA-10, DCS-FR-CSA-13); an unparsable value is a hard error.
+func parseSearchTime(name string, value *string) (*time.Time, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(*value))
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s value %q: expected an RFC3339 timestamp", name, *value)
+	}
+	return &t, nil
 }
 
 func stringValue(value *string) string {

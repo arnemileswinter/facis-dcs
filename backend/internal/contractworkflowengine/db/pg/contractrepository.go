@@ -493,6 +493,23 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		params = append(params, values.Tag)
 		paramIndex++
 	}
+	if len(values.Party) > 0 {
+		// Party filter (DCS-FR-CSA-10, DCS-FR-CSA-13): the contract's two
+		// parties live in the responsible JSONB as creator/counterparty.
+		conditions += ` (responsible->>'creator' = $` + strconv.Itoa(paramIndex) + ` OR responsible->>'counterparty' = $` + strconv.Itoa(paramIndex+1) + `) AND`
+		params = append(params, values.Party, values.Party)
+		paramIndex += 2
+	}
+	if values.ValidFrom != nil {
+		conditions += ` start_date >= $` + strconv.Itoa(paramIndex) + ` AND`
+		params = append(params, *values.ValidFrom)
+		paramIndex++
+	}
+	if values.ValidUntil != nil {
+		conditions += ` exp_date <= $` + strconv.Itoa(paramIndex) + ` AND`
+		params = append(params, *values.ValidUntil)
+		paramIndex++
+	}
 	if len(values.ParentDID) > 0 {
 		// Reverse-index over locally held children: match the child's stored
 		// dcs:parentContract @id in contracts_effective. Kept as a DID-scoped

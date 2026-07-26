@@ -213,6 +213,14 @@ type SearchValues struct {
 	// (DCS-FR-CSA-11); only meaningful for the archive queries, whose
 	// backing view exposes archive_tags.
 	Tag string
+	// Party matches a contract party DID against the responsible JSONB
+	// column: the creator or the counterparty (DCS-FR-CSA-10, DCS-FR-CSA-13).
+	Party string
+	// ValidFrom/ValidUntil bound the contract's validity period
+	// (DCS-FR-CSA-10, DCS-FR-CSA-13): start_date >= ValidFrom,
+	// exp_date <= ValidUntil. Each bound applies independently when set.
+	ValidFrom  *time.Time
+	ValidUntil *time.Time
 	// ParentDID is the full-scope hierarchy filter: when
 	// set, only contracts whose dcs:parentContract references this DID are
 	// returned. It is a reverse-index QUERY over children the instance

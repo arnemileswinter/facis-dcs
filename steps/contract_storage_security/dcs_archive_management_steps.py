@@ -207,6 +207,68 @@ def step_when_archive_tag_search(context, tag):
     )
 
 
+@given('contract "{name}" has counterparty "{party_did}" set directly in the database (party-search test seam)')
+def step_given_contract_counterparty(context, name, party_did):
+    """No API path assigns a distinct counterparty DID in the single-instance
+    BDD flow, so the responsible JSONB's counterparty slot is seeded via the
+    shared test DB connection — the same accepted seam the expiry-window
+    step below uses."""
+    did, _ = ContractService._contract_data(context, name)
+    cursor = context.db.cursor()
+    cursor.execute(
+        "UPDATE contracts SET responsible = jsonb_set(COALESCE(responsible, '{}'::jsonb), '{counterparty}', to_jsonb(%s::text)) WHERE did = %s",
+        (party_did, did),
+    )
+    context.db.commit()
+    cursor.close()
+
+
+@given('contract "{name}" has validity period "{start}" to "{end}" set directly in the database (validity-search test seam)')
+def step_given_contract_validity_period(context, name, start, end):
+    """No API path sets start_date/exp_date after creation, so the validity
+    period is seeded via the shared test DB connection — the same accepted
+    seam the expiry-window step below uses."""
+    did, _ = ContractService._contract_data(context, name)
+    cursor = context.db.cursor()
+    cursor.execute(
+        "UPDATE contracts SET start_date = %s, exp_date = %s WHERE did = %s",
+        (start, end, did),
+    )
+    context.db.commit()
+    cursor.close()
+
+
+@when('the Archive Manager searches the archive by party "{party_did}"')
+def step_when_archive_party_search(context, party_did):
+    """DCS-FR-CSA-10/-13: /archive/search?party=... matches the DID against
+    the contract's creator or counterparty in the responsible JSONB."""
+    import requests as _requests  # noqa: PLC0415
+
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    context.requests_response = _requests.get(
+        archive_search_url(context),
+        params={"party": party_did},
+        headers=headers,
+        timeout=context.http_timeout_seconds,
+    )
+
+
+@when('the Archive Manager searches the archive with validity period from "{valid_from}" until "{valid_until}"')
+def step_when_archive_validity_search(context, valid_from, valid_until):
+    """DCS-FR-CSA-10/-13: /archive/search?valid_from=...&valid_until=...
+    bounds the contract validity period (start_date >= valid_from,
+    exp_date <= valid_until)."""
+    import requests as _requests  # noqa: PLC0415
+
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    context.requests_response = _requests.get(
+        archive_search_url(context),
+        params={"valid_from": valid_from, "valid_until": valid_until},
+        headers=headers,
+        timeout=context.http_timeout_seconds,
+    )
+
+
 @then('the archive search result does not include contract "{name}"')
 def step_then_archive_search_excludes(context, name):
     entries, did = _contract_dids_in_response(context, name)
