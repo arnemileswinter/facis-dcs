@@ -524,3 +524,85 @@ kubeStateMetrics:
 dss:
   enabled: false
   # url: http://<release>-dss:8080  # defaults to the in-cluster dss service
+
+# ---- ACME certificate renewal (opt-in) --------------------------------
+# For clusters where cert-manager cannot renew the ingress certificate itself.
+# The usual cause is a namespace LimitRange with a per-container minimum above
+# what cert-manager asks for its HTTP-01 solver pod (10m CPU / 64Mi): the solver
+# never schedules, the challenge is never presented, and the certificate simply
+# lapses. That cannot be worked around through cert-manager, because the Issuer
+# CRD only honours priorityClassName, nodeSelector, affinity, serviceAccountName
+# and tolerations under solvers[].http01.ingress.podTemplate.spec — resources are
+# ignored, and the request values are a controller-wide flag.
+#
+# This runs the same HTTP-01 exchange as an ordinary CronJob whose resources obey
+# the LimitRange, and writes the result into the TLS Secret the ingress serves.
+# Leave disabled wherever cert-manager works: this is a fallback, not a preference.
+acmeRenewal:
+  enabled: false
+  # Hostname to certify. Must be the host the ingress serves and must already
+  # resolve to this cluster, or the HTTP-01 challenge cannot be answered.
+  host: ""
+  # Contact address for the ACME account; Let's Encrypt rejects registration
+  # without one and uses it for expiry warnings.
+  email: ""
+  # Name of the kubernetes.io/tls Secret referenced by ingress.tls[].secretName.
+  secretName: ""
+  server: "https://acme-v02.api.letsencrypt.org/directory"
+  # Twice weekly. certbot renews only inside its own window and exits 0
+  # otherwise, so a frequent schedule costs nothing and leaves room to recover
+  # from a failed attempt well before expiry.
+  schedule: "17 3 * * 1,4"
+  image: "certbot/certbot:v2.11.0"
+  challengePort: 8080
+  rbac:
+    # The renewal pod needs its own ServiceAccount + Role + RoleBinding to write
+    # the TLS Secret. Set false on clusters that do not grant the installer
+    # rbac.authorization — the same namespace restriction pkcs11.provisioning.
+    # publishSecrets exists for — and name an existing account below that may
+    # already write secrets in this namespace.
+    create: true
+  serviceAccountName: ""
+  # Defaults to ingress.className when empty.
+  ingressClassName: ""
+  ingressAnnotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistence:
+    size: "1Gi"
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: ""
+
+# ---- Shared supporting services for a resource-constrained peer -------
+# Exposes this instance's stateless services under https://<host>/shared/<name>
+# so a peer that cannot run its own can consume them. Disabled by default: doing
+# this makes the peer depend on this deployment for validation and revocation
+# data, which weakens its independence and should be a considered choice.
+#
+# service is rendered with tpl, so it may reference the release, e.g.
+# "{{ .Release.Name }}-dss".
+sharedServices:
+  enabled: false
+  host: ""
+  ingressClassName: ""
+  proxyBodySize: "64m"
+  annotations: {}
+  tls: []
+  services:
+    - name: statuslist
+      service: "{{ .Release.Name }}-statuslist-service"
+      port: 8080
+    - name: dss
+      service: "{{ .Release.Name }}-dss"
+      port: 8080
+    - name: orce
+      service: "{{ .Release.Name }}-orce"
+      port: 1880
+    - name: ipfs-dm
+      service: "{{ .Release.Name }}-ipfs-document-manager"
+      port: 8080
