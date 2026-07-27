@@ -563,6 +563,24 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
+	// The designated target's name, so the contract view can say where it
+	// deploys to without a second round trip (ADR-25).
+	var targetName *string
+	if contractResult.TargetID != nil {
+		targetTx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		target, err := s.TargetRepo.ReadTarget(ctx, targetTx, *contractResult.TargetID)
+		_ = targetTx.Rollback()
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		if target != nil {
+			targetName = &target.Name
+		}
+	}
+
 	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String()))
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
 		Did:                contractResult.DID,
@@ -585,6 +603,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		Responsible:        contractResult.Responsible,
 		Kpis:               kpis,
 		KpiViolations:      kpiViolations,
+		TargetID:           contractResult.TargetID,
+		TargetName:         targetName,
 	}, nil
 }
 
