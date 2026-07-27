@@ -42,13 +42,6 @@ const CALLBACK_SECRET = process.env.E2E_DEPLOYMENT_CALLBACK_SECRET ?? 'bdd-deplo
 /** The shipped ORCE contract-target flow the kind stack runs (values.bdd.yml). */
 const E2E_CONTRACT_TARGET_URL = process.env.E2E_CONTRACT_TARGET_URL ?? 'http://dcs-orce:1880/contract-target/deploy'
 
-/** The bearer token the SPA holds for the currently applied role session. */
-async function currentToken(page: import('@playwright/test').Page): Promise<string> {
-  const token = await page.evaluate(() => window.localStorage.getItem('access_token'))
-  expect(token, 'the applied role session must carry an access token').toBeTruthy()
-  return token!
-}
-
 test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance alert the compliance officer can see', async ({
   page,
   loginAs,
@@ -107,35 +100,46 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
     await test.step('signing auto-deploys it and the target acknowledges, taking the contract ACTIVE', async () => {
       // Nothing is simulated: the auto-deploy subscriber dispatched to the
       // shipped ORCE contract-target flow, whose callback drives SIGNED ->
-      // ACTIVE. Wait for that transition, then read the @id of the field the
-      // ODRL constraint binds — a KPI binds to the constraint by node IRI, not
-      // by label.
-      await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
-      const token = await currentToken(page)
-      let fields: { '@id': string }[] = []
+      // ACTIVE. Both the state and the identifier a KPI reports against are
+      // read off the screen — the contract renders its machine-readable side
+      // beside the document (UC-04), which is where the node IRIs live.
       await expect
         .poll(
           async () => {
-            const res = await page.request.get(`/api/contract/retrieve/${contractDid}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-            if (!res.ok()) return `retrieve ${res.status()}`
-            const body = (await res.json()) as {
-              state?: string
-              contract_data?: { 'dcs:contractFields'?: { '@id': string }[] }
-            }
-            fields = body.contract_data?.['dcs:contractFields'] ?? []
-            return String(body.state ?? '').toUpperCase()
+            await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+            return (
+              await page
+                .getByTestId('contract-state-badge')
+                .innerText()
+                .catch(() => '')
+            )
+              .trim()
+              .toUpperCase()
           },
           {
             message: 'the automatic deployment is acknowledged, driving SIGNED -> ACTIVE',
             timeout: 180_000,
-            intervals: [3_000],
+            intervals: [5_000],
           },
         )
         .toBe('ACTIVE')
-      expect(fields.length, 'the contract declares the ODRL-bound field a KPI can report against').toBeGreaterThan(0)
-      return fields[0]['@id']
+
+      // The machine-readable side sits beside the document it renders, so the
+      // Content tab has to be open before it can be expanded.
+      await page
+        .getByRole('tab', { name: /content/i })
+        .or(page.getByText('Contract Content', { exact: true }))
+        .first()
+        .click()
+      await page.getByTestId('machine-readable-toggle').click()
+      const identifiers = page.getByTestId('machine-readable-field-id')
+      await expect(
+        identifiers.first(),
+        'the machine-readable view names the field a KPI can report against',
+      ).toBeVisible()
+      const iri = (await identifiers.first().innerText()).trim()
+      expect(iri, 'a node IRI, not a label').toContain('#')
+      return iri
     })
 
   const correlationId = await test.step('the contract manager re-dispatches it to the target', async () => {

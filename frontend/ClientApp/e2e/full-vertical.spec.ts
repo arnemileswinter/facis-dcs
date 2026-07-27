@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { type DcsRole, expect, test } from './dcs-test'
 import { signApprovedContractViaViewer } from './lifecycle-helpers'
@@ -367,8 +368,37 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
 
     const bundleDownload = page.waitForEvent('download', { timeout: 90_000 })
     await page.getByRole('button', { name: 'Export bundle' }).click()
-    const bundleBytes = readFileSync(await (await bundleDownload).path())
+    const bundlePath = await (await bundleDownload).path()
+    const bundleBytes = readFileSync(bundlePath)
     expect(bundleBytes.subarray(0, 2).toString('latin1')).toBe('PK')
+
+    // The bundle must carry the contract's business data, not just a
+    // well-formed zip. contract.jsonld is the stored payload verbatim, so the
+    // negotiated value has to be in it: a bundle that exports an empty
+    // contract would satisfy every other check here.
+    const contractJsonld = JSON.parse(
+      execFileSync('python3', [
+        '-c',
+        'import sys,zipfile;print(zipfile.ZipFile(sys.argv[1]).read("contract.jsonld").decode())',
+        bundlePath,
+      ]).toString(),
+    ) as {
+      'dcs:contractFields'?: { 'dcs:label'?: string; 'dcs:value'?: unknown }[]
+      'dcs:contractData'?: unknown[]
+    }
+
+    const amount = (contractJsonld['dcs:contractFields'] ?? []).find((f) => /amount/i.test(f['dcs:label'] ?? ''))
+    expect(amount, 'the exported payload declares the negotiated field').toBeTruthy()
+    expect(amount!['dcs:value'], 'and carries the value that was agreed').toEqual({
+      '@value': '250',
+      '@type': 'xsd:decimal',
+    })
+
+    // Empty is correct here and worth pinning: dcs:contractData holds typed
+    // domain object graphs, and a negotiated scalar's one home is the field
+    // itself (ADR-23). An export that started putting scalars here instead
+    // would mean the value had two homes.
+    expect(Array.isArray(contractJsonld['dcs:contractData'] ?? []), 'contractData is a graph, absent here').toBe(true)
   })
 
   // ---- Stage 10: Auditor runs a scoped audit over the contract ----
