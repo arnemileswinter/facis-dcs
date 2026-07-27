@@ -148,6 +148,10 @@ spec:
             - name: DCS_PUBLIC_URL
               value: {{ include "digital-contracting-service.publicAnchorBaseURL" . | quote }}
             {{- end }}
+            {{- if .Values.contractTargets }}
+            - name: CONTRACT_TARGETS_FILE
+              value: /etc/dcs/contract-targets/targets.json
+            {{- end }}
             {{- if .Values.oid4vp.trust.enabled }}
             - name: OID4VP_TRUST_DATA_PATH
               value: {{ include "digital-contracting-service.oid4vpTrustDataPath" . | quote }}
@@ -312,6 +316,11 @@ spec:
               mountPath: {{ .Values.oid4vp.trust.existingConfigMapMountPath | quote }}
               readOnly: true
           {{- end }}
+          {{- if .Values.contractTargets }}
+            - name: contract-targets
+              mountPath: /etc/dcs/contract-targets
+              readOnly: true
+          {{- end }}
           {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -387,6 +396,11 @@ spec:
             items:
               - key: {{ .Values.oid4vp.trust.existingConfigMapKey | quote }}
                 path: {{ .Values.oid4vp.trust.existingConfigMapKey | quote }}
+      {{- end }}
+      {{- if .Values.contractTargets }}
+        - name: contract-targets
+          configMap:
+            name: {{ include "digital-contracting-service.fullname" . }}-contract-targets
       {{- end }}
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}

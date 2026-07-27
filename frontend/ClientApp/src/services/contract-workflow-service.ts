@@ -17,6 +17,8 @@ import type {
   ContractSearchRequest,
   ContractStoreRequest,
   ContractSubmitRequest,
+  ContractTargetDesignateRequest,
+  ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
 } from '@/models/requests/contract-request'
@@ -38,6 +40,7 @@ import type {
   ContractSearchResponse,
   ContractStoreResponse,
   ContractSubmitResponse,
+  ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
 } from '@/models/responses/contract-response'
@@ -151,6 +154,28 @@ export const contractWorkflowService: ContractWorkflowService = {
 
   async deploy(request: ContractDeployRequest) {
     return http.post<ContractDeployResponse>('/contract/deploy', request).then((res) => res.data)
+  },
+
+  // ---- Contract target systems (ADR-25) ------------------------------------
+
+  async listTargets() {
+    return http.get<ContractTarget[]>('/contract/targets').then((res) => res.data)
+  },
+
+  async createTarget(request: ContractTargetWriteRequest) {
+    return http.post<ContractTarget>('/contract/targets', request).then((res) => res.data)
+  },
+
+  async updateTarget(request: ContractTargetWriteRequest & { id: string }) {
+    return http.put<ContractTarget>('/contract/targets', request).then((res) => res.data)
+  },
+
+  async deleteTarget(id: string) {
+    return http.delete('/contract/targets', { data: { id } }).then((res) => res.data)
+  },
+
+  async designateTarget(request: ContractTargetDesignateRequest) {
+    return http.post('/contract/target/designate', request).then((res) => res.data)
   },
 
   async audit(request: ContractAuditRequest) {

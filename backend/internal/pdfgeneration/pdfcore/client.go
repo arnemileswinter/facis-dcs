@@ -31,15 +31,37 @@ type Client struct {
 	// never lets pdf-core see key material, so every C2PA signature is produced
 	// here and posted back to pdf-core's /c2pa/embed.
 	sign C2PASignFunc
+	// authority is this instance's DID, recorded as the asserting party in every
+	// C2PA lifecycle assertion pdf-core writes for this client's renders. It is
+	// sent per request because pdf-core is stateless and may be shared.
+	authority string
 }
+
+// lifecycleAuthorityHeader carries the asserting instance's DID to pdf-core.
+const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
 
 // New returns a Client pointed at baseURL. sign is the in-process dcs-c2pa
 // signer the two-step render flow uses; it must be non-nil.
 func New(baseURL string, sign C2PASignFunc) *Client {
+	return NewWithAuthority(baseURL, sign, "")
+}
+
+// NewWithAuthority returns a Client that names issuerDID as the party asserting
+// the lifecycle events of every render it requests.
+func NewWithAuthority(baseURL string, sign C2PASignFunc, issuerDID string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		sign:       sign,
+		authority:  strings.TrimSpace(issuerDID),
+	}
+}
+
+// setLifecycleAuthority tags a render request with this instance's DID, leaving
+// the header off entirely when none is configured.
+func (c *Client) setLifecycleAuthority(req *http.Request) {
+	if c.authority != "" {
+		req.Header.Set(lifecycleAuthorityHeader, c.authority)
 	}
 }
 
@@ -131,6 +153,7 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 		return nil, "", fmt.Errorf("pdf-core download request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/ld+json")
+	c.setLifecycleAuthority(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -189,6 +212,7 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 		return nil, "", fmt.Errorf("pdf-core update request: %w", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.setLifecycleAuthority(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

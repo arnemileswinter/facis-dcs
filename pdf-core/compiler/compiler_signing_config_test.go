@@ -26,7 +26,7 @@ func mustTestX5ChainPEM(t *testing.T) string {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "DCS-PDF-CORE test signer"},
+		Subject:               pkix.Name{Organization: []string{"FACIS DCS"}, CommonName: "DCS-PDF-CORE test signer"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		BasicConstraintsValid: true,

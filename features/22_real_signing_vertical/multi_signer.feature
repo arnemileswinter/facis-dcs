@@ -17,6 +17,7 @@ Feature: Multi-signer signing workflow
   Scenario: Both declared signature fields must be signed before the contract activates
     Given contract "Dual Signer Contract" is a fresh draft declaring signature fields "SignerOne" and "SignerTwo"
     And contract "Dual Signer Contract" is submitted, reviewed, and approved via the standard workflow
+    And contract "Dual Signer Contract" deploys to the configured target system
     And a completed signing ceremony exists for field "SignerOne" of contract "Dual Signer Contract"
     And a completed signing ceremony exists for field "SignerTwo" of contract "Dual Signer Contract"
     When the signer of field "SignerOne" applies their signature to contract "Dual Signer Contract"

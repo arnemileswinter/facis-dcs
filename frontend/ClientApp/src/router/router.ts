@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   PencilSquareIcon,
+  ServerStackIcon,
   ShieldCheckIcon,
   ShieldExclamationIcon,
   Square3Stack3DIcon,
@@ -28,6 +29,7 @@ import { authenticationService } from '@/services/authentication-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
+import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
@@ -95,6 +97,9 @@ const ROUTES = {
   },
   NON_COMPLIANCE: {
     INVESTIGATION: 'non_compliance.investigation',
+  },
+  ADMIN: {
+    TARGETS: 'admin.targets',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -440,6 +445,19 @@ const routes: RouteRecordRaw[] = [
       title: 'DCS - Signature Compliance Viewer',
       order: 7,
       roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'CONTRACT_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/targets',
+    name: ROUTES.ADMIN.TARGETS,
+    component: ContractTargetAdminView,
+    meta: {
+      name: 'Target Systems',
+      icon: ServerStackIcon,
+      requiresAuth: true,
+      title: 'DCS - Target Systems',
+      order: 9,
+      roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
   {

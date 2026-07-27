@@ -12,6 +12,7 @@ import { useContractDataPreprocess } from '@contract-workflow-engine/composables
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -51,20 +52,24 @@ const tabs = computed(() =>
   }),
 )
 
+// The view holds its own copy from retrieve-by-id rather than the contracts
+// store, so anything that changes the contract has to re-run THIS fetch: a
+// store refresh leaves contract.value untouched and the page showing stale data.
+const loadContract = async () => {
+  const id = route.params.did
+  if (!id || Array.isArray(id)) return
+  try {
+    contract.value = await contractWorkflowService.retrieveById({ did: id })
+    applyContractDataToDraft(contract.value?.contract_data)
+  } catch (err: unknown) {
+    console.error('Failed to load contract', err)
+  }
+}
+
 watch(
   () => !!route.params.did,
   async (value) => {
-    if (value) {
-      try {
-        const id = route.params.did
-        if (id && !Array.isArray(id)) {
-          contract.value = await contractWorkflowService.retrieveById({ did: id })
-          applyContractDataToDraft(contract.value?.contract_data)
-        }
-      } catch (err: unknown) {
-        console.error('Failed to load contract', err)
-      }
-    }
+    if (value) await loadContract()
   },
   { immediate: true },
 )
@@ -91,6 +96,13 @@ const childContracts = computed(() => contracts.value.filter((c) => c.parent_con
 const contractTitle = computed(
   () => contract.value?.name ?? contract.value?.contract_data?.['dcs:metadata']?.['dcs:title'] ?? contract.value?.did,
 )
+
+// After the target is designated the contract's updated_at moves on, so this
+// view's own copy is re-fetched — otherwise it keeps a stale timestamp that
+// every later action is rejected against, and still shows no target.
+const reloadContract = () => {
+  void loadContract()
+}
 
 onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
@@ -178,6 +190,13 @@ const exportBundle = async () => {
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />
+
+                <!-- Where this contract deploys to (ADR-25) -->
+                <div class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
+                  <div class="card-body gap-2">
+                    <ContractTargetPicker :contract="contract" @designated="reloadContract" />
+                  </div>
+                </div>
 
                 <!-- Deployment KPIs (DCS-FR-CWE-31, DCS-FR-CWE-09) -->
                 <div

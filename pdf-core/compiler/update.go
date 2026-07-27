@@ -319,7 +319,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	var result []byte
 
 	for range 6 {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabelFromHash(manifestHashHex), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabel(hardBindingHash), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
 		if err != nil {
 			return nil, fmt.Errorf("render update manifest: %w", err)
 		}
@@ -809,7 +809,14 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 	if err != nil {
 		return fmt.Errorf("extract original lifecycle timestamp: %w", err)
 	}
-	freshOriginal, err := CompilePDF(ctx, oldPayload, originalCompiledAt)
+	// The asserting instance's DID is carried by the manifest, not the payload,
+	// so a verifier that never saw it must read it back off the document for the
+	// recompilation to reproduce the stored bytes — as with the timestamp above.
+	originalAuthority, err := extractLifecycleAuthority(originalC2PA, 0)
+	if err != nil {
+		return fmt.Errorf("extract original lifecycle authority: %w", err)
+	}
+	freshOriginal, err := CompilePDF(WithLifecycleAuthority(ctx, originalAuthority), oldPayload, originalCompiledAt)
 	if err != nil {
 		return fmt.Errorf("recompile original payload: %w", err)
 	}
@@ -838,6 +845,11 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		if err != nil {
 			return fmt.Errorf("extract lifecycle timestamp for update %d: %w", hop, err)
 		}
+		hopAuthority, err := extractLifecycleAuthority(hopC2PA, hop)
+		if err != nil {
+			return fmt.Errorf("extract lifecycle authority for update %d: %w", hop, err)
+		}
+		hopCtx := WithLifecycleAuthority(ctx, hopAuthority)
 
 		// Re-apply this hop's amendment to the bytes preceding it (which may
 		// themselves embed a PAdES signature or signing-evidence attachment —
@@ -851,9 +863,9 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		remoteManifestURL := extractRemoteManifestURLFromXMP(hopEnd)
 		var freshUpdated []byte
 		if vcPresent && len(embeddedVC) > 0 {
-			freshUpdated, err = UpdatePDFWithOptions(ctx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
+			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
 		} else {
-			freshUpdated, err = UpdatePDFWithOptions(ctx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
+			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
 		}
 		if err != nil {
 			return fmt.Errorf("re-apply update %d: %w", hop, err)

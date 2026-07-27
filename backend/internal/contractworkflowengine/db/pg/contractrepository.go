@@ -110,11 +110,17 @@ func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx
 
 func (r *PostgresContractRepo) ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.Contract, error) {
 	query := `
-        SELECT did, origin, state, name, description,
-               created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
-        FROM contracts_effective
-        WHERE did = $1
+        SELECT ce.did, ce.origin, ce.state, ce.name, ce.description,
+               ce.created_by, ce.created_at, ce.updated_at, ce.contract_version, ce.contract_data,
+               ce.start_date, ce.exp_date, ce.exp_policy, ce.exp_notice_period, ce.responsible,
+               ce.template_did, ce.template_version,
+               -- Joined rather than carried by contracts_effective: that view
+               -- has dependents, so widening it would mean dropping and
+               -- rebuilding them (ADR-25).
+               c.target_id
+        FROM contracts_effective ce
+        JOIN contracts c ON c.did = ce.did
+        WHERE ce.did = $1
     `
 	var ct db.Contract
 	err := tx.GetContext(ctx, &ct, query, did)
@@ -161,9 +167,13 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 			latest.did AS latest_template_did,
 			COALESCE(tpl.state = 'DEPRECATED', FALSE) AS template_is_deprecated,
 			regexp_replace(ce.contract_data->'dcs:parentContract'->>'@id', '^.*/', '') AS parent_contract_did,
-			COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title') AS name
+			COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title') AS name,
+			c.target_id,
+			tgt.name AS target_name
 		FROM contracts_effective_metadata cem
 		LEFT JOIN contracts_effective ce ON ce.did = cem.did
+		LEFT JOIN contracts c ON c.did = cem.did
+		LEFT JOIN contract_targets tgt ON tgt.id = c.target_id
 		LEFT JOIN contract_templates tpl
 			ON tpl.did = cem.template_did
 		LEFT JOIN LATERAL (

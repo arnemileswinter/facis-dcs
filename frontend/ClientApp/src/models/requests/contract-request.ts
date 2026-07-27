@@ -124,3 +124,19 @@ export interface ContractOfferRequest {
   did: string
   updated_at: string
 }
+
+/** Register or change a Contract Target System (ADR-25, UC-09-01). */
+export interface ContractTargetWriteRequest {
+  name: string
+  url: string
+  description?: string
+  enabled?: boolean
+}
+
+/** Point a contract at the target system it deploys to. An empty target_id
+ *  clears the designation. */
+export interface ContractTargetDesignateRequest {
+  did: string
+  updated_at: string
+  target_id?: string
+}
