@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
 
@@ -90,13 +89,13 @@ func (r *PostgresContractTargetRepo) CountContractsDesignating(ctx context.Conte
 	return count, nil
 }
 
-func (r *PostgresContractTargetRepo) DesignateForContract(ctx context.Context, tx *sqlx.Tx, did string, targetID *string, updatedAt time.Time) (bool, error) {
+func (r *PostgresContractTargetRepo) DesignateForContract(ctx context.Context, tx *sqlx.Tx, did string, targetID *string) (bool, error) {
 	const statement = `
         UPDATE contracts
         SET target_id = $2, updated_at = CURRENT_TIMESTAMP
-        WHERE did = $1 AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $3::timestamp)
+        WHERE did = $1
     `
-	result, err := tx.ExecContext(ctx, statement, did, targetID, updatedAt)
+	result, err := tx.ExecContext(ctx, statement, did, targetID)
 	if err != nil {
 		return false, fmt.Errorf("designate target for contract %s: %w", did, err)
 	}

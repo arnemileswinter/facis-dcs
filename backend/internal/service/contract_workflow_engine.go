@@ -1760,12 +1760,27 @@ func (s *contractWorkflowEnginesrvc) DesignateContractTarget(ctx context.Context
 		targetID = &id
 	}
 
-	changed, err := s.TargetRepo.DesignateForContract(ctx, tx, req.Did, targetID, updatedAt)
+	// Staleness is compared at second granularity against the stored value,
+	// the way every other contract mutation does it: updated_at is handed to
+	// clients as RFC3339, which carries no sub-second part, so an exact match
+	// could never succeed.
+	stored, err := s.CRepo.ReadDataByDID(ctx, tx, req.Did)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if stored == nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no contract %s", req.Did))
+	}
+	if updatedAt.Unix() < stored.UpdatedAt.Unix() {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("the contract changed since it was read; reload and try again"))
+	}
+
+	changed, err := s.TargetRepo.DesignateForContract(ctx, tx, req.Did, targetID)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 	if !changed {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("the contract changed since it was read; reload and try again"))
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no contract %s", req.Did))
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)

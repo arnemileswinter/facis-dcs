@@ -65,10 +65,10 @@ type ContractTargetRepo interface {
 	// undeployable with no record of where they were meant to go.
 	CountContractsDesignating(ctx context.Context, tx *sqlx.Tx, id string) (int, error)
 	// DesignateForContract sets (or with a nil targetID clears) the target a
-	// contract deploys to. Guarded by updatedAt so a concurrent edit is
-	// refused rather than silently overwritten, as every other contract
-	// mutation is.
-	DesignateForContract(ctx context.Context, tx *sqlx.Tx, did string, targetID *string, updatedAt time.Time) (bool, error)
+	// contract deploys to. Staleness is checked by the caller against the
+	// stored updated_at, the same second-granularity comparison every other
+	// contract mutation uses.
+	DesignateForContract(ctx context.Context, tx *sqlx.Tx, did string, targetID *string) (bool, error)
 }
 
 type DeploymentRepo interface {
