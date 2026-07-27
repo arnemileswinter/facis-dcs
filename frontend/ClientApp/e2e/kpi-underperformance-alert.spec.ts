@@ -1,4 +1,4 @@
-import { expect, mintSession, test } from './dcs-test'
+import { expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
 
 /**
@@ -10,22 +10,22 @@ import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './
  * whole chain from the officer's and manager's seats, clicking the real
  * controls, and ends on the rendered alert badge rather than on a JSON field.
  *
- * The steps that are not clicks are the two no DCS user performs.
+ * Deployment happens twice here, which is the SRS's own arrangement rather than
+ * a quirk of the fixture: DCS-FR-SM-12 automatically triggers deployment when
+ * signing completes, and UC-05's stimulus is separately "a Contract Manager
+ * submits a signed contract for deployment". So the contract reaches ACTIVE on
+ * its own, and the manager then re-dispatches it by hand — the recovery an
+ * operator needs when a target was unreachable, lost its state, or was replaced.
+ * The state machine treats that as an idempotent ACTIVE -> ACTIVE re-dispatch.
  *
- * Deployment is one of them: DCS-FR-CWE-06 auto-deploys a contract as soon as
- * its signing workflow completes, so it goes SIGNED -> ACTIVE on its own and the
- * manual Deploy button — which only renders while the contract is SIGNED — is
- * never reachable in this flow. Waiting for the automatic deployment is what
- * actually happens; clicking Deploy would be exercising a path the product does
- * not take.
- *
- * The KPI report is the other: the reporter is the contract *target system*, an
- * external party posting over the deployment callback channel with its shared
- * secret. It quotes the correlation id of the automatic deployment, read back
- * from the archive entry.
+ * The one step that is not a click is the KPI report: the reporter is the
+ * contract *target system*, an external party posting over the deployment
+ * callback channel with its shared secret, quoting the correlation id the
+ * manager's deployment returned. No DCS user performs it and no control exists
+ * to click.
  *
  * Every action a DCS *user* performs — author, submit, review, approve, sign,
- * sweep — goes through the real controls as the role that owns it.
+ * deploy, sweep — goes through the real controls as the role that owns it.
  *
  * The threshold is the one buildApprovedContract already authors through the
  * clause editor: an ODRL constraint binding the Payment Amount contract field
@@ -92,33 +92,28 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
       return fields[0]['@id']
     })
 
-  const correlationId = await test.step('read the automatic deployment its callback must quote', async () => {
-    // The callback resolves the deployment by correlation id and refuses an
-    // unknown one, so the target has to quote the real one. It is published on
-    // the contract's archive entry, which is written on SIGNED.
-    // Minted directly rather than via a page: this is a read for a fixture
-    // input, and /archive/search is scoped to Archive Manager, which no view in
-    // this flow belongs to.
-    const token = mintSession('Archive Manager').token
-    let found: string | undefined
-    await expect
-      .poll(
-        async () => {
-          const res = await page.request.get(`/api/archive/search?did=${encodeURIComponent(contractDid)}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (!res.ok()) return false
-          const entries = (await res.json()) as {
-            did?: string
-            evidence?: { deployment?: { correlation_id?: string } }
-          }[]
-          found = entries.find((e) => e.did === contractDid)?.evidence?.deployment?.correlation_id
-          return Boolean(found)
-        },
-        { message: 'the archive entry records the automatic deployment', timeout: 120_000, intervals: [3_000] },
-      )
-      .toBe(true)
-    return found!
+  const correlationId = await test.step('the contract manager re-dispatches it to the target', async () => {
+    // UC-05's stimulus is a Contract Manager submitting a contract for
+    // deployment, and the state machine treats DEPLOY from ACTIVE as an
+    // idempotent re-dispatch — the operator's recovery when a target has to
+    // receive the contract again. Clicking it is what a manager would do, and
+    // the response carries the correlation id the target's callback must quote.
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+    const deploy = page.getByTestId('deploy-contract')
+    await expect(deploy, 'a manager can re-dispatch an active contract to its target').toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(deploy).toHaveText('Redeploy')
+
+    const deployed = page.waitForResponse(
+      (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
+    )
+    await deploy.click()
+    const response = await deployed
+    expect(response.ok(), `redeploy ${response.status()}: ${await response.text()}`).toBeTruthy()
+    const body = (await response.json()) as { correlation_id?: string }
+    expect(body.correlation_id, 'the deployment names the correlation id its callback quotes').toBeTruthy()
+    return body.correlation_id!
   })
 
   await test.step('the target reports a value that breaches the contract threshold', async () => {

@@ -16,7 +16,6 @@ export type DcsRole =
   | 'Contract Manager'
   | 'Contract Signer'
   | 'Auditor'
-  | 'Archive Manager'
   | 'Compliance Officer'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
