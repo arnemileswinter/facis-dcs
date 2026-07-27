@@ -70,6 +70,34 @@ Normalize a route base path to always start with "/" and never end with "/".
 {{- end }}
 
 {{/*
+The /.well-known documents this instance publishes at the HOST ROOT, as a YAML array.
+
+Root-relative on purpose and not derived from route.basePath: a peer resolves a
+did:web by appending /.well-known/did.json to the bare hostname, so these three
+have no base path to inherit. The backend mounts each of them (backend/design/did.go)
+and the ingress must route them to the backend ahead of any broader /.well-known
+claim (Hydra's OIDC discovery, notably).
+*/}}
+{{- define "digital-contracting-service.wellKnownPaths" -}}
+- /.well-known/did.json
+- /.well-known/dcs-agreement-credential.json
+- /.well-known/dcs-federation-rules.md
+{{- end }}
+
+{{/*
+Where pdf-core reads the C2PA x5chain from: the projected Secret when the
+provisioning hook publishes one, otherwise the file the hook leaves on the
+shared token volume.
+*/}}
+{{- define "digital-contracting-service.pdfCoreX5ChainPath" -}}
+{{- if .Values.pkcs11.provisioning.publishSecrets -}}
+{{- printf "/x5chain/%s" (include "digital-contracting-service.pdfCoreX5ChainSecretKey" .) -}}
+{{- else -}}
+{{- printf "%s/c2pa-x5chain.pem" .Values.pkcs11.provisioning.tokenDir -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve PostgreSQL host (explicit override or in-chart default).
 */}}
 {{- define "digital-contracting-service.postgresqlHost" -}}
@@ -363,6 +391,20 @@ in-cluster and externally — combined with publicBaseURL's scheme and path.
 {{- if .Values.route.publicBaseURL -}}
 {{- $u := urlParse .Values.route.publicBaseURL -}}
 {{- printf "%s://%s%s" $u.scheme (include "digital-contracting-service.didHostname" .) $u.path -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Path the backend reads its OID4VP issuer trust document from. An
+operator-supplied ConfigMap wins over the image's baked-in dev fixture, because
+a deployment that must trust a real credential issuer cannot express that in the
+image. The file is at <mountPath>/<key>, matching the volumeMount.
+*/}}
+{{- define "digital-contracting-service.oid4vpTrustDataPath" -}}
+{{- if .Values.oid4vp.trust.existingConfigMap -}}
+{{- printf "%s/%s" (trimSuffix "/" .Values.oid4vp.trust.existingConfigMapMountPath) .Values.oid4vp.trust.existingConfigMapKey -}}
+{{- else -}}
+{{- .Values.oid4vp.trust.dataPath -}}
 {{- end -}}
 {{- end }}
 

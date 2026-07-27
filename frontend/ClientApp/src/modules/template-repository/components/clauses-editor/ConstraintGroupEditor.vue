@@ -24,7 +24,7 @@ import {
  * embed one root group.
  */
 
-defineProps<{
+const props = defineProps<{
   /** Fields offered as a constraint's left operand and negotiated boundary. */
   fields: { id: string; label: string }[]
   /** The title on this group's combinator select (targets the top-level one). */
@@ -64,8 +64,26 @@ function valueOptionGroupsFor(child: AtomicDraft) {
   return groupValueOptions(valueOptionsFor(child))
 }
 
+function isFieldOperand(child: AtomicDraft): boolean {
+  return props.fields.some((field) => field.id === child.leftOperand)
+}
+
+/** The selection key for an option under a given left operand: a field-bound
+ *  option is keyed by its notation (a field holds one distinct value anyway),
+ *  a context-operand option by its concept IRI, which stays unique when
+ *  notations collide across schemes. */
+function optionKey(option: { iri?: string; value: string }, child: AtomicDraft): string {
+  if (isFieldOperand(child)) return option.value
+  return option.iri ?? option.value
+}
+
 function optionOperand(optionValue: string, child: AtomicDraft): OperandDraftValue {
   const option = valueOptionsFor(child).find((item) => item.value === optionValue || item.iri === optionValue)
+  // A field-bound operand carries the option's notation (e.g. "DEU"): the
+  // policy audit compares it against the field's filled dcs:value, which
+  // holds the notation. A context operand (odrl:spatial, odrl:purpose) is
+  // deferred to use-time policy evaluation and keeps the concept IRI.
+  if (isFieldOperand(child)) return { '@value': option?.value ?? optionValue, '@type': 'xsd:string' }
   if (option?.iri) return { '@id': option.iri }
   return { '@value': optionValue, '@type': 'xsd:string' }
 }
@@ -94,7 +112,7 @@ function toggleOption(child: AtomicDraft, optionValue: string) {
   if (selected.has(optionValue)) selected.delete(optionValue)
   else selected.add(optionValue)
   child.values = valueOptionsFor(child)
-    .map((option) => option.iri ?? option.value)
+    .map((option) => optionKey(option, child))
     .filter((value) => selected.has(value))
     .map((value) => optionOperand(value, child))
   child.value = ''
@@ -171,11 +189,11 @@ function resetFixedOperand(child: AtomicDraft) {
           <option value="">choose value</option>
           <option
             v-for="option in valueOptionsFor(child)"
-            :key="option.iri ?? option.value"
-            :value="option.iri ?? option.value"
-            :selected="fixedValueFor(child) === (option.iri ?? option.value)"
+            :key="optionKey(option, child)"
+            :value="optionKey(option, child)"
+            :selected="fixedValueFor(child) === optionKey(option, child)"
           >
-            {{ formatValueOption(option.iri ?? option.value, valueOptionsFor(child)) }}
+            {{ formatValueOption(optionKey(option, child), valueOptionsFor(child)) }}
           </option>
         </select>
         <details v-else-if="!child.rightSource" data-testid="constraint-value-multiselect" class="dropdown max-w-full">
@@ -191,18 +209,18 @@ function resetFixedOperand(child: AtomicDraft) {
               </legend>
               <label
                 v-for="option in catalog.options"
-                :key="option.iri ?? option.value"
+                :key="optionKey(option, child)"
                 class="flex min-h-8 items-center gap-2 rounded px-2 hover:bg-base-200"
               >
                 <input
                   type="checkbox"
                   class="checkbox checkbox-sm checkbox-primary"
-                  :value="option.iri ?? option.value"
-                  :checked="selectedOptionValues(child).includes(option.iri ?? option.value)"
-                  @change="toggleOption(child, option.iri ?? option.value)"
+                  :value="optionKey(option, child)"
+                  :checked="selectedOptionValues(child).includes(optionKey(option, child))"
+                  @change="toggleOption(child, optionKey(option, child))"
                 />
                 <span class="text-sm">
-                  {{ formatValueOption(option.iri ?? option.value, valueOptionsFor(child)) }}
+                  {{ formatValueOption(optionKey(option, child), valueOptionsFor(child)) }}
                 </span>
               </label>
             </fieldset>

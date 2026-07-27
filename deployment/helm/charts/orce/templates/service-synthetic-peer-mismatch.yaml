@@ -8,6 +8,7 @@ runtime crypto or a second deployment. ClusterIP only: this identity is
 resolved in-cluster, by the backend pod's own did:web fetch, never from
 outside the cluster.
 */}}
+{{- if .Values.syntheticPeer.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -22,3 +23,4 @@ spec:
   selector:
     app.kubernetes.io/name: orce
     app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

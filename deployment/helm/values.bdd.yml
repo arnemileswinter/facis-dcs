@@ -72,6 +72,9 @@ identity:
 oid4vp:
   trust:
     xfscAllowUnsignedFallback: true
+    # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
+    # issuer" scenarios) verifies against this baked-in dev cert.
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
   enabled: true
@@ -345,6 +348,11 @@ systemClients:
 
 orce:
   enabled: true
+  # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
+  # did:web against the same ORCE pod; off by default in the chart because it is
+  # a test fixture.
+  syntheticPeer:
+    enabled: true
   persistence:
     enabled: true
   # The contract-target-flow's callback legs (deployment ack + measured KPI,

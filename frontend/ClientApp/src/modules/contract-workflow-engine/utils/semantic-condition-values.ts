@@ -1,5 +1,5 @@
+import { type DcsContractData, type DcsContractField, fieldFillScalar, typedFieldFill } from '@/models/dcs-jsonld'
 import type { SemanticConditionValue } from '@/models/contract-data'
-import type { DcsContractData, DcsContractField } from '@/models/dcs-jsonld'
 
 /**
  * Boundary between the editor's (blockId, conditionId, parameterName)
@@ -32,7 +32,10 @@ export function applyInlineSemanticValues(
     if (value?.parameterValue === undefined) {
       return rest
     }
-    return { ...rest, 'dcs:value': value.parameterValue }
+    return {
+      ...rest,
+      'dcs:value': typedFieldFill(value.parameterValue, field['dcs:datatype']),
+    }
   })
 }
 
@@ -40,12 +43,13 @@ export function applyInlineSemanticValues(
 export function fromDocumentSemanticValues(fields: DcsContractField[]): SemanticConditionValue[] {
   const values: SemanticConditionValue[] = []
   for (const field of fields) {
-    if (field['dcs:value'] === undefined) continue
+    const scalar = fieldFillScalar(field['dcs:value'], field['dcs:datatype'])
+    if (scalar === undefined) continue
     values.push({
       blockId: '',
       conditionId: field['@id'],
       parameterName: field['dcs:label'],
-      parameterValue: field['dcs:value'],
+      parameterValue: scalar,
     })
   }
   return values

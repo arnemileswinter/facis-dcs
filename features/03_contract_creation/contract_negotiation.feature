@@ -12,7 +12,7 @@ Feature: Contract Negotiation
     Then the negotiation interface is displayed
     And I can view all contract clauses
 
-  @clean_db
+  @clean_db @DCS-IR-CWE-03
   Scenario: Add comment to contract clause
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation
@@ -21,7 +21,7 @@ Feature: Contract Negotiation
     And the comment is attributed to my identity
     And the comment includes a timestamp
 
-  @clean_db
+  @clean_db @DCS-FR-CWE-17 @DCS-IR-CWE-03
   Scenario: Propose redline edit to contract clause
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation
@@ -30,7 +30,7 @@ Feature: Contract Negotiation
     And the original text is preserved
     And the redline proposal is visible to other negotiators
 
-  @clean_db
+  @clean_db @DCS-FR-CWE-17 @DCS-FR-CWE-27 @DCS-IR-CWE-04
   Scenario: Track version history during negotiation
     Given I am authenticated with roles: "Contract Manager"
     And contract "Service Agreement" has multiple negotiation edits
@@ -90,7 +90,7 @@ Feature: Contract Negotiation
   # no organization/representative-of-party concept in the data model, only
   # DID membership. FR-CWE-18's intent (only parties may negotiate) is
   # preserved; "Acme Corp"/"TechVendor Inc" party-naming is not.
-  @clean_db
+  @clean_db @DCS-FR-CWE-01
   Scenario: Only parties to contract can negotiate terms
     Given I am authenticated with roles: "Contract Reviewer"
     And contract "Service Agreement" is open for negotiation

@@ -2,18 +2,18 @@
 (features/22_real_signing_vertical/poa_at_signing.feature; UC-14, DCS-FR-SM-03/
 -04/-26).
 
-The signatory presents a fresh PoA credential at the ceremony. The webhook
-verifies it authorizes the very party (the participating instance DID) being
-signed; a missing or wrong-organization PoA blocks signing (UC-14). The
-compliance viewer re-checks every party node in the (possibly peer-synced)
-contract and raises a finding for any that signed without a valid PoA, which is
-recorded as an audit event (FR-SM-04/-26).
+The signatory presents a fresh PoA credential at the ceremony, alongside the
+PID, in one wallet vp_token (ADR-20 — the EUDIPLO webhook this used to go
+through is removed). The callback verifies the PoA authorizes the very party
+(the participating instance DID) being signed; a missing or wrong-organization
+PoA blocks signing (UC-14). The compliance viewer re-checks every party node in
+the (possibly peer-synced) contract and raises a finding for any that signed
+without a valid PoA, which is recorded as an audit event (FR-SM-04/-26).
 """
 
 from __future__ import annotations
 
 import json
-import uuid
 
 from behave import given, then, when
 
@@ -25,24 +25,27 @@ from steps.support.api_client import (
 from steps.support.services.auth_service import AuthService
 from steps.support.services.contract_service import ContractService
 from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
+    CEREMONY_AUD,
     _build_pid_presentation,
-    _complete_ceremony_via_webhook,
+    _complete_ceremony_via_presentation,
+    _fetch_pending_nonce,
 )
 
 
 def _start_party_ceremony(context, name):
     """Start a ceremony for the signing party (the local instance DID) and build
-    the PID presentation the webhook needs, without completing it."""
+    the PID presentation the completion steps need, without completing it."""
     party_did = ContractService._local_peer_did(context)
     did, _ = ContractService._contract_data(context, name)
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
     resp = post_json(context, signature_request_url(context), {"contract_did": did, "field_name": party_did}, headers=signer_h)
     assert resp.status_code == 200, f"/signature/request failed: {resp.status_code} {resp.text}"
     ceremony_id = resp.json()["ceremony_id"]
+    nonce = _fetch_pending_nonce(context, ceremony_id)
     presentation, _issuer, _disc, subject_did = _build_pid_presentation(
-        given_name="PoA Signatory", family_name="BDD-Testperson", aud="dcs-signature-ceremony", nonce=str(uuid.uuid4()),
+        given_name="PoA Signatory", family_name="BDD-Testperson", aud=CEREMONY_AUD, nonce=nonce,
     )
-    context.poa_ceremony = {"id": ceremony_id, "presentation": presentation, "subject_did": subject_did, "party_did": party_did}
+    context.poa_ceremony = {"id": ceremony_id, "presentation": presentation, "subject_did": subject_did, "party_did": party_did, "nonce": nonce}
 
 
 @when('a signing ceremony is started for the signing party of contract "{name}"')
@@ -50,21 +53,21 @@ def step_when_start_party_ceremony(context, name):
     _start_party_ceremony(context, name)
 
 
-@when('the ceremony webhook is completed with no Power of Attorney')
-def step_when_webhook_no_poa(context):
+@when('the ceremony presentation is completed with no Power of Attorney')
+def step_when_presentation_no_poa(context):
     c = context.poa_ceremony
-    context.requests_response = _complete_ceremony_via_webhook(
+    context.requests_response = _complete_ceremony_via_presentation(
         context, c["id"], c["presentation"], c["subject_did"], "PoA Signatory", "BDD-Testperson",
-        poa_organization="",
+        poa_organization="", nonce=c["nonce"],
     )
 
 
-@when('the ceremony webhook is completed with a Power of Attorney for a different party')
-def step_when_webhook_wrong_poa(context):
+@when('the ceremony presentation is completed with a Power of Attorney for a different party')
+def step_when_presentation_wrong_poa(context):
     c = context.poa_ceremony
-    context.requests_response = _complete_ceremony_via_webhook(
+    context.requests_response = _complete_ceremony_via_presentation(
         context, c["id"], c["presentation"], c["subject_did"], "PoA Signatory", "BDD-Testperson",
-        poa_organization="did:web:some-other-org.example",
+        poa_organization="did:web:some-other-org.example", nonce=c["nonce"],
     )
 
 

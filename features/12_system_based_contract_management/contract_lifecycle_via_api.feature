@@ -14,7 +14,7 @@
 @UC-12 @DCS-FR-CWE-13 @DCS-FR-CWE-28
 Feature: Contract lifecycle driven entirely through the API
 
-  @UC-12-01 @UC-12-02 @UC-12-03 @UC-12-05
+  @UC-12-01 @UC-12-02 @UC-12-03 @UC-12-05 @DCS-FR-UC-10-1 @DCS-FR-UC-11-1 @DCS-FR-UC-12-1 @DCS-FR-UC-12-2 @DCS-FR-UC-12-3 @DCS-FR-UC-12-5
   Scenario: Create, review, approve, sign, and archive a contract entirely via API calls
     Given contract "API Lifecycle Contract" is in "Draft" status
     Then the contract "API Lifecycle Contract" has an audit event of type "CREATE_CONTRACT"
@@ -26,8 +26,21 @@ Feature: Contract lifecycle driven entirely through the API
     And the contract "API Lifecycle Contract" has completed signing
     And the archive has an entry for contract "API Lifecycle Contract"
 
-  @UC-12-04
+  @UC-12-04 @DCS-FR-UC-12-4
   Scenario: Contract metadata and history are queryable via API after the lifecycle completes
     Given contract "API Query Contract" has reached contract state "APPROVED"
     When the contract search endpoint is queried with state filter "APPROVED"
     Then the search results include contract "API Query Contract"
+
+  # DCS-FR-CWE-28's rate-limits clause: authenticated API interactions are
+  # budgeted per credential (middleware.RateLimitAuthenticated, fixed
+  # one-minute window, DCS_API_RATE_LIMIT_PER_MINUTE, default 3000). The
+  # hammer uses a DEDICATED credential so the rest of the suite's budgets
+  # are untouched, and a second credential proves the limit is per-client,
+  # not global.
+  @DCS-FR-CWE-28
+  Scenario: API requests beyond the per-credential rate limit are rejected with 429
+    Given a dedicated API credential for rate-limit probing
+    When that credential issues more API requests within a minute than the configured rate limit
+    Then at least one request is rejected with http 429 naming the rate limit
+    And API requests with a different credential still succeed

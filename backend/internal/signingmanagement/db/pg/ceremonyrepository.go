@@ -35,7 +35,10 @@ func (r *PostgresCeremonyRepo) GetCeremonyByID(ctx context.Context, tx *sqlx.Tx,
 		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
 		       prepared_pdf, prepared_pdf_sha256, request_nonce, request_expires_at, credential_type,
 		       published_by, published_holder_did, published_roles, consumed_at,
-		       poa_organization, poa_roles
+		       poa_organization, poa_roles,
+		       pinned_payload, pinned_payload_sha256, pinned_content_hash, pinned_renderer_version,
+		       pinned_signed_count, pinned_contract_version, required_credential_type,
+		       signer_cert_subject, signer_cert_serial
 		  FROM signature_ceremonies
 		 WHERE id = $1`, id,
 	)
@@ -48,16 +51,21 @@ func (r *PostgresCeremonyRepo) GetCeremonyByID(ctx context.Context, tx *sqlx.Tx,
 	return &c, nil
 }
 
+// StorePreparedRequest persists the OID4VP Document-Retrieval publish state
+// (request nonce/expiry, the qualifier the JAR asked for, the publishing
+// signer's context). It does NOT touch prepared_pdf/prepared_pdf_sha256 or the
+// pinned_* columns — those are pinned once, by PinPreparedBytes, from inside
+// the SAME Prepare() call that produced the document this request publishes
+// (ADR-20): publish never re-derives or re-pins the to-be-signed bytes.
 func (r *PostgresCeremonyRepo) StorePreparedRequest(ctx context.Context, tx *sqlx.Tx, req db.PreparedRequest) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE signature_ceremonies
-		   SET prepared_pdf = $2, prepared_pdf_sha256 = $3, request_nonce = $4,
-		       request_expires_at = $5, credential_type = $6, published_by = $7,
-		       published_holder_did = $8, published_roles = $9, consumed_at = NULL
-		 WHERE id = $1 AND status = $10`,
-		req.CeremonyID, req.PreparedPDF, req.PreparedPDFSHA256, req.RequestNonce,
-		req.RequestExpiresAt, req.CredentialType, req.PublishedBy,
-		req.HolderDID, req.Roles, db.CeremonyVerified,
+		   SET request_nonce = $2, request_expires_at = $3, credential_type = $4,
+		       published_by = $5, published_holder_did = $6, published_roles = $7,
+		       consumed_at = NULL
+		 WHERE id = $1 AND status = $8`,
+		req.CeremonyID, req.RequestNonce, req.RequestExpiresAt, req.CredentialType,
+		req.PublishedBy, req.HolderDID, req.Roles, db.CeremonyVerified,
 	)
 	if err != nil {
 		return fmt.Errorf("store prepared request for ceremony %s: %w", req.CeremonyID, err)
@@ -68,6 +76,45 @@ func (r *PostgresCeremonyRepo) StorePreparedRequest(ctx context.Context, tx *sql
 	}
 	if affected == 0 {
 		return fmt.Errorf("ceremony %s is not in %q state", req.CeremonyID, db.CeremonyVerified)
+	}
+	return nil
+}
+
+// PinPreparedBytes persists the exact to-be-signed PDF and JAdES payload, plus
+// the finalize metadata derived alongside them, at every prepare (ADR-20). A
+// later prepare on the same ceremony overwrites the pin with fresh bytes; it
+// does not touch the publish-specific columns StorePreparedRequest owns.
+func (r *PostgresCeremonyRepo) PinPreparedBytes(ctx context.Context, tx *sqlx.Tx, p db.PinnedBytes) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE signature_ceremonies
+		   SET prepared_pdf = $2, prepared_pdf_sha256 = $3,
+		       pinned_payload = $4, pinned_payload_sha256 = $5,
+		       pinned_content_hash = $6, pinned_renderer_version = $7,
+		       pinned_signed_count = $8, pinned_contract_version = $9,
+		       required_credential_type = $10
+		 WHERE id = $1`,
+		p.CeremonyID, p.PreparedPDF, p.PreparedPDFSHA256,
+		p.PinnedPayload, p.PinnedPayloadSHA256,
+		p.PinnedContentHash, p.PinnedRendererVersion,
+		p.PinnedSignedCount, p.PinnedContractVersion, p.RequiredCredentialType,
+	)
+	if err != nil {
+		return fmt.Errorf("pin prepared bytes for ceremony %s: %w", p.CeremonyID, err)
+	}
+	return nil
+}
+
+// RecordSignerCertificate persists the validated signing certificate's
+// subject and serial on the ceremony (sole control evidence, DCS-FR-SM-26).
+func (r *PostgresCeremonyRepo) RecordSignerCertificate(ctx context.Context, tx *sqlx.Tx, ceremonyID, subject, serial string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE signature_ceremonies
+		   SET signer_cert_subject = $2, signer_cert_serial = $3
+		 WHERE id = $1`,
+		ceremonyID, subject, serial,
+	)
+	if err != nil {
+		return fmt.Errorf("record signer certificate for ceremony %s: %w", ceremonyID, err)
 	}
 	return nil
 }

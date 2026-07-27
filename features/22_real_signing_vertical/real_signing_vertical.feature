@@ -1,4 +1,4 @@
-# Real signing vertical - PAdES signature, EUDIPLO signing ceremony, PID
+# Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID
 # binding (SRS: DCS-FR-SM-08/-14/-16/-18, DCS-IR-SI-10, DCS-FR-CWE-04).
 #
 # Harness notes (see steps/real_signing_vertical/
@@ -7,15 +7,17 @@
 #
 #   1. pdf-core's own POST /sign is not reachable from this harness at all
 #      (only the backend is, via BDD_DCS_BASE_URL) - PAdES is exercised
-#      indirectly through POST /signature/apply and by inspecting the PDF
-#      bytes GET /pdf/export/contract/{did} serves afterwards, using the
-#      same direct-byte-search technique established elsewhere in this
-#      codebase's BDD packs.
-#   2. EUDIPLO is never co-deployed here; this harness plays the "EUDIPLO
-#      test client" role itself, POSTing a real, protocol-correct SD-JWT VC +
-#      KB-JWT PID presentation straight at the ceremony webhook
-#      (POST /signature/request/webhook, authenticated via the
-#      X-EUDIPLO-Webhook-Secret shared-secret header), built with the
+#      indirectly through the prepare/submit wallet ceremony (ADR-12/ADR-20;
+#      /signature/apply is gone) and by inspecting the PDF bytes GET
+#      /pdf/export/contract/{did} serves afterwards, using the same
+#      direct-byte-search technique established elsewhere in this codebase's
+#      BDD packs.
+#   2. EUDIPLO is not a dependency of this DCS (ADR-20); this harness plays
+#      the wallet itself, direct_post'ing a real, protocol-correct SD-JWT VC +
+#      KB-JWT vp_token (PID + Power of Attorney, keyed by their DCQL query
+#      ids) straight at the ceremony's own callback
+#      (POST /signature/request/{ceremony_id}/callback, authenticated by the
+#      unguessable ceremony id, not a shared secret), built with the
 #      testWallet/dcs_wallet signing primitives.
 #   3. Byte-level PDF assertions (SubFilter, x5chain, RFC3161 timestamp,
 #      ByteRange coverage) are direct-byte-search heuristics, not a full PDF/
@@ -30,8 +32,8 @@
 # rendering claims are recorded as an explicit coverage gap via the final
 # @skip scenario, not fabricated.
 
-@DCS-FR-SM-16 @DCS-IR-SI-10
-Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
+@DCS-FR-SM-16 @DCS-IR-SI-10 @DCS-FR-UC-04-1
+Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID binding
 
   # ---------------------------------------------------------------------
   # PAdES signature production - pdf-core POST /sign, exercised indirectly
@@ -45,7 +47,7 @@ Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
     Then the signed PDF for contract "RSV AcroForm Contract" contains a PAdES signature naming the signing party AcroForm field
     And the signed PDF for contract "RSV AcroForm Contract" has a structurally valid PAdES ByteRange
 
-  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010
+  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010 @DCS-FR-SM-02 @DCS-IR-CI-08
   Scenario: The PAdES signature declares SubFilter ETSI.CAdES.detached with a full embedded x5chain
     Given contract "RSV SubFilter Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerTwo"
     Then the signed PDF for contract "RSV SubFilter Contract" declares SubFilter ETSI.CAdES.detached
@@ -83,19 +85,19 @@ Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
     Then get http 200:Success code
     And the signature envelope for contract "RSV Apply Fields Contract" reflects the ceremony's signer_did and credential_type "AES"
 
-  @DCS-FR-SM-16 @FR-SM-25 @UC-04-02
+  @DCS-FR-SM-16 @FR-SM-25 @UC-04-02 @DCS-FR-UC-11-1
   Scenario: Apply is refused with a typed error until a completed PID presentation exists for the signer
     Given contract "RSV Ceremony Gate Contract" has reached contract state "APPROVED"
     When contract signer applies a signature to contract "RSV Ceremony Gate Contract" without a prior signing ceremony
     Then the apply request is rejected with a typed ceremony-required error
 
-  @DCS-FR-CWE-04
+  @DCS-FR-CWE-04 @DCS-FR-SM-11
   Scenario: The signature record binds both the PDF hash and the JSON-LD content hash
     Given contract "RSV Dual Hash Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerSix"
     Then the contract_signatures row for contract "RSV Dual Hash Contract" records both a PDF hash and a JSON-LD content hash
 
   # ---------------------------------------------------------------------
-  # EUDIPLO signing ceremony (see steps module docstring point 2)
+  # Wallet-driven signing ceremony (see steps module docstring point 2)
   # ---------------------------------------------------------------------
 
   @FR-SM-14
@@ -111,33 +113,46 @@ Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
     When I start a signing ceremony for contract "RSV Ceremony Denied Contract" field "SignerEight" as "Contract Observer"
     Then the ceremony start request is denied for that role
 
-  @FR-SM-14
+  @FR-SM-14 @DCS-FR-CWE-19 @DCS-FR-SM-24
   Scenario: GET /signature/request/{id} reports the ceremony's lifecycle status as it progresses
     Given contract "RSV Ceremony Status Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerNine"
     When I poll the signing ceremony status for contract "RSV Ceremony Status Contract"
     Then get http 200:Success code
     And the signing ceremony for contract "RSV Ceremony Status Contract" has status "verified"
 
-  @NFR-SEC-18 @FR-SM-14
-  Scenario: The webhook receiver marks the ceremony verified and persists PID claims when the shared secret is correct
+  @ADR-20 @FR-SM-14
+  Scenario: The ceremony callback marks the ceremony verified and persists PID claims when the request nonce is correct
     Given contract "RSV Webhook Auth Contract" has reached contract state "APPROVED"
     When I start a signing ceremony for contract "RSV Webhook Auth Contract" field "SignerTen" as "Contract Signer"
     Then get http 200:Success code
-    When the EUDIPLO webhook confirms the presentation for contract "RSV Webhook Auth Contract" with the correct shared secret
+    When the wallet presentation confirms the ceremony for contract "RSV Webhook Auth Contract" with the correct request nonce
     Then get http 200:Success code
     When I poll the signing ceremony status for contract "RSV Webhook Auth Contract"
     Then the signing ceremony for contract "RSV Webhook Auth Contract" has status "verified"
 
-  @NFR-SEC-18 @FR-SM-14
-  Scenario: The webhook receiver rejects a request presenting an incorrect shared secret
+  @ADR-20 @FR-SM-14
+  Scenario: The ceremony callback rejects a presentation bound to an incorrect request nonce
     Given contract "RSV Webhook Bad Secret Contract" has reached contract state "APPROVED"
     When I start a signing ceremony for contract "RSV Webhook Bad Secret Contract" field "SignerEleven" as "Contract Signer"
     Then get http 200:Success code
-    When a caller posts the EUDIPLO webhook for contract "RSV Webhook Bad Secret Contract" with an incorrect shared secret
-    Then the webhook request is rejected for the incorrect shared secret
+    When a caller posts a ceremony presentation for contract "RSV Webhook Bad Secret Contract" with an incorrect request nonce
+    Then the ceremony presentation is rejected for the incorrect request nonce
+
+  # DCS-FR-SM-13: the signing workflow enforces deadlines — the ceremony's
+  # expires_at (issued at start, ceremonyTTL) is a hard gate at the
+  # presentation callback: a late wallet presentation does not verify and
+  # the signer must start a fresh ceremony (the workflow's retry).
+  @DCS-FR-SM-13 @ADR-20
+  Scenario: The ceremony callback rejects a presentation that arrives after the ceremony deadline
+    Given contract "RSV Ceremony Deadline Contract" has reached contract state "APPROVED"
+    When I start a signing ceremony for contract "RSV Ceremony Deadline Contract" field "SignerDeadline" as "Contract Signer"
+    Then get http 200:Success code
+    When the signing ceremony deadline for contract "RSV Ceremony Deadline Contract" has already passed
+    And the wallet presentation confirms the ceremony for contract "RSV Ceremony Deadline Contract" with the correct request nonce
+    Then the ceremony presentation is rejected because the signing deadline has passed
 
   @UC-04-02
-  Scenario: The ceremony completes headlessly by fulfilling the OID4VP presentation/webhook contract, no wallet UI involved
+  Scenario: The ceremony completes headlessly by fulfilling the OID4VP presentation contract, no wallet UI involved
     Given contract "RSV Headless Ceremony Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerTwelve"
     When I poll the signing ceremony status for contract "RSV Headless Ceremony Contract"
     Then get http 200:Success code
@@ -149,7 +164,7 @@ Feature: Real signing vertical - PAdES signature, EUDIPLO ceremony, PID binding
   # embedded — personal data stays out of the shared PDF (eIDAS/GDPR).
   # ---------------------------------------------------------------------
 
-  @DCS-FR-SM-08 @NFR-SEC-18
+  @DCS-FR-SM-08 @NFR-SEC-18 @DCS-NFR-SEC-18 @DCS-NFR-SQ-04
   Scenario: The signer PID is NOT embedded in the signed PDF (privacy), only the pseudonymous binding
     Given contract "RSV Verbatim Presentation Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerThirteen"
     Then the signer PID for contract "RSV Verbatim Presentation Contract" is NOT embedded in the signed PDF, only the pseudonymous binding

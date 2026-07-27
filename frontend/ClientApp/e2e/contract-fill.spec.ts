@@ -59,9 +59,13 @@ test('filling a placeholder writes the value inline on the placeholder of an odr
   const placeholders = payload.contract_data['dcs:contractFields'] ?? []
   const amount = placeholders.find((ph) => /amount/i.test(ph['dcs:label'] ?? ''))
   expect(amount, 'the payment amount placeholder is in the document').toBeTruthy()
-  // The value lives inline on the placeholder, not in a separate values array;
-  // the decimal-typed placeholder yields a NUMBER, not a string.
-  expect(amount!['dcs:value'], 'the filled value is carried inline on the placeholder').toBe(250)
+  // The value lives inline on the field, not in a separate values array —
+  // serialized as a typed literal carrying the field's declared datatype,
+  // with the exact lexical token the user agreed to.
+  expect(amount!['dcs:value'], 'the filled value is carried inline as a typed literal').toEqual({
+    '@value': '250',
+    '@type': 'xsd:decimal',
+  })
 
   expect(payload.contract_data['dcs:policies']['@type'], 'unsigned contracts stay an odrl:Offer').toBe('odrl:Offer')
 })

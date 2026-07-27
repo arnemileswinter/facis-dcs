@@ -422,7 +422,7 @@ run_e2e_kind_ci: build_dcs_image build_pdf_core_image run_e2e_kind
 run_bdd_audit_kind_ci: build_dcs_image build_pdf_core_image kind_deploy
 	@$(MAKE) run_bdd_audit_kind_once
 
-# The community-packaged EU DSS 6.2 demonstration webapp (visible-PAdES rQES).
+# The community-packaged EU DSS 6.2 demonstration webapp (visible-PAdES wallet-based AES).
 DSS_IMAGE ?= conectx/dss-demo:6.2.1
 
 # Pull (if absent) and load the DSS image into the kind cluster. The DSS is the

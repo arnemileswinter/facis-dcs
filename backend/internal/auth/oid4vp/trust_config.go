@@ -1,6 +1,7 @@
 package oid4vp
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,15 @@ import (
 type TrustConfig struct {
 	VCTs    []string                 `json:"vcts"`
 	Issuers map[string]TrustedIssuer `json:"issuers"`
+
+	// x5cRoots are the trust anchors an x5c-bearing credential's certificate
+	// chain must verify against (OID4VP_X5C_TRUST_ANCHORS_PATH) — a real
+	// EUDI-wallet-issued PID carries its issuer certificate this way, not a
+	// bare JWK. Optional: nil until a real wallet needs it (dev/BDD issue PID
+	// credentials via the JWKS issuer path below, never x5c), but an x5c
+	// credential presented with no roots configured must be REFUSED, never
+	// silently trusted off its own embedded leaf cert.
+	x5cRoots *x509.CertPool
 }
 
 // TrustedIssuer holds verification keys for one issuer DID entry in trust configuration.
@@ -86,4 +96,43 @@ func (c *TrustConfig) IssuerJWKS(iss string) (json.RawMessage, error) {
 	}
 
 	return entry.JWKS, nil
+}
+
+// X5CTrustRoots returns the configured x5c chain-validation trust anchors, or
+// nil if none were loaded (an x5c-bearing credential must then be refused,
+// never accepted off its own embedded leaf cert — see sdjwt.verificationKeyFromX5C).
+func (c *TrustConfig) X5CTrustRoots() *x509.CertPool {
+	if c == nil {
+		return nil
+	}
+	return c.x5cRoots
+}
+
+// SetX5CTrustRoots attaches the x5c chain-validation trust anchors loaded via
+// LoadX5CTrustAnchors. Separate from LoadTrustConfig because the anchors are
+// PEM certificates, not JSON, and are optional (OID4VP_X5C_TRUST_ANCHORS_PATH).
+func (c *TrustConfig) SetX5CTrustRoots(pool *x509.CertPool) {
+	c.x5cRoots = pool
+}
+
+// LoadX5CTrustAnchors reads a PEM bundle of one or more trusted root
+// certificates (ConfigMap mount) that x5c-bearing credential chains must
+// verify against.
+func LoadX5CTrustAnchors(path string) (*x509.CertPool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("x5c trust anchors path is empty")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read x5c trust anchors %q: %w", path, err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		return nil, fmt.Errorf("x5c trust anchors %q: no valid PEM certificates found", path)
+	}
+
+	return pool, nil
 }

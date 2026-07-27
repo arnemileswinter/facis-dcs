@@ -7,6 +7,7 @@ import BuilderPreviewDialog from '@template-repository/components/builder-editor
 import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
 import ClauseEditor from '@template-repository/components/clauses-editor/ClauseEditor.vue'
 import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
@@ -115,6 +116,19 @@ const { isManager } = useTemplatePermissions()
           </div>
           <AddBlockModal />
           <BuilderPreviewDialog />
+        </div>
+
+        <!-- DATA TAB -->
+        <div v-show="activeTab === 'data'">
+          <div class="card border border-base-300 bg-base-100 shadow-sm">
+            <div class="card-body gap-5">
+              <h2 class="card-title text-sm">
+                <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
+                Semantic Data Objects
+              </h2>
+              <DataObjectsEditor mode="template" :editable="templateEditorUiStore.isTemplateEditable" />
+            </div>
+          </div>
         </div>
 
         <!-- META TAB -->

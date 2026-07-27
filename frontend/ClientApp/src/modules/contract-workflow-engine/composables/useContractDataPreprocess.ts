@@ -10,9 +10,10 @@ import type { DcsBlock, DcsContractData, DcsContractField, DcsLayoutNode, OdrlRu
 export interface PreprocessedContractData {
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
-  /** Field declarations consumed by the existing contract form view-model. */
-  contractData: DcsContractField[]
-  domainData: DcsContractData['dcs:contractData']
+  /** Flat dcs:ContractField declarations (the negotiable terms). */
+  contractFields: DcsContractField[]
+  /** Typed domain objects binding to fields by @id. */
+  contractData: DcsContractData['dcs:contractData']
   /** Flattened from the stored enclosing odrl:Set — dcsDraftStore keeps the flat rule array as its internal source of truth. */
   policies: OdrlRule[]
   semanticConditionValues: SemanticConditionValue[]
@@ -32,8 +33,8 @@ export function useContractDataPreprocess() {
     return {
       blocks: contractData['dcs:documentStructure']['dcs:blocks']['@list'],
       layout: contractData['dcs:documentStructure']['dcs:layout']['@list'],
-      contractData: contractData['dcs:contractFields'],
-      domainData: contractData['dcs:contractData'],
+      contractFields: contractData['dcs:contractFields'],
+      contractData: contractData['dcs:contractData'],
       policies: flattenPolicySet(contractData['dcs:policies']),
       semanticConditionValues: fromDocumentSemanticValues(collectDeclaredRequirements(contractData)),
       derivedFromTemplate: contractData.derivedFromTemplate,

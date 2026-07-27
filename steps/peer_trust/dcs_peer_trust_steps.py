@@ -24,31 +24,46 @@ Untrusted-peer single-instance testing technique
 ------------------------------------------------
 The did:web challenge-response signature (see backend/internal/service/
 dcs_to_dcs.go's PostPdf): the caller signs a fresh `secret_value` with its
-private key, and the receiving instance resolves
-`https://<hostname>/.well-known/did.json` (hostname derived ONLY from the
-did:web host component — see `identity.DIDWebToHostname`, which stops at the
-first ":" after the "did:web:" prefix and ignores everything after) to fetch
-the matching public key.
+private key, and the receiving instance resolves the peer's did:web
+identifier to a document URL (`identity.FetchDIDDocument` ->
+`DIDWebPath`/`DIDWebDocumentPath`) to fetch the matching public key.
 
-That means a did:web identifier of the shape
-`<this-instance's-own-did:web-id>:<arbitrary-suffix>` resolves, hostname-wise,
-to THIS SAME running instance's own `/.well-known/did.json` (AND, per
-ADR-19, its own `/.well-known/dcs-agreement-credential.json`) and dev private
-key — so signing with that key produces a genuinely valid signature for that
-synthetic identifier, without needing a second real DCS process. Crucially
-the synthetic identifier is a DIFFERENT STRING than the instance's real DID
-id, so it does not trip PostPdf's separate same-peer guard
+Resolution follows did-method-web, so PATH SEGMENTS ARE PART OF THE
+IDENTITY: `did:web:<host>:<suffix>` resolves to
+`https://<host>/<suffix>/did.json`, NOT to `<host>`'s
+`/.well-known/did.json`. A synthetic peer therefore cannot be minted by
+appending an arbitrary suffix to this instance's own DID — that names a
+document this instance does not serve, and PostPdf then fails at its very
+first step (FetchDIDDocument) long before any trust-gate layer runs.
+
+What DOES yield a self-resolving synthetic peer is percent-encoding: the
+resolver percent-decodes each component (`url.QueryUnescape` per part), so
+re-encoding one already-ASCII character of the host produces a DIFFERENT DID
+STRING that decodes to the SAME authority (see
+`_self_resolving_peer_variant`). Such an identifier resolves to THIS SAME
+running instance's own `/.well-known/did.json`, its own
+`/.well-known/dcs-agreement-credential.json` and its own signing key, so
+layers 1/2 (challenge-response) and layer 3a (agreement credential: valid
+signature, issuer resolving to the same target, matching rules hash) all pass
+GENUINELY, leaving layer 3b — the PDP — as the only gate under test. Being a
+different string, it also does not trip PostPdf's separate same-peer guard
 (`req.FromPeerDid == localPeer`), which would otherwise reject
-self-simulated same-DID requests for an unrelated reason and make the
-untrusted-peer test dishonest.
+self-simulated same-DID requests for an unrelated reason and make the test
+dishonest.
 
-Because the synthetic peer's agreement credential resolves to THIS
-instance's own (not yet implemented) endpoint, "missing credential" is
-directly and honestly simulatable today (the endpoint 404s). A
-"signature-invalid" or "hash-mismatched" peer credential is NOT simulatable
-this way, since we cannot make our own instance publish a broken credential
-about itself without touching backend code — those sub-cases are flagged as
-open points at their respective scenarios rather than faked.
+Consequence: this identity is CONSTANT per instance rather than unique per
+scenario (uniqueness would require a distinguishing path segment, which is
+exactly what resolution now makes meaningful). Nothing here needs a unique
+peer — every assertion is scoped by the scenario's own contract DID, and
+`RecordDenialIncidentTxDeduped` dedupes on (contract DID, peer DID,
+direction), whose contract-DID component is already per-scenario unique.
+
+A peer with a MISSING credential (layer 3a fails) is simulated separately via
+the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), and one
+with a valid-but-wrong-hash credential via a second orce route
+(`_orce_mismatch_peer_credentials`) — this instance cannot be made to publish
+a broken credential about itself. A "signature-invalid" credential remains
+uncovered and is flagged as an open point at its scenario rather than faked.
 
 This technique is the natural single-instance extension of the self-peer
 simulation used by the contract-state-machine pack (see
@@ -121,13 +136,48 @@ def _own_identity(context):
     return real_did, token_dir
 
 
-def _synthetic_peer_credentials(context, marker: str):
+def _self_resolving_peer_variant(real_did: str) -> str:
+    """Re-encode one character of a did:web identifier's host component, so the
+    result is a DIFFERENT DID STRING that resolves to exactly the SAME target.
+
+    did:web resolution percent-decodes each colon-separated component
+    (identity.DIDWebPath -> url.QueryUnescape), so "%64cs.example%3A8080" and
+    "dcs.example%3A8080" denote one and the same authority. That is what makes
+    a single-instance synthetic peer possible at all now that path segments are
+    part of the identity (see module docstring): the peer's did.json,
+    agreement credential and rules hash are this instance's own real,
+    self-consistent ones, while the identifier is still not the instance's own
+    DID string and so clears PostPdf's same-peer guard.
+
+    The first host character is the one re-encoded — always present (an empty
+    host is rejected by the resolver) and, for a hostname, always ASCII, so a
+    single %XX byte is a faithful encoding of it.
+    """
+    prefix = "did:web:"
+    assert real_did.startswith(prefix), f"not a did:web identifier: {real_did}"
+    rest = real_did[len(prefix):]
+    host_encoded, _, suffix = rest.partition(":")
+    assert host_encoded, f"did:web identifier has empty host component: {real_did}"
+    first = host_encoded[0]
+    assert first != "%", (
+        f"host component of {real_did} already starts with a percent-escape; re-encoding its "
+        "first character would corrupt that escape rather than rename it"
+    )
+    assert first.isascii(), (
+        f"host component of {real_did} starts with non-ASCII {first!r}; a single-byte %XX escape "
+        "would not faithfully encode it (expected an IDNA/ASCII hostname)"
+    )
+    variant_host = f"%{ord(first):02X}{host_encoded[1:]}"
+    return prefix + variant_host + (f":{suffix}" if suffix else "")
+
+
+def _synthetic_peer_credentials(context):
     """Build a syntactically valid, cryptographically genuine did:web peer
     identity that is NOT this instance's own DID string (see module
     docstring) and a matching challenge-response signature over a fresh
     secret_value."""
     real_did, token_dir = _own_identity(context)
-    synthetic_did = f"{real_did}:{marker}-{uuid.uuid4()}"
+    synthetic_did = _self_resolving_peer_variant(real_did)
     secret_value = str(uuid.uuid4())
     signature = _sign_secret_value_with_dev_key(token_dir, secret_value)
     secret_hash = base64.b64encode(signature).decode()
@@ -144,9 +194,16 @@ def _orce_synthetic_peer_did() -> str:
     credential endpoint deliberately 404s (layer 3a genuinely fails, not by
     absence of an endpoint that has since been implemented). The exact DID
     string is a live contract with the deployment side — override via
-    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed; the default
-    below matches the currently agreed format."""
-    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880:synthetic-peer")
+    BDD_TRUST_PDP_SYNTHETIC_PEER_DID once confirmed/changed.
+
+    A BARE AUTHORITY, deliberately: the flow serves this identity at the host
+    root and distinguishes it from the AC5 mismatch identity by Host header,
+    not by path. It previously carried a ":synthetic-peer" segment, which only
+    resolved because did:web resolution discarded path segments — with
+    resolution following the spec, that segment would point every lookup
+    (did.json, agreement credential, and the peer API the synchronizer ships
+    to) at paths this fixture does not serve."""
+    return os.getenv("BDD_TRUST_PDP_SYNTHETIC_PEER_DID", "did:web:dcs-orce%3A1880")
 
 
 def _orce_synthetic_peer_credentials(context):
@@ -236,7 +293,7 @@ def step_given_peer_identity(context):
     3a) and the PDP (layer 3b), each exercised by its own dedicated Given
     step (this file's "...publishes no agreement credential..." below;
     steps/peer_trust/dcs_trust_pdp_steps.py's PDP-stub Givens)."""
-    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context, "bdd-peer")
+    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context)
     context.peer_from_did = synthetic_did
     context.peer_secret_value = secret_value
     context.peer_secret_hash = secret_hash
@@ -759,224 +816,51 @@ def step_then_contract_offered_on_b(context, expected):
     )
 
 
-@when(
-    "the parties complete negotiation acceptance, submit, review, and approval on both sides"
-)
-def step_when_full_approval_cross_instance(context):
+@when("instance A drives the contract to APPROVED through its own local workflow")
+def step_when_drive_to_approved_locally(context):
+    """OFFERED -> NEGOTIATION -> SUBMITTED -> REVIEWED -> APPROVED, entirely
+    on instance A (ADR-13: each DCS runs its own workflow; a counterparty
+    create assigns all RBAC roles to A's own peer). Same two-submit pattern
+    as the single-instance state-machine pack: A is the sole negotiator and
+    there are no open negotiation decisions."""
     c_did = context.cross_instance_contract_did
-
     with _as_instance(context, context.base_url_a):
         creator_h = context.cross_instance_creator_headers
-
-        # Draft/Offered -> Negotiation -> Submitted (creator submits twice,
-        # same pattern as the single-instance contract-state-machine pack).
-        # This exercises the Offered -> Negotiation edge of the transition
-        # table (contractstate/transition.go, Offered branch).
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
-        assert retrieve.status_code == 200, retrieve.text
-        updated_at = retrieve.json().get("updated_at")
-
-        submit_payload = {
-            "did": c_did,
-            "updated_at": updated_at,
-            "reviewers": [context.peer_did_a],
-            "approvers": [context.peer_did_b],
-            "negotiators": [context.peer_did_b],
-        }
-        first_submit = post_json(context, f"{context.base_url_a}/contract/submit", submit_payload, headers=creator_h)
-        context.requests_response = first_submit
-        if first_submit.status_code != 200:
-            return  # surfaced to the Then step below
-
-    # Negotiation -> Submitted is gated by submit.go's Negotiation branch on
-    # IsValidNegotiator(cmd.CauserDID) — the CAUSER must itself be a listed
-    # negotiator. Since B (not A) is the sole negotiator here, this can only
-    # be satisfied by B itself calling negotiate/respond/submit against its
-    # own endpoint; B's local copy has Origin=A, so each of these calls
-    # transparently forwards to A via the existing peer-action machinery
-    # (negotiate.go / acceptnegotiation.go both do the same
-    # `Origin != localPeer` forwarding check already proven by the
-    # cross-instance offer replication) — no manual peer-action signing
-    # needed here, unlike the untrusted-peer simulation scenarios.
-    with _as_instance(context, context.base_url_b):
-        negotiator_h = AuthService.get_headers_for_roles(["Contract Negotiator"], api_base=context.base_url_b)
-
-        retrieve_b = get_with_headers(context, f"{context.base_url_b}/contract/retrieve/{c_did}", headers=negotiator_h)
-        assert retrieve_b.status_code == 200, (
-            f"Expected instance B to already have the contract replicated before negotiating: "
-            f"{retrieve_b.status_code} {retrieve_b.text}"
-        )
-
-        # negotiate() forwards to A (the origin) since B isn't origin, so the
-        # optimistic-concurrency check there compares against A's actual
-        # updated_at — read that directly rather than risking a stale value
-        # from B's replica (which only catches up asynchronously via
-        # post_sync).
-        retrieve_fresh = get_with_headers(context, f"{context.base_url_a}/contract/retrieve/{c_did}", headers=creator_h)
-        assert retrieve_fresh.status_code == 200, retrieve_fresh.text
-        updated_at_fresh = retrieve_fresh.json().get("updated_at")
-
-        negotiate_resp = post_json(
-            context,
-            f"{context.base_url_b}/contract/negotiate",
-            {
-                "did": c_did,
-                "updated_at": updated_at_fresh,
-                "negotiated_by": "instance-b-negotiator",
-                # negotiationmerging.ChangeRequest is a struct of optional
-                # pointer fields — an empty object is a valid "no actual
-                # changes, just closing out the negotiation round" proposal.
-                "change_request": {},
-            },
-            headers=negotiator_h,
-        )
-        context.requests_response = negotiate_resp
-        if negotiate_resp.status_code != 200:
-            return
-
-    # The negotiation record (and its id, needed to respond to it) only
-    # exists authoritatively on A (the origin) — read it back from there.
-    with _as_instance(context, context.base_url_a):
-        retrieve_a = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
-        assert retrieve_a.status_code == 200, retrieve_a.text
-        negotiations = retrieve_a.json().get("negotiations") or []
-        assert negotiations, f"Expected at least one negotiation record on instance A after B's negotiate call, got: {retrieve_a.text}"
-        negotiation_id = negotiations[-1].get("id")
-        assert negotiation_id, f"Negotiation record has no id: {negotiations[-1]}"
-
-    with _as_instance(context, context.base_url_b):
-        # Accept as a DIFFERENT organization than the one that proposed the
-        # change above (negotiator_h) — acceptnegotiation.go's
-        # conflict-of-interest guard (FR-CWE-07) now rejects a respond call
-        # whose participant identity (the OID4VP credential's organization
-        # claim) matches the negotiation's created_by, and both would
-        # otherwise default to the same organization ("Acme Corp") since
-        # neither call overrides it. This is orthogonal to the peer-DID
-        # authorization (IsValidNegotiator/CauserDID) this scenario is
-        # actually testing, which is unaffected by which organization the
-        # accepting credential carries.
-        accepting_negotiator_h = AuthService.get_headers_for_roles(
-            ["Contract Negotiator"], api_base=context.base_url_b, organization="TechVendor Inc"
-        )
-        respond_resp = post_json(
-            context,
-            f"{context.base_url_b}/contract/respond",
-            {"id": negotiation_id, "did": c_did, "action_flag": "ACCEPTING"},
-            headers=accepting_negotiator_h,
-        )
-        context.requests_response = respond_resp
-        if respond_resp.status_code != 200:
-            return
-
-        # Forwarded writes mutate A's (the origin's) row directly; B's own
-        # local replica only catches up later via the async post_sync
-        # broadcast, so read the authoritative updated_at from A itself
-        # (a plain f-string URL, not the context.base_url-reading
-        # contract_retrieve_by_id_url helper, since context.base_url is
-        # currently swapped to B inside this _as_instance block).
-        retrieve_fresh = get_with_headers(context, f"{context.base_url_a}/contract/retrieve/{c_did}", headers=creator_h)
-        assert retrieve_fresh.status_code == 200, retrieve_fresh.text
-        updated_at_fresh = retrieve_fresh.json().get("updated_at")
-
-        negotiator_submit_payload = {
-            "did": c_did,
-            "updated_at": updated_at_fresh,
-            "reviewers": [context.peer_did_a],
-            "approvers": [context.peer_did_b],
-            "negotiators": [context.peer_did_b],
-        }
-        negotiator_submit = post_json(
-            context, f"{context.base_url_b}/contract/submit", negotiator_submit_payload, headers=negotiator_h,
-        )
-        context.requests_response = negotiator_submit
-        if negotiator_submit.status_code != 200:
-            return
-
-        # Since a real negotiation record existed for this contract_version,
-        # submit.go's Negotiation branch merges the accepted change and bumps
-        # contract_version instead of advancing to Submitted (see
-        # negotiationmerging.MergeChangeRequests) — the round stays in
-        # Negotiation. The new version has no negotiation record of its own
-        # yet, so submitting once more (still as B, the only negotiator)
-        # finds no open negotiations and actually advances to Submitted.
-        retrieve_after_merge = get_with_headers(context, f"{context.base_url_a}/contract/retrieve/{c_did}", headers=creator_h)
-        assert retrieve_after_merge.status_code == 200, retrieve_after_merge.text
-        after_merge_body = retrieve_after_merge.json()
-        if after_merge_body.get("state", "").upper() == "NEGOTIATION":
-            negotiator_submit_payload["updated_at"] = after_merge_body.get("updated_at")
-            negotiator_submit_2 = post_json(
-                context, f"{context.base_url_b}/contract/submit", negotiator_submit_payload, headers=negotiator_h,
+        for _ in range(2):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+            assert retrieve.status_code == 200, retrieve.text
+            resp = post_json(
+                context,
+                f"{context.base_url_a}/contract/submit",
+                {"did": c_did, "updated_at": retrieve.json().get("updated_at")},
+                headers=creator_h,
             )
-            context.requests_response = negotiator_submit_2
-            if negotiator_submit_2.status_code != 200:
-                return
+            assert resp.status_code == 200, f"submit failed: {resp.status_code} {resp.text}"
 
-    with _as_instance(context, context.base_url_a):
         reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_a)
         retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=reviewer_h)
-        updated_at = retrieve.json().get("updated_at")
+        assert retrieve.status_code == 200, retrieve.text
         review_submit = post_json(
             context,
             f"{context.base_url_a}/contract/submit",
-            {"did": c_did, "updated_at": updated_at, "forward_to": "approval"},
+            {"did": c_did, "updated_at": retrieve.json().get("updated_at"), "forward_to": "approval"},
             headers=reviewer_h,
         )
-        context.requests_response = review_submit
-        if review_submit.status_code != 200:
-            return
-
-    with _as_instance(context, context.base_url_b):
-        approver_h = AuthService.get_headers_for_roles(["Contract Approver"], api_base=context.base_url_b)
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=approver_h)
-        assert retrieve.status_code == 200, (
-            f"Expected the contract to already be replicated to instance B before B's approver "
-            f"acts, got {retrieve.status_code}: {retrieve.text}"
+        assert review_submit.status_code == 200, (
+            f"reviewer forward-to-approval failed: {review_submit.status_code} {review_submit.text}"
         )
-        # As above: B's approve forwards to A (the origin), so use A's
-        # authoritative updated_at rather than B's possibly-stale replica
-        # (the post_sync catch-up from the reviewer's submit on A may not
-        # have landed on B yet).
-        retrieve_fresh = get_with_headers(context, f"{context.base_url_a}/contract/retrieve/{c_did}", headers=creator_h)
-        assert retrieve_fresh.status_code == 200, retrieve_fresh.text
-        updated_at = retrieve_fresh.json().get("updated_at")
+
+        approver_h = AuthService.get_headers_for_roles(["Contract Approver"], api_base=context.base_url_a)
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=approver_h)
+        assert retrieve.status_code == 200, retrieve.text
         approve = post_json(
-            context, f"{context.base_url_b}/contract/approve", {"did": c_did, "updated_at": updated_at},
+            context,
+            f"{context.base_url_a}/contract/approve",
+            {"did": c_did, "updated_at": retrieve.json().get("updated_at")},
             headers=approver_h,
         )
+        assert approve.status_code == 200, f"approve failed: {approve.status_code} {approve.text}"
         context.requests_response = approve
-
-
-@then("the contract state APPROVED is replicated on both instance A and instance B")
-def step_then_approved_replicated_both(context):
-    assert context.requests_response.status_code == 200, (
-        "Expected the full submit/review/approve sequence to complete, got "
-        f"{context.requests_response.status_code}: {context.requests_response.text}"
-    )
-    c_did = context.cross_instance_contract_did
-    manager_h_a = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_a)
-    manager_h_b = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_b)
-
-    for label, base_url, headers in (
-        ("A", context.base_url_a, manager_h_a),
-        ("B", context.base_url_b, manager_h_b),
-    ):
-        deadline = time.monotonic() + 45
-        actual_state = None
-        last_resp = None
-        while time.monotonic() < deadline:
-            last_resp = _requests.get(
-                f"{base_url}/contract/retrieve/{c_did}", headers=headers, timeout=context.http_timeout_seconds
-            )
-            if last_resp.status_code == 200:
-                actual_state = str(last_resp.json().get("state", "")).upper()
-                if actual_state == "APPROVED":
-                    break
-            time.sleep(1)
-        assert actual_state == "APPROVED", (
-            f"Expected contract state APPROVED to be replicated on instance {label}, last "
-            f"observed state: '{actual_state}' (last response: "
-            f"{last_resp.status_code if last_resp else 'n/a'} {last_resp.text if last_resp else ''})"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -989,17 +873,24 @@ def step_when_sign_cross_instance(context):
     # Reuses the real-signing pack's ceremony machinery verbatim — every URL
     # builder reads context.base_url, which _as_instance swaps to A.
     from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
+        CEREMONY_AUD,
         _build_pid_presentation,
-        _complete_ceremony_via_webhook,
+        _complete_ceremony_via_presentation,
+        _fetch_pending_nonce,
     )
 
     with _as_instance(context, context.base_url_a):
         c_did = context.cross_instance_contract_did
+        # The seeded signature fields name the PARTIES (create.go
+        # seedSignatureFields: one field per instance DID), and the ceremony's
+        # PoA must authorize exactly the signed party (UC-14) — so the field
+        # is A's own peer DID.
+        field_name = context.peer_did_a
         signer_h = AuthService.get_headers_for_roles(["Contract Signer"], api_base=context.base_url_a)
         start = post_json(
             context,
             signature_request_url(context),
-            {"contract_did": c_did, "field_name": "PeerRevocationSigner"},
+            {"contract_did": c_did, "field_name": field_name},
             headers=signer_h,
         )
         assert start.status_code == 200, (
@@ -1008,16 +899,18 @@ def step_when_sign_cross_instance(context):
         ceremony_id = start.json().get("ceremony_id")
         assert ceremony_id, f"/signature/request response has no ceremony_id: {start.text}"
 
+        nonce = _fetch_pending_nonce(context, ceremony_id)
         given_name, family_name = "PeerRevocation", "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
             given_name=given_name, family_name=family_name,
-            aud="dcs-signature-ceremony", nonce=str(uuid.uuid4()),
+            aud=CEREMONY_AUD, nonce=nonce,
         )
-        webhook = _complete_ceremony_via_webhook(
-            context, ceremony_id, presentation, subject_did, given_name, family_name
+        completion = _complete_ceremony_via_presentation(
+            context, ceremony_id, presentation, subject_did, given_name, family_name,
+            poa_organization=field_name, nonce=nonce,
         )
-        assert webhook.status_code == 200, (
-            f"ceremony webhook failed on instance A: {webhook.status_code} {webhook.text}"
+        assert completion.status_code == 200, (
+            f"ceremony presentation failed on instance A: {completion.status_code} {completion.text}"
         )
 
         manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_a)
@@ -1030,9 +923,10 @@ def step_when_sign_cross_instance(context):
             c_did,
             signer_did=subject_did,
             signatory=given_name,
-            field_name="PeerRevocationSigner",
+            field_name=field_name,
             credential_type="AES",
             headers=signer_h,
+            ceremony_id=ceremony_id,
         )
         assert apply_resp.status_code == 200, (
             f"wallet signing failed on instance A: {apply_resp.status_code} {apply_resp.text}"

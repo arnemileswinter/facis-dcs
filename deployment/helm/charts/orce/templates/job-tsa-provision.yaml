@@ -63,6 +63,10 @@ spec:
       containers:
         - name: tsa-provision
           image: alpine:3.19
+          {{- with (.Values.jobResources | default .Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: K8S_NAMESPACE
               valueFrom:

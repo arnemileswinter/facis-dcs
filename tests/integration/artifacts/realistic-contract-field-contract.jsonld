@@ -274,132 +274,134 @@
         }
       ]
     },
-    "dcs:layout": [
-      {
-        "@id": "did:web:example:contract:realistic-service#block-root",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-parties"
-            },
-            {
-              "@id": "did:web:example:contract:realistic-service#block-service"
-            },
-            {
-              "@id": "did:web:example:contract:realistic-service#block-payment"
-            },
-            {
-              "@id": "did:web:example:contract:realistic-service#block-sla"
-            },
-            {
-              "@id": "did:web:example:contract:realistic-service#block-legal"
-            }
-          ]
+    "dcs:layout": {
+      "@list": [
+        {
+          "@id": "did:web:example:contract:realistic-service#block-root",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-parties"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-service"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-payment"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-sla"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-legal"
+              }
+            ]
+          },
+          "dcs:isRoot": true
         },
-        "dcs:isRoot": true
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-parties",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-parties"
-            }
-          ]
+        {
+          "@id": "did:web:example:contract:realistic-service#block-parties",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-parties"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-parties",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-service",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-service"
+              },
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-term"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-service",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-term",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-payment",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-payment"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-payment",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-sla",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-sla"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-sla",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-legal",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": [
+              {
+                "@id": "did:web:example:contract:realistic-service#block-clause-legal"
+              }
+            ]
+          }
+        },
+        {
+          "@id": "did:web:example:contract:realistic-service#block-clause-legal",
+          "@type": "dcs:LayoutNode",
+          "dcs:children": {
+            "@list": []
+          }
         }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-parties",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-service",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-service"
-            },
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-term"
-            }
-          ]
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-service",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-term",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-payment",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-payment"
-            }
-          ]
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-payment",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-sla",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-sla"
-            }
-          ]
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-sla",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-legal",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": [
-            {
-              "@id": "did:web:example:contract:realistic-service#block-clause-legal"
-            }
-          ]
-        }
-      },
-      {
-        "@id": "did:web:example:contract:realistic-service#block-clause-legal",
-        "@type": "dcs:LayoutNode",
-        "dcs:children": {
-          "@list": []
-        }
-      }
-    ]
+      ]
+    }
   },
   "dcs:metadata": {
     "@id": "did:web:example:contract:realistic-service#metadata",

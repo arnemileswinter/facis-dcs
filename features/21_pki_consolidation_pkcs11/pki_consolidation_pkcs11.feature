@@ -39,7 +39,7 @@
 @DCS-IR-HI-01 @DCS-NFR-SEC-02
 Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rotation
 
-  @DCS-IR-HI-01
+  @DCS-IR-HI-01 @DCS-IR-SI-12 @DCS-NFR-SEC-06
   Scenario: A correctly PKCS#11-configured backend is reachable and serves its HSM-backed DID document
     # See the header comment for why only the positive path is modeled: a
     # reachable, 200-responding /.well-known/did.json can only happen if
@@ -114,7 +114,7 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     # of pass/fail counts.
     Given I am authenticated with roles: "Contract Manager"
 
-  @DCS-OR-C2PA-007
+  @DCS-OR-C2PA-007 @DCS-IR-CI-09
   Scenario: Revoking the dev signing certificate in the CRL flips a previously valid signature to invalid
     Given contract "PKI CRL Revocation Contract" has reached contract state "SIGNED"
     And signature validation for contract "PKI CRL Revocation Contract" currently reports no certificate-revocation finding
@@ -123,16 +123,16 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     Then get http 200:Success code
     And signature validation for contract "PKI CRL Revocation Contract" reports the certificate as revoked
 
-  @DCS-OR-C2PA-007
-  Scenario: A historical signature made with the old HSM key keeps validating after rotation, while a new signature uses the new key
-    Given I am authenticated with roles: "Contract Manager"
-    And contract "PKI Rotation Old Contract" has reached contract state "SIGNED"
-    When I validate the signature for contract "PKI Rotation Old Contract"
-    Then get http 200:Success code
-    And signature validation for contract "PKI Rotation Old Contract" reports the signature as still valid after rotation
-    Given the active dcs-contract-pades HSM key version has been rotated to a new version
-    And contract "PKI Rotation New Contract" has reached contract state "SIGNED"
-    When I validate the signature for contract "PKI Rotation Old Contract"
-    Then get http 200:Success code
-    And signature validation for contract "PKI Rotation Old Contract" reports the signature as still valid after rotation
-    And the applied signatures for contracts "PKI Rotation Old Contract" and "PKI Rotation New Contract" are attributed to different HSM key versions
+  # A prior version of this pack covered dcs-contract-pades key rotation
+  # (a historical PAdES contract signature staying valid across a version
+  # bump, old vs new signatures attributed to distinct key versions). That
+  # key, and the DCS-as-signatory PAdES signing path that produced such
+  # signatures, is gone by design (ADR-20/ADR-12: the DCS holds no contract-
+  # signing key: the wallet signs, DCS only validates and records). Contract
+  # signatures no longer carry any DCS HSM key attribution to rotate. No
+  # remaining DCS-held key exercises version-aware rotation in production
+  # either: hsm.VersionedLabel has no caller, and C2PA signing
+  # (hsm.Signer(KeyLabelC2PA())) always resolves the base "dcs-c2pa" label.
+  # Not replacing this scenario against dcs-c2pa: that would mean adding
+  # unused-in-production rotation wiring solely to keep a test green, rather
+  # than testing an existing behavior.

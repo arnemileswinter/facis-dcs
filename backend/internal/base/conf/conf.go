@@ -6,6 +6,8 @@ package conf
 
 import (
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -85,4 +87,52 @@ func SyncFailCronJobTimeOut() time.Duration {
 		}
 	}
 	return 5 * time.Minute
+}
+
+// ArchiveExpiringWindow is how far ahead the archive dashboard's
+// expiring-contracts list looks (DCS-FR-CSA-04, DCS-FR-CSA-21).
+// DCS_ARCHIVE_EXPIRING_WINDOW_DAYS (a positive integer number of days)
+// overrides the 30-day default; any non-positive or unparsable value keeps
+// the default, like the other env-overridable accessors in this package.
+func ArchiveExpiringWindow() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_EXPIRING_WINDOW_DAYS")); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return 30 * 24 * time.Hour
+}
+
+// APIRateLimitPerMinute is the per-credential request budget for
+// authenticated API interactions (DCS-FR-CWE-28). DCS_API_RATE_LIMIT_PER_MINUTE
+// (a positive integer) overrides the default; any non-positive or unparsable
+// value keeps the default, like the other env-overridable accessors here.
+func APIRateLimitPerMinute() int {
+	if v := strings.TrimSpace(os.Getenv("DCS_API_RATE_LIMIT_PER_MINUTE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 3000
+}
+
+// AESCertNameMatchRequired reports whether the sole-control gate (ADR-20)
+// enforces cert-subject to PID name matching for an AES-level signature. It
+// is mandatory and non-configurable for QES (eIDAS Annex I requires a
+// qualified certificate to carry the signatory's verified name); for AES it
+// defaults to enforced too — closing exactly the shared/self-signed-key hole
+// the gate exists for — but an operator can relax it with
+// DCS_AES_CERT_NAME_MATCH_REQUIRED=false for a deployment whose AES ceremony
+// legitimately cannot bind a certificate name (documented operator choice,
+// never the default).
+func AESCertNameMatchRequired() bool {
+	v := strings.TrimSpace(os.Getenv("DCS_AES_CERT_NAME_MATCH_REQUIRED"))
+	if v == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(v)
+	if err != nil {
+		return true
+	}
+	return enabled
 }

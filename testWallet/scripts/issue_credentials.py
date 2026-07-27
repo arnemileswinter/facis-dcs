@@ -116,15 +116,14 @@ def main() -> int:
         print(f"issued: {path}")
 
     pid_names = args.credential if args.credential else None
-    try:
-        for path in issue_pid_credentials(
-            credentials_dir=args.credentials_dir,
-            wallet_private_jwk=wallet_private,
-            credential_names=pid_names,
-        ):
-            print(f"issued: {path}")
-    except Exception as exc:
-        print(f"PID issuance skipped (network/EUDIPLO failure): {exc}")
+    for path in issue_pid_credentials(
+        credentials_dir=args.credentials_dir,
+        wallet_private_jwk=wallet_private,
+        credential_names=pid_names,
+        issuer_private_jwk=issuer_private,
+        issuer_did=args.issuer_did,
+    ):
+        print(f"issued: {path}")
     return 0
 
 

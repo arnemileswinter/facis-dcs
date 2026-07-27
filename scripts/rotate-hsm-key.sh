@@ -9,7 +9,7 @@
 # material the running process cannot mint itself.
 #
 # Usage: rotate-hsm-key.sh <token-dir> <token-label> <pin> <base-label> [module-path] [ca-dir] [x5chain-out]
-#   <base-label>  e.g. dcs-contract-pades; version N key label is
+#   <base-label>  e.g. dcs-c2pa; version N key label is
 #                 "<base-label>-v<N>" (v1 is the un-suffixed base label).
 # Requires DATABASE_URL in the environment (advances pki_active_key_version).
 set -euo pipefail

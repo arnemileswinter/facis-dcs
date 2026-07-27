@@ -10,7 +10,7 @@
 @isolated_stack @UC-07-03 @UC-08-01 @UC-08-02 @DCS-IR-PACM-01 @DCS-IR-PACM-02 @DCS-IR-CSA-04
 Feature: Minimal auditing workstation with archive integrity and ORCE evidence
 
-  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-PACM-01 @DCS-FR-CSA-24
+  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-PACM-01 @DCS-FR-CSA-24 @DCS-FR-PACM-01
   Scenario: Auditor can filter every audit scope to a real resource DID
     Given contract "Scoped Audit Contract" is submitted, reviewed, approved, and signed via the standard workflow
     When the Auditor runs scope "templates" for the source template of that contract with justification "external audit BDD-4711"
@@ -26,14 +26,14 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
     Then the process audit request is accepted
     And the filtered audit contains a non-empty "archive" group for that contract
 
-  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-CSA-04 @DCS-FR-CSA-24
+  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-CSA-04 @DCS-FR-CSA-24 @DCS-FR-PACM-04
   Scenario: Archive Manager is restricted to the archive audit scope
     When the Archive Manager runs scope "archive" with justification "archive control BDD-4712"
     Then the process audit request is accepted
     When the Archive Manager runs scope "contracts" with justification "scope escalation BDD-4713"
     Then the request is denied with an authorization error
 
-  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-PACM-01
+  @REQ-audit-ui-archive-orce-AC1 @DCS-IR-PACM-01 @DCS-FR-PACM-04
   Scenario: Audit scope and justification are validated
     When the Auditor runs scope "unknown" with justification "scope validation BDD-4714"
     Then get http 400:Bad Request
@@ -67,13 +67,13 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
     And the contract audit contains lifecycle evidence for that contract
     And no failed finding is caused solely by the contract being pre-effective
 
-  @REQ-audit-ui-archive-orce-AC3 @DCS-FR-CSA-19 @UC-08-02
+  @REQ-audit-ui-archive-orce-AC3 @DCS-FR-CSA-19 @UC-08-02 @DCS-FR-CSA-01 @DCS-FR-CSA-03 @DCS-NFR-BR-05 @DCS-NFR-SEC-10
   Scenario: A valid archive entry passes each independent integrity rule
     Given contract "Valid Integrity Contract" is submitted, reviewed, approved, and signed via the standard workflow
     When the Auditor runs scope "archive" for that contract with justification "integrity proof BDD-4718"
     Then passed findings exist for DB snapshot, content hash, IPFS snapshot, ORCE receipt, ORCE chain, and RFC-3161 TSA
 
-  @REQ-audit-ui-archive-orce-AC3 @DCS-FR-CSA-19 @UC-08-02
+  @REQ-audit-ui-archive-orce-AC3 @DCS-FR-CSA-19 @UC-08-02 @DCS-FR-CSA-01
   Scenario Outline: Archive evidence defects are returned as individual failed findings
     Given contract "Defective Integrity Contract" is submitted, reviewed, approved, and signed via the standard workflow
     And its archived evidence is corrupted as "<defect>"
@@ -87,7 +87,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
       | missing receipt | ARCHIVE_ORCE_RECEIPT |
       | invalid TSA     | ARCHIVE_TSA_RFC3161  |
 
-  @REQ-audit-ui-archive-orce-AC4 @DCS-FR-CWE-20 @DCS-FR-CSA-18
+  @REQ-audit-ui-archive-orce-AC4 @DCS-FR-CWE-20 @DCS-FR-CSA-18 @DCS-FR-CSA-08 @DCS-NFR-SQ-04
   Scenario: SIGNED archival records real signing evidence without credential disclosure
     Given contract "Signing Evidence Contract" is submitted, reviewed, approved, and signed via the standard workflow
     Then its archive entry records signer, credential type, ceremony, field, signing time, PDF CID, and PDF hash
@@ -101,7 +101,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
     And archive event "bdd-restart-chain-second" is notarized
     Then the second ORCE receipt references the first receipt hash
 
-  @REQ-audit-ui-archive-orce-AC5 @DCS-FR-CSA-18
+  @REQ-audit-ui-archive-orce-AC5 @DCS-FR-CSA-18 @DCS-NFR-SEC-09
   Scenario: ORCE protects both append and retrieval with the configured bearer token
     Given the configured ORCE archive notary is reachable with its bearer token
     When the current ORCE audit log is remembered
@@ -119,7 +119,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
     When archive event "bdd-idempotent-entry" is notarized with different content
     Then the ORCE request is rejected as a conflict
 
-  @REQ-audit-ui-archive-orce-AC6 @DCS-IR-PACM-02 @UC-08-01 @UC-08-02
+  @REQ-audit-ui-archive-orce-AC6 @DCS-IR-PACM-02 @UC-08-01 @UC-08-02 @DCS-FR-PACM-01 @DCS-FR-PACM-05 @DCS-FR-UC-08-1
   Scenario Outline: Every report format contains the complete filtered audit result
     Given contract "Complete Report Contract" is submitted, reviewed, approved, and signed via the standard workflow
     When the Auditor exports scope "archive" for that contract as "<format>" with justification "external report BDD-4720"
@@ -133,7 +133,7 @@ Feature: Minimal auditing workstation with archive integrity and ORCE evidence
       | csv    |
       | pdf    |
 
-  @REQ-audit-ui-archive-orce-AC7 @DCS-FR-CSA-18 @DCS-FR-CSA-24
+  @REQ-audit-ui-archive-orce-AC7 @DCS-FR-CSA-18 @DCS-FR-CSA-24 @DCS-FR-PACM-04 @DCS-FR-UC-07-2
   Scenario: Audit and export access records the actor and mandatory purpose
     When a Contract Manager runs scope "contracts" with justification "unauthorized audit BDD-4721"
     Then the request is denied with an authorization error

@@ -64,7 +64,7 @@ Feature: Contract hierarchy invariant and ZIP bundle export
     When contract "Cycle A" is updated to reference contract "Cycle B" as its parent
     Then the request is denied with a client error
 
-  @DCS-FR-CWE-29
+  @DCS-FR-CWE-29 @DCS-FR-CSA-05
   Scenario: contract search accepts a parent_did filter and returns only contracts referencing it
     Given contract "Filter Frame Contract" exists with no parent reference
     And contract "Filter Linked Child" references contract "Filter Frame Contract" as its parent
@@ -80,7 +80,7 @@ Feature: Contract hierarchy invariant and ZIP bundle export
     When child contracts are created on instance A: one linked to a frame and offered to instance B, another linked to the same frame and kept local to instance A only
     Then instance B's parent_did-filtered search for the frame includes the offered child but never the sibling that stayed local to instance A
 
-  @DCS-FR-CWE-29
+  @DCS-FR-CWE-29 @DCS-FR-CSA-05
   Scenario: Frame contract detail query shows linked child contracts with their states
     Given contract "Detail Frame Contract" exists with no parent reference
     And contract "Detail Linked Draft Child" references contract "Detail Frame Contract" as its parent, then reaches contract state "DRAFT"
@@ -103,7 +103,7 @@ Feature: Contract hierarchy invariant and ZIP bundle export
     And the response has Content-Type "application/zip"
     And the contract bundle ZIP for "Bundle Export Contract" contains entries: contract.jsonld, contract.pdf, manifest-store.c2pa, credentials/, signatures.json, bundle-manifest.json
 
-  @DCS-FR-CWE-30
+  @DCS-FR-CWE-30 @DCS-FR-CSA-05
   Scenario: Child contract bundle carries the parent chain upward and its locally-known sibling under related/
     # All three contracts are deliberately kept in DRAFT (not advanced to
     # SIGNED): contract/update — used to establish dcs:parentContract links

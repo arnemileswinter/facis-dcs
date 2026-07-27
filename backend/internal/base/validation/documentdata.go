@@ -216,6 +216,9 @@ func NormalizeContractData(raw *datatype.JSON, _ bool) (*datatype.JSON, error) {
 		return nil, err
 	}
 	normalizeCanonicalEnvelope(data, "dcs:Contract")
+	if err := validateContractMetadataType(data); err != nil {
+		return nil, err
+	}
 	if err := validateExternalContextsResolvable(data); err != nil {
 		return nil, err
 	}
@@ -414,7 +417,11 @@ func typeLayoutNodes(data documentData) {
 	if !ok {
 		return
 	}
-	nodes, ok := topLevelValue(documentData(structure), "layout").([]any)
+	rawLayout := topLevelValue(documentData(structure), "layout")
+	nodes, ok := jsonLDList(rawLayout)
+	if !ok {
+		nodes, ok = rawLayout.([]any)
+	}
 	if !ok {
 		return
 	}
@@ -599,7 +606,7 @@ func validateCanonicalReferences(data documentData, documentStructure map[string
 			return err
 		}
 	}
-	if err := validateContractDataFieldReferences(data, fieldIDs); err != nil {
+	if err := validateContractDataGraph(data, fieldIDs); err != nil {
 		return err
 	}
 	return validatePolicyOperands(data, fieldIDs)
@@ -666,19 +673,31 @@ func validateBlockFieldReferences(block map[string]any, fieldIDs map[string]bool
 	return nil
 }
 
-// validateContractDataFieldReferences enforces the two-level model:
-// contractData contains typed domain objects; each of their business
-// properties is a bare reference to a declared ContractField.
-func validateContractDataFieldReferences(data documentData, fieldIDs map[string]bool) error {
+// validateContractDataGraph enforces the contract-data object graph: every
+// domain object is a typed node named by @id; a property value is a literal
+// (fixed data), a reference to a declared ContractField (a negotiable leaf),
+// or a reference to another domain object (structure, arbitrary depth). Every
+// reference must resolve in-document — the graph stays self-contained, so
+// SHACL traversal and rendering never consult anything outside the document.
+func validateContractDataGraph(data documentData, fieldIDs map[string]bool) error {
 	contractData, _ := topLevelValue(data, "contractData").([]any)
+	objectIDs := map[string]bool{}
 	for index, rawObject := range contractData {
 		object, ok := rawObject.(map[string]any)
 		if !ok {
 			return fmt.Errorf("contractData.%d must be a domain object", index)
 		}
-		if strings.TrimSpace(fmt.Sprint(object["@type"])) == "" {
+		id, _ := object["@id"].(string)
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("contractData.%d needs an @id: a domain object is an addressable graph node", index)
+		}
+		if objectType, _ := object["@type"].(string); strings.TrimSpace(objectType) == "" {
 			return fmt.Errorf("contractData.%d.@type is required", index)
 		}
+		objectIDs[id] = true
+	}
+	for index, rawObject := range contractData {
+		object := rawObject.(map[string]any)
 		for property, rawValue := range object {
 			if strings.HasPrefix(property, "@") {
 				continue
@@ -688,18 +707,33 @@ func validateContractDataFieldReferences(data documentData, fieldIDs map[string]
 				values = []any{rawValue}
 			}
 			for _, value := range values {
-				ref, ok := value.(map[string]any)
-				if !ok || len(ref) != 1 {
-					return fmt.Errorf("contractData.%d.%s must reference a contract field by @id", index, property)
-				}
-				id, _ := ref["@id"].(string)
-				if !fieldIDs[id] {
-					return fmt.Errorf("contractData.%d.%s references nonexistent contract field %q", index, property, id)
+				if err := validateContractDataValue(value, fieldIDs, objectIDs); err != nil {
+					return fmt.Errorf("contractData.%d.%s %w", index, property, err)
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// validateContractDataValue admits the three value kinds of the contract-data
+// graph — a JSON literal, a typed {"@value"} literal, or a single-key {"@id"}
+// reference into the document — and nothing else.
+func validateContractDataValue(value any, fieldIDs, objectIDs map[string]bool) error {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil // a bare JSON literal: fixed data
+	}
+	if id, isRef := object["@id"].(string); isRef && len(object) == 1 {
+		if !fieldIDs[id] && !objectIDs[id] {
+			return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
+		}
+		return nil
+	}
+	if _, isLiteral := object["@value"]; isLiteral {
+		return nil // a typed literal
+	}
+	return errors.New("must be a literal, a contract-field reference, or a {\"@id\"} reference to another domain object — an embedded blank node is not addressable")
 }
 
 func validatePolicyOperands(data documentData, fieldIDs map[string]bool) error {

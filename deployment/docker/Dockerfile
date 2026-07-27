@@ -103,6 +103,11 @@ COPY --from=go-builder /build/gendid /build/hsmsign /app/
 COPY --from=go-builder --chown=$DOCKER_USER:$DOCKER_USER \
   /build/config/oid4vp/trust.dev.json /app/config/oid4vp/trust.dev.json
 
+# Optional x5c chain-validation trust anchors (OID4VP_X5C_TRUST_ANCHORS_PATH,
+# unset/gated off in production — dev/BDD only, see values.bdd.yml).
+COPY --from=go-builder --chown=$DOCKER_USER:$DOCKER_USER \
+  /build/config/oid4vp/x5c-trust-anchors.dev.pem /app/config/oid4vp/x5c-trust-anchors.dev.pem
+
 # Copy generated OpenAPI spec from go-builder stage
 COPY --from=go-builder /build/gen/http/openapi3.json /app/gen/http/openapi3.json
 COPY --chown=$DOCKER_USER:$DOCKER_USER docs/policies/ /app/docs/policies/

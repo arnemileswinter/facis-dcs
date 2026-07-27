@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -27,15 +26,6 @@ const ceremonyTTL = 15 * time.Minute
 // ceremonyAudience is the fixed OID4VP audience/client_id bound into the
 // KB-JWT of a PID presentation for a signing ceremony.
 const ceremonyAudience = pidverify.Audience
-
-// WebhookSecret returns the shared secret that authenticates the EUDIPLO
-// OID4VP webhook (NFR-SEC-18). It is read from EUDIPLO_WEBHOOK_SECRET.
-func WebhookSecret() string {
-	if v := strings.TrimSpace(os.Getenv("EUDIPLO_WEBHOOK_SECRET")); v != "" {
-		return v
-	}
-	return "bdd-eudiplo-webhook-secret"
-}
 
 // StartCeremonyCmd carries the inputs for starting a signing ceremony.
 type StartCeremonyCmd struct {
@@ -98,44 +88,50 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 	return &ceremony, nil
 }
 
-// ErrWebhookUnauthorized is returned when the webhook shared secret is missing
-// or incorrect (NFR-SEC-18).
-var ErrWebhookUnauthorized = errors.New("incorrect webhook shared secret")
-
-// ErrCeremonyNotFound is returned when a webhook references an unknown ceremony.
+// ErrCeremonyNotFound is returned when the presentation references an unknown
+// ceremony.
 var ErrCeremonyNotFound = errors.New("ceremony not found")
+
+// ErrCeremonyExpired rejects a presentation that arrives after the ceremony's
+// deadline (DCS-FR-SM-13): the signing workflow enforces the deadline issued
+// at ceremony start (expires_at, ceremonyTTL) — a late wallet presentation
+// does not verify, and the signer must request a fresh ceremony (the
+// workflow's retry).
+var ErrCeremonyExpired = errors.New("ceremony deadline has passed; request a new signing ceremony")
 
 // ErrPoAUnauthorized is returned when the signing presentation carries no Power
 // of Attorney, or a PoA that authorizes a different organization than the party
 // (signature field) being signed — signing is not authorized (UC-14, FR-SM-03).
 var ErrPoAUnauthorized = errors.New("power of attorney does not authorize this signature")
 
-// WebhookCmd carries a completed signing-ceremony presentation from EUDIPLO: the
-// PID (the natural-person signatory) and the Power of Attorney presented at
-// signing (UC-14, FR-SM-03), whose organization the signature is checked against.
-type WebhookCmd struct {
-	Secret          string
+// PresentationCmd carries a completed signing-ceremony presentation, ALREADY
+// cryptographically verified against the ceremony's own nonce and the
+// configured trust anchors by the caller (oid4vp.Verifier.VerifyPID, ADR-20):
+// the resolved signatory DID and SD-JWT key-binding hash, the disclosed PID
+// claims, and the Power of Attorney presented at signing (UC-14, FR-SM-03),
+// whose organization the signature is checked against. CompletePresentation
+// persists this outcome; it performs no verification of its own.
+type PresentationCmd struct {
 	CeremonyID      string
+	SignerDID       string
+	SDHash          string
 	VpToken         string
 	PidClaims       any
 	PoAOrganization string
 	PoARoles        any
 }
 
-// WebhookHandler validates a PID presentation and marks the ceremony verified.
-type WebhookHandler struct {
+// PresentationHandler records a verified PID+PoA presentation and marks the
+// ceremony verified. The caller (SignatureRequestCallback's direct_post
+// vp_token branch) has already cryptographically verified the presentation
+// against the ceremony's nonce and the configured trust anchors before
+// calling this — CompletePresentation only persists the outcome.
+type PresentationHandler struct {
 	DB           *sqlx.DB
 	CeremonyRepo db.CeremonyRepo
 }
 
-func (h *WebhookHandler) Handle(ctx context.Context, cmd WebhookCmd) (*db.SignatureCeremony, error) {
-	if strings.TrimSpace(cmd.Secret) == "" || cmd.Secret != WebhookSecret() {
-		return nil, ErrWebhookUnauthorized
-	}
-	return h.CompletePresentation(ctx, cmd)
-}
-
-func (h *WebhookHandler) CompletePresentation(ctx context.Context, cmd WebhookCmd) (*db.SignatureCeremony, error) {
+func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd PresentationCmd) (*db.SignatureCeremony, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -152,11 +148,14 @@ func (h *WebhookHandler) CompletePresentation(ctx context.Context, cmd WebhookCm
 	if ceremony == nil {
 		return nil, ErrCeremonyNotFound
 	}
-
-	signerDID, sdHash, err := pidverify.Verify(cmd.VpToken)
-	if err != nil {
-		return nil, fmt.Errorf("pid presentation verification failed: %w", err)
+	if time.Now().UTC().After(ceremony.ExpiresAt) {
+		return nil, fmt.Errorf("%w (expired %s)", ErrCeremonyExpired, ceremony.ExpiresAt.UTC().Format(time.RFC3339))
 	}
+
+	if strings.TrimSpace(cmd.SignerDID) == "" {
+		return nil, fmt.Errorf("presentation carries no verified signatory DID")
+	}
+	signerDID, sdHash := cmd.SignerDID, cmd.SDHash
 
 	var pidBytes []byte
 	if cmd.PidClaims != nil {
@@ -190,7 +189,7 @@ func (h *WebhookHandler) CompletePresentation(ctx context.Context, cmd WebhookCm
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit webhook: %w", err)
+		return nil, fmt.Errorf("commit presentation: %w", err)
 	}
 
 	ceremony.Status = db.CeremonyVerified

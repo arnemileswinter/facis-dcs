@@ -38,10 +38,10 @@ func TestValidateOfferReadyRejectsUnresolvedProsePlaceholder(t *testing.T) {
 			"@id":   id + "#metadata",
 			"@type": "dcs:ContractMetadata",
 		},
-		"dcs:contractData": []any{
+		"dcs:contractFields": []any{
 			map[string]any{
 				"@id":          fieldID,
-				"@type":        "dcs:Placeholder",
+				"@type":        "dcs:ContractField",
 				"dcs:label":    "Payment Amount",
 				"dcs:datatype": "xsd:decimal",
 				"dcs:required": true,
@@ -63,7 +63,7 @@ func TestValidateOfferReadyRejectsUnresolvedProsePlaceholder(t *testing.T) {
 					},
 				},
 			}},
-			"dcs:layout": []any{
+			"dcs:layout": map[string]any{"@list": []any{
 				map[string]any{
 					"@id":        id + "#root",
 					"dcs:isRoot": true,
@@ -79,7 +79,7 @@ func TestValidateOfferReadyRejectsUnresolvedProsePlaceholder(t *testing.T) {
 						"@list": []any{},
 					},
 				},
-			},
+			}},
 		},
 	}
 	raw, err := datatype.NewJSON(data)

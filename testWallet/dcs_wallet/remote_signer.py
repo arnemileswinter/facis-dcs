@@ -2,7 +2,7 @@
 
 The wallet holds the signatory's key (sole control). Given a prepared PDF (the
 DCS has embedded the PoA + placed the AcroForm field), the wallet drives its
-EXTERNAL SCA — an EU DSS — through the rQES two-call flow and signs the
+EXTERNAL SCA — an EU DSS — through the CSC two-call flow and signs the
 data-to-be-signed itself with the signatory's key. The DCS never sees the key
 and never calls the wallet; the wallet returns the finished signed document.
 
@@ -19,6 +19,9 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from cryptography import x509
+from cryptography.x509.oid import NameOID
 
 from dcs_wallet.signer import ensure_signing_material, sign_dtbs
 
@@ -227,6 +230,42 @@ def _pades_params(
     }
 
 
+def _assert_cert_identity(
+    cert_der: bytes, user: str, keys_dir: Path, expected_given_name: str, expected_family_name: str
+) -> None:
+    """Fail loudly, here, if ensure_signing_material's cache returned a cert for
+    the wrong identity — rather than let a mismatched cert travel all the way
+    through DSS signing and only surface three steps later as a DCS
+    cert_pid_mismatch that names no file, no path, no timing. Concurrent
+    Playwright specs sign against this same shared keys_dir cache
+    (testWallet/keys/signing), so a caller that gets back the wrong signatory's
+    cert needs to know it immediately, with the on-disk evidence attached.
+    """
+    cert = x509.load_der_x509_certificate(cert_der)
+
+    def _attr(oid: x509.ObjectIdentifier) -> str | None:
+        values = cert.subject.get_attributes_for_oid(oid)
+        return values[0].value if values else None
+
+    actual_given = _attr(NameOID.GIVEN_NAME)
+    actual_family = _attr(NameOID.SURNAME)
+    if actual_given == expected_given_name and actual_family == expected_family_name:
+        return
+
+    crt_path = keys_dir / _SIGNING_DIR / f"{user}.signing.crt.pem"
+    jwk_path = keys_dir / _SIGNING_DIR / f"{user}.signing.jwk"
+    stat = crt_path.stat() if crt_path.exists() else None
+    raise RuntimeError(
+        f"ensure_signing_material({user!r}) returned a certificate for the WRONG identity: "
+        f"expected GIVEN_NAME={expected_given_name!r} SURNAME={expected_family_name!r}, "
+        f"got GIVEN_NAME={actual_given!r} SURNAME={actual_family!r}. "
+        f"cert path: {crt_path} (exists={crt_path.exists()}, "
+        f"mtime={stat.st_mtime if stat else None}), jwk path: {jwk_path} "
+        f"(exists={jwk_path.exists()}) - this points at a cross-process cache "
+        "collision on the shared wallet keys_dir, not a DSS or DCS bug."
+    )
+
+
 def sign_pdf(
     prepared_pdf: bytes,
     *,
@@ -235,6 +274,8 @@ def sign_pdf(
     field: str = "",
     keys_dir: Path,
     name: str = "contract.pdf",
+    given_name: str | None = None,
+    family_name: str | None = None,
 ) -> bytes:
     """Sign prepared_pdf's AcroForm signature field as the external SCA, signing
     the DTBS with the signatory's own key. field selects which field on a
@@ -243,6 +284,11 @@ def sign_pdf(
     then signDocument) are only deterministic — and so only produce a valid
     signature — over a pre-placed field, so a signable contract declares its
     signature field (pdf-core /T == signatoryName) and prepare renders it.
+
+    given_name/family_name override the certificate subject's GIVEN_NAME/
+    SURNAME (default: derived from `user`, see ensure_signing_material) — pass
+    them to deliberately mint a cert that does NOT match the ceremony's PID
+    (ADR-20 cert↔PID name-match negative test).
     """
     existing = _unsigned_signature_fields(prepared_pdf)
     if not existing:
@@ -257,7 +303,8 @@ def sign_pdf(
     elif field not in existing:
         raise RuntimeError(f"signature field {field!r} is not an unsigned field on the PDF; found {existing!r}")
 
-    signing_jwk, cert_der = ensure_signing_material(user, keys_dir)
+    signing_jwk, cert_der = ensure_signing_material(user, keys_dir, given_name=given_name, family_name=family_name)
+    _assert_cert_identity(cert_der, user, keys_dir, given_name or user, family_name or "BDD-Testperson")
     cert_b64 = base64.b64encode(cert_der).decode()
     signing_ms = int(time.time() * 1000)
     params = _pades_params(cert_b64, field, user, signing_ms)
@@ -280,4 +327,25 @@ def sign_pdf(
             "signatureValue": {"algorithm": "ECDSA_SHA256", "value": base64.b64encode(signature).decode()},
         },
     )["bytes"]
-    return base64.b64decode(signed_b64)
+    signed_pdf = base64.b64decode(signed_b64)
+
+    # DSS embeds signingCertificate's DER bytes verbatim in the CMS SignerInfo
+    # it builds, but the PDF's /Contents signature dictionary entry holds that
+    # CMS blob as a HEX-ENCODED string literal (ISO 32000), not raw binary — so
+    # this searches for the cert's hex encoding, not cert_der itself, which
+    # would never match a PDF's byte stream at all. This is a SEPARATE external
+    # call from ensure_signing_material's cache (already checked above): one
+    # shared DSS instance handles every concurrent signing call across the
+    # whole test run, so if it substituted a different in-flight request's
+    # certificate under load, that would show up here, not in the cache check.
+    cert_hex_lower = cert_der.hex().encode("ascii")
+    cert_hex_upper = cert_hex_lower.upper()
+    if cert_hex_lower not in signed_pdf and cert_hex_upper not in signed_pdf:
+        raise RuntimeError(
+            f"DSS signDocument for user={user!r} field={field!r} returned a PDF that does not "
+            "embed the certificate we sent it (searched for the requested signingCertificate's "
+            "hex-encoded DER bytes in the response and found no match) - this points at the "
+            "shared DSS instance itself substituting another concurrent signing call's "
+            "certificate, not a local cache issue."
+        )
+    return signed_pdf

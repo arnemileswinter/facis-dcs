@@ -20,7 +20,7 @@ route:
 
 # Public hostname Keycloak reports to clients (KC_HOSTNAME) and the reverse
 # proxy (ingress) is served on. Required to be a real, externally reachable
-# https URL for wallet/browser OIDC flows — see docs/deployment-osc-testbed.md
+# https URL for wallet/browser OIDC flows — see deployment/README.md
 # and the fc-service-side issuer wiring in ../federated-catalogue.
 hostname: ""
 

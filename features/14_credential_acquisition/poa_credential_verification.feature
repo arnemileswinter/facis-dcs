@@ -1,8 +1,8 @@
 # Identity and PoA Credential Acquisition (UC-14). PID credential acquisition,
 # verification, and binding to the signing session IS implemented and
 # exercised end-to-end by 22_real_signing_vertical/real_signing_vertical.
-# feature (EUDIPLO ceremony, SD-JWT VC + KB-JWT presentation, embedded under
-# the PAdES signature) — not duplicated here.
+# feature (wallet-driven signing ceremony, SD-JWT VC + KB-JWT presentation,
+# embedded under the PAdES signature) — not duplicated here.
 #
 # PoA disposition ("credential at login"): the PoA credential (dc+sd-jwt,
 # vct urn:dcs:poa:v1, holder-bound) is presented at LOGIN — every session

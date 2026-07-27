@@ -67,19 +67,19 @@ function isSetOperator(operator: string): boolean {
   return operator === 'odrl:isAnyOf' || operator === 'odrl:isNoneOf' || operator === 'odrl:isAllOf'
 }
 
-function literalRightOperand(
-  value: string,
-  operator: string,
-): JsonLdTypedValue | { '@list': JsonLdTypedValue[] } | undefined {
+function literalRightOperand(value: string, operator: string): JsonLdTypedValue | JsonLdTypedValue[] | undefined {
   const trimmed = value.trim()
   if (!trimmed) return undefined
   if (isSetOperator(operator)) {
+    // A set operand is an unordered JSON-LD set (bare array): the policy
+    // audit expands and matches each member individually, while an @list
+    // would reach it as a single nested list value.
     const values = trimmed
       .split(',')
       .map((part) => part.trim())
       .filter(Boolean)
       .map(typed)
-    return values.length ? { '@list': values } : undefined
+    return values.length ? values : undefined
   }
   return typed(trimmed)
 }
@@ -88,11 +88,9 @@ function nonEmptyOperand(value: OperandDraftValue): boolean {
   return '@id' in value ? !!value['@id'] : value['@value'] !== ''
 }
 
-function fixedRightOperand(
-  atomic: AtomicDraft,
-): JsonLdTypedValue | JsonLdReference | { '@list': OperandDraftValue[] } | undefined {
+function fixedRightOperand(atomic: AtomicDraft): JsonLdTypedValue | JsonLdReference | OperandDraftValue[] | undefined {
   const values = atomic.values.filter(nonEmptyOperand)
-  if (values.length) return isSetOperator(atomic.operator) ? { '@list': values } : values[0]
+  if (values.length) return isSetOperator(atomic.operator) ? values : values[0]
   return literalRightOperand(atomic.value, atomic.operator)
 }
 
@@ -163,7 +161,7 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
       values: [],
     }
   }
-  const values = right && '@list' in right ? right['@list'].map((item) => ({ ...item })) : []
+  const values = Array.isArray(right) ? right.map((item) => ({ ...item })) : []
   const value = values.length
     ? values.map(operandLabel).join(', ')
     : right && '@value' in right

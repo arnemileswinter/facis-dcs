@@ -77,6 +77,41 @@ def sign_credential_sd_jwt(
     return join_sd_jwt(issuer_jwt, disclosures)
 
 
+def sign_credential_sd_jwt_x5c(
+    *,
+    visible_claims: dict[str, Any],
+    selective_claims: dict[str, Any],
+    issuer_private: dict[str, Any],
+    issuer_cert_der: bytes,
+) -> str:
+    """Same as sign_credential_sd_jwt, but the issuer JWT header carries the
+    issuer's own x5c certificate chain instead of a bare jwk+kid — what a
+    real EUDI wallet's issued PID actually looks like (ResolveIssuerVerification
+    KeyForPID, backend/internal/auth/oid4vp/sdjwt/keys.go), as opposed to this
+    project's default JWKS-trust-listed dev issuer path (DEFAULT_ISSUER_DID).
+    """
+    disclosures: list[str] = []
+    sd_digests: list[str] = []
+    for claim_name, claim_value in selective_claims.items():
+        encoded, digest = create_property_disclosure(claim_name, claim_value)
+        disclosures.append(encoded)
+        sd_digests.append(digest)
+
+    payload = {**visible_claims, "_sd": sd_digests, "_sd_alg": DEFAULT_SD_ALG}
+    headers = {
+        "typ": CREDENTIAL_JWT_TYP,
+        "alg": "ES256",
+        "x5c": [base64.b64encode(issuer_cert_der).decode()],
+    }
+    issuer_jwt = jwt.encode(
+        payload,
+        _jwt_private_key(issuer_private),
+        algorithm="ES256",
+        headers=headers,
+    )
+    return join_sd_jwt(issuer_jwt, disclosures)
+
+
 def sign_key_binding_jwt(
     *,
     issuer_jwt: str,
@@ -186,14 +221,23 @@ def issue_access_credential(
     issuer_did: str = DEFAULT_ISSUER_DID,
     aud: str = DEFAULT_KB_AUD,
     nonce: str = DEFAULT_KB_NONCE,
+    statuslist_service_base: str | None = None,
+    statuslist_tenant: str | None = None,
 ) -> str:
-    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time)."""
+    """Build SD-JWT+KB vp_token for an OpenID4VP request (presentation-time).
+    statuslist_service_base/statuslist_tenant default to
+    issue_stored_credential's own defaults when unset — pass
+    BDD_CREDENTIAL_TENANT explicitly for a presentation the BDD/CI status-list
+    provisioning actually seeds (the "default" tenant is not guaranteed to
+    be, see ensure_statuslist_for_dev.py)."""
     issued_sd_jwt = issue_stored_credential(
         organization=organization,
         roles=roles,
         issuer_private=issuer_private,
         wallet_private=wallet_private,
         issuer_did=issuer_did,
+        statuslist_service_base=statuslist_service_base,
+        statuslist_tenant=statuslist_tenant,
     )
     return attach_key_binding(
         issued_sd_jwt=issued_sd_jwt,

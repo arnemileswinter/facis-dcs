@@ -11,6 +11,13 @@ interface CeremonyRequest {
 
 export interface CeremonyResult {
   signerDid: string
+  // The EXACT ceremony this result came from — callers MUST pass this to
+  // BOTH prepareSignature and submitSignature so they resolve the same
+  // ceremony prepare pinned bytes on (ADR-20), rather than "the signer's
+  // most recent verified ceremony", which is ambiguous once more than one
+  // ceremony has been verified for the same signer/field (e.g. a retried
+  // ceremony after "Start a new ceremony").
+  ceremonyId: string
 }
 
 const POLL_INTERVAL_MS = 2500
@@ -87,7 +94,7 @@ async function pollStatus() {
     phase.value = status.status
     if (status.status === 'verified') {
       stopPolling()
-      confirm({ signerDid: status.signer_did ?? '' })
+      confirm({ signerDid: status.signer_did ?? '', ceremonyId })
     } else if (status.status === 'expired' || status.status === 'failed') {
       stopPolling()
     }

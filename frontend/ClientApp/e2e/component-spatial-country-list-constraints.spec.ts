@@ -119,6 +119,11 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
     .filter({ hasText: 'Global Name' })
     .getByRole('textbox')
     .fill(`Grouped purposes ${Date.now()}`)
+  await page
+    .getByRole('group')
+    .filter({ hasText: 'Base Description' })
+    .getByRole('textbox')
+    .fill('Purpose catalog grouping fixture for the constraint-editor e2e.')
   await page.getByRole('tab', { name: /Clauses/ }).click()
 
   const editor = page.getByTestId('split-clause-editor')
@@ -170,7 +175,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
       'odrl:permission'?: {
         'odrl:constraint'?: {
           'odrl:leftOperand': { '@id': string }
-          'odrl:rightOperand': { '@list': { '@id': string }[] }
+          'odrl:rightOperand': { '@id': string }[]
         }[]
       }[]
     }
@@ -178,7 +183,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
   const purpose = document['dcs:policies']['odrl:permission']?.[0]?.['odrl:constraint']?.find(
     (constraint) => constraint['odrl:leftOperand']['@id'] === 'odrl:purpose',
   )
-  expect(purpose?.['odrl:rightOperand']['@list']).toEqual([
+  expect(purpose?.['odrl:rightOperand']).toEqual([
     { '@id': 'https://w3id.org/facis/dcs/taxonomy/v1#service-purpose-operations' },
     { '@id': 'https://w3id.org/facis/dcs/taxonomy/v1#data-use-purpose-operations' },
   ])

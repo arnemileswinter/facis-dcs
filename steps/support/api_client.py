@@ -129,6 +129,10 @@ def archive_audit_url(context) -> str:
     return f"{context.base_url}/archive/audit"
 
 
+def archive_statistics_url(context) -> str:
+    return f"{context.base_url}/archive/statistics"
+
+
 def archive_delete_url(context) -> str:
     return f"{context.base_url}/archive/delete"
 
@@ -212,10 +216,6 @@ def signature_request_url(context) -> str:
 
 def signature_request_by_id_url(context, ceremony_id: str) -> str:
     return f"{context.base_url}/signature/request/{ceremony_id}"
-
-
-def signature_request_webhook_url(context) -> str:
-    return f"{context.base_url}/signature/request/webhook"
 
 
 def signature_request_publish_url(context, ceremony_id: str) -> str:

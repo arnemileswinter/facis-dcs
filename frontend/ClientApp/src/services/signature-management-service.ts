@@ -1,4 +1,37 @@
+import { isAxiosError } from 'axios'
 import http from '@/api/http'
+
+// ADR-20 acceptance-gate error codes (backend/design/signature_management.go's
+// submitSignature/signatureRequestCallback Error() results), keyed by Goa's
+// ServiceError.Name — the JSON "name" field every such response carries.
+// Mapped to a distinct, human-readable message per failure mode: NEVER by
+// matching the "message" text, which is free-form and not a stable contract.
+const SIGNING_ERROR_MESSAGES: Record<string, string> = {
+  document_mismatch:
+    'The signed document does not match what was prepared for signing — its visible content changed after preparation. Download the document again and sign it without modification.',
+  nonce_mismatch:
+    'The signature is not bound to this signing request — it may be stale or was not produced for this ceremony. Start the signing ceremony again.',
+  level_below_required:
+    'The signature does not meet the signature level this contract requires (e.g. a Qualified Electronic Signature is required but an Advanced one was provided). Sign with a credential that meets the required level.',
+  cert_pid_mismatch:
+    "The signing certificate does not identify the verified signatory — its name does not match the presented identity. Confirm you're signing with the certificate issued to you.",
+  jades_invalid: 'The machine-readable signature (JAdES) accompanying the signed document is invalid or malformed.',
+  signature_invalid: 'The submitted signature is not cryptographically valid.',
+  ceremony_required: 'A completed identity verification ceremony is required before this contract can be signed.',
+}
+
+// Maps a signing-endpoint error to a human-readable message via the typed
+// backend error code, never by string-matching free-form error text.
+export function signingErrorMessage(e: unknown): string {
+  if (isAxiosError(e)) {
+    const name = e.response?.data?.name as string | undefined
+    if (name && SIGNING_ERROR_MESSAGES[name]) return SIGNING_ERROR_MESSAGES[name]
+    const backendMessage = e.response?.data?.message as string | undefined
+    if (backendMessage) return backendMessage
+    return e.message
+  }
+  return e instanceof Error ? e.message : String(e)
+}
 
 export interface SignatureContract {
   did: string
@@ -17,7 +50,6 @@ export interface SignatureContractDetail {
   contract: SignatureContract
   // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
-  key_version?: number
 }
 
 export interface SignatureEnvelope {
@@ -88,6 +120,14 @@ export interface SignatureViewItem {
   pdf_hash?: string
   kb_sd_hash?: string
   validation_report_hash?: string
+  // ADR-20: the contract's OWN declared level requirement for this field —
+  // compare against credential_type (the level actually achieved).
+  required_credential_type?: string
+  // Whether DSS's qualification determination was QESIG (qualified cert +
+  // QSCD) — the QES evidence distinct from credential_type alone.
+  qualified?: boolean
+  signer_cert_subject?: string
+  signer_cert_serial?: string
 }
 
 export interface SignatureViewResult {
@@ -154,11 +194,30 @@ export const signatureManagementService = {
   // to-be-signed PDF (PoA + summary embedded, signature field placed), which the
   // signatory signs externally (their wallet/QTSP, or a desktop PAdES signer),
   // then submit the signed PDF for validation and recording.
-  async prepareSignature(did: string, signerDid: string, credentialType: string): Promise<Blob> {
+  //
+  // ceremonyId MUST be the SAME ceremony_id (from startCeremony/the polled
+  // ceremony result) passed to BOTH prepareSignature and submitSignature —
+  // without it, the backend resolves "the signer's most recent verified
+  // ceremony [for fieldName]", which is only unambiguous while exactly one
+  // ceremony has been verified for that signer/field on this contract; a
+  // retried ceremony (e.g. "Start a new ceremony" after a stalled one) makes
+  // that heuristic pick a DIFFERENT ceremony at submit time than the one
+  // prepare pinned bytes onto (ADR-20 byte pinning requires the two calls
+  // resolve the SAME ceremony). fieldName is still sent for multi-signer
+  // contracts and as a fallback when ceremonyId is unavailable.
+  async prepareSignature(
+    did: string,
+    signerDid: string,
+    credentialType: string,
+    fieldName: string,
+    ceremonyId: string,
+  ): Promise<Blob> {
     const res = await http.post<{ document: string }>('/signature/prepare', {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      field_name: fieldName,
+      ceremony_id: ceremonyId,
     })
     const bytes = Uint8Array.from(atob(res.data.document), (c) => c.charCodeAt(0))
     return new Blob([bytes], { type: 'application/pdf' })
@@ -169,6 +228,8 @@ export const signatureManagementService = {
     signerDid: string,
     credentialType: string,
     signedPdf: Blob,
+    fieldName: string,
+    ceremonyId: string,
   ): Promise<SignatureEnvelope | undefined> {
     const buffer = await signedPdf.arrayBuffer()
     let binary = ''
@@ -179,6 +240,8 @@ export const signatureManagementService = {
       did,
       signer_did: signerDid,
       credential_type: credentialType,
+      ceremony_id: ceremonyId,
+      field_name: fieldName,
       signed_pdf: btoa(binary),
       jades_signature: '',
     })

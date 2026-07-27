@@ -17,8 +17,9 @@ const (
 )
 
 // SignatureCeremony is a signing ceremony: a request for the signer's wallet to
-// present a PID (via EUDIPLO/OID4VP) that must complete before a PAdES
-// signature can be applied (FR-SM-14, UC-04-02).
+// present a PID over OID4VP directly (ADR-20; EUDIPLO is not a dependency)
+// that must complete before a PAdES signature can be applied (FR-SM-14,
+// UC-04-02).
 type SignatureCeremony struct {
 	ID          string  `db:"id"`
 	ContractDID string  `db:"contract_did"`
@@ -52,6 +53,46 @@ type SignatureCeremony struct {
 	PublishedHolderDID *string    `db:"published_holder_did"`
 	PublishedRoles     []byte     `db:"published_roles"`
 	ConsumedAt         *time.Time `db:"consumed_at"`
+
+	// Pinned at EVERY prepare (wallet ceremony and desktop /signature/prepare
+	// alike, ADR-20): the exact to-be-signed material and the finalize
+	// metadata derived alongside it, so submit validates against committed
+	// bytes instead of re-deriving them, and applies no side effects.
+	PinnedPayload         []byte  `db:"pinned_payload"`
+	PinnedPayloadSHA256   *string `db:"pinned_payload_sha256"`
+	PinnedContentHash     *string `db:"pinned_content_hash"`
+	PinnedRendererVersion *string `db:"pinned_renderer_version"`
+	PinnedSignedCount     *int    `db:"pinned_signed_count"`
+	PinnedContractVersion *int    `db:"pinned_contract_version"`
+	// RequiredCredentialType is the contract's OWN declared signature-level
+	// requirement for this field (dcs:requiredCredentialType, default AES),
+	// pinned at prepare so submit gates on it rather than on the caller-
+	// supplied credential_type (SM-01 per-contract level enforcement).
+	RequiredCredentialType *string `db:"required_credential_type"`
+
+	// SignerCertSubject/SignerCertSerial are the signing certificate's subject
+	// and serial (eIDAS Art. 26c sole control), recorded once a signature
+	// validates, for the Signature Compliance Viewer and cross-ceremony
+	// consistency checks (DCS-FR-SM-26).
+	SignerCertSubject *string `db:"signer_cert_subject"`
+	SignerCertSerial  *string `db:"signer_cert_serial"`
+}
+
+// PinnedBytes is the exact to-be-signed material and derived metadata pinned
+// at prepare (ADR-20): the base PDF (already stored via PreparedPDF/
+// PreparedPDFSHA256, shared with the publish flow), the canonical JAdES
+// payload, and the finalize inputs that must not be re-derived at submit.
+type PinnedBytes struct {
+	CeremonyID             string
+	PreparedPDF            []byte
+	PreparedPDFSHA256      string
+	PinnedPayload          []byte
+	PinnedPayloadSHA256    string
+	PinnedContentHash      string
+	PinnedRendererVersion  string
+	PinnedSignedCount      int
+	PinnedContractVersion  int
+	RequiredCredentialType string
 }
 
 // PreparedRequest carries the published OID4VP signing request state persisted on
@@ -78,8 +119,20 @@ type CeremonyRepo interface {
 	// signer's context) on a verified ceremony (ADR-12 publish).
 	StorePreparedRequest(ctx context.Context, tx *sqlx.Tx, req PreparedRequest) error
 	// MarkCeremonyConsumed records that the signed document has been accepted at
-	// the callback, so a published request is single-use.
+	// the callback, so a published request is single-use. The caller runs it in
+	// the SAME transaction as SubmitSignature's finalize (ADR-20 atomic
+	// consumption): the UPDATE ... WHERE consumed_at IS NULL guard and the
+	// finalize writes commit or roll back together, so two concurrent
+	// callbacks can never both finalize.
 	MarkCeremonyConsumed(ctx context.Context, tx *sqlx.Tx, id string) error
+	// PinPreparedBytes persists the exact to-be-signed material (PDF + JAdES
+	// payload) and the finalize metadata derived alongside it, at every
+	// prepare (ADR-20). A later prepare on the same ceremony overwrites the
+	// pin with fresh bytes.
+	PinPreparedBytes(ctx context.Context, tx *sqlx.Tx, pinned PinnedBytes) error
+	// RecordSignerCertificate persists the validated signing certificate's
+	// subject and serial on the ceremony (sole control evidence, DCS-FR-SM-26).
+	RecordSignerCertificate(ctx context.Context, tx *sqlx.Tx, ceremonyID, subject, serial string) error
 	// FindVerifiedCeremony returns the most recent verified ceremony for the
 	// given contract and signer, or (nil, nil) when none exists.
 	FindVerifiedCeremony(ctx context.Context, tx *sqlx.Tx, contractDID, signerDID string) (*SignatureCeremony, error)

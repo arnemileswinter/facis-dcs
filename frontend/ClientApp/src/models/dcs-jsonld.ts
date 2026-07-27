@@ -35,8 +35,44 @@ export interface DcsContractField {
   'dcs:datatype': XsdDatatype
   'dcs:shape'?: JsonLdReference
   'dcs:required': boolean
-  'dcs:value'?: string | number | boolean
+  'dcs:value'?: string | number | boolean | JsonLdTypedValue
   'dcs:valueConstraint'?: import('@template-repository/models/contract-template').SemanticValueConstraint
+}
+
+/** The local name of an IRI or compact term — its part after the last
+ *  '#', '/' or ':'. */
+export function localNameOf(iri: string): string {
+  return iri.replace(/^.*[#/:]/, '')
+}
+
+/** Serializes a fill as a typed literal carrying the field's declared
+ *  datatype. The lexical form is a string, so the document carries the
+ *  exact token the user agreed to — deterministic across round trips. */
+export function typedFieldFill(value: string | number | boolean, datatype: XsdDatatype): JsonLdTypedValue {
+  return { '@value': String(value), '@type': datatype }
+}
+
+/** Reads a fill back to the editor's scalar, accepting the typed-literal
+ *  serialization and bare scalars alike. Returns undefined for an absent
+ *  fill. A typed fill converts per the declared datatype — a decimal field's
+ *  editor holds a NUMBER — so write and read stay symmetric and draft
+ *  dirty-checks never see a phantom change. */
+export function fieldFillScalar(
+  fill: DcsContractField['dcs:value'],
+  datatype?: XsdDatatype,
+): string | number | boolean | undefined {
+  if (fill === null || fill === undefined) return undefined
+  if (typeof fill !== 'object') return fill
+  const lexical = fill['@value']
+  switch (datatype ?? fill['@type']) {
+    case 'xsd:decimal':
+    case 'xsd:integer':
+      return Number(lexical)
+    case 'xsd:boolean':
+      return lexical === 'true'
+    default:
+      return lexical
+  }
 }
 
 /** A clause references a ContractField only by its @id. */
@@ -44,11 +80,18 @@ export type DcsContractFieldRef = JsonLdReference
 
 export type DcsContentSegment = string | DcsContractFieldRef
 
-/** A typed business object whose properties reference declared fields. */
+/** A property value in the contract-data graph: a literal (fixed data), a
+ *  typed literal, or a reference to a declared field or another domain
+ *  object. */
+export type DcsContractDataValue = string | number | boolean | JsonLdTypedValue | JsonLdReference
+
+/** A typed domain object in the contract-data graph. Properties hold
+ *  literals, references to declared contract fields (negotiable leaves), or
+ *  references to other domain objects (structure, arbitrary depth). */
 export type DcsContractDataObject = {
-  '@id'?: string
+  '@id': string
   '@type': string
-} & Record<string, string | JsonLdReference | JsonLdReference[] | undefined>
+} & Record<string, DcsContractDataValue | DcsContractDataValue[] | undefined>
 
 export interface DcsSection {
   '@type': 'dcs:Section'
@@ -104,7 +147,7 @@ export interface OdrlConstraint {
    * are negotiated field references, resolved to their filled values at
    * enforcement.
    */
-  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | { '@list': (JsonLdTypedValue | JsonLdReference)[] }
+  'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | (JsonLdTypedValue | JsonLdReference)[]
 }
 
 /**

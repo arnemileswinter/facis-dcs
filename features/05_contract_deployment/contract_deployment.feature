@@ -16,7 +16,7 @@
 @DCS-FR-UC-05-1 @DCS-FR-UC-13-1
 Feature: Contract deployment, execution evidence, and KPIs
 
-  @DCS-FR-CWE-20
+  @DCS-FR-CWE-20 @DCS-FR-CSA-08 @DCS-FR-UC-07-1
   Scenario: Archive entry is created only when the contract reaches SIGNED, not at APPROVED
     Given contract "Archive Trigger Contract" has reached contract state "APPROVED"
     Then the archive has no entry for contract "Archive Trigger Contract"
@@ -68,7 +68,7 @@ Feature: Contract deployment, execution evidence, and KPIs
     When the target sends a deployment callback for contract "Callback Auth Contract" with an invalid shared secret
     Then the callback request is rejected for the missing or invalid shared secret
 
-  @DCS-IR-SI-02 @DCS-IR-SI-05
+  @DCS-IR-SI-02 @DCS-IR-SI-05 @DCS-IR-CI-07
   Scenario: The shipped ORCE contract-target-flow verifies the content hash and returns a matching ack
     Given contract "ORCE Ack Contract" has reached contract state "SIGNED"
     And the example ORCE contract-target-flow is reachable
@@ -79,7 +79,7 @@ Feature: Contract deployment, execution evidence, and KPIs
   # backend dispatches to the shipped ORCE contract-target-flow
   # (CONTRACT_TARGET_URL), which verifies the payload hash and POSTs the
   # authoritative ack callback itself — no harness-simulated callback.
-  @DCS-FR-SM-10 @DCS-IR-SI-02
+  @DCS-FR-SM-10 @DCS-IR-SI-02 @DCS-FR-CSA-03
   Scenario: The execution-evidence receipt is TSA-timestamped and appended to the archive entry
     Given contract "TSA Evidence Contract" has reached contract state "SIGNED"
     And an authorized user deploys contract "TSA Evidence Contract" to the configured contract target
@@ -117,7 +117,7 @@ Feature: Contract deployment, execution evidence, and KPIs
     Then get http 200:Success code
     And the contract detail for "KPI Dashboard Contract" shows KPI "uptime_percent" with value "99.5"
 
-  @DCS-FR-CWE-09
+  @DCS-FR-CWE-09 @DCS-FR-UC-06-1
   Scenario: A KPI that violates its contractual SLA threshold sets a violation flag
     Given contract "KPI Violation Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
     And contract "KPI Violation Contract" is submitted, reviewed, approved, and signed via the standard workflow
@@ -128,3 +128,21 @@ Feature: Contract deployment, execution evidence, and KPIs
     Then get http 200:Success code
     And the contract detail for "KPI Violation Contract" shows a KPI violation flag for its ODRL-bound field
     And the semantic KPI observations for "KPI Violation Contract" record a violated observation for its ODRL-bound field
+
+  # DCS-FR-CWE-31 requires more than recording the breach: "Alerts MUST be
+  # raised for underperformance or missed targets". A violation flag sitting on
+  # a contract nobody opens is not an alert, so the compliance monitor — the
+  # surface an officer actually watches — must surface it too.
+  @DCS-FR-CWE-31 @DCS-FR-PACM-03 @DCS-IR-PACM-03
+  Scenario: A breached KPI raises an underperformance alert on the compliance monitor
+    Given contract "KPI Alert Contract" is a fresh draft whose ODRL policy constrains field "coverage" using operator "gteq" against "95" while the actual value is "95"
+    And contract "KPI Alert Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And an authorized user deploys contract "KPI Alert Contract" to the configured contract target
+    And get http 200:Success code
+    And the contract target acknowledges the deployment of contract "KPI Alert Contract"
+    And the target reports a KPI value for the ODRL-bound field of contract "KPI Alert Contract" = "80"
+    And get http 200:Success code
+    When the Compliance Officer requests continuous monitoring
+    Then get http 200:Success code
+    And the monitoring sweep flags contract "KPI Alert Contract" with a "CONTRACT_UNDERPERFORMANCE" compliance risk
+    And the flagged risk for contract "KPI Alert Contract" is recorded in the PAC audit trail

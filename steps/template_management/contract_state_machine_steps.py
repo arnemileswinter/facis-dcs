@@ -20,6 +20,7 @@ import re
 import shlex
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -276,10 +277,12 @@ def _apply_signature(context, name):
 
     did, _updated_at = ContractService._contract_data(context, name)
     party_did = ContractService._local_peer_did(context)
-    _ceremony_id, _presentation, subject_did = _run_full_ceremony(
+    ceremony_id, _presentation, subject_did = _run_full_ceremony(
         context, name, party_did, "BDD Counterparty Signer"
     )
-    resp = wallet_sign(context, did, signer_did=subject_did, signatory="BDD Counterparty Signer")
+    resp = wallet_sign(
+        context, did, signer_did=subject_did, signatory="BDD Counterparty Signer", ceremony_id=ceremony_id
+    )
     assert resp.status_code == 200, (
         f"Wallet signing failed while preparing SIGNED state for '{name}': {resp.status_code} {resp.text}"
     )
@@ -416,21 +419,21 @@ def step_given_contract_reached_state(context, name, state):
 @given('contract "{name}" is a draft with an unfilled required placeholder')
 def step_given_draft_with_open_placeholder(context, name):
     """A DRAFT contract derived from a template whose clause carries an inline,
-    required dcs:Placeholder without a dcs:value — the document is not closed
+    required dcs:ContractField without a dcs:value — the document is not closed
     (validation.ValidateContractClosed: "prose placeholder binds to unfilled
-    field"), which is exactly what the offer gate rejects. Placeholder @ids are
+    field"), which is exactly what the offer gate rejects. Field @ids are
     urn:uuid:* on the template; contract creation rebases them onto the
-    contract DID (documentdata.go rebaseIDText), placeholder node and prose
+    contract DID (documentdata.go rebaseIDText), field node and prose
     reference alike, so closedness still pairs them up."""
     from steps.support.services.template_service import TemplateService  # noqa: PLC0415
 
     field_id = "urn:uuid:field-payment-amount"
     template_data = TemplateService.canonical_document_data("BDD Open Placeholder Template")
     template_data["@context"]["xsd"] = "http://www.w3.org/2001/XMLSchema#"
-    template_data["dcs:contractData"] = [
+    template_data["dcs:contractFields"] = [
         {
             "@id": field_id,
-            "@type": "dcs:Placeholder",
+            "@type": "dcs:ContractField",
             "dcs:label": "Payment Amount",
             "dcs:datatype": "xsd:decimal",
             "dcs:required": True,
@@ -456,13 +459,15 @@ def step_when_fill_required_placeholder(context, name, value):
     assert contract_data, f"contract '{name}' has no contract_data: {body}"
 
     filled = 0
-    for placeholder in contract_data.get("dcs:contractData") or []:
-        if placeholder.get("dcs:required") and not placeholder.get("dcs:value"):
-            placeholder["dcs:value"] = float(value) if "." in value else int(value)
+    for field in contract_data.get("dcs:contractFields") or []:
+        if field.get("dcs:required") and not field.get("dcs:value"):
+            # A fill is a typed literal carrying the field's declared
+            # datatype — the lexical string keeps the exact agreed token.
+            field["dcs:value"] = {"@value": value, "@type": field.get("dcs:datatype", "xsd:string")}
             filled += 1
     assert filled, (
-        f"contract '{name}' has no unfilled required placeholder to fill: "
-        f"{contract_data.get('dcs:contractData')}"
+        f"contract '{name}' has no unfilled required field to fill: "
+        f"{contract_data.get('dcs:contractFields')}"
     )
 
     resp = put_json(
@@ -592,11 +597,90 @@ def step_when_apply_signature(context, name):
 def step_when_terminate_contract_with_reason(context, name, reason):
     did, updated_at = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    # The backend records TerminatedBy = middleware.GetParticipantID, which the
+    # OIDC validator reads from the token's ext.iss claim (oidc.go
+    # ValidateToken); capture it here so the audit-event step can match the
+    # recorded identity against the actual caller.
+    manager_token = manager_h["Authorization"].removeprefix("Bearer ").strip()
+    manager_claims = AuthService.decode_jwt_payload(manager_token)
+    context.terminating_participant = (manager_claims.get("ext") or {}).get("iss")
     context.requests_response = post_json(
         context,
         contract_terminate_url(context),
         {"did": did, "reason": reason, "updated_at": updated_at},
         headers=manager_h,
+    )
+    if context.requests_response.status_code == 200:
+        ContractService._refresh_contract(context, name)
+
+
+@when('the initiator attempts to update terminated contract "{name}"')
+def step_when_attempt_update_terminated(context, name):
+    from steps.support.api_client import contract_update_url, put_json  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    headers = _seed_headers(context, name)
+    # Fresh updated_at: the optimistic-concurrency guard in command/update.go
+    # runs before the transition check, so a stale timestamp would fail as a
+    # concurrency error (500) instead of the TERMINATED transition rejection
+    # this scenario asserts.
+    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
+    assert retrieve.status_code == 200, retrieve.text
+    context.requests_response = put_json(
+        context,
+        contract_update_url(context),
+        {
+            "did": did,
+            "updated_at": retrieve.json().get("updated_at"),
+            "description": "post-termination edit attempt",
+        },
+        headers=headers,
+    )
+
+
+@when('the initiator attempts to negotiate a change on terminated contract "{name}"')
+def step_when_attempt_negotiate_terminated(context, name):
+    from steps.support.api_client import contract_negotiate_url  # noqa: PLC0415
+
+    did, _ = ContractService._contract_data(context, name)
+    headers = _seed_headers(context, name)
+    # Fresh updated_at for the same reason as the update attempt above:
+    # negotiate.go checks content_updated_at before ValidateTransition.
+    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
+    assert retrieve.status_code == 200, retrieve.text
+    context.requests_response = post_json(
+        context,
+        contract_negotiate_url(context),
+        {
+            "did": did,
+            "updated_at": retrieve.json().get("updated_at"),
+            "negotiated_by": AuthService.username_for_roles(["Contract Creator"]),
+            "change_request": "post-termination change attempt",
+        },
+        headers=headers,
+    )
+
+
+@when('the reviewer returns contract "{name}" for modification with finding "{finding}"')
+def step_when_reviewer_returns_with_finding(context, name, finding):
+    # POST /contract/submit from SUBMITTED with forward_to=reject reopens the
+    # review/negotiation/approval task rows and returns the contract to
+    # NEGOTIATION (command/submit.go, actionflag.Reject branch); the finding
+    # travels in the comments array onto the SUBMIT_CONTRACT audit event.
+    did, _ = ContractService._contract_data(context, name)
+    reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
+    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
+    assert retrieve.status_code == 200, retrieve.text
+    context.requests_response = post_json(
+        context,
+        contract_submit_url(context),
+        {
+            "did": did,
+            "updated_at": retrieve.json().get("updated_at"),
+            "forward_to": "reject",
+            "comments": [finding],
+        },
+        headers=reviewer_h,
     )
     if context.requests_response.status_code == 200:
         ContractService._refresh_contract(context, name)
@@ -741,6 +825,113 @@ def step_then_contract_has_audit_event(context, name, event_type):
     assert event_type.upper() in event_types, (
         f"Expected an audit event of type '{event_type}' for contract '{name}', "
         f"got event types: {event_types}"
+    )
+
+
+def _parse_rfc3339(value):
+    # Go time.Time marshals as RFC3339Nano ("...T...Z" with 0-9 fractional
+    # digits); Python 3.10 fromisoformat accepts neither "Z" nor fractions
+    # other than 3/6 digits, so normalize both before parsing.
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), text)
+    return datetime.fromisoformat(text)
+
+
+@then('the TERMINATE_CONTRACT audit event for contract "{name}" records reason "{reason}", the terminating identity and role, and an effective timestamp')
+def step_then_terminate_event_records_payload(context, name, reason):
+    # DCS-FR-CSA-16: the termination record is the TERMINATE_CONTRACT audit
+    # event's payload — reason/terminated_by/occurred_at/user_roles JSON tags
+    # on TerminateEvent (backend/internal/contractworkflowengine/event/
+    # event.go). Same async-outbox polling rationale as the generic
+    # audit-event step above.
+    did, _ = ContractService._contract_data(context, name)
+    auditor_h = AuthService.get_headers_for_roles(["Auditor"])
+    events = []
+    record = None
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        assert resp.status_code == 200, (
+            f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
+        )
+        events = resp.json()
+        assert isinstance(events, list), f"Expected audit response to be a list, got: {events}"
+        for entry in events:
+            if str(entry.get("event_type", "")).upper() != "TERMINATE_CONTRACT":
+                continue
+            data = entry.get("event_data") or {}
+            if data.get("reason") == reason:
+                record = data
+                break
+        if record is not None:
+            break
+        time.sleep(2)
+    if record is None:
+        terminate_payloads = [
+            e.get("event_data") for e in events
+            if str(e.get("event_type", "")).upper() == "TERMINATE_CONTRACT"
+        ]
+        raise AssertionError(
+            f"Expected a TERMINATE_CONTRACT audit event for contract '{name}' carrying "
+            f"reason '{reason}', got TERMINATE_CONTRACT payloads: {terminate_payloads}"
+        )
+
+    expected_participant = getattr(context, "terminating_participant", None)
+    assert expected_participant, (
+        "context.terminating_participant is unset — the terminate When step must "
+        "run first so the recorded identity can be matched against the caller"
+    )
+    assert record.get("terminated_by") == expected_participant, (
+        f"terminated_by should be the initiating participant '{expected_participant}', "
+        f"got: {record.get('terminated_by')!r}"
+    )
+    assert "Contract Manager" in (record.get("user_roles") or []), (
+        f"user_roles should record the initiating role 'Contract Manager', "
+        f"got: {record.get('user_roles')!r}"
+    )
+    occurred_at = record.get("occurred_at")
+    assert occurred_at, f"occurred_at missing from termination record: {record}"
+    try:
+        _parse_rfc3339(occurred_at)
+    except ValueError as exc:
+        raise AssertionError(
+            f"occurred_at {occurred_at!r} does not parse as an RFC3339 timestamp: {exc}"
+        ) from exc
+
+
+@then('the SUBMIT_CONTRACT audit event for contract "{name}" records the reviewer finding "{finding}"')
+def step_then_submit_event_records_finding(context, name, finding):
+    # DCS-IR-CWE-06: the reviewer's finding comment is persisted on the
+    # SUBMIT_CONTRACT audit event (SubmitEvent.Comments) together with the
+    # REJECT action flag that sent the contract back to NEGOTIATION.
+    did, _ = ContractService._contract_data(context, name)
+    auditor_h = AuthService.get_headers_for_roles(["Auditor"])
+    events = []
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        assert resp.status_code == 200, (
+            f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
+        )
+        events = resp.json()
+        assert isinstance(events, list), f"Expected audit response to be a list, got: {events}"
+        for entry in events:
+            if str(entry.get("event_type", "")).upper() != "SUBMIT_CONTRACT":
+                continue
+            data = entry.get("event_data") or {}
+            if str(data.get("action_flag", "")).upper() == "REJECT" and finding in (data.get("comments") or []):
+                return
+        time.sleep(2)
+    submit_payloads = [
+        e.get("event_data") for e in events
+        if str(e.get("event_type", "")).upper() == "SUBMIT_CONTRACT"
+    ]
+    raise AssertionError(
+        f"Expected a SUBMIT_CONTRACT audit event for contract '{name}' with action_flag "
+        f"REJECT carrying the reviewer finding '{finding}' in its comments, got "
+        f"SUBMIT_CONTRACT payloads: {submit_payloads}"
     )
 
 

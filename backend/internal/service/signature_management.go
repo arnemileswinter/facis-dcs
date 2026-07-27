@@ -45,12 +45,28 @@ func mapSignatureCommandError(err error) error {
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
 		return signaturemanagement.MakeCeremonyRequired(err)
 	}
-	if errors.Is(err, command.ErrSignatureInvalid) {
+	// Every ADR-20 acceptance-gate rejection gets its OWN typed Goa error, not
+	// a shared signature_invalid — the frontend's validation-failure view
+	// (item 11) distinguishes these by CODE, never by matching error text.
+	switch {
+	case errors.Is(err, command.ErrDocumentMismatch):
+		return signaturemanagement.MakeDocumentMismatch(err)
+	case errors.Is(err, command.ErrNonceMismatch):
+		return signaturemanagement.MakeNonceMismatch(err)
+	case errors.Is(err, command.ErrLevelBelowRequired):
+		return signaturemanagement.MakeLevelBelowRequired(err)
+	case errors.Is(err, command.ErrCertPIDMismatch), errors.Is(err, command.ErrCertInconsistent):
+		return signaturemanagement.MakeCertPidMismatch(err)
+	case errors.Is(err, command.ErrJAdESInvalid):
+		return signaturemanagement.MakeJadesInvalid(err)
+	case errors.Is(err, command.ErrSignatureInvalid):
 		return signaturemanagement.MakeSignatureInvalid(err)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
 		errors.Is(err, command.ErrUnknownSignatureField) ||
 		errors.Is(err, command.ErrFieldAlreadySigned) ||
+		errors.Is(err, command.ErrCeremonyNotPrepared) ||
+		errors.Is(err, command.ErrCeremonyConsumed) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, db.ErrSignatureNotFound) {
 		return signaturemanagement.MakeBadRequest(err)
@@ -71,14 +87,23 @@ type signatureManagementsrvc struct {
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
-	// RequestSigner signs the OID4VP Document-Retrieval request object (JAR) the
-	// wallet consumes in the publish/callback signing ceremony (ADR-12). It is the
-	// SAME HSM JAR signer the auth service uses for login/PID request objects — the
-	// DCS attesting as itself, not as a contracting party.
+	// RequestSigner signs the pending-ceremony PID/PoA presentation request
+	// object (JAR) — the SAME HSM JAR signer + Hydra client_id the auth
+	// service's login flow uses (jwk header, no x509_san_dns claim).
 	RequestSigner oid4vprequest.Signer
-	// OID4VPClientID is the DCS relying party's x509_san_dns client_id bound into
-	// the request object (the same Hydra client_id the auth OID4VP flows use).
+	// OID4VPClientID is the Hydra client_id the pending-ceremony (PID/PoA
+	// presentation) request object declares.
 	OID4VPClientID string
+	// DocRetrievalSigner signs the published Document-Retrieval request object
+	// (JAR) a real wallet consumes to fetch and sign the prepared documents
+	// (ADR-12). Distinct from RequestSigner: this request declares
+	// client_id_scheme=x509_san_dns, which requires an x5c certificate chain
+	// in the header, not a bare jwk — see oid4vprequest.X5CSigner.
+	DocRetrievalSigner oid4vprequest.Signer
+	// DocRetrievalClientID is the DNS hostname DocRetrievalSigner's own
+	// certificate identifies (x509_san_dns requires client_id to be that DNS
+	// name, and to equal the leaf certificate's SAN).
+	DocRetrievalClientID string
 	// PublicAPIBase is the externally-resolvable API base the request object's
 	// request_uri, document_locations, and response_uri are built from.
 	PublicAPIBase string
@@ -102,28 +127,31 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
+	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
 
 	return &signatureManagementsrvc{
-		JWTAuthenticator: jwtAuth,
-		DB:               db,
-		CRepo:            cRepo,
-		CeremonyRepo:     ceremonyRepo,
-		PDFCore:          pdfCore,
-		ATrailReader:     auditTrailReader,
-		VCSigner:         vcSigner,
-		VCIssuer:         vcIssuer,
-		IssuerDID:        issuerDID,
-		IPFSClient:       ipfsClient,
-		ArchiveRepo:      archiveRepo,
-		ArchiveNotary:    archiveNotary,
-		ArchiveTSA:       archiveTSA,
-		RequestSigner:    requestSigner,
-		OID4VPClientID:   oid4vpClientID,
-		PublicAPIBase:    publicAPIBase,
-		PIDDCQLQuery:     pidDCQLQuery,
-		DCQLQuery:        dcqlQuery,
-		Trust:            trust,
+		JWTAuthenticator:     jwtAuth,
+		DB:                   db,
+		CRepo:                cRepo,
+		CeremonyRepo:         ceremonyRepo,
+		PDFCore:              pdfCore,
+		ATrailReader:         auditTrailReader,
+		VCSigner:             vcSigner,
+		VCIssuer:             vcIssuer,
+		IssuerDID:            issuerDID,
+		IPFSClient:           ipfsClient,
+		ArchiveRepo:          archiveRepo,
+		ArchiveNotary:        archiveNotary,
+		ArchiveTSA:           archiveTSA,
+		RequestSigner:        requestSigner,
+		OID4VPClientID:       oid4vpClientID,
+		PublicAPIBase:        publicAPIBase,
+		DocRetrievalSigner:   docRetrievalSigner,
+		DocRetrievalClientID: docRetrievalClientID,
+		PIDDCQLQuery:         pidDCQLQuery,
+		DCQLQuery:            dcqlQuery,
+		Trust:                trust,
 	}
 }
 
@@ -253,7 +281,6 @@ func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signatu
 			SignerDid:      envelope.SignerDID,
 			Status:         envelope.Status.String(),
 		}
-		res.KeyVersion = &envelope.KeyVersion
 	}
 
 	return res, nil
@@ -344,12 +371,17 @@ func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *sig
 	if req.FieldName != nil {
 		fieldName = *req.FieldName
 	}
+	ceremonyID := ""
+	if req.CeremonyID != nil {
+		ceremonyID = *req.CeremonyID
+	}
 
 	handler := s.newApplier()
 	document, err := handler.Prepare(ctx, command.ApplyCmd{
 		DID:            req.Did,
 		SignerDID:      req.SignerDid,
 		FieldName:      fieldName,
+		CeremonyID:     ceremonyID,
 		CredentialType: credentialType,
 		AppliedBy:      middleware.GetParticipantID(ctx),
 		HolderDID:      middleware.GetHolderDID(ctx),
@@ -381,6 +413,10 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 	if req.JadesSignature != nil {
 		jadesSignature = *req.JadesSignature
 	}
+	ceremonyID := ""
+	if req.CeremonyID != nil {
+		ceremonyID = *req.CeremonyID
+	}
 
 	handler := s.newApplier()
 	if err := handler.SubmitSignature(ctx, command.SubmitSignatureCmd{
@@ -388,6 +424,7 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 			DID:            req.Did,
 			SignerDID:      req.SignerDid,
 			FieldName:      fieldName,
+			CeremonyID:     ceremonyID,
 			CredentialType: credentialType,
 			AppliedBy:      middleware.GetParticipantID(ctx),
 			HolderDID:      middleware.GetHolderDID(ctx),
@@ -597,6 +634,22 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
+	// Per-signature ceremony lookup (ADR-20 SM-26): the contract's declared
+	// level requirement and the signing certificate's subject/serial live on
+	// the ceremony row, not the embedded ContractSigningSummaryCredential.
+	ceremonies := make(map[string]*db.SignatureCeremony, len(records))
+	for _, rec := range records {
+		if rec.CeremonyID == nil || ceremonies[*rec.CeremonyID] != nil {
+			continue
+		}
+		ceremony, cErr := s.CeremonyRepo.GetCeremonyByID(ctx, tx, *rec.CeremonyID)
+		if cErr != nil {
+			return nil, signaturemanagement.MakeInternalError(cErr)
+		}
+		if ceremony != nil {
+			ceremonies[*rec.CeremonyID] = ceremony
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
@@ -611,6 +664,8 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 			Format:         "PAdES (ETSI.CAdES.detached) + JAdES (ETSI TS 119 182-1)",
 			Jades:          rec.JAdESSignature,
 		}
+		qualified := strings.EqualFold(rec.CredentialType, "QES")
+		item.Qualified = &qualified
 		if rec.SignedAt != nil {
 			t := rec.SignedAt.UTC().Format(time.RFC3339)
 			item.SignedAt = &t
@@ -618,6 +673,13 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 		if rec.RevokedAt != nil {
 			t := rec.RevokedAt.UTC().Format(time.RFC3339)
 			item.RevokedAt = &t
+		}
+		if rec.CeremonyID != nil {
+			if ceremony := ceremonies[*rec.CeremonyID]; ceremony != nil {
+				item.RequiredCredentialType = ceremony.RequiredCredentialType
+				item.SignerCertSubject = ceremony.SignerCertSubject
+				item.SignerCertSerial = ceremony.SignerCertSerial
+			}
 		}
 		enrichWithSigningEvidence(item, rec, validation.SigningEvidence)
 		signatures = append(signatures, item)
@@ -725,42 +787,8 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 	return res, nil
 }
 
-func (s *signatureManagementsrvc) CeremonyWebhook(ctx context.Context, req *signaturemanagement.SMSignatureWebhookRequest) (res *signaturemanagement.SMSignatureWebhookResponse, err error) {
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
-	secret := ""
-	if req.WebhookSecret != nil {
-		secret = *req.WebhookSecret
-	}
-	poaOrganization := ""
-	if req.PoaOrganization != nil {
-		poaOrganization = *req.PoaOrganization
-	}
-	handler := command.WebhookHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
-	ceremony, err := handler.Handle(ctx, command.WebhookCmd{
-		Secret:          secret,
-		CeremonyID:      req.CeremonyID,
-		VpToken:         req.VpToken,
-		PidClaims:       req.PidClaims,
-		PoAOrganization: poaOrganization,
-		PoARoles:        req.PoaRoles,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, command.ErrWebhookUnauthorized):
-			return nil, signaturemanagement.MakeUnauthorized(err)
-		case errors.Is(err, command.ErrPoAUnauthorized):
-			return nil, signaturemanagement.MakeBadRequest(err)
-		case errors.Is(err, command.ErrCeremonyNotFound):
-			return nil, signaturemanagement.MakeNotFound(err)
-		default:
-			return nil, signaturemanagement.MakeInternalError(err)
-		}
-	}
-
-	return &signaturemanagement.SMSignatureWebhookResponse{
-		CeremonyID: ceremony.ID,
-		Status:     ceremony.Status,
-	}, nil
-}
+// The EUDIPLO OID4VP webhook (ceremonyWebhook) is removed (ADR-20): the
+// remote EUDIPLO PID service is not a dependency of this DCS anymore. Ceremony
+// PID+PoA verification runs entirely from the wallet's own direct_post
+// (ceremonyPresentationDirectPost in signature_request.go) — see
+// command.PresentationHandler.

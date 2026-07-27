@@ -60,20 +60,35 @@ def step_given_field_ceremony(context, name, field):
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.keys import generate_ec_private_jwk  # noqa: PLC0415
 
-    _ceremony_id, _presentation, subject_did = _run_full_ceremony(
+    ceremony_id, _presentation, subject_did = _run_full_ceremony(
         context, name, field, field, holder_private=generate_ec_private_jwk()
     )
     signers = getattr(context, "multi_signer_dids", None)
     if signers is None:
         signers = {}
         context.multi_signer_dids = signers
-    signers.setdefault(name, {})[field] = subject_did
+    # _run_full_ceremony also stashes ceremony_id/presentation on context, keyed
+    # only by contract name — the SECOND field's ceremony here overwrites the
+    # first's before either field signs. Keep our own per-field copy so the
+    # apply step below pins the right ceremony (and signatory name) per field.
+    signers.setdefault(name, {})[field] = {
+        "subject_did": subject_did,
+        "ceremony_id": ceremony_id,
+        "signatory": field,
+    }
 
 
 @when('the signer of field "{field}" applies their signature to contract "{name}"')
 def step_when_field_signer_applies(context, name, field):
-    subject_did = context.multi_signer_dids[name][field]
-    context.requests_response = _apply_signature(context, name, signer_did=subject_did, field_name=field)
+    entry = context.multi_signer_dids[name][field]
+    context.requests_response = _apply_signature(
+        context,
+        name,
+        signer_did=entry["subject_did"],
+        field_name=field,
+        ceremony_id=entry["ceremony_id"],
+        signatory=entry["signatory"],
+    )
     if context.requests_response.status_code == 200:
         ContractService._refresh_contract(context, name)
 

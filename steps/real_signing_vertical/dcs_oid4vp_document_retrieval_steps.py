@@ -42,10 +42,18 @@ def step_when_publish_signing_request(context, name):
     ceremony_id = (getattr(context, "ceremony_ids", {}) or {}).get(name)
     assert ceremony_id, f"No completed ceremony recorded for contract {name!r}"
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
+    # credential_type is deliberately omitted: the backend defaults it to the
+    # CONTRACT's own declared level requirement for this field (SM-01), which
+    # is what the JAR should ask the wallet for. Hardcoding "AES" here used to
+    # make a QES-required field's publish call fail its own fail-fast check
+    # before the wallet ever got a chance to (mis)behave — the level-mismatch
+    # rejection belongs at submit, once the wallet's actual signature is known
+    # (see "with an ordinary AES signature" steps in dcs_signing_acceptance_
+    # hardening_steps.py, which sign AES regardless of what was requested).
     resp = post_json(
         context,
         signature_request_publish_url(context, ceremony_id),
-        {"ceremony_id": ceremony_id, "credential_type": "AES"},
+        {"ceremony_id": ceremony_id},
         headers=signer_h,
     )
     context.requests_response = resp

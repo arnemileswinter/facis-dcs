@@ -67,6 +67,17 @@ This deploys its own Helm release (`dcs2`), provisions a separate SoftHSM2 token
 
 For step-by-step manual commands and troubleshooting, see [deployment/README.md](./deployment/README.md#local-development).
 
+## Contract Signing
+
+The DCS holds no contract-signing key: a contract is signed by the
+signatory's own wallet over a standard OID4VP "Document Retrieval" ceremony
+(prepare → publish → wallet fetches and signs → callback validates and
+records) — see [backend/README.md](./backend/README.md#contract-signing) and
+[docs/adr-12-wallet-driven-signing.md](./docs/adr-12-wallet-driven-signing.md)
+/ [docs/adr-20-signing-acceptance-hardening.md](./docs/adr-20-signing-acceptance-hardening.md).
+There is no other signing path — `testWallet/` plays the wallet+QTSP stand-in
+for local dev and CI (see [testWallet/](./testWallet/)).
+
 ## Tests
 
 Backend unit tests:

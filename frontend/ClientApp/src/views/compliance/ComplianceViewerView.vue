@@ -196,11 +196,37 @@ function statusIndicator(status: string): Indicator {
     : { label: 'ACTIVE', cls: 'badge-success' }
 }
 
-// DCS-FR-SM-21: the signature level (SES/AES/QES). A qualified PAdES level from
-// the DSS report (…-BASELINE-LTA on a qualified chain) is QES; otherwise the
-// credential class the signature was applied under stands.
+// DCS-FR-SM-21: the signature level (SES/AES/QES) the signature actually
+// ACHIEVED — recorded from what DSS validated at submit (ADR-20), never
+// re-derived here.
 function signatureLevel(sig: SignatureViewItem): string {
   return (sig.credential_type || 'AES').toUpperCase()
+}
+
+function requiredLevel(sig: SignatureViewItem): string {
+  return (sig.required_credential_type ?? 'AES').toUpperCase()
+}
+
+const LEVEL_RANK: Record<string, number> = { SES: 0, AES: 1, QES: 2 }
+
+// ADR-20 SM-01: the achieved level must meet or exceed the contract's own
+// declared requirement for the field — the explicit pass/fail a verifier
+// needs, not just two badges to compare by eye.
+function levelMeetsRequirement(sig: SignatureViewItem): boolean {
+  const achieved = LEVEL_RANK[signatureLevel(sig)] ?? 0
+  const required = LEVEL_RANK[requiredLevel(sig)] ?? 1
+  return achieved >= required
+}
+
+function levelBadgeClass(level: string): string {
+  switch (level) {
+    case 'QES':
+      return 'badge-secondary'
+    case 'AES':
+      return 'badge-info'
+    default:
+      return 'badge-ghost'
+  }
 }
 
 // --- Report export --------------------------------------------------------
@@ -252,9 +278,11 @@ function exportPdf() {
       (s) => `<tr>
         <td>${escapeHtml(s.signer_did)}</td>
         <td>${escapeHtml(s.field_name ?? '—')}</td>
-        <td>${escapeHtml(signatureLevel(s))}</td>
+        <td>${escapeHtml(signatureLevel(s))} / req. ${escapeHtml(requiredLevel(s))} (${levelMeetsRequirement(s) ? 'PASS' : 'FAIL'})</td>
+        <td>${escapeHtml(signatureLevel(s) === 'QES' ? (s.qualified ? 'Qualified (QSCD)' : 'Not qualified') : 'N/A')}</td>
         <td>${escapeHtml(s.status)}</td>
         <td>${escapeHtml(s.signed_at ?? '—')}</td>
+        <td style="font-family:monospace;font-size:10px">${escapeHtml(s.signer_cert_subject ?? '—')}</td>
         <td style="font-family:monospace;font-size:10px">${escapeHtml(s.content_hash ?? '—')}</td>
       </tr>`,
     )
@@ -284,8 +312,8 @@ function exportPdf() {
         Generated: ${escapeHtml(report.generated_at)}
       </p>
       <h2>Signatures</h2>
-      <table><thead><tr><th>Signer</th><th>Field</th><th>Level</th><th>Status</th><th>Signed at</th><th>Content hash</th></tr></thead>
-      <tbody>${sigRows || '<tr><td colspan="6">No signatures</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Signer</th><th>Field</th><th>Level</th><th>Qualification</th><th>Status</th><th>Signed at</th><th>Certificate subject</th><th>Content hash</th></tr></thead>
+      <tbody>${sigRows || '<tr><td colspan="8">No signatures</td></tr>'}</tbody></table>
       ${dssHtml}
       ${rows('Integrity Findings', report.integrity_findings)}
       ${rows('Validation Findings', report.validation_findings)}
@@ -519,7 +547,11 @@ function exportPdf() {
                   <thead>
                     <tr>
                       <th>Signer</th>
-                      <th>Signature level</th>
+                      <th>Achieved level</th>
+                      <th>Required level</th>
+                      <th>Level compliance</th>
+                      <th>Qualification</th>
+                      <th>Certificate subject</th>
                       <th>Credential status</th>
                       <th>Credential binding</th>
                     </tr>
@@ -528,7 +560,35 @@ function exportPdf() {
                     <tr v-for="(sig, i) in view?.signatures ?? []" :key="i">
                       <td class="max-w-48 truncate font-mono text-xs">{{ sig.signer_did }}</td>
                       <td>
-                        <span class="badge badge-sm badge-info">{{ signatureLevel(sig) }}</span>
+                        <span class="badge badge-sm" :class="levelBadgeClass(signatureLevel(sig))">
+                          {{ signatureLevel(sig) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="badge badge-outline badge-sm" :class="levelBadgeClass(requiredLevel(sig))">
+                          {{ requiredLevel(sig) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          class="badge badge-sm"
+                          :class="levelMeetsRequirement(sig) ? 'badge-success' : 'badge-error'"
+                        >
+                          {{ levelMeetsRequirement(sig) ? 'PASS' : 'FAIL' }}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          v-if="signatureLevel(sig) === 'QES'"
+                          class="badge badge-sm"
+                          :class="sig.qualified ? 'badge-success' : 'badge-error'"
+                        >
+                          {{ sig.qualified ? 'Qualified (QSCD)' : 'Not qualified' }}
+                        </span>
+                        <span v-else class="text-xs text-base-content/50">N/A (AES)</span>
+                      </td>
+                      <td class="max-w-56 truncate font-mono text-[10px]" :title="sig.signer_cert_subject ?? ''">
+                        {{ sig.signer_cert_subject ?? '—' }}
                       </td>
                       <td>
                         <span class="badge badge-sm" :class="statusIndicator(sig.status).cls">
@@ -540,7 +600,7 @@ function exportPdf() {
                       </td>
                     </tr>
                     <tr v-if="!view?.signatures?.length">
-                      <td colspan="4" class="text-base-content/60">No signatures on this contract.</td>
+                      <td colspan="8" class="text-base-content/60">No signatures on this contract.</td>
                     </tr>
                   </tbody>
                 </table>

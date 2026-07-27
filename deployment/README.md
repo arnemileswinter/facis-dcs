@@ -15,9 +15,8 @@ Key components:
 - **Multi-Contract Signing** — multi-party contract execution within a single workflow
 - **Automated Workflows** — contract generation, execution, and deployment
 - **Lifecycle Management** — contract monitoring with renewal/expiration alerts
-- **Signature Management** — signatures linked to verifiable digital identities
+- **Signature Management** — signatures linked to verifiable digital identities, produced by the signatory's own wallet, never a DCS-held key (see "Contract signing" below)
 - **Secure Archiving** — tamper-evident archive compliant with retention policies
-- **Machine Signing** — automated signing for high-volume transactions
 
 ---
 
@@ -223,6 +222,109 @@ JUnit reports are published as check annotations and uploaded as workflow artifa
 
 ---
 
+## Deploying an instance (`helm/deploy.sh`)
+
+```bash
+./helm/deploy.sh --values /path/to/values.my-instance.yml \
+                 --namespace dcs --release dcs \
+                 --public-url https://dcs.example.org
+```
+
+Repeatable `--values` files layer over the chart's `values.yaml`. Keep them
+**outside this repository**: they carry hostnames, DIDs and credentials that are
+specific to one deployment, and nothing environment-specific belongs in the
+chart. `--dry-run` validates values, templates and API acceptance without
+changing anything; `--release` matters because subchart service names derive from
+it, so values referring to `http://<release>-orce:1880` must agree with it.
+
+Re-running converges (`helm upgrade --install`), so the script is the same for a
+first install and an update.
+
+### Why a script rather than a GitOps sync
+
+Three properties of this chart make an unattended reconciler a poor fit, all of
+them observed on live deployments:
+
+**The FC realm hook must run before the app can become healthy.** Realm
+provisioning is a `post-install,post-upgrade` Helm hook. A reconciler that maps
+Helm hooks onto its own phases typically runs `post-*` only after the sync is
+*healthy* — but the backend treats a failed Federated Catalogue schema sync as
+fatal, so it crash-loops until that hook grants its service account the
+`SCHEMA_*` roles. The hook that unblocks the app never runs, because the app is
+never healthy. Plain `helm` does not gate post-install hooks on pod health, so
+the ordering resolves itself.
+
+**Some of the chart's own components patch what the chart renders.** The realm
+hook writes the FC issuer URL into `fc-service` after the manifests are applied.
+A reconciler comparing live state against rendered state sees permanent drift
+there and may fight it.
+
+**Provisioning is a first-boot side effect, not declarative state.** Key
+material, `did.json` and the C2PA x5chain are generated once into a volume. A
+reconciler has no way to know that re-running provisioning is safe only because
+the scripts are idempotent.
+
+None of this argues against GitOps in general. It argues for treating a DCS
+install as a sequenced operation, which is what the script does.
+
+### What it checks, and why those checks exist
+
+Each check corresponds to a way an instance can look healthy while being unable
+to do its job. All were observed on a running deployment that reported no errors:
+
+| Check | Why it is not obvious |
+|---|---|
+| Backend logged `HTTP server listening` | A pod is `Running` before it clears its startup gates, because key material arrives from a hook *after* scheduling. |
+| No `failed to sync federated catalogue` in the log | The backend treats this as fatal and restarts, so the symptom is a restart count rather than an error surfaced anywhere. |
+| `DCS_TRUST_PDP_URL` set **and** answering 2xx | The ADR-19 trust gate is fail-closed. Unset or non-2xx means federation is entirely off — nothing ships, nothing is accepted — and the instance reports nothing unusual. A reachable URL is not enough; the endpoint must actually answer. |
+| `DSS_URL` set | Without a validator the instance refuses every externally produced signature. Contract creation still works, so this surfaces only when someone tries to sign. |
+| All three `/.well-known` documents resolve **from outside** | A peer resolves this instance by appending `/.well-known/did.json` to the bare hostname. Anything else claiming that prefix on the ingress — Hydra's OIDC discovery, notably — shadows them. Everything looks correct in-cluster; only an external fetch shows the 404. |
+| Served DID matches `ISSUER_DID` | A mismatch makes peers reject the instance, with the rejection visible only on the far side. |
+
+The external checks need `--public-url`; without it the script says so rather
+than passing silently.
+
+### Conditions worth knowing before you run it
+
+- **The namespace must already exist.** The script does not create it, so it
+  works with credentials that cannot see cluster-scoped objects. For the same
+  reason it probes reachability with `kubectl version`, not `kubectl get
+  namespace`.
+- **Restricted RBAC.** If the installer may not create `roles`/`rolebindings`,
+  set `pkcs11.provisioning.publishSecrets=false`. The provisioning hook then
+  writes `did.json` and the x5chain to the shared token volume instead of
+  publishing Secrets, and needs no API access at all. In that mode pdf-core is
+  pinned to the backend's node to co-mount a `ReadWriteOnce` volume; declare
+  `persistence.accessModes: ["ReadWriteMany"]` to lift the pinning. The ORCE TSA
+  hook still publishes its own Secret, so also set
+  `orce.localTSA.autoProvision=false` and pre-create that Secret — its key and
+  certificate are self-signed and depend on nothing in-cluster.
+- **Constrained namespaces.** A full instance is roughly ten workloads and ten
+  Services. Under a `ResourceQuota` check `limits.cpu` in particular: the chart's
+  default container limits are generous, and a namespace capped at a couple of
+  CPUs fits only a couple of containers, which shows up as Deployments that exist
+  with zero replicas rather than as an install error. A `services` cap also
+  starves cert-manager's ACME HTTP-01 solver, which needs one of its own, so TLS
+  silently never issues. Either raise the quota or set explicit small
+  `resources.limits` and consume shared services from another instance.
+- **Editing a subchart requires repackaging.** Helm prefers a packaged
+  `charts/*.tgz` over the source directory, so a stale archive deploys old
+  templates. The script runs `helm dependency update` every time for this reason;
+  remember it when rendering by hand.
+- **Federation needs both sides configured, and lockstep builds.** Each instance
+  consults only its own policy endpoint. Both must also publish
+  `/.well-known/dcs-agreement-credential.json`, and the agreement compares a hash
+  of the embedded federation rules — so two instances federate only when running
+  the same build.
+
+### Adopting an instance that was deployed another way
+
+If resources were created by something other than this script — a reconciler, or
+an earlier manual install — there is no Helm release to upgrade, and running the
+script will attempt a fresh install that collides with the existing objects.
+Either let `helm upgrade --install` adopt them deliberately, or uninstall and
+reinstall in a maintenance window. Plan this rather than discovering it.
+
 ## Production Deployment
 
 ### Signing keys (PKCS#11) and the C2PA x5chain
@@ -249,6 +351,40 @@ pkcs11:
   provisioning:
     enabled: false
 ```
+
+### Contract signing: PID trust anchors and QES trusted-list
+
+The DCS holds no contract-signing key (ADR-12/ADR-20): a signature is produced
+by the signatory's own wallet, and the DCS's job is to verify what comes back.
+Two trust configurations follow from that:
+
+- **PID issuer trust anchors** (`OID4VP_TRUST_DATA_PATH`, a JSON file shaped
+  like `backend/config/oid4vp/trust.dev.json`): the DID/URL-keyed issuer
+  public keys the backend accepts a PID (and Power of Attorney) credential
+  from. **Dev/CI only** ships a self-issuance dev issuer key
+  (`did:web:dev.example:issuer:poa`, matching the key `testWallet/scripts/
+  issue_pid_credentials.py` self-signs with) — self-issued PIDs are a
+  dev-edge substitution for the broken remote EUDIPLO PID service and must
+  **never** appear in a production trust store. A production deployment
+  points this file at the real PID issuer registry's public keys instead —
+  swapping the file is the entire change; the verification code
+  (`oid4vp.Verifier.VerifyPID`) is identical either way.
+- **QES trusted list**: a contract that requires QES for a signature field
+  (`dcs:requiredCredentialType: "QES"` on its `dcs:SignatureField`, ADR-20) is
+  only accepted when DSS's validation reports a `QESIG` qualification — a
+  qualified certificate chaining to an EU trusted-list (LOTL/TL) CA. The DSS
+  instance (`deployment/helm/charts/dss`) validates against whatever trusted
+  list it is configured with; a production deployment points it at the real
+  EU LOTL. **This chart does not yet provision a mock/custom trusted list for
+  CI/dev QES testing** — that is tracked in ADR-20 §5 as a remaining
+  CI-provisioning item, not a gap in the acceptance gate itself (the gate
+  rejects a non-qualified signature regardless of what trusted list DSS runs
+  against).
+- **Per-contract signature-level requirement**: set on the contract's
+  `dcs:SignatureField` node at authoring time (`dcs:requiredCredentialType`,
+  `AES` or `QES`, default `AES` when absent) — no deployment-level
+  configuration; it's contract content, enforced per field at prepare and
+  submit.
 
 ### Hydra
 - Enable `hydra.enabled` and set `hydra.config.selfIssuerURL` to the public issuer URL

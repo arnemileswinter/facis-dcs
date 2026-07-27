@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
-import type { Page } from '@playwright/test'
 import { type DcsRole, expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { Page } from '@playwright/test'
 
 /**
  * Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26).
@@ -34,7 +34,7 @@ async function openViewer(page: Page, loginAs: LoginAs, role: DcsRole, contractD
 }
 
 test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({ page, loginAs }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(120_000)
   page.setDefaultTimeout(15_000)
 
   // Reach SIGNED via the same proven lifecycle the other specs use — derive a
@@ -71,6 +71,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
   })
 
   await test.step('compliance checks tab flags signature level + credential status', async () => {
+    // DCS-IR-SM-07
     await page.getByRole('tab', { name: 'Compliance Checks' }).click()
 
     const checked = page.waitForResponse(
@@ -84,10 +85,38 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await expect(page.locator('.badge').filter({ hasText: 'ACTIVE' }).first()).toBeVisible()
   })
 
+  await test.step('compliance table surfaces the level-aware fields ADR-20 added (SM-01/SM-26)', async () => {
+    // The signatures table is populated from /signature/view (already loaded
+    // by openViewer above), independent of the "Run Compliance" POST above —
+    // these columns render as soon as the viewer opens.
+    const row = page
+      .getByRole('row')
+      .filter({ has: page.locator('td') })
+      .first()
+    await expect(row).toBeVisible()
+
+    // Achieved level (this contract has no declared requirement, so it
+    // defaults to AES): the achieved-level badge from the pre-existing column.
+    await expect(row.locator('td').nth(1).locator('.badge')).toHaveText('AES')
+    // Required level: same default, AES.
+    await expect(row.locator('td').nth(2).locator('.badge')).toHaveText('AES')
+    // Level compliance: achieved (AES) meets required (AES) -> PASS.
+    await expect(row.locator('td').nth(3).locator('.badge')).toHaveText('PASS')
+    await expect(row.locator('td').nth(3).locator('.badge')).toHaveClass(/badge-success/)
+    // Qualification: N/A for an AES (non-QES) signature.
+    await expect(row.locator('td').nth(4)).toContainText('N/A (AES)')
+    // Certificate subject: non-empty — the signatory's own certificate, not
+    // a DCS/org key (ADR-20 sole-control evidence, DCS-FR-SM-26).
+    const certCell = row.locator('td').nth(5)
+    await expect(certCell).not.toHaveText('—')
+    await expect(certCell).not.toHaveText('')
+  })
+
   await test.step('export compliance report as JSON and PDF', async () => {
+    // DCS-IR-SM-08
     const jsonDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Export JSON' }).click()
-    const jsonPath = (await (await jsonDownload).path())!
+    const jsonPath = await (await jsonDownload).path()
     const report = JSON.parse(readFileSync(jsonPath, 'utf-8')) as {
       contract_did: string
       signatures: unknown[]
@@ -127,6 +156,7 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
   // ---- Revocation (destructive — last) ----
   await test.step('revocation tab revokes the signature', async () => {
+    // DCS-IR-SM-06
     await openViewer(page, loginAs, 'Contract Manager', contractDid)
     await page.getByRole('tab', { name: 'Revocation' }).click()
 

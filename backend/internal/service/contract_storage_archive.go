@@ -29,21 +29,23 @@ import (
 
 // ContractStorageArchive service implementation.
 type contractStorageArchivesrvc struct {
-	DB           *sqlx.DB
-	CRepo        db.ContractRepo
-	DIDDocument  identity.DIDDocument
-	ATrailReader base.AuditTrailReader
+	DB            *sqlx.DB
+	CRepo         db.ContractRepo
+	DIDDocument   identity.DIDDocument
+	ATrailReader  base.AuditTrailReader
+	SnapshotStore archiveSnapshotStore
 	auth.JWTAuthenticator
 }
 
 // NewContractStorageArchive returns the ContractStorageArchive service implementation.
-func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader) contractstoragearchive.Service {
+func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore) contractstoragearchive.Service {
 	return &contractStorageArchivesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
 		DIDDocument:      didDocument,
 		ATrailReader:     auditTrailReader,
+		SnapshotStore:    snapshotStore,
 	}
 }
 
@@ -90,6 +92,15 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		state = &tState
 	}
 
+	validFrom, err := parseSearchTime("valid_from", p.ValidFrom)
+	if err != nil {
+		return nil, contractstoragearchive.MakeBadRequest(err)
+	}
+	validUntil, err := parseSearchTime("valid_until", p.ValidUntil)
+	if err != nil {
+		return nil, contractstoragearchive.MakeBadRequest(err)
+	}
+
 	qry := contract.SearchArchivedContractsQry{
 		DID:             stringValue(p.Did),
 		ContractVersion: intValue(p.ContractVersion),
@@ -99,6 +110,9 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		Description:     stringValue(p.Description),
 		ContractData:    stringValue(p.ContractData),
 		Tag:             stringValue(p.Tag),
+		Party:           stringValue(p.Party),
+		ValidFrom:       validFrom,
+		ValidUntil:      validUntil,
 	}
 	queryHandler := contract.GetArchivedContractsHandler{
 		DB:    s.DB,
@@ -127,7 +141,9 @@ func (s *contractStorageArchivesrvc) Store(ctx context.Context, p *contractstora
 // (DCS-FR-CSA-17): the row is marked deleted_at/deleted_by/deletion_reason,
 // never physically removed, and the operation is itself logged as an audit
 // event under the ContractStorageArchive component so it shows up through
-// Audit below.
+// Audit below. Once the soft-delete is committed, the entries' archived
+// snapshots are removed from the IPFS store — secure data disposal per
+// DCS-NFR-SEC-13 — and a removal failure is a hard error.
 func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstoragearchive.DeletePayload) (res int, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
@@ -138,6 +154,15 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// The snapshot CIDs must be captured before the soft-delete: afterwards
+	// there is no other record of which IPFS objects the entries pointed at
+	// for this deletion.
+	entries, err := s.CRepo.ReadArchiveEntries(ctx, tx)
+	if err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
 
 	deletedBy := middleware.GetParticipantID(ctx)
 	affected, err := s.CRepo.MarkArchiveEntryDeleted(ctx, tx, p.Did, deletedBy, p.Justification)
@@ -164,7 +189,50 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 
+	// Secure disposal (DCS-NFR-SEC-13): the archived snapshots leave the
+	// IPFS store now that their entries are deleted.
+	if err := removeArchivedSnapshots(s.SnapshotStore, snapshotCIDs); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+
 	return affected, nil
+}
+
+// archiveSnapshotStore is the slice of the IPFS client the delete path needs
+// for snapshot disposal (DCS-NFR-SEC-13).
+type archiveSnapshotStore interface {
+	DeleteFile(cid string) error
+}
+
+// snapshotCIDsForDeletion collects the distinct snapshot CIDs of the given
+// DID's live (not yet soft-deleted) archive entries — the IPFS objects a
+// delete of that DID must dispose of. Entries without a stored snapshot CID
+// carry nothing in IPFS and are skipped.
+func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []string {
+	seen := map[string]bool{}
+	cids := []string{}
+	for _, entry := range entries {
+		if entry.DID != did || entry.DeletedAt != nil || entry.SnapshotCID == "" {
+			continue
+		}
+		if seen[entry.SnapshotCID] {
+			continue
+		}
+		seen[entry.SnapshotCID] = true
+		cids = append(cids, entry.SnapshotCID)
+	}
+	return cids
+}
+
+// removeArchivedSnapshots removes each snapshot CID from the IPFS store,
+// failing hard on the first removal error (DCS-NFR-SEC-13).
+func removeArchivedSnapshots(store archiveSnapshotStore, cids []string) error {
+	for _, cid := range cids {
+		if err := store.DeleteFile(cid); err != nil {
+			return fmt.Errorf("remove archived snapshot %s from IPFS: %w", cid, err)
+		}
+	}
+	return nil
 }
 
 // Annotate sets an archived contract's summary and tags (DCS-FR-CSA-11).
@@ -357,6 +425,19 @@ func archiveEvidenceValue(evidence *datatype.JSON) any {
 		return nil
 	}
 	return value
+}
+
+// parseSearchTime parses an optional RFC3339 search parameter
+// (DCS-FR-CSA-10, DCS-FR-CSA-13); an unparsable value is a hard error.
+func parseSearchTime(name string, value *string) (*time.Time, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(*value))
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s value %q: expected an RFC3339 timestamp", name, *value)
+	}
+	return &t, nil
 }
 
 func stringValue(value *string) string {

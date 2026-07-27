@@ -65,6 +65,23 @@ spec:
                 port:
                   number: 8081
           {{- end }}
+          {{- /* This instance's own /.well-known documents, routed to the backend BEFORE
+               Hydra's blanket /.well-known prefix below. A peer resolves this instance's
+               did:web against the host root (identity.FetchDIDDocumentFromHostname builds
+               https://<host>/.well-known/did.json), and the agreement credential + federation
+               rules are fetched the same way by the trust gate. Hydra owning all of
+               /.well-known shadows them, so did:web resolution 404s and federation cannot
+               start. These are exact paths so ingress-nginx prefers them over that prefix;
+               the backend serves each of them (see backend/design/did.go). */}}
+          {{- range include "digital-contracting-service.wellKnownPaths" $ | fromYamlArray }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "digital-contracting-service.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port | int }}
+          {{- end }}
           {{- /* Hydra public OAuth2/OIDC routes — keeps Hydra off the edge; browser traffic
                proxied through this ingress. selfIssuerURL must match the ingress host. */}}
           {{- if and $.Values.hydra.enabled $.Values.hydra.route.paths }}

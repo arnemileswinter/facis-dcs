@@ -20,7 +20,7 @@ from steps.support.services.auth_service import AuthService
 from steps.support.services.template_service import TemplateService
 
 
-ARTIFACT_DIRECTORY = Path("tests/integration/artifacts")
+ARTIFACT_DIRECTORY = Path("tests/integration/artifacts/generated")
 TEMPLATE_ARTIFACT = ARTIFACT_DIRECTORY / "realistic-contract-field-template.jsonld"
 CONTRACT_ARTIFACT = ARTIFACT_DIRECTORY / "realistic-contract-field-contract.jsonld"
 
@@ -205,7 +205,7 @@ def _realistic_template_document():
         "dcs:documentStructure": {
             "@type": "dcs:DocumentStructure",
             "dcs:blocks": {"@list": blocks},
-            "dcs:layout": layout,
+            "dcs:layout": {"@list": layout},
         },
     }
 
@@ -224,6 +224,14 @@ def _refresh_template(context, role):
     context.realistic_template_response = response.json()
     context.realistic_template_updated_at = context.realistic_template_response["updated_at"]
     return context.realistic_template_response
+
+
+def _scoped_to_did(node_id: str, did: str) -> bool:
+    """True when an internal identifier is rebased under the document's DID.
+    The backend mints dereferenceable resource IRIs (base.ResourceIRI), so
+    the pre-fragment part is either the bare DID or a URL ending in /<did>."""
+    base, _, _ = node_id.partition("#")
+    return base == did or base.endswith(f"/{did}")
 
 
 def _document_ids(document):
@@ -250,7 +258,7 @@ def _blocks_by_suffix(document):
 
 
 def _layout_by_suffix(document):
-    layout = document["dcs:documentStructure"]["dcs:layout"]
+    layout = document["dcs:documentStructure"]["dcs:layout"]["@list"]
     return {node["@id"].rsplit("#block-", 1)[-1]: node for node in layout}
 
 
@@ -438,7 +446,12 @@ def step_then_documents_retain_layout(context):
 @then("the contract records its template provenance and rebases internal identifiers")
 def step_then_contract_provenance_and_rebase(context):
     provenance = context.realistic_contract_data.get("derivedFromTemplate") or {}
-    assert provenance.get("@id") == context.realistic_template_did, (
+    # The backend records the template's dereferenceable resource IRI
+    # (base.ResourceIRI("template", did)), not the bare system key.
+    provenance_id = provenance.get("@id") or ""
+    assert provenance_id == context.realistic_template_did or provenance_id.endswith(
+        f"/template/{context.realistic_template_did}"
+    ), (
         f"Contract provenance does not identify source template: {provenance}"
     )
     assert isinstance(provenance.get("version"), int) and provenance["version"] >= 1, (
@@ -457,13 +470,13 @@ def step_then_contract_provenance_and_rebase(context):
         if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
     ]
     assert template_internal_ids and all(
-        node_id.startswith(context.realistic_template_did + "#") for node_id in template_internal_ids
+        _scoped_to_did(node_id, context.realistic_template_did) for node_id in template_internal_ids
     ), f"Template identifiers were not rebased to its DID: {template_internal_ids}"
     assert contract_internal_ids and all(
-        node_id.startswith(context.realistic_contract_did + "#") for node_id in contract_internal_ids
+        _scoped_to_did(node_id, context.realistic_contract_did) for node_id in contract_internal_ids
     ), f"Contract identifiers were not rebased to its DID: {contract_internal_ids}"
     assert not any(
-        node_id.startswith(context.realistic_template_did + "#") for node_id in contract_internal_ids
+        _scoped_to_did(node_id, context.realistic_template_did) for node_id in contract_internal_ids
     ), f"Contract still contains template-scoped internal identifiers: {contract_internal_ids}"
 
 

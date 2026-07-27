@@ -3,6 +3,8 @@ backend/design/process_audit_and_compliance.go): /pac/audit, /pac/report
 (GET report + POST incident), /pac/monitor.
 """
 
+import json
+
 from behave import given, then, when
 
 from steps.support.api_client import (
@@ -121,6 +123,26 @@ def step_then_monitor_flags_risk(context, name, risk_type):
         f"{risk_type} risk, got risks: {risks}"
     )
     assert matching[0].get("detail"), f"Expected the flagged risk to carry a detail message, got: {matching[0]}"
+
+
+@then(
+    'the monitoring sweep flags contract "{name}" with an "{risk_type}" '
+    'compliance risk attributed to actor "{actor}"'
+)
+def step_then_monitor_flags_risk_with_actor(context, name, risk_type, actor):
+    """DCS-FR-PACM-02 unauthorized-access rule: beyond the flagged risk
+    itself, its detail must attribute the denial to the denied actor
+    (retrieved_by on the persisted CONTRACT_ACCESS_DENIED artifact — the
+    OID4VP-disclosed organization claim, see querymonitor.go
+    unauthorizedAccessRisks)."""
+    step_then_monitor_flags_risk(context, name, risk_type)
+    did, _ = ContractService._contract_data(context, name)
+    risks = context.requests_response.json().get("risks") or []
+    matching = [r for r in risks if r.get("did") == did and r.get("risk_type") == risk_type]
+    assert any(actor in (r.get("detail") or "") for r in matching), (
+        f"Expected the {risk_type} risk for contract '{name}' (did={did}) to attribute "
+        f"the denial to actor '{actor}' in its detail, got: {matching}"
+    )
 
 
 @then('the flagged risk for contract "{name}" is recorded in the PAC audit trail')
@@ -253,4 +275,29 @@ def step_then_audit_response_includes_contract(context, name):
     assert did in all_dids, (
         f"Expected the CONTRACT_WORKFLOW_ENGINE audit trail to include an entry for contract "
         f"'{name}' (did={did}), got dids: {all_dids}"
+    )
+
+
+@then("the audit outbox holds a CONFIG_INTEGRITY_ATTESTATION record hashing the DID document")
+def step_then_config_attestation_recorded(context):
+    # The attestation is written once at process startup (DCS-NFR-SEC-04), so
+    # it is already committed by the time any scenario runs — no polling.
+    cursor = context.db.cursor()
+    cursor.execute(
+        """SELECT event_data FROM outbox_events
+           WHERE component = 'PROCESS_AUDIT_AND_COMPLIANCE'
+             AND event_type = 'CONFIG_INTEGRITY_ATTESTATION'
+           ORDER BY id DESC LIMIT 1"""
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    assert row, "Expected a CONFIG_INTEGRITY_ATTESTATION outbox record from startup (DCS-NFR-SEC-04)"
+    event_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    hashes = event_data.get("file_hashes") or {}
+    did_hash = hashes.get("did-document")
+    assert did_hash and len(did_hash) == 64 and all(c in "0123456789abcdef" for c in did_hash), (
+        f"Expected the attestation to carry a 64-hex SHA-256 for the DID document, got: {event_data}"
+    )
+    assert event_data.get("did", "").startswith("did:"), (
+        f"Expected the attestation to name the attesting instance by DID, got: {event_data}"
     )

@@ -17,6 +17,7 @@ import (
 
 	dcstodcs2 "digital-contracting-service/internal/dcstodcs"
 	pq2 "digital-contracting-service/internal/dcstodcs/db/pg"
+	"digital-contracting-service/internal/processauditandcompliance/configattest"
 
 	didservice "digital-contracting-service/gen/did_service"
 
@@ -308,6 +309,21 @@ func main() {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
 	authCfg.RequestSigner = requestSigner
+
+	// The Document-Retrieval signing ceremony's request object declares
+	// client_id_scheme=x509_san_dns (docretrieval.go) — a real wallet resolves
+	// trust from the leaf certificate's SAN, not a bare jwk, so it is signed
+	// with the DCS's own DID/hostname certificate chain instead of the HSM JAR
+	// key above (already verified, just above, to carry a SAN matching its
+	// hostname).
+	docRetrievalSigner, err := oid4vprequest.NewX5CSigner(didDocument)
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not build OID4VP document-retrieval request signer")
+	}
+	docRetrievalClientID, err := docRetrievalSigner.ClientID()
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not resolve document-retrieval client_id")
+	}
 	systemClients, err := loadSystemClients()
 	if err != nil {
 		log.Fatalf(ctx, err, "Invalid system client configuration")
@@ -378,6 +394,18 @@ func main() {
 	did, err := didDocument.GetID()
 	if err != nil {
 		log.Fatalf(ctx, err, "could not read DID")
+	}
+
+	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
+	// security-critical mounted config files, enforce any operator pins, and
+	// record the attestation in the audit outbox. A pin mismatch or an
+	// unreadable configured file aborts startup.
+	if err := configattest.Attest(ctx, db, did, map[string]string{
+		"did-document":      os.Getenv("DCS_DID"),
+		"oid4vp-trust-data": os.Getenv("OID4VP_TRUST_DATA_PATH"),
+		"x5c-trust-anchors": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH"),
+	}, os.Getenv("DCS_CONFIG_SHA256_PINS")); err != nil {
+		log.Fatalf(ctx, err, "Config integrity verification failed")
 	}
 
 	outboxProcessor := event.OutboxProcessor{
@@ -588,13 +616,13 @@ func main() {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
 
-		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader)
+		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, contractTargetClient)
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, ipfsAPIClient, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, ipfsAPIClient, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService

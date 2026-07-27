@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +14,8 @@ import (
 
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/jades"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 
 	trustgate "digital-contracting-service/internal/dcstodcs"
 
@@ -76,11 +80,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 // extract the embedded JSON-LD, and upserts this instance's own local copy of
 // the contract. No tasks cross the boundary — each DCS runs its own workflow.
 func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (res *dcstodcs.DCSToDCSContractPdfResponse, err error) {
-	senderHostname, err := identity.DIDWebToHostname(req.FromPeerDid)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	remoteDIDDocument, err := identity.FetchDIDDocumentFromHostname(senderHostname)
+	remoteDIDDocument, err := identity.FetchDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -145,6 +145,27 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			fmt.Errorf("post_pdf rejected: could not extract contract payload from PDF: %w", err))
 	}
 
+	// A ship accompanied by a JAdES is a signature (acceptance, DCS-FR-SM-02):
+	// the JAdES must verify against the SENDER's did:web key and its payload
+	// must bind exactly the contract this PDF carries. The challenge-response
+	// secret above only authenticates the session — this binds the contract
+	// CONTENT to the sender's key and leaves an independently verifiable
+	// artifact behind (served by get_provenance).
+	var syncSignature *db2.SyncSignature
+	if req.JadesSignature != nil && *req.JadesSignature != "" {
+		verified, err := verifyShippedJades(*req.JadesSignature, req.ContractIri, req.FromPeerDid, payload, remoteDIDDocument)
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
+		}
+		syncSignature = verified
+	}
+
+	// The sender's declared contract state is informational except for
+	// REVOKED: the authenticated counterparty revoking its own signature
+	// voids the agreement, so the receiver must adopt it (DCS-NFR-BR-06) —
+	// no other peer-declared state ever overrides the local workflow.
+	adoptRevoked := req.ContractState != nil && *req.ContractState == contractstate.Revoked.String()
+
 	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, IPFSClient: s.IPFSClient}
 	if err := receiver.Handle(ctx, command.PeerPdfReceiveCmd{
 		ContractIRI:  req.ContractIri,
@@ -152,11 +173,71 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		LocalPeer:    localPeer,
 		Payload:      payload,
 		Pdf:          req.Pdf,
+		AdoptRevoked: adoptRevoked,
 	}); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
+	if syncSignature != nil {
+		tx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := s.SRepo.UpsertSyncSignature(ctx, tx, *syncSignature); err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+	}
+
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil
+}
+
+// verifyShippedJades verifies a signature ship's JAdES (DCS-FR-SM-02): the
+// compact JWS must verify against its own x5c chain, the x5c leaf key must be
+// the sender's published did:web key, and the signed payload must be exactly
+// the JCS canonicalization of the contract the shipped PDF itself carries —
+// same recipe the pre-ADR-13 post_sync handler applied. Returns the
+// provenance artifact to persist for get_provenance.
+func verifyShippedJades(jadesSignature, contractIRI, fromPeerDID string, pdfPayload []byte, remoteDIDDocument *identity.DIDDocument) (*db2.SyncSignature, error) {
+	jadesPayload, leafKey, err := jades.Verify(jadesSignature)
+	if err != nil {
+		return nil, err
+	}
+	peerKey := remoteDIDDocument.PublicKey()
+	if peerKey == nil || leafKey.X.Cmp(peerKey.X) != 0 || leafKey.Y.Cmp(peerKey.Y) != 0 {
+		return nil, fmt.Errorf("JAdES x5c leaf key does not match peer %s's did:web key", fromPeerDID)
+	}
+
+	// The payload is self-describing ({dcs:contractDid, dcs:contractVersion,
+	// dcs:contractDocument}) — read the claimed identity out of the VERIFIED
+	// bytes, then require it to bind this ship's contract and document.
+	var claimed struct {
+		ContractDid     string `json:"dcs:contractDid"`
+		ContractVersion int    `json:"dcs:contractVersion"`
+	}
+	if err := json.Unmarshal(jadesPayload, &claimed); err != nil {
+		return nil, fmt.Errorf("could not decode JAdES payload: %w", err)
+	}
+	if claimed.ContractDid != contractIRI {
+		return nil, fmt.Errorf("JAdES payload binds contract %s, not the shipped contract %s", claimed.ContractDid, contractIRI)
+	}
+	expectedPayload, err := jades.BuildContractPayload(claimed.ContractDid, claimed.ContractVersion, pdfPayload)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(jadesPayload, expectedPayload) {
+		return nil, fmt.Errorf("JAdES payload does not match the contract document embedded in the shipped PDF for %s", contractIRI)
+	}
+
+	return &db2.SyncSignature{
+		DID:             contractIRI,
+		ContractVersion: claimed.ContractVersion,
+		FromPeerDID:     fromPeerDID,
+		JadesSignature:  jadesSignature,
+	}, nil
 }
 
 // GetProvenance returns the stored JAdES provenance artifact for a contract

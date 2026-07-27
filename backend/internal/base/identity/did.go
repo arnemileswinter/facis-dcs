@@ -418,42 +418,90 @@ func parseQCStatements(cert *x509.Certificate) (qualified bool, qscd bool, err e
 	return false, false, nil // extension not present -> not an eIDAS certificate
 }
 
-// FetchDIDDocumentFromHostname fetches the did.json of a host via
-// /.well-known/did.json, first over https, then falling back to http.
-func FetchDIDDocumentFromHostname(hostname string) (*DIDDocument, error) {
+// FetchDIDDocument resolves a did:web identifier to its document, first over
+// https, then falling back to http. Resolution follows the identifier's own path
+// segments, so several instances can share one host.
+func FetchDIDDocument(did string) (*DIDDocument, error) {
+	host, segments, err := DIDWebPath(did)
+	if err != nil {
+		return nil, err
+	}
+	docPath := DIDWebDocumentPath(segments)
+
 	var lastErr error
 	for _, scheme := range []string{"https", "http"} {
-		url := fmt.Sprintf("%s://%s/.well-known/did.json", scheme, hostname)
-		doc, err := fetchDIDDocumentFromURL(url)
+		doc, err := fetchDIDDocumentFromURL(DIDWebBaseURL(scheme, host, nil) + docPath)
 		if err == nil {
 			return doc, nil
 		}
 		lastErr = err
 	}
-	return nil, fmt.Errorf("fetching did.json from %s failed: %w", hostname, lastErr)
+	return nil, fmt.Errorf("fetching did.json for %s failed: %w", did, lastErr)
 }
 
 // DIDWebToHostname extracts the host (including port) from a did:web
 // identifier, e.g. "did:web:localhost%3A8991" -> "localhost:8991".
+//
+// Path segments are deliberately dropped: this is the authority, which is what
+// certificate hostname verification checks. Use DIDWebPath when the whole
+// resolution target matters — two DIDs under one host share a hostname.
 func DIDWebToHostname(did string) (string, error) {
+	host, _, err := DIDWebPath(did)
+	return host, err
+}
+
+// DIDWebPath splits a did:web identifier into its authority and its path
+// segments, e.g. "did:web:example.com%3A8991:tenant:b" ->
+// ("example.com:8991", ["tenant", "b"]).
+func DIDWebPath(did string) (string, []string, error) {
 	const prefix = "did:web:"
 	if !strings.HasPrefix(did, prefix) {
-		return "", fmt.Errorf("not a did:web identifier: %q", did)
+		return "", nil, fmt.Errorf("not a did:web identifier: %q", did)
 	}
 
-	rest := strings.TrimPrefix(did, prefix)
-
-	hostEncoded, _, _ := strings.Cut(rest, ":")
-	if hostEncoded == "" {
-		return "", errors.New("did:web identifier has empty host component")
-	}
-
-	host, err := url.QueryUnescape(hostEncoded) // %3A -> ":"
+	parts := strings.Split(strings.TrimPrefix(did, prefix), ":")
+	host, err := url.QueryUnescape(parts[0]) // %3A -> ":"
 	if err != nil {
-		return "", fmt.Errorf("invalid percent-encoding in did:web host: %w", err)
+		return "", nil, fmt.Errorf("invalid percent-encoding in did:web host: %w", err)
+	}
+	if host == "" {
+		return "", nil, errors.New("did:web identifier has empty host component")
 	}
 
-	return host, nil
+	segments := make([]string, 0, len(parts)-1)
+	for _, raw := range parts[1:] {
+		segment, err := url.QueryUnescape(raw)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid percent-encoding in did:web path: %w", err)
+		}
+		if segment == "" {
+			return "", nil, fmt.Errorf("did:web identifier %q has an empty path segment", did)
+		}
+		segments = append(segments, segment)
+	}
+	return host, segments, nil
+}
+
+// DIDWebDocumentPath is the path a did:web document is served at, per
+// did-method-web: the bare authority uses /.well-known/did.json, while an
+// identifier carrying path segments uses those segments and NO .well-known.
+// Getting this wrong makes every DID under one host resolve to the same
+// document.
+func DIDWebDocumentPath(segments []string) string {
+	if len(segments) == 0 {
+		return "/.well-known/did.json"
+	}
+	return "/" + strings.Join(segments, "/") + "/did.json"
+}
+
+// DIDWebBaseURL is the origin plus path segments a did:web identifier denotes,
+// without the document filename — the base an instance's own endpoints hang off.
+func DIDWebBaseURL(scheme, host string, segments []string) string {
+	base := scheme + "://" + host
+	if len(segments) > 0 {
+		base += "/" + strings.Join(segments, "/")
+	}
+	return base
 }
 
 func fetchDIDDocumentFromURL(url string) (*DIDDocument, error) {
