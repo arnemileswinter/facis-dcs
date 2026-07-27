@@ -16,25 +16,6 @@ jobs:
       dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
 
-  # pdf-core is a separate deployable with its own image, and the C2PA
-  # compiler lives in it — a release that rebuilds only the backend ships none
-  # of pdf-core's changes. It was previously pushed by hand, which is how an
-  # image could silently lag the source it was cut from.
-  #
-  # repo_name names the image (the backend job leaves it empty and inherits the
-  # repository name); the build context is the repo root because the Dockerfile
-  # copies from ../docs, matching tests/bdd's build_pdf_core_image.
-  dockerbuild-pdf-core:
-    uses: eclipse-xfsc/dev-ops/.github/workflows/dockerbuild.yml@harbor-env-patch
-    secrets:
-      HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
-      HARBOR_CREDENTIALS: ${{ secrets.HARBOR_CREDENTIALS }}
-    with:
-      repo_name: "pdf-core"
-      dockerfile: "pdf-core/Dockerfile"
-      buildContext: "."
-      harbor_config: "deployment/harbor.config"
-
   # Publishes the Helm chart to Harbor's OCI registry (DCS-OE-03: chart must
   # be published to a Helm repo, not only exist in-tree). Uses the same
   # HARBOR_HOST/HARBOR_CREDENTIALS secrets as the Docker build jobs above, and
