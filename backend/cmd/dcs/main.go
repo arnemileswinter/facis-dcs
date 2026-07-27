@@ -219,8 +219,8 @@ func main() {
 	}
 
 	// DCS_PUBLIC_URL is the base of every absolute IRI a produced document
-	// carries (@context, sh:shapesGraph, dcterms:conformsTo anchors, C2PA
-	// remote manifests) — these must dereference for external consumers.
+	// carries (@context, sh:shapesGraph, C2PA remote manifests) — these must
+	// dereference for external consumers.
 	if strings.TrimSpace(os.Getenv("DCS_PUBLIC_URL")) == "" {
 		log.Fatalf(ctx, errors.New("dcs configuration missing"), "DCS_PUBLIC_URL must be set: produced documents carry absolute, resolvable IRIs based on it")
 	}

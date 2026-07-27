@@ -239,9 +239,12 @@ func (s *semanticHubsrvc) ResolveOntology(ctx context.Context, p *semantichubgen
 	return toSchemaItem(schema), nil
 }
 
-// ResolveProfile serves validation profiles at the anchor path
-// (/semantic/profile/{name}?version=N) that semantichub.AnchorURL embeds
-// into every produced document's dcterms:conformsTo.
+// ResolveProfile serves a registered validation profile at
+// /semantic/profile/{name}?version=N. Documents no longer carry a
+// dcterms:conformsTo anchor pointing here — claiming conformance to one
+// envelope profile said nothing about the vocabulary a contract's own data
+// uses — but the profiles remain readable, and the rules still run at
+// validation time.
 func (s *semanticHubsrvc) ResolveProfile(ctx context.Context, p *semantichubgen.ResolveProfilePayload) (res *semantichubgen.SemanticSchemaItem, err error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -347,16 +350,11 @@ func RefreshValidationAnchors(ctx context.Context, db *sqlx.DB) error {
 	if err != nil {
 		return fmt.Errorf("load active hub shapes version: %w", err)
 	}
-	profileVersion, err := semantichub.ActiveVersion(ctx, db, semantichub.ProfileName, "profile")
-	if err != nil {
-		return fmt.Errorf("load active hub profile version: %w", err)
-	}
 	validation.SetCanonicalOntologyIRIs(hubIRIs)
 	validation.ResetDomainOntologyCache()
 	validation.SetSchemaAnchorRefs(
 		semantichub.AnchorURL("context", semantichub.ContextName, contextVersion),
 		semantichub.AnchorURL("shapes", semantichub.ShapesName, shapesVersion),
-		semantichub.AnchorURL("profile", semantichub.ProfileName, profileVersion),
 	)
 	return nil
 }
