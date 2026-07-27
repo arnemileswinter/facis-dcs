@@ -162,7 +162,7 @@ func parseCurrentPagesKids(pdf []byte) ([]int, error) {
 // The original PDF bytes are preserved unchanged as a prefix so existing
 // C2PA hard-binding signatures remain verifiable over the original byte range.
 func UpdatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, compiledAt time.Time) ([]byte, error) {
-	return updatePDF(ctx, oldPDF, newPayload, nil, "", compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, nil, "", compiledAt, false)
 }
 
 // UpdatePDFWithVC appends a PDF incremental update that replaces visible page
@@ -179,7 +179,7 @@ func UpdatePDFWithVC(ctx context.Context, oldPDF []byte, newPayload []byte, vcBy
 	if len(vcBytes) == 0 {
 		return UpdatePDF(ctx, oldPDF, newPayload, compiledAt)
 	}
-	return updatePDF(ctx, oldPDF, newPayload, vcBytes, "", compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, vcBytes, "", compiledAt, false)
 }
 
 // UpdatePDFWithOptions is the full-control entry point used by the DCS backend.
@@ -188,7 +188,24 @@ func UpdatePDFWithVC(ctx context.Context, oldPDF []byte, newPayload []byte, vcBy
 // remote_manifests field (DCS-OR-C2PA-008 AC3). When remoteManifestURL is empty
 // the output is identical to UpdatePDF / UpdatePDFWithVC.
 func UpdatePDFWithOptions(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
-	return updatePDF(ctx, oldPDF, newPayload, vcBytes, remoteManifestURL, compiledAt)
+	return updatePDF(ctx, oldPDF, newPayload, vcBytes, remoteManifestURL, compiledAt, false)
+}
+
+// ReanchorProvenance appends a provenance-only C2PA manifest whose hard
+// binding covers the document's current bytes, without changing its payload.
+//
+// A PAdES signature is applied after the lifecycle manifest so that the
+// signature commits to the provenance (ADR-26). That leaves the manifest's
+// whole-file binding covering less than the file it now lives in, and no
+// amendment can fix it: the payload has not changed, and the amendment path
+// refuses an unchanged document. This appends, so the signature's byte range
+// is untouched and the signature keeps verifying in external tools.
+func ReanchorProvenance(ctx context.Context, oldPDF []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
+	payload, err := ExtractLatestEmbeddedJSONLD(oldPDF)
+	if err != nil {
+		return nil, fmt.Errorf("extract embedded payload to re-anchor: %w", err)
+	}
+	return updatePDF(ctx, oldPDF, payload, nil, remoteManifestURL, compiledAt, true)
 }
 
 // ExtractManifestStore returns the raw JUMBF C2PA manifest store bytes
@@ -199,7 +216,7 @@ func ExtractManifestStore(pdf []byte) ([]byte, error) {
 
 // updatePDF is the shared implementation used by UpdatePDF and UpdatePDFWithVC.
 // The "no changes" guard is bypassed when vcBytes is non-nil.
-func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time) ([]byte, error) {
+func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []byte, remoteManifestURL string, compiledAt time.Time, reanchor bool) ([]byte, error) {
 	oldPayload, err := ExtractEmbeddedJSONLD(oldPDF)
 	if err != nil {
 		return nil, fmt.Errorf("extract embedded JSON-LD: %w", err)
@@ -213,7 +230,9 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	oldHashHex := hex.EncodeToString(oldHash[:])
 	newHashHex := hex.EncodeToString(newHash[:])
 
-	if oldHashHex == newHashHex && len(vcBytes) == 0 {
+	// A re-anchor deliberately carries an unchanged payload; every other caller
+	// gets the no-changes guard.
+	if oldHashHex == newHashHex && len(vcBytes) == 0 && !reanchor {
 		return nil, ErrNoChanges
 	}
 

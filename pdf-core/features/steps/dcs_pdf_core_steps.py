@@ -174,19 +174,6 @@ def _ensure_c2patool_binary():
 # that does not match the bytes — is a defect.
 _C2PA_EXPECTED_FAILURES = {"signingCredential.untrusted"}
 
-# assertion.dataHash.mismatch is expected on a PAdES-signed contract and only
-# there (ADR-26). The hard binding hashes the whole file, the signature is
-# applied after the manifest so the signature commits to the provenance, and
-# the appended signature revisions therefore fall outside what the manifest
-# hashed. On a document carrying no signature the same status is a real
-# integrity failure, so the gate is condition-aware rather than tolerant.
-_C2PA_SIGNED_ONLY_FAILURES = {"assertion.dataHash.mismatch"}
-
-
-def _is_pades_signed(pdf_path):
-    data = pdf_path.read_bytes()
-    return b"/ByteRange" in data and (b"/Type /Sig" in data or b"/Type/Sig" in data)
-
 
 def _run_c2patool(pdf_path):
     binary = _ensure_c2patool_binary()
@@ -209,26 +196,20 @@ def _run_c2patool(pdf_path):
             f"c2patool produced no JSON report for {pdf_path.name}: {exc}\nstdout:\n{completed.stdout}"
         )
 
-    tolerated = set(_C2PA_EXPECTED_FAILURES)
-    signed = _is_pades_signed(pdf_path)
-    if signed:
-        tolerated |= _C2PA_SIGNED_ONLY_FAILURES
-
     unexpected = [
         f"{entry.get('code')} ({entry.get('explanation')}) at {entry.get('url')}"
         for scope in _c2pa_validation_scopes(report)
         for entry in scope.get("failure", [])
-        if entry.get("code") not in tolerated
+        if entry.get("code") not in _C2PA_EXPECTED_FAILURES
     ]
     state = report.get("validation_state")
-    # A signed contract cannot reach "Valid" while its hard binding stops at the
-    # signature, so the state is only decisive for unsigned documents.
-    state_ok = state == "Valid" or signed
-    if unexpected or not state_ok:
+    # Signed contracts included: provenance is re-anchored over the signature
+    # (ADR-26), so a signed artifact validates like any other and a dataHash
+    # mismatch on one is a regression, not an expected state.
+    if unexpected or state != "Valid":
         raise AssertionError(
-            f"c2patool reports validation_state={state!r} for {pdf_path.name} "
-            f"(PAdES-signed={signed}); unexpected failures:\n  "
-            + "\n  ".join(unexpected or ["(none)"])
+            f"c2patool reports validation_state={state!r} for {pdf_path.name}; "
+            f"unexpected failures:\n  " + "\n  ".join(unexpected or ["(none)"])
         )
 
 

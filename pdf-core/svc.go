@@ -227,6 +227,30 @@ type verifyResponse struct {
 	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
 }
 
+// renderReanchor appends a provenance-only C2PA manifest binding the submitted
+// PDF's current bytes (ADR-26). The payload is unchanged, so this is not an
+// amendment: it exists because a PAdES signature is applied after the lifecycle
+// manifest, leaving that manifest's whole-file binding short of the signed file.
+func (s *service) renderReanchor(w http.ResponseWriter, r *http.Request) {
+	if err := checkMediaType(r.Header.Get("Content-Type"), "application/pdf"); err != nil {
+		writeError(w, err)
+		return
+	}
+	raw, err := limitRead(r.Body, 32<<20)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	signer := compiler.NewCapturingSigner()
+	updated, err := compiler.ReanchorProvenance(renderContext(r, signer), raw,
+		strings.TrimSpace(r.URL.Query().Get("manifest_url")), compiler.CanonicalCompiledAt)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	writePrepared(w, updated, signer.Captured())
+}
+
 func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	if err := checkMediaType(r.Header.Get("Content-Type"), "application/pdf"); err != nil {
 		writeError(w, err)
