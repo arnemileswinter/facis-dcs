@@ -17,6 +17,8 @@ import type {
   ContractSearchRequest,
   ContractStoreRequest,
   ContractSubmitRequest,
+  ContractTargetDesignateRequest,
+  ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
 } from '@/models/requests/contract-request'
@@ -37,6 +39,7 @@ import type {
   ContractSearchResponse,
   ContractStoreResponse,
   ContractSubmitResponse,
+  ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
 } from '@/models/responses/contract-response'
@@ -65,6 +68,12 @@ export interface ContractWorkflowService {
   store: (request: ContractStoreRequest) => Promise<ContractStoreResponse>
   terminate: (request: ContractTerminateRequest) => Promise<ContractTerminateResponse>
   deploy: (request: ContractDeployRequest) => Promise<ContractDeployResponse>
+  // Contract target systems (ADR-25)
+  listTargets: () => Promise<ContractTarget[]>
+  createTarget: (request: ContractTargetWriteRequest) => Promise<ContractTarget>
+  updateTarget: (request: ContractTargetWriteRequest & { id: string }) => Promise<ContractTarget>
+  deleteTarget: (id: string) => Promise<unknown>
+  designateTarget: (request: ContractTargetDesignateRequest) => Promise<unknown>
   audit: (request: ContractAuditRequest) => Promise<ContractAuditResponse>
   retrieveHistoryByDid: (request: ContractHistoryRetrieveRequest) => Promise<ContractHistoryResponse>
   exportPdf: (did: string) => Promise<Blob>

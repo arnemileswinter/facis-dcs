@@ -18,6 +18,10 @@ import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './
  * operator needs when a target was unreachable, lost its state, or was replaced.
  * The state machine treats that as an idempotent ACTIVE -> ACTIVE re-dispatch.
  *
+ * Where it deploys to is chosen through the UI as well: an administrator
+ * registers a target system, and the manager points the contract at it before
+ * signing (ADR-25). Nothing is seeded behind the UI's back.
+ *
  * The one step that is not a click is the KPI report: the reporter is the
  * contract *target system*, an external party posting over the deployment
  * callback channel with its shared secret, quoting the correlation id the
@@ -35,6 +39,9 @@ import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './
 
 const CALLBACK_SECRET = process.env.E2E_DEPLOYMENT_CALLBACK_SECRET ?? 'bdd-deployment-callback-secret'
 
+/** The shipped ORCE contract-target flow the kind stack runs (values.bdd.yml). */
+const E2E_CONTRACT_TARGET_URL = process.env.E2E_CONTRACT_TARGET_URL ?? 'http://dcs-orce:1880/contract-target/deploy'
+
 /** The bearer token the SPA holds for the currently applied role session. */
 async function currentToken(page: import('@playwright/test').Page): Promise<string> {
   const token = await page.evaluate(() => window.localStorage.getItem('access_token'))
@@ -50,12 +57,51 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
   // signing through the UI; each leg is slow and this test owns all of them.
   test.setTimeout(20 * 60_000)
 
-  const contractDid =
-    await test.step('author, approve and sign a contract whose ODRL policy bounds a numeric field', async () => {
-      const did = await buildApprovedContract(page, loginAs)
-      await signApprovedContractViaViewer(page, loginAs, did)
-      return did
-    })
+  const targetName = `E2E Target ${Date.now()}`
+
+  await test.step('the administrator registers a target system', async () => {
+    await gotoAs(page, loginAs, 'Sys. Administrator', '/ui/admin/targets')
+    await expect(page.getByTestId('target-admin')).toBeVisible()
+
+    await page.getByTestId('target-name').fill(targetName)
+    // The shipped ORCE contract-target flow, the same endpoint the BDD suite
+    // registers: it verifies the payload hash and acknowledges over the
+    // callback channel, which is what drives SIGNED -> ACTIVE.
+    await page.getByTestId('target-url').fill(E2E_CONTRACT_TARGET_URL)
+    await page.getByTestId('target-description').fill('Registered by the KPI alert e2e.')
+
+    const registered = page.waitForResponse(
+      (r) => r.url().includes('/contract/targets') && r.request().method() === 'POST',
+    )
+    await page.getByTestId('target-save').click()
+    const response = await registered
+    expect(response.ok(), `register target ${response.status()}`).toBeTruthy()
+
+    await expect(page.getByTestId('target-row').filter({ hasText: targetName })).toHaveCount(1)
+  })
+
+  const contractDid = await test.step('author and approve a contract whose ODRL policy bounds a numeric field', () =>
+    buildApprovedContract(page, loginAs))
+
+  await test.step('the contract manager points it at that target system', async () => {
+    // Before signing, deliberately: signing completion deploys the contract
+    // automatically with nobody present to choose a destination, so a contract
+    // that reaches it without one does not deploy at all (ADR-25).
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+    await expect(page.getByTestId('contract-target-unset'), 'no target is set yet').toBeVisible()
+
+    await page.getByTestId('contract-target-select').selectOption({ label: targetName })
+    const designated = page.waitForResponse(
+      (r) => r.url().includes('/contract/target/designate') && r.request().method() === 'POST',
+    )
+    await page.getByTestId('contract-target-save').click()
+    const response = await designated
+    expect(response.ok(), `designate ${response.status()}`).toBeTruthy()
+
+    await expect(page.getByTestId('contract-target-name')).toContainText(targetName)
+  })
+
+  await test.step('sign it', () => signApprovedContractViaViewer(page, loginAs, contractDid))
 
   const boundFieldIri =
     await test.step('signing auto-deploys it and the target acknowledges, taking the contract ACTIVE', async () => {

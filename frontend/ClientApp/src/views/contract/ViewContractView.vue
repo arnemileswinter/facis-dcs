@@ -12,6 +12,7 @@ import { useContractDataPreprocess } from '@contract-workflow-engine/composables
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -91,6 +92,13 @@ const childContracts = computed(() => contracts.value.filter((c) => c.parent_con
 const contractTitle = computed(
   () => contract.value?.name ?? contract.value?.contract_data?.['dcs:metadata']?.['dcs:title'] ?? contract.value?.did,
 )
+
+// After the target is designated the contract's updated_at moves on, so the
+// store is refreshed rather than left holding a stale timestamp that every
+// later action would be rejected against.
+const reloadContract = () => {
+  void contractsStore.loadContracts()
+}
 
 onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
@@ -178,6 +186,13 @@ const exportBundle = async () => {
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />
+
+                <!-- Where this contract deploys to (ADR-25) -->
+                <div class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
+                  <div class="card-body gap-2">
+                    <ContractTargetPicker :contract="contract" @designated="reloadContract" />
+                  </div>
+                </div>
 
                 <!-- Deployment KPIs (DCS-FR-CWE-31, DCS-FR-CWE-09) -->
                 <div

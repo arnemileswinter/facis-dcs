@@ -151,3 +151,16 @@ export interface ContractHistoryItem {
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]
+
+/** A configured Contract Target System deployments may be dispatched to
+ *  (ADR-25). Disabled entries stay referenceable so a contract naming one keeps
+ *  a readable destination, but dispatch to them is refused. */
+export interface ContractTarget {
+  id: string
+  name: string
+  url: string
+  description?: string
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
