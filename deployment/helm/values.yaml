@@ -606,3 +606,21 @@ sharedServices:
     - name: ipfs-dm
       service: "{{ .Release.Name }}-ipfs-document-manager"
       port: 8080
+
+# ---- Contract target systems (ADR-25) ---------------------------------
+# Systems a signed contract can be deployed to. A fresh install has an empty
+# registry and nothing can be deployed until one exists, so declaring them here
+# makes an instance usable straight after install — and makes a test cluster
+# that is recreated on every run usable without manual setup.
+#
+# Seeding is CREATE-ONLY, matched on name. An entry an administrator later
+# repoints in the admin UI is not reverted by the next restart: changing a value
+# here affects new installs, and changing a running deployment's target is done
+# in the UI. Removing an entry here does not remove it from a running instance.
+#
+# Each entry: name (unique), url (endpoint the payload is POSTed to),
+# description (optional), enabled (optional, default true).
+contractTargets: []
+#  - name: "Reference ORCE target"
+#    url: "http://my-release-orce:1880/contract-target/deploy"
+#    description: "The shipped ORCE contract-target flow."

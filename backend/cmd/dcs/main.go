@@ -468,6 +468,27 @@ func main() {
 	// recorded on the deployment row so the compliance monitor can alert on it.
 	cweDeploymentRepo := &cwerepo.PostgresDeploymentRepo{}
 	cweTargetRepo := cwerepo.PostgresContractTargetRepo{}
+
+	// Target systems declared in deployment configuration (ADR-25). A fresh
+	// install has an empty registry, so without this nothing can be deployed
+	// until somebody opens the admin UI — including in a test cluster that is
+	// recreated every run. Entries already present are left untouched, so an
+	// administrator who repoints one is not overruled by the next restart.
+	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
+		raw, err := os.ReadFile(seedPath)
+		if err != nil {
+			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
+		}
+		entries, err := cwecommand.ParseSeedTargets(raw)
+		if err != nil {
+			log.Fatalf(ctx, err, "invalid contract target configuration in %s", seedPath)
+		}
+		seeded, err := cwecommand.SeedContractTargets(ctx, db, &cweTargetRepo, entries)
+		if err != nil {
+			log.Fatalf(ctx, err, "could not register the configured contract targets")
+		}
+		log.Printf(ctx, "contract target registry: %d of %d configured targets registered", seeded, len(entries))
+	}
 	// One client for every registered target: the endpoint travels with each
 	// dispatch now that a contract names its own destination (ADR-25).
 	contractTargetClient := cwecommand.NewHTTPContractTargetClient()

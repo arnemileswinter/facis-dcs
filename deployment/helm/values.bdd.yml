@@ -59,8 +59,9 @@ extraEnv:
   # the wiring). Only instance A dispatches — signing commands forward to the
   # contract's Origin peer, so deployments always originate here.
   #
-  # The endpoint is no longer configured here: a contract designates a target
-  # from the registry (ADR-25), and the BDD suite registers this one itself.
+  # The endpoint is no longer an env var: a contract designates a target from the
+  # registry (ADR-25). It is seeded under contractTargets below, so the suite
+  # finds it already registered rather than having to create it.
 
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper) is published by the hsm-provision
@@ -448,3 +449,12 @@ kubeStateMetrics:
 # signing BDD scenarios can complete.
 dss:
   enabled: true
+
+# Seeded into the target registry at startup (ADR-25) so a freshly created kind
+# cluster can deploy without anyone opening the admin UI. The BDD and e2e suites
+# look this up by name; the e2e also registers one of its own through the UI, to
+# prove an operator can.
+contractTargets:
+  - name: "BDD Contract Target"
+    url: "http://dcs-orce:1880/contract-target/deploy"
+    description: "The shipped ORCE contract-target flow used by the test suites."

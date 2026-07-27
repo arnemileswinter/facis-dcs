@@ -41,9 +41,12 @@ the deployment run, so:
   by default, and may direct a re-dispatch elsewhere;
 - the audit trail and any failure alert can name *which system* was missed.
 
-A contract that reaches signing with no target designated does not deploy, and
-that is surfaced as an alert rather than a log line (DCS-FR-CWE-31, alerts for
-missed targets). Silently doing nothing is the behaviour this ADR exists to end.
+**A contract with no target designated simply does not deploy, and that is a
+normal outcome, not a failure.** Not every party deploys what it signs — a
+negotiating peer may hold the agreement without executing it anywhere — so
+deployment is opt-in and its absence is neither an error nor an alert. A
+*manager who asks for a deployment* on such a contract is refused with a message
+saying so, because they asked; the automatic trigger just does nothing.
 
 ## Consequences
 
@@ -65,6 +68,13 @@ one target still configures it once rather than never.
 
 Existing deployments do not migrate. Per the project's greenfield rule the
 database may be wiped; no compatibility path reads the old environment variable.
+
+The registry can be seeded from deployment configuration (`contractTargets` in
+the chart), so a fresh install — or a test cluster recreated on every run — has
+its targets without anyone opening the admin UI. Seeding is **create-only,
+matched on name**: an entry an administrator later repoints in the UI is not
+reverted by the next restart, because configuration winning every restart would
+send deployments somewhere they had been deliberately moved away from.
 
 ## Alternatives considered
 

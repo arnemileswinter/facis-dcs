@@ -7,6 +7,7 @@ package deployevent
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -33,7 +34,11 @@ func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		if err := s.handle(ctx, evt); err != nil {
+		// A contract that designates no target system is not an error: not every
+		// party deploys what it signs — a negotiating peer may simply hold the
+		// agreement. Deployment is opt-in, so this is an ordinary outcome
+		// (ADR-25) and must not be reported as a failure.
+		if err := s.handle(ctx, evt); err != nil && !errors.Is(err, command.ErrNoTargetDesignated) {
 			log.Printf("contractworkflowengine/deployevent: could not auto-deploy: %v", err)
 		}
 	})
