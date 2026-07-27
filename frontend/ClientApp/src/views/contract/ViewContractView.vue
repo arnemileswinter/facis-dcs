@@ -11,6 +11,7 @@ import ContractStructureTree from '@contract-workflow-engine/components/Contract
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
@@ -263,6 +264,12 @@ const exportBundle = async () => {
                         :verification-result="verificationResult"
                       />
                     </div>
+
+                    <!-- The machine-readable side of the same payload, beside
+                         the document it renders (UC-04 stimulus 5). After it,
+                         not before: the readable contract is what a person
+                         came for. -->
+                    <ContractMachineReadableView :contract="contract" />
                   </div>
                 </div>
               </div>
