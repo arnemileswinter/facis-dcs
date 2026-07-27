@@ -571,9 +571,9 @@ func main() {
 	}); err != nil {
 		log.Fatalf(ctx, err, "pdf-core not reachable at %s", pdfCoreURL)
 	}
-	pdfCoreClient := pdfcore.New(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
+	pdfCoreClient := pdfcore.NewWithAuthority(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
 		return hsm.SignES256(c2paSigner, sigStructure)
-	})
+	}, issuerDID)
 
 	smCRepo := smrepo.PostgresContractRepo{
 		IPFSClient: ipfsAPIClient,

@@ -237,7 +237,7 @@ func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash
 	actionsAssertionBox := renderJUMBFSuperbox(cborUUID, 0x03, "c2pa.actions.v2", [][]byte{renderBMFFBox("cbor", actionsAssertionPayload)})
 	actionsAssertionHash := sha256.Sum256(actionsAssertionBox[8:])
 
-	lifecycleAssertionPayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "draft", "", "", "", "", compiledAt)
+	lifecycleAssertionPayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "draft", "", lifecycleAuthorityFromContext(ctx), "", "", compiledAt)
 	lifecycleAssertionBox := renderJUMBFSuperbox(cborUUID, 0x03, "dcs.lifecycle", [][]byte{renderBMFFBox("cbor", lifecycleAssertionPayload)})
 	lifecycleAssertionHash := sha256.Sum256(lifecycleAssertionBox[8:])
 
@@ -328,7 +328,7 @@ func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string,
 	var lifecycleURI string
 	var lifecycleHash [32]byte
 	if contractID != "" {
-		lifecyclePayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "amended", "", "", "", hex.EncodeToString(parentManifestHash), compiledAt)
+		lifecyclePayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "amended", "", lifecycleAuthorityFromContext(ctx), "", hex.EncodeToString(parentManifestHash), compiledAt)
 		lifecycleBox := renderJUMBFSuperbox(cborUUID, 0x03, "dcs.lifecycle", [][]byte{renderBMFFBox("cbor", lifecyclePayload)})
 		lifecycleHash = sha256.Sum256(lifecycleBox[8:])
 		lifecycleURI = absoluteAssertionURI(updateLabel, "dcs.lifecycle")
@@ -927,31 +927,31 @@ func absoluteSignatureURI(manifestLabel string) string {
 	return absoluteManifestURI(manifestLabel) + "/c2pa.signature"
 }
 
-// extractLifecycleEffectiveAt extracts the effective_at timestamp from the
-// dcs.lifecycle assertion in the manifest at manifestIdx (0-based) of c2paBytes.
-func extractLifecycleEffectiveAt(c2paBytes []byte, manifestIdx int) (time.Time, error) {
+// extractLifecycleFields decodes the dcs.lifecycle assertion in the manifest at
+// manifestIdx (0-based) of c2paBytes into its flat field map.
+func extractLifecycleFields(c2paBytes []byte, manifestIdx int) (map[string]string, error) {
 	manifestBoxes, err := extractTopLevelManifestBoxes(c2paBytes)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("extract manifests: %w", err)
+		return nil, fmt.Errorf("extract manifests: %w", err)
 	}
 	if manifestIdx >= len(manifestBoxes) {
-		return time.Time{}, fmt.Errorf("manifest index %d out of range (%d manifests)", manifestIdx, len(manifestBoxes))
+		return nil, fmt.Errorf("manifest index %d out of range (%d manifests)", manifestIdx, len(manifestBoxes))
 	}
 	assertionStore, err := extractLabeledChildJUMBFBox(manifestBoxes[manifestIdx], "c2pa.assertions")
 	if err != nil {
-		return time.Time{}, fmt.Errorf("find assertion store: %w", err)
+		return nil, fmt.Errorf("find assertion store: %w", err)
 	}
 	lifecycleBox, err := extractLabeledChildJUMBFBox(assertionStore, "dcs.lifecycle")
 	if err != nil {
-		return time.Time{}, fmt.Errorf("find dcs.lifecycle: %w", err)
+		return nil, fmt.Errorf("find dcs.lifecycle: %w", err)
 	}
 	outerBoxes, err := parseBMFFBoxes(lifecycleBox)
 	if err != nil || len(outerBoxes) == 0 {
-		return time.Time{}, fmt.Errorf("parse lifecycle jumb: %w", err)
+		return nil, fmt.Errorf("parse lifecycle jumb: %w", err)
 	}
 	innerBoxes, err := parseBMFFBoxes(outerBoxes[0].Payload)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse lifecycle children: %w", err)
+		return nil, fmt.Errorf("parse lifecycle children: %w", err)
 	}
 	var cborData []byte
 	for _, b := range innerBoxes {
@@ -961,11 +961,32 @@ func extractLifecycleEffectiveAt(c2paBytes []byte, manifestIdx int) (time.Time, 
 		}
 	}
 	if cborData == nil {
-		return time.Time{}, fmt.Errorf("cbor box not found in dcs.lifecycle")
+		return nil, fmt.Errorf("cbor box not found in dcs.lifecycle")
 	}
 	fields, err := parseCBORTextMap(cborData)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("decode lifecycle CBOR: %w", err)
+		return nil, fmt.Errorf("decode lifecycle CBOR: %w", err)
+	}
+	return fields, nil
+}
+
+// extractLifecycleAuthority returns the DID of the instance that asserted the
+// manifest at manifestIdx. A recompile must reproduce it from the document
+// itself, because it is carried by the manifest rather than the payload.
+func extractLifecycleAuthority(c2paBytes []byte, manifestIdx int) (string, error) {
+	fields, err := extractLifecycleFields(c2paBytes, manifestIdx)
+	if err != nil {
+		return "", err
+	}
+	return fields["authority"], nil
+}
+
+// extractLifecycleEffectiveAt extracts the effective_at timestamp from the
+// dcs.lifecycle assertion in the manifest at manifestIdx (0-based) of c2paBytes.
+func extractLifecycleEffectiveAt(c2paBytes []byte, manifestIdx int) (time.Time, error) {
+	fields, err := extractLifecycleFields(c2paBytes, manifestIdx)
+	if err != nil {
+		return time.Time{}, err
 	}
 	s, ok := fields["effective_at"]
 	if !ok || s == "" {
