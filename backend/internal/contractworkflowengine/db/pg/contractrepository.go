@@ -112,7 +112,8 @@ func (r *PostgresContractRepo) ReadDataByDID(ctx context.Context, tx *sqlx.Tx, d
 	query := `
         SELECT did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
+               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
+               target_id
         FROM contracts_effective
         WHERE did = $1
     `

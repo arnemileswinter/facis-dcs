@@ -461,16 +461,16 @@ func main() {
 		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"))
 	}
 
-	// Contract deployment (UC-05-01): the Contract Target
-	// System client is optional — without CONTRACT_TARGET_URL set, deploy
-	// dispatches are still recorded (correlation ID, content hash, archive
-	// evidence) but no outbound call is made; the target's own callback
-	// (POST /contract/deployment/callback) is the authoritative signal.
+	// Contract deployment (UC-05-01): a contract designates a registered target
+	// system (ADR-25) and the client dispatches to that entry's endpoint. The
+	// target's own callback (POST /contract/deployment/callback) remains the
+	// authoritative signal of a successful deployment; a failed outbound call is
+	// recorded on the deployment row so the compliance monitor can alert on it.
 	cweDeploymentRepo := &cwerepo.PostgresDeploymentRepo{}
-	var contractTargetClient cwecommand.ContractTargetClient
-	if targetURL := cwecommand.ContractTargetURL(); targetURL != "" {
-		contractTargetClient = cwecommand.NewHTTPContractTargetClient(targetURL)
-	}
+	cweTargetRepo := cwerepo.PostgresContractTargetRepo{}
+	// One client for every registered target: the endpoint travels with each
+	// dispatch now that a contract names its own destination (ADR-25).
+	contractTargetClient := cwecommand.NewHTTPContractTargetClient()
 
 	// Initialize the Federated Catalogue client.
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
@@ -617,7 +617,7 @@ func main() {
 		}
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, contractTargetClient)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient)
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
@@ -679,6 +679,7 @@ func main() {
 			DB:             db,
 			CRepo:          &cweRepo,
 			DeploymentRepo: cweDeploymentRepo,
+			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
 		},
 	}

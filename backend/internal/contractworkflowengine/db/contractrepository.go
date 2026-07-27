@@ -96,6 +96,9 @@ type Contract struct {
 	ContractData    *datatype.JSON `db:"contract_data"`
 	TemplateDID     string         `db:"template_did"`
 	TemplateVersion int            `db:"template_version"`
+	// TargetID is the registered Contract Target System this contract deploys
+	// to (ADR-25); nil until one is designated.
+	TargetID *string `db:"target_id"`
 }
 
 type ContractMetadata struct {

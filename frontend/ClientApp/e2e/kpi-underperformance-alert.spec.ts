@@ -105,14 +105,27 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
     })
     await expect(deploy).toHaveText('Redeploy')
 
-    const deployed = page.waitForResponse(
-      (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
-    )
+    // The click reloads the page on success (router.go(0)), which discards the
+    // response body before it can be read off a waitForResponse handle. Route
+    // the request instead: route.fetch() performs the real call and hands back
+    // the real response, which is then passed through unchanged — the body is
+    // captured on the way past rather than substituted.
+    let captured: { status: number; text: string } | undefined
+    await page.route('**/contract/deploy', async (route) => {
+      const response = await route.fetch()
+      const text = await response.text()
+      captured = { status: response.status(), text }
+      await route.fulfill({ response, body: text })
+    })
+
     await deploy.click()
-    const response = await deployed
-    expect(response.ok(), `redeploy ${response.status()}: ${await response.text()}`).toBeTruthy()
-    const body = (await response.json()) as { correlation_id?: string }
+    await expect.poll(() => captured !== undefined, { message: 'the deployment request completes' }).toBe(true)
+    await page.unroute('**/contract/deploy')
+
+    expect(captured!.status, `redeploy ${captured!.status}: ${captured!.text}`).toBe(200)
+    const body = JSON.parse(captured!.text) as { correlation_id?: string; target_name?: string }
     expect(body.correlation_id, 'the deployment names the correlation id its callback quotes').toBeTruthy()
+    expect(body.target_name, 'the deployment names the target system it went to').toBeTruthy()
     return body.correlation_id!
   })
 

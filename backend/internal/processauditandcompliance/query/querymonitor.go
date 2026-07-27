@@ -44,6 +44,12 @@ const RiskTypeUnauthorizedAccess = "UNAUTHORIZED_ACCESS"
 // exists and the breach is a fact to be recorded and acted on.
 const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
 
+// RiskTypeDeploymentFailed flags a deployment the Contract Target System never
+// received (DCS-FR-CWE-31, "alerts for underperformance or missed targets").
+// The contract is in force on this side and absent on the other, and until this
+// existed the only trace was a line in the process log.
+const RiskTypeDeploymentFailed = "CONTRACT_DEPLOYMENT_FAILED"
+
 // approvalPendingStates are the contract states in which an OPEN approval
 // task means the contract is waiting on a required approval decision.
 var approvalPendingStates = map[contractstate.ContractState]bool{
@@ -158,6 +164,12 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	}
 	risks = append(risks, perfRisks...)
 
+	dispatchRisks, err := h.deploymentFailureRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, dispatchRisks...)
+
 	denialQuery := `
         SELECT COALESCE(did, '') AS did,
                COALESCE(event_data ->> 'retrieved_by', '') AS retrieved_by
@@ -233,6 +245,64 @@ func (h *ComplianceMonitor) underperformanceRisks(ctx context.Context, tx *sqlx.
 		return nil, fmt.Errorf("could not read violating KPI reports: %w", err)
 	}
 	return underperformanceRisksFromKPIs(reported, checkedAt), nil
+}
+
+// deploymentFailureRisks reads back the dispatches already recorded as failed.
+// Like the underperformance alert it reports a persisted outcome rather than
+// re-deriving one: deploy.go marks the row when its outbound call returns an
+// error, and this states that judgement.
+func (h *ComplianceMonitor) deploymentFailureRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
+	const failedDispatchQuery = `
+        SELECT COALESCE(d.did, '') AS did,
+               COALESCE(d.correlation_id, '') AS correlation_id,
+               COALESCE(t.name, d.target_url) AS target,
+               COALESCE(d.dispatch_error, '') AS reason,
+               d.requested_at
+        FROM contract_deployments d
+        LEFT JOIN contract_targets t ON t.id = d.target_id
+        WHERE d.status = 'DISPATCH_FAILED'
+        ORDER BY d.requested_at, d.id
+    `
+	var failed []failedDispatch
+	if err := tx.SelectContext(ctx, &failed, failedDispatchQuery); err != nil {
+		return nil, fmt.Errorf("could not read failed deployment dispatches: %w", err)
+	}
+	return deploymentFailureRisksFrom(failed, checkedAt), nil
+}
+
+// failedDispatch is one persisted deployment whose outbound call never reached
+// its target.
+type failedDispatch struct {
+	DID           string    `db:"did"`
+	CorrelationID string    `db:"correlation_id"`
+	TargetURL     *string   `db:"target"`
+	Reason        string    `db:"reason"`
+	RequestedAt   time.Time `db:"requested_at"`
+}
+
+// deploymentFailureRisksFrom maps failed dispatches to compliance risks. The
+// detail names the target and the reason: an operator told only that a
+// deployment failed knows neither which system to look at nor whether to retry.
+func deploymentFailureRisksFrom(failed []failedDispatch, checkedAt time.Time) []event2.ComplianceRisk {
+	risks := make([]event2.ComplianceRisk, 0, len(failed))
+	for _, dispatch := range failed {
+		if strings.TrimSpace(dispatch.DID) == "" {
+			continue
+		}
+		target := "the configured target system"
+		if dispatch.TargetURL != nil && strings.TrimSpace(*dispatch.TargetURL) != "" {
+			target = *dispatch.TargetURL
+		}
+		risks = append(risks, event2.ComplianceRisk{
+			DID:      dispatch.DID,
+			RiskType: RiskTypeDeploymentFailed,
+			Detail: fmt.Sprintf("deployment %s to %s was never received: %s (dispatched %s)",
+				dispatch.CorrelationID, target, dispatch.Reason,
+				dispatch.RequestedAt.UTC().Format(time.RFC3339)),
+			DetectedAt: checkedAt,
+		})
+	}
+	return risks
 }
 
 // violatingKPI is one persisted target-reported KPI already judged to breach

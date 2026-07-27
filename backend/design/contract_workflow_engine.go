@@ -290,6 +290,9 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract (DCS-FR-CWE-31, DCS-FR-CWE-09)")
 	Attribute("kpi_violations", ArrayOf(String), "Metric names whose latest reported value violates its contractual SLA threshold (DCS-FR-CWE-09)")
 
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
+
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_data", "negotiations", "contract_version", "template_did", "template_version")
 })
 
@@ -600,6 +603,7 @@ var ContractDeployRequest = Type("ContractDeployRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Optional: dispatch to this registered target instead of the one the contract designates (ADR-25). A re-dispatch may be directed elsewhere; the contract's own designation is unchanged.")
 
 	Required("did", "updated_at")
 })
@@ -613,8 +617,80 @@ var ContractDeployResponse = Type("ContractDeployResponse", func() {
 	Attribute("timestamp", String, "When the deployment was dispatched")
 	Attribute("correlation_id", String, "Correlation ID for matching the target's later ack/status/KPI callbacks")
 	Attribute("payload", Any, "The machine-readable JSON-LD payload sent to the contract target, including the odrl:Set policy")
+	Attribute("target_id", String, "Registered target system the contract was dispatched to (ADR-25)")
+	Attribute("target_name", String, "Name of that target system, as configured")
 
 	Required("did", "contract_version", "content_hash", "timestamp", "correlation_id", "payload")
+})
+
+// ---- Contract target registry (ADR-25, UC-09-01 system configuration) -------
+
+var ContractTarget = Type("ContractTarget", func() {
+	Description("A configured Contract Target System deployments may be dispatched to (DCS-IR-SI-05)")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Disabled targets stay referenceable so a contract naming one keeps a readable destination, but dispatch to them is refused")
+	Attribute("created_at", String, "When the target was registered")
+	Attribute("updated_at", String, "When the target was last changed")
+
+	Required("id", "name", "url", "enabled")
+})
+
+var ContractTargetListRequest = Type("ContractTargetListRequest", func() {
+	Description("List the registered Contract Target Systems")
+	Token("token", String, "JWT token")
+})
+
+var ContractTargetCreateRequest = Type("ContractTargetCreateRequest", func() {
+	Description("Register a Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("name", "url")
+})
+
+var ContractTargetUpdateRequest = Type("ContractTargetUpdateRequest", func() {
+	Description("Change a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("id", "name", "url")
+})
+
+var ContractTargetDeleteRequest = Type("ContractTargetDeleteRequest", func() {
+	Description("Remove a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+
+	Required("id")
+})
+
+var ContractTargetDesignateRequest = Type("ContractTargetDesignateRequest", func() {
+	Description("Designate the target system a contract deploys to (ADR-25)")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Registered target to designate, or empty to clear the designation")
+
+	Required("did", "updated_at")
 })
 
 var ContractDeploymentReceiptPayload = Type("ContractDeploymentReceiptPayload", func() {
@@ -1396,6 +1472,124 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		HTTP(func() {
 			POST("/contract/deploy")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// ---- Contract target registry (ADR-25) ---------------------------------
+
+	Method("listContractTargets", func() {
+		Description("List the registered Contract Target Systems a contract may be deployed to (ADR-25).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		// Readable by whoever has to pick one, writable only by the administrator.
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetListRequest)
+		Result(ArrayOf(ContractTarget))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/targets")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("createContractTarget", func() {
+		Description("Register a Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetCreateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("updateContractTarget", func() {
+		Description("Change a registered Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetUpdateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			PUT("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deleteContractTarget", func() {
+		Description("Remove a registered Contract Target System. Refused while a contract still designates it, so no contract is left undeployable with no record of where it was meant to go.")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetDeleteRequest)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			DELETE("/contract/targets")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("designateContractTarget", func() {
+		Description("Designate the target system a contract deploys to (ADR-25). The automatic trigger on signing completion has no human present to choose one, so the destination belongs to the contract.")
+		Meta("dcs:requirements", "DCS-FR-SM-12", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Contract Management Dashboard")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetDesignateRequest)
+		Result(ContractRetrieveByIDResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/target/designate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

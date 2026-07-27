@@ -83,6 +83,8 @@ from steps.support.api_client import (
     contract_deploy_url,
     contract_deployment_callback_url,
     contract_retrieve_by_id_url,
+    contract_target_designate_url,
+    contract_targets_url,
     get_with_headers,
     post_json,
 )
@@ -195,6 +197,64 @@ def step_given_full_workflow_to_signed(context, name):
 # ---------------------------------------------------------------------------
 
 
+BDD_TARGET_NAME = "BDD Contract Target"
+
+
+def _registered_target_id(context) -> str:
+    """The registry entry for the shipped ORCE contract-target flow (ADR-25).
+
+    Deployment used to address one endpoint from CONTRACT_TARGET_URL; it now
+    goes to a target the contract designates, so the suite registers one once
+    and reuses it. Registration is idempotent by name.
+    """
+    cached = getattr(context, "bdd_target_id", None)
+    if cached:
+        return cached
+    admin_h = AuthService.get_headers_for_roles(["Sys. Administrator"])
+    listed = get_with_headers(context, contract_targets_url(context), headers=admin_h)
+    assert listed.status_code == 200, f"could not list contract targets: {listed.status_code} {listed.text}"
+    for entry in listed.json() or []:
+        if entry.get("name") == BDD_TARGET_NAME:
+            context.bdd_target_id = entry["id"]
+            return context.bdd_target_id
+
+    created = post_json(
+        context,
+        contract_targets_url(context),
+        {
+            "name": BDD_TARGET_NAME,
+            "url": os.getenv("BDD_CONTRACT_TARGET_URL", "http://dcs-orce:1880/contract-target/deploy"),
+            "description": "Shipped ORCE contract-target flow used by the BDD suite.",
+            "enabled": True,
+        },
+        headers=admin_h,
+    )
+    assert created.status_code == 200, f"could not register the contract target: {created.status_code} {created.text}"
+    context.bdd_target_id = created.json()["id"]
+    return context.bdd_target_id
+
+
+def _ensure_target_designated(context, name, target_id=None):
+    """Point the contract at a registered target so it has somewhere to deploy.
+
+    A contract designates its own destination (ADR-25) because the automatic
+    trigger on signing completion has no human present to choose one.
+    """
+    did, updated_at = ContractService._contract_data(context, name)
+    resolved = target_id if target_id is not None else _registered_target_id(context)
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    resp = post_json(
+        context,
+        contract_target_designate_url(context),
+        {"did": did, "updated_at": updated_at, "target_id": resolved},
+        headers=manager_h,
+    )
+    assert resp.status_code == 200, (
+        f"could not designate a target system for contract '{name}': {resp.status_code} {resp.text}"
+    )
+    ContractService._refresh_contract(context, name)
+
+
 @step('an authorized user deploys contract "{name}" to the configured contract target')
 def step_when_deploy_contract(context, name):
     # Several scenarios use this step as an "And" continuing a *Given* block
@@ -204,6 +264,7 @@ def step_when_deploy_contract(context, name):
     # registered only via @when is "undefined" when behave looks it up as a
     # Given; `@step` registers this text under given/when/then alike, and
     # the step is also genuinely used as a real When.
+    _ensure_target_designated(context, name)
     did, updated_at = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     context.requests_response = post_json(
