@@ -11,6 +11,7 @@ import ContractStructureTree from '@contract-workflow-engine/components/Contract
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
@@ -190,6 +191,11 @@ const exportBundle = async () => {
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />
+
+                <!-- The machine-readable side of the same payload (UC-04) -->
+                <div class="mt-4">
+                  <ContractMachineReadableView :contract="contract" />
+                </div>
 
                 <!-- Where this contract deploys to (ADR-25) -->
                 <div class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
