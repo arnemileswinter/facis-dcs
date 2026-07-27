@@ -40,7 +40,12 @@ const (
 	SystemContractApprover UserRole = "Sys. Contract Approver"
 	SystemContractManager  UserRole = "Sys. Contract Manager"
 	SystemContractSigner   UserRole = "Sys. Contract Signer"
-	ContractTargetSystem   UserRole = "Contract Target System"
+	// ContractTargetSystem is SRS Table 5's "external system that receives and
+	// executes deployed contracts". It is deliberately NOT an authorizable role:
+	// a target is a registry row and its deployment callback authenticates with
+	// the DEPLOYMENT_CALLBACK_SECRET shared secret (ADR-25), never an OAuth
+	// client, so it is rejected by IsValid rather than granting a caller nothing.
+	ContractTargetSystem UserRole = "Contract Target System"
 	// SystemAuditor extends the SRS System User classes (SRS §2.4 Table 5, all
 	// of which are contract-oriented) with the read-only integrity role an
 	// external notary needs: it may read the audit trail's tamper-evidence
@@ -65,7 +70,7 @@ func (r UserRole) IsValid() bool {
 		ArchiveManager, Auditor, SystemAdministrator, ComplianceOfficer, IntegrationManager,
 		ProcessOrchestrator, Validator,
 		SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemContractManager, SystemContractSigner,
 		SystemAuditor:
 		return true
 	}
@@ -81,7 +86,7 @@ func (r UserRole) String() string {
 func (r UserRole) IsSystemRole() bool {
 	switch r {
 	case SystemContractCreator, SystemContractReviewer, SystemContractApprover,
-		SystemContractManager, SystemContractSigner, ContractTargetSystem,
+		SystemContractManager, SystemContractSigner,
 		SystemAuditor:
 		return true
 	}
