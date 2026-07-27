@@ -67,3 +67,31 @@ func appendSignatureRevision(pdf []byte) []byte {
 	return append(append([]byte(nil), pdf...),
 		[]byte("\n% signature revision\n/Type /Sig /ByteRange [0 1 2 3]\n%%EOF\n")...)
 }
+
+// The deterministic verify must reproduce a re-anchor from the document's own
+// bytes. It replays every appended revision; a re-anchor carries the payload
+// unchanged, so replaying it as an amendment hits the no-changes guard and the
+// document is reported as not reproducing itself — which is what a signed
+// contract looked like to /verify before this was handled.
+//
+// This is also the check ADR-26 relies on to call a re-anchored contract good:
+// it proves the appended revision is the provenance this instance produced,
+// rather than an unexplained modification after signing.
+func TestVerifyReproducesAReanchoredDocument(t *testing.T) {
+	compiled, err := CompilePDF(testSigningContext(), []byte(minimalPayloadBase), time.Now())
+	if err != nil {
+		t.Fatalf("CompilePDF: %v", err)
+	}
+	amended, err := UpdatePDF(testSigningContext(), compiled, []byte(minimalPayloadAmended), time.Now())
+	if err != nil {
+		t.Fatalf("UpdatePDF: %v", err)
+	}
+	reanchored, err := ReanchorProvenance(testSigningContext(), amended, "", time.Now())
+	if err != nil {
+		t.Fatalf("ReanchorProvenance: %v", err)
+	}
+
+	if err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
+		t.Fatalf("verify must reproduce the re-anchor: %v", err)
+	}
+}

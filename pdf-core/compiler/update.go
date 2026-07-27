@@ -880,10 +880,22 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		// written by a later hop.
 		embeddedVC, vcPresent, _ := ExtractEmbeddedVC(hopEnd)
 		remoteManifestURL := extractRemoteManifestURLFromXMP(hopEnd)
+
+		// A hop that carries the payload unchanged is a re-anchor, not an
+		// amendment (ADR-26): provenance appended over a signature so the
+		// binding covers the signed bytes. Re-applying it through the amendment
+		// path would hit the no-changes guard and fail to reproduce it, so the
+		// hop is replayed the way it was produced.
+		prevPayload, prevErr := ExtractLatestEmbeddedJSONLD(boundary)
+		reanchorHop := prevErr == nil && bytes.Equal(prevPayload, newPayload)
+
 		var freshUpdated []byte
-		if vcPresent && len(embeddedVC) > 0 {
+		switch {
+		case reanchorHop:
+			freshUpdated, err = updatePDF(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt, true)
+		case vcPresent && len(embeddedVC) > 0:
 			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
-		} else {
+		default:
 			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
 		}
 		if err != nil {
