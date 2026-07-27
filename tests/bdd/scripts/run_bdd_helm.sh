@@ -449,8 +449,13 @@ fi
 if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
+  # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed
+  # Hydra through the same ingress everything else uses. Left unset it defaults
+  # to localhost:4444, where nothing listens in CI, so anything reaching for a
+  # token gets a proxy error instead of an answer.
   E2E_DCS_API_BASE="${BDD_PUBLIC_ORIGIN}/digital-contracting-service/api" \
   E2E_BDD_PYTHON="$VENV_PATH/bin/python3" \
+  DCS_HYDRA_TARGET="${BDD_PUBLIC_ORIGIN}" \
     npm run e2e
 else
   echo "Running BDD suite via bdd-executor environment"
