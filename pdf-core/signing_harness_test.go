@@ -32,20 +32,48 @@ func setupTestSigning() error {
 		return err
 	}
 	testMainC2PASigner = key
-	tmpl := &x509.Certificate{
+
+	// The chain must satisfy the C2PA certificate profile, or every manifest the
+	// suite compiles is one c2patool rejects with signingCredential.invalid: a
+	// CA-issued (not self-signed) leaf, an organizationName in the subject, and
+	// an accepted extended key usage. This mirrors scripts/c2pa-cert-provision.sh.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	caTmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "DCS-PDF-CORE test c2pa signer"},
+		Subject:               pkix.Name{Organization: []string{"FACIS DCS"}, CommonName: "DCS-PDF-CORE test c2pa CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
+	if err != nil {
+		return err
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return err
+	}
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{Organization: []string{"FACIS DCS"}, CommonName: "DCS-PDF-CORE test c2pa signer"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, key.Public(), caKey)
 	if err != nil {
 		return err
 	}
 	chainPath := filepath.Join(dir, "x5chain.pem")
-	if err := os.WriteFile(chainPath, certPEM(der), 0o644); err != nil {
+	if err := os.WriteFile(chainPath, append(certPEM(der), certPEM(caDER)...), 0o644); err != nil {
 		return err
 	}
 	_ = os.Setenv("DCS_PDF_CORE_C2PA_X5CHAIN_PEM_FILE", chainPath)

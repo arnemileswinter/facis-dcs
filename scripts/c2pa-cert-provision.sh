@@ -22,6 +22,11 @@ CRL_URL="${6:-http://localhost:8991/crl/dcs-c2pa.crl}"
 KEY_LABEL="${KEY_LABEL:-dcs-c2pa}"
 CA_CN="DCS Dev C2PA CA"
 LEAF_CN="DCS Dev ${KEY_LABEL} Signer"
+# c2pa-rs reads the signing certificate's organizationName once the COSE
+# signature has verified, and fails the whole validation when it is absent, so a
+# CN-only leaf yields manifests every C2PA verifier reports as
+# claimSignature.mismatch. Both subjects therefore carry an O=.
+CERT_ORG="${CERT_ORG:-FACIS DCS}"
 VALIDITY_DAYS="825"
 
 export SOFTHSM2_CONF="$TOKEN_DIR/softhsm2.conf"
@@ -44,7 +49,7 @@ if [ ! -f "$CA_KEY" ] || [ ! -f "$CA_CRT" ]; then
   echo "Generating dev C2PA CA in $OUT_DIR..."
   openssl ecparam -name prime256v1 -genkey -noout -out "$CA_KEY"
   openssl req -x509 -new -sha256 -key "$CA_KEY" -days "$VALIDITY_DAYS" \
-    -subj "/CN=$CA_CN" -out "$CA_CRT"
+    -subj "/O=$CERT_ORG/CN=$CA_CN" -out "$CA_CRT"
 else
   echo "Reusing existing dev C2PA CA in $OUT_DIR."
 fi
@@ -52,7 +57,7 @@ fi
 # Issue a leaf whose public key is forced to the token's dcs-c2pa public key.
 # The throwaway CSR key only carries the subject; -force_pubkey overrides it.
 openssl ecparam -name prime256v1 -genkey -noout -out "$workdir/tmp-leaf.key"
-openssl req -new -key "$workdir/tmp-leaf.key" -subj "/CN=$LEAF_CN" -out "$workdir/leaf.csr"
+openssl req -new -key "$workdir/tmp-leaf.key" -subj "/O=$CERT_ORG/CN=$LEAF_CN" -out "$workdir/leaf.csr"
 
 cat > "$workdir/leaf.ext" <<EOF
 basicConstraints=critical,CA:FALSE

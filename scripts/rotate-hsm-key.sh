@@ -61,7 +61,10 @@ if [ -n "$CA_DIR" ] && [ -n "$X5CHAIN_OUT" ]; then
       --read-object --type pubkey --label "$NEW_LABEL" --output-file "$workdir/leaf.pub.der"
     openssl pkey -pubin -inform DER -in "$workdir/leaf.pub.der" -out "$workdir/leaf.pub.pem"
     openssl ecparam -name prime256v1 -genkey -noout -out "$workdir/tmp-leaf.key"
-    openssl req -new -key "$workdir/tmp-leaf.key" -subj "/CN=DCS Dev Signer $NEW_LABEL" -out "$workdir/leaf.csr"
+    # The O= is load-bearing, not cosmetic: c2pa-rs fails validation outright when
+    # the signing certificate carries no organizationName. See c2pa-cert-provision.sh.
+    openssl req -new -key "$workdir/tmp-leaf.key" \
+      -subj "/O=${CERT_ORG:-FACIS DCS}/CN=DCS Dev Signer $NEW_LABEL" -out "$workdir/leaf.csr"
     cat > "$workdir/leaf.ext" <<'EOF'
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature

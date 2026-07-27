@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/pem"
@@ -356,7 +357,12 @@ func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string,
 	signaturePayload = append(signaturePayload, 0xA0, 0xF6)
 	signaturePayload = append(signaturePayload, cborBytes(sig)...)
 	signatureBox := renderJUMBFSuperbox(c2paSigUUID, 0x03, "c2pa.signature", [][]byte{renderBMFFBox("cbor", signaturePayload)})
-	return renderJUMBFSuperbox(c2paUpdateUUID, 0x03, updateLabel, [][]byte{assertionStore, claimBox, signatureBox}), nil
+	// A standard manifest box (c2ma), never an update manifest (c2um): c2pa-rs
+	// ignores an update manifest's own hard binding and checks its parent's
+	// against the current file, which can never match once the amendment has
+	// appended an incremental PDF update. See
+	// TestAmendmentManifestIsNotAC2PAUpdateManifest.
+	return renderJUMBFSuperbox(c2paManifUUID, 0x03, updateLabel, [][]byte{assertionStore, claimBox, signatureBox}), nil
 }
 
 func renderJUMBFSuperbox(uuidHex string, toggles byte, label string, children [][]byte) []byte {
@@ -791,7 +797,27 @@ func loadSigningMaterialFromEnv(getenv func(string) string, readFile func(string
 	if err != nil {
 		return signingMaterial{}, err
 	}
+	if err := requireLeafOrganization(certs[0]); err != nil {
+		return signingMaterial{}, err
+	}
 	return signingMaterial{certChainDER: certs}, nil
+}
+
+// requireLeafOrganization refuses a signing leaf that carries no organizationName.
+// c2pa-rs reads it off the signing certificate after the COSE signature verifies
+// and fails the whole validation when it is absent, so a leaf with only a CN
+// produces manifests every C2PA verifier reports as claimSignature.mismatch —
+// a sound signature made indistinguishable from a forged one. Refusing the chain
+// here turns that into a configuration error at startup instead.
+func requireLeafOrganization(leafDER []byte) error {
+	leaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		return fmt.Errorf("parse x5chain leaf certificate: %w", err)
+	}
+	if len(leaf.Subject.Organization) == 0 {
+		return fmt.Errorf("x5chain leaf %q carries no organizationName; C2PA verifiers reject claims signed by it", leaf.Subject.CommonName)
+	}
+	return nil
 }
 
 func resolveSigningConfigValue(readFile func(string) ([]byte, error), inlineValue string, filePath string, inlineName string, fileName string) (string, bool, error) {
@@ -869,8 +895,15 @@ func decodeUUIDHex(uuidHex string) [16]byte {
 	return uuid
 }
 
-func updateManifestLabelFromHash(payloadHash string) string {
-	return urnUUIDFromHash(payloadHash) + ":dcs-pdf-core:2_1"
+// updateManifestLabel returns the label for the manifest an amendment appends,
+// derived from the hard binding hash (SHA-256 of the file bytes at amendment
+// time) rather than the payload hash. Amending the same payload twice — the
+// negotiation ping-pong amends once per exchange — would otherwise mint the same
+// label twice, so the second amendment would name itself as its parent and
+// c2patool would reject the document outright with "cyclic ingredient found in
+// path". The file grows on every hop, so the hard binding hash never repeats.
+func updateManifestLabel(hardBindingHash []byte) string {
+	return urnUUIDFromHash(hex.EncodeToString(hardBindingHash)) + ":dcs-pdf-core:2_1"
 }
 
 // witnessManifestLabel returns a manifest label for the verification witness

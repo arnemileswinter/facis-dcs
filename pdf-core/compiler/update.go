@@ -319,7 +319,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	var result []byte
 
 	for range 6 {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabelFromHash(manifestHashHex), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabel(hardBindingHash), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
 		if err != nil {
 			return nil, fmt.Errorf("render update manifest: %w", err)
 		}
