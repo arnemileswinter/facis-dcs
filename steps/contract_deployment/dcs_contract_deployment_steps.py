@@ -255,6 +255,18 @@ def _ensure_target_designated(context, name, target_id=None):
     ContractService._refresh_contract(context, name)
 
 
+@step('contract "{name}" deploys to the configured target system')
+def step_contract_deploys_to_configured_target(context, name):
+    """Point the contract at the seeded target (ADR-25).
+
+    Stated explicitly rather than folded into the workflow steps because
+    deployment is opt-in: a contract that designates no target simply does not
+    deploy, which is an ordinary outcome for a party that only holds an
+    agreement. A scenario that expects deployment has to say where to.
+    """
+    _ensure_target_designated(context, name)
+
+
 @step('an authorized user deploys contract "{name}" to the configured contract target')
 def step_when_deploy_contract(context, name):
     # Several scenarios use this step as an "And" continuing a *Given* block
