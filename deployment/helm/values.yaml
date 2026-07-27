@@ -262,6 +262,16 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
+  # Pointing another component's DSN at this server is not enough to create its
+  # database — list it here as well. Hydra in particular only runs
+  # `hydra migrate sql`, which assumes the database already exists; without an
+  # entry it stays unready and the backend cannot discover the OIDC provider.
+  additionalDatabases: []
+  # Defaults to an emptyDir, which loses every contract on a pod restart. Enable
+  # for anything longer-lived than a test cluster.
+  persistence:
+    enabled: false
+    size: 1Gi
 
 hydra:
   enabled: false
