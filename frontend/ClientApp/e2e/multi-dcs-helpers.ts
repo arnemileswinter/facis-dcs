@@ -955,6 +955,10 @@ export async function deployContract(inst: Instance, contractDid: string): Promi
   // A contract deploys to the target system it designates (ADR-25), so the
   // manager picks one first. The registry is seeded by the chart
   // (contractTargets in values.bdd.yml), so an entry is already there to pick.
+  // Wait for the picker itself before deciding: an isVisible() poll on a page
+  // that has not finished loading answers "no" and silently skips designation,
+  // which then surfaces as a deploy refusal further down.
+  await expect(inst.page.getByTestId('contract-target-picker')).toBeVisible({ timeout: 30_000 })
   if (
     await inst.page
       .getByTestId('contract-target-unset')

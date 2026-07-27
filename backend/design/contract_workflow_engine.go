@@ -178,6 +178,8 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("exp_date", String, "The timestamp when the contract expired")
 	Attribute("exp_policy", String, "The policy what should happen if the contract is expired")
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("latest_template_did", String, "The DID of the latest template for this contract")
 	Attribute("template_is_deprecated", Boolean, "Whether the template is deprecated")

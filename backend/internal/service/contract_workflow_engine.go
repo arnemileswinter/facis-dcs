@@ -112,6 +112,12 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
+		// Deployment refusals are the operator's to fix — no target designated,
+		// one that is not registered, one that is disabled. Returning 500 made
+		// each read as an outage rather than as the answer to what was asked.
+		errors.Is(err, command.ErrNoTargetDesignated) ||
+		errors.Is(err, command.ErrTargetNotRegistered) ||
+		errors.Is(err, command.ErrTargetDisabled) ||
 		errors.Is(err, command.ErrSigningIncomplete) ||
 		errors.Is(err, command.ErrContractNotRenewable) ||
 		errors.Is(err, command.ErrNotAParty) ||
@@ -434,6 +440,8 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			LatestTemplateDid:    item.LatestTemplateDID,
 			TemplateIsDeprecated: item.TemplateIsDeprecated,
 			ParentContractDid:    item.ParentContractDID,
+			TargetID:             item.TargetID,
+			TargetName:           item.TargetName,
 		})
 	}
 
