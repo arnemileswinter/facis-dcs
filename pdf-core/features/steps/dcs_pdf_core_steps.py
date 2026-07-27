@@ -203,6 +203,9 @@ def _run_c2patool(pdf_path):
         if entry.get("code") not in _C2PA_EXPECTED_FAILURES
     ]
     state = report.get("validation_state")
+    # Signed contracts included: provenance is re-anchored over the signature
+    # (ADR-26), so a signed artifact validates like any other and a dataHash
+    # mismatch on one is a regression, not an expected state.
     if unexpected or state != "Valid":
         raise AssertionError(
             f"c2patool reports validation_state={state!r} for {pdf_path.name}; "

@@ -906,6 +906,21 @@ type finalizeInput struct {
 // receive-and-record half the ceremony callback invokes after validating the
 // returned signature.
 func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in finalizeInput) error {
+	// Re-anchor provenance over the signature (ADR-26). The lifecycle manifest
+	// was written before signing so the signature commits to it, which leaves
+	// that manifest's whole-file C2PA binding covering less than the signed
+	// file. Appending a provenance-only manifest here restores the binding
+	// without touching the signature's byte range, so the signature keeps
+	// verifying in external tools; PDF readers report the document as modified
+	// after signing, which is what happened.
+	if h.PDFCore != nil {
+		reanchored, err := h.PDFCore.Reanchor(ctx, in.signedPDF, provenance.RemoteManifestURL(cmd.DID))
+		if err != nil {
+			return fmt.Errorf("re-anchor provenance over the signature for %s: %w", cmd.DID, err)
+		}
+		in.signedPDF = reanchored
+	}
+
 	signedPDFSum := sha256.Sum256(in.signedPDF)
 	signedPDFHash := hex.EncodeToString(signedPDFSum[:])
 

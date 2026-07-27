@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -232,6 +233,38 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 		return nil, "", fmt.Errorf("pdf-core update: %w", err)
 	}
 	return pdf, version, nil
+}
+
+// Reanchor appends a provenance-only C2PA manifest binding the signed PDF's
+// current bytes (ADR-26), returning the re-anchored PDF. It changes no payload:
+// the signature is applied after the lifecycle manifest so that it commits to
+// the provenance, and this restores a whole-file binding over the result
+// without touching the signature's byte range.
+func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) ([]byte, error) {
+	url := c.BaseURL + "/render/reanchor"
+	if manifestURL != "" {
+		url += "?manifest_url=" + neturl.QueryEscape(manifestURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(pdf))
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+	c.setLifecycleAuthority(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+	var prepared preparedC2PA
+	if err := json.NewDecoder(resp.Body).Decode(&prepared); err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor decode prepared: %w", err)
+	}
+	return c.signAndEmbed(ctx, prepared)
 }
 
 // EmbedEvidence posts pdf + evidence to POST /evidence/embed and returns the
