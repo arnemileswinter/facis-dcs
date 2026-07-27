@@ -44,12 +44,15 @@
         "y": 140,
         "wires": [
             [
-                "TOKENREQ01"
+                "e3c4d5e6f7a8b9c0"
+            ],
+            [
+                "e9c0d1e2f3a4b5c6"
             ]
         ]
     },
     {
-        "id": "TOKENREQ01",
+        "id": "e9c0d1e2f3a4b5c6",
         "type": "function",
         "z": "b3f7c8e1a2d4f6a8",
         "name": "Request target access token",
@@ -60,12 +63,12 @@
         "y": 160,
         "wires": [
             [
-                "TOKENHTTP1"
+                "f0d1e2f3a4b5c6d7"
             ]
         ]
     },
     {
-        "id": "TOKENHTTP1",
+        "id": "f0d1e2f3a4b5c6d7",
         "type": "http request",
         "z": "b3f7c8e1a2d4f6a8",
         "name": "Fetch token from Hydra",
