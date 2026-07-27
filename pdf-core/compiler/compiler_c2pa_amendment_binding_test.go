@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -206,4 +207,45 @@ outer:
 		return true
 	}
 	return false
+}
+
+// TestSignedContractKeepsItsProvenanceChain pins the boundary ADR-26 draws.
+//
+// A PAdES signature is applied after the lifecycle manifest so that the
+// signature commits to the provenance, which means the signature's revisions
+// fall outside the whole-file hash that manifest carries. That is the accepted
+// trade, not tampering: an external tool must still verify the signature, and
+// the provenance must remain intact and readable up to it.
+//
+// What must not decay is the chain itself — the manifests, their ingredient
+// links and their claim signatures survive the appended signature layer, so a
+// verifier can still read who asserted what. Only the whole-file binding stops.
+func TestSignedContractKeepsItsProvenanceChain(t *testing.T) {
+	compiled, err := CompilePDF(testSigningContext(), []byte(minimalPayloadBase), time.Now())
+	if err != nil {
+		t.Fatalf("CompilePDF: %v", err)
+	}
+
+	// Stand in for the PAdES layer: bytes appended after the manifest, exactly
+	// what a signature revision is from the manifest's point of view.
+	signedLike := append(append([]byte(nil), compiled...), []byte("\n% appended signature revision\n%%EOF\n")...)
+
+	c2paBytes, err := extractEmbeddedStreamByFileSpecName(signedLike, "content_credential.c2pa")
+	if err != nil {
+		t.Fatalf("the provenance must survive the appended signature: %v", err)
+	}
+	manifests, err := extractTopLevelManifestBoxes(c2paBytes)
+	if err != nil {
+		t.Fatalf("extract manifests: %v", err)
+	}
+	if len(manifests) == 0 {
+		t.Fatal("a signed contract carries no manifests; the chain did not survive signing")
+	}
+	if _, err := extractLifecycleFields(c2paBytes, 0); err != nil {
+		t.Fatalf("the lifecycle assertion must stay readable after signing: %v", err)
+	}
+	// The original bytes are untouched — which is why the signature verifies.
+	if !bytes.HasPrefix(signedLike, compiled) {
+		t.Fatal("appending a signature must leave the signed bytes intact")
+	}
 }
