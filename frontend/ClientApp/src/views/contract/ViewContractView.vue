@@ -52,20 +52,24 @@ const tabs = computed(() =>
   }),
 )
 
+// The view holds its own copy from retrieve-by-id rather than the contracts
+// store, so anything that changes the contract has to re-run THIS fetch: a
+// store refresh leaves contract.value untouched and the page showing stale data.
+const loadContract = async () => {
+  const id = route.params.did
+  if (!id || Array.isArray(id)) return
+  try {
+    contract.value = await contractWorkflowService.retrieveById({ did: id })
+    applyContractDataToDraft(contract.value?.contract_data)
+  } catch (err: unknown) {
+    console.error('Failed to load contract', err)
+  }
+}
+
 watch(
   () => !!route.params.did,
   async (value) => {
-    if (value) {
-      try {
-        const id = route.params.did
-        if (id && !Array.isArray(id)) {
-          contract.value = await contractWorkflowService.retrieveById({ did: id })
-          applyContractDataToDraft(contract.value?.contract_data)
-        }
-      } catch (err: unknown) {
-        console.error('Failed to load contract', err)
-      }
-    }
+    if (value) await loadContract()
   },
   { immediate: true },
 )
@@ -93,11 +97,11 @@ const contractTitle = computed(
   () => contract.value?.name ?? contract.value?.contract_data?.['dcs:metadata']?.['dcs:title'] ?? contract.value?.did,
 )
 
-// After the target is designated the contract's updated_at moves on, so the
-// store is refreshed rather than left holding a stale timestamp that every
-// later action would be rejected against.
+// After the target is designated the contract's updated_at moves on, so this
+// view's own copy is re-fetched — otherwise it keeps a stale timestamp that
+// every later action is rejected against, and still shows no target.
 const reloadContract = () => {
-  void contractsStore.loadContracts()
+  void loadContract()
 }
 
 onMounted(() => {
