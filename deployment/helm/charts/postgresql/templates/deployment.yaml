@@ -4,6 +4,10 @@ metadata:
   name: {{ .Release.Name }}-postgresql
 spec:
   replicas: 1
+  # The data volume is RWO, so the default rolling update deadlocks: the
+  # replacement pod cannot attach while the outgoing one still holds it.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: postgresql
