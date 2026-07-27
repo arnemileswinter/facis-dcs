@@ -1,3 +1,4 @@
+import type { APIRequestContext } from '@playwright/test'
 import { expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
 
@@ -37,7 +38,22 @@ import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './
  * it. Nothing here is seeded behind the UI's back.
  */
 
-const CALLBACK_SECRET = process.env.E2E_DEPLOYMENT_CALLBACK_SECRET ?? 'bdd-deployment-callback-secret'
+// The target authenticates its callback as its own registered client (ADR-27),
+// so the suite obtains a token the same way a real target system would.
+const TARGET_CLIENT_ID = process.env.E2E_TARGET_CLIENT_ID ?? 'dcs-orce-target'
+const TARGET_CLIENT_SECRET = process.env.E2E_TARGET_CLIENT_SECRET ?? 'dcs-orce-target-secret'
+
+const targetAccessToken = async (request: APIRequestContext) => {
+  const res = await request.post('/oauth2/token', {
+    form: {
+      grant_type: 'client_credentials',
+      client_id: TARGET_CLIENT_ID,
+      client_secret: TARGET_CLIENT_SECRET,
+    },
+  })
+  expect(res.ok(), `target token ${res.status()}: ${await res.text()}`).toBeTruthy()
+  return (await res.json()).access_token as string
+}
 
 /** The shipped ORCE contract-target flow the kind stack runs (values.bdd.yml). */
 const E2E_CONTRACT_TARGET_URL = process.env.E2E_CONTRACT_TARGET_URL ?? 'http://dcs-orce:1880/contract-target/deploy'
@@ -183,7 +199,7 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
     // 900 against "Payment Amount <= 500" — the constraint authored in the
     // clause editor by the fixture.
     const res = await page.request.post('/api/contract/deployment/callback', {
-      headers: { 'X-Deployment-Callback-Secret': CALLBACK_SECRET },
+      headers: { Authorization: `Bearer ${await targetAccessToken(page.request)}` },
       data: {
         did: contractDid,
         correlation_id: correlationId,

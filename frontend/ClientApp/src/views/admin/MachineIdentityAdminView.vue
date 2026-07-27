@@ -1,0 +1,241 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import MachineCredentialDialog from '@/components/admin/MachineCredentialDialog.vue'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
+import type { MachineCredential, MachineIdentity } from '@/models/responses/contract-response'
+
+/**
+ * Administration of the machine identities that reach DCS over its API: the SRS
+ * Table 5 System Users (ADR-27). Their credentials used to live in the
+ * deployment's values file, so adding an integrator or rotating a secret meant
+ * editing configuration and redeploying.
+ *
+ * Sys. Contract Signer is absent on purpose. ADR-17 removes signing scope from
+ * that class: eIDAS makes a signatory a natural person under sole control, so a
+ * signature always needs a person with a wallet.
+ */
+
+const ASSIGNABLE_ROLES = [
+  'Sys. Contract Creator',
+  'Sys. Contract Reviewer',
+  'Sys. Contract Approver',
+  'Sys. Contract Manager',
+  'Sys. Auditor',
+]
+
+const identities = ref<MachineIdentity[]>([])
+const loading = ref(false)
+const error = ref('')
+const saving = ref(false)
+
+const editingId = ref<string | null>(null)
+const form = ref({ name: '', participant_did: '', description: '', roles: [] as string[], enabled: true })
+
+const issued = ref<MachineCredential | null>(null)
+const issuedTitle = ref('')
+
+const isEditing = computed(() => editingId.value !== null)
+
+const load = async () => {
+  loading.value = true
+  error.value = ''
+  try {
+    identities.value = await contractWorkflowService.listMachineIdentities()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not load system users'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+
+const resetForm = () => {
+  editingId.value = null
+  form.value = { name: '', participant_did: '', description: '', roles: [], enabled: true }
+}
+
+const edit = (identity: MachineIdentity) => {
+  editingId.value = identity.id
+  form.value = {
+    name: identity.name,
+    participant_did: identity.participant_did,
+    description: identity.description ?? '',
+    roles: [...identity.roles],
+    enabled: identity.enabled,
+  }
+}
+
+const save = async () => {
+  saving.value = true
+  error.value = ''
+  try {
+    const payload = {
+      name: form.value.name.trim(),
+      participant_did: form.value.participant_did.trim(),
+      description: form.value.description.trim() || undefined,
+      roles: form.value.roles,
+    }
+    if (editingId.value) {
+      await contractWorkflowService.updateMachineIdentity({
+        ...payload,
+        id: editingId.value,
+        enabled: form.value.enabled,
+      })
+    } else {
+      // Creating one issues its first credential, and this response is the only
+      // place the secret appears.
+      const created = await contractWorkflowService.createMachineIdentity(payload)
+      issuedTitle.value = `Credential for ${created.identity.name}`
+      issued.value = created.credential
+    }
+    resetForm()
+    await load()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save the system user'
+  } finally {
+    saving.value = false
+  }
+}
+
+const rotate = async (identity: MachineIdentity) => {
+  error.value = ''
+  try {
+    const credential = await contractWorkflowService.rotateMachineIdentitySecret(identity.id)
+    issuedTitle.value = `New credential for ${identity.name}`
+    issued.value = credential
+    await load()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not issue a new secret'
+  }
+}
+
+const remove = async (identity: MachineIdentity) => {
+  error.value = ''
+  try {
+    await contractWorkflowService.deleteMachineIdentity(identity.id)
+    await load()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not remove the system user'
+  }
+}
+</script>
+
+<template>
+  <div data-testid="machine-identity-admin" class="flex flex-col gap-6 p-6">
+    <div>
+      <h1 class="text-2xl font-semibold">System Users</h1>
+      <p class="mt-1 opacity-70">
+        Integrations that reach this deployment over its API rather than through a browser. Each authenticates with its
+        own credential, so one can be disabled or reissued without touching the others.
+      </p>
+    </div>
+
+    <div v-if="error" data-testid="machine-identity-error" class="alert rounded-box alert-error">{{ error }}</div>
+
+    <section class="card bg-base-200">
+      <form class="card-body grid gap-3 md:grid-cols-2" @submit.prevent="save">
+        <h2 class="card-title md:col-span-2">{{ isEditing ? 'Change system user' : 'Register a system user' }}</h2>
+
+        <label class="form-control">
+          <span class="label-text">Name</span>
+          <input v-model="form.name" data-testid="identity-name" required class="input-bordered input" />
+        </label>
+
+        <label class="form-control">
+          <span class="label-text">Attributed participant DID</span>
+          <input
+            v-model="form.participant_did"
+            data-testid="identity-participant-did"
+            required
+            class="input-bordered input"
+          />
+          <span class="label-text-alt mt-1 opacity-70">Its actions appear under this identity in the audit trail.</span>
+        </label>
+
+        <label class="form-control md:col-span-2">
+          <span class="label-text">Description</span>
+          <input v-model="form.description" data-testid="identity-description" class="input-bordered input" />
+        </label>
+
+        <fieldset class="md:col-span-2">
+          <legend class="label-text mb-1">What it may do</legend>
+          <div class="flex flex-wrap gap-3">
+            <label v-for="role in ASSIGNABLE_ROLES" :key="role" class="flex cursor-pointer items-center gap-2">
+              <input
+                v-model="form.roles"
+                :value="role"
+                type="checkbox"
+                class="checkbox checkbox-sm"
+                :data-testid="`identity-role-${role}`"
+              />
+              <span class="label-text">{{ role }}</span>
+            </label>
+          </div>
+          <p class="mt-2 text-xs opacity-70">
+            Signing is not offered: a machine can at most seal, which is a different legal instrument, so a signature
+            always needs a person with a wallet.
+          </p>
+        </fieldset>
+
+        <label v-if="isEditing" class="flex cursor-pointer items-center gap-2">
+          <input v-model="form.enabled" data-testid="identity-enabled" type="checkbox" class="toggle toggle-sm" />
+          <span class="label-text">May call this deployment</span>
+        </label>
+
+        <div class="flex gap-2 md:col-span-2">
+          <button type="submit" data-testid="identity-save" :disabled="saving" class="btn btn-primary">
+            {{ saving ? 'Saving…' : isEditing ? 'Save changes' : 'Register and issue credential' }}
+          </button>
+          <button v-if="isEditing" type="button" data-testid="identity-cancel" class="btn btn-ghost" @click="resetForm">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <div v-if="loading" class="opacity-70">Loading…</div>
+      <div v-else-if="identities.length === 0" data-testid="identity-empty-state" class="alert rounded-box alert-info">
+        No system user is registered yet.
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Client ID</th>
+              <th>Roles</th>
+              <th>Secret issued</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="identity in identities" :key="identity.id" data-testid="identity-row">
+              <td data-testid="identity-row-name">{{ identity.name }}</td>
+              <td class="font-mono text-xs">{{ identity.oauth_client_id }}</td>
+              <td class="text-xs">{{ identity.roles.join(', ') }}</td>
+              <td class="text-xs">{{ identity.secret_issued_at ?? '—' }}</td>
+              <td>
+                <span v-if="identity.enabled" class="badge badge-sm badge-success">enabled</span>
+                <span v-else data-testid="identity-row-disabled" class="badge badge-sm badge-warning">disabled</span>
+              </td>
+              <td class="flex gap-2">
+                <button class="btn btn-ghost btn-xs" data-testid="identity-edit" @click="edit(identity)">Edit</button>
+                <button class="btn btn-ghost btn-xs" data-testid="identity-rotate" @click="rotate(identity)">
+                  New secret
+                </button>
+                <button class="btn text-error btn-ghost btn-xs" data-testid="identity-delete" @click="remove(identity)">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <MachineCredentialDialog v-if="issued" :credential="issued" :title="issuedTitle" @close="issued = null" />
+  </div>
+</template>

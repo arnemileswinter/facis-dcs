@@ -22,6 +22,12 @@ type SeedTarget struct {
 	// Enabled defaults to true: a target declared in configuration is one the
 	// deployment intends to use.
 	Enabled *bool `json:"enabled,omitempty"`
+	// OAuthClientID names the client this target authenticates its callbacks
+	// as, for the case where the client is provisioned by the same deployment
+	// configuration rather than issued through the admin UI (ADR-27). Left
+	// empty, the target has no credential until an administrator issues one and
+	// cannot acknowledge a deployment before then.
+	OAuthClientID string `json:"oauth_client_id,omitempty"`
 }
 
 // ParseSeedTargets decodes the configured target list.
@@ -73,13 +79,17 @@ func seedTargets(ctx context.Context, list listTargetsFn, create createTargetFn,
 		if entry.Enabled != nil {
 			enabled = *entry.Enabled
 		}
-		if err := create(ctx, db.ContractTarget{
+		target := db.ContractTarget{
 			Name:        name,
 			URL:         url,
 			Description: entry.Description,
 			Enabled:     enabled,
 			CreatedBy:   "system:deployment-configuration",
-		}); err != nil {
+		}
+		if clientID := strings.TrimSpace(entry.OAuthClientID); clientID != "" {
+			target.OAuthClientID = &clientID
+		}
+		if err := create(ctx, target); err != nil {
 			return seeded, fmt.Errorf("register configured contract target %q: %w", name, err)
 		}
 		known[name] = true

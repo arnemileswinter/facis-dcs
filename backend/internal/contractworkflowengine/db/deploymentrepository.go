@@ -44,14 +44,19 @@ type ContractKPI struct {
 // serving several execution environments could not otherwise say where a
 // contract should go, and a failed dispatch had no target to name.
 type ContractTarget struct {
-	ID          string    `db:"id"`
-	Name        string    `db:"name"`
-	URL         string    `db:"url"`
-	Description *string   `db:"description"`
-	Enabled     bool      `db:"enabled"`
-	CreatedBy   string    `db:"created_by"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID          string  `db:"id"`
+	Name        string  `db:"name"`
+	URL         string  `db:"url"`
+	Description *string `db:"description"`
+	Enabled     bool    `db:"enabled"`
+	// OAuthClientID is the Hydra client this target authenticates its callbacks
+	// with (ADR-27). Nil until a credential is issued; the secret is never
+	// stored, only Hydra's hash of it.
+	OAuthClientID  *string    `db:"oauth_client_id"`
+	SecretIssuedAt *time.Time `db:"secret_issued_at"`
+	CreatedBy      string     `db:"created_by"`
+	CreatedAt      time.Time  `db:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at"`
 }
 
 type ContractTargetRepo interface {
@@ -69,6 +74,10 @@ type ContractTargetRepo interface {
 	// stored updated_at, the same second-granularity comparison every other
 	// contract mutation uses.
 	DesignateForContract(ctx context.Context, tx *sqlx.Tx, did string, targetID *string) (bool, error)
+	// SetCredential records the OAuth2 client this target authenticates its
+	// callbacks as, and when its current secret was issued. The secret itself
+	// is never stored: Hydra holds only a hash of it (ADR-27).
+	SetCredential(ctx context.Context, tx *sqlx.Tx, id string, oauthClientID string, issuedAt time.Time) error
 }
 
 type DeploymentRepo interface {

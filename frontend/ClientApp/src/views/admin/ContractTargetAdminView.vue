@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import MachineCredentialDialog from '@/components/admin/MachineCredentialDialog.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import type { ContractTarget } from '@/models/responses/contract-response'
+import type { ContractTarget, MachineCredential } from '@/models/responses/contract-response'
 
 /**
  * Administration of the Contract Target Systems deployments may be dispatched
@@ -14,6 +15,9 @@ const targets = ref<ContractTarget[]>([])
 const loading = ref(false)
 const error = ref('')
 const saving = ref(false)
+
+const issued = ref<MachineCredential | null>(null)
+const issuedTitle = ref('')
 
 const editingId = ref<string | null>(null)
 const form = ref({ name: '', url: '', description: '', enabled: true })
@@ -70,6 +74,21 @@ const save = async () => {
     error.value = err instanceof Error ? err.message : 'Could not save the target system'
   } finally {
     saving.value = false
+  }
+}
+
+// A target proves it is itself when it acknowledges a deployment, so the
+// credential is issued per target rather than shared (ADR-27). Issuing again
+// stops the previous secret working.
+const issueCredential = async (target: ContractTarget) => {
+  error.value = ''
+  try {
+    const credential = await contractWorkflowService.rotateTargetSecret(target.id)
+    issuedTitle.value = `Callback credential for ${target.name}`
+    issued.value = credential
+    await load()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not issue the callback credential'
   }
 }
 
@@ -147,6 +166,7 @@ const remove = async (target: ContractTarget) => {
               <th>Endpoint</th>
               <th>Description</th>
               <th>Deployments</th>
+              <th>Callback credential</th>
               <th></th>
             </tr>
           </thead>
@@ -159,8 +179,25 @@ const remove = async (target: ContractTarget) => {
                 <span v-if="target.enabled" class="badge badge-sm badge-success">accepted</span>
                 <span v-else data-testid="target-row-disabled" class="badge badge-sm badge-warning">refused</span>
               </td>
+              <td class="text-xs">
+                <span
+                  v-if="target.oauth_client_id"
+                  data-testid="target-row-credentialed"
+                  class="badge badge-sm badge-success"
+                >
+                  issued
+                </span>
+                <span v-else data-testid="target-row-no-credential" class="badge badge-ghost badge-sm">none</span>
+              </td>
               <td class="flex gap-2">
                 <button class="btn btn-ghost btn-xs" data-testid="target-edit" @click="edit(target)">Edit</button>
+                <button
+                  class="btn btn-ghost btn-xs"
+                  data-testid="target-issue-credential"
+                  @click="issueCredential(target)"
+                >
+                  {{ target.oauth_client_id ? 'New secret' : 'Issue credential' }}
+                </button>
                 <button class="btn text-error btn-ghost btn-xs" data-testid="target-delete" @click="remove(target)">
                   Remove
                 </button>
@@ -170,5 +207,7 @@ const remove = async (target: ContractTarget) => {
         </table>
       </div>
     </section>
+
+    <MachineCredentialDialog v-if="issued" :credential="issued" :title="issuedTitle" @close="issued = null" />
   </div>
 </template>

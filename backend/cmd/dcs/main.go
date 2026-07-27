@@ -49,6 +49,7 @@ import (
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/contractworkflowengine/deployevent"
+	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/middleware"
 	pdfevent "digital-contracting-service/internal/pdfgeneration/event"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
@@ -324,15 +325,23 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not resolve document-retrieval client_id")
 	}
-	systemClients, err := loadSystemClients()
+	// Machine callers are resolved from the registry at request time, so an
+	// identity can be added, disabled or rotated without a redeploy (ADR-27).
+	// DCS_SYSTEM_CLIENTS remains a declarative seed for the callers a
+	// deployment must have before anyone logs in to create them.
+	machineIdentities := machineidentity.NewPostgresRepo(db)
+	seeded, err := loadSystemClients()
 	if err != nil {
 		log.Fatalf(ctx, err, "Invalid system client configuration")
+	}
+	if err := seedMachineIdentities(ctx, machineIdentities, seeded); err != nil {
+		log.Fatalf(ctx, err, "Could not seed the configured system clients")
 	}
 	hydraJWTValidator, err := middleware.NewHydraJWTValidator(ctx, middleware.HydraJWTConfig{
 		PublicIssuerURL:   authCfg.Hydra.PublicIssuerURL(),
 		InternalIssuerURL: authCfg.Hydra.InternalIssuerURL(),
 		ClientID:          authCfg.Hydra.ClientID(),
-		SystemClients:     systemClients,
+		SystemClients:     machineIdentities,
 	})
 	if err != nil {
 		log.Fatalf(ctx, err, "Failed to initialize Hydra JWT validator")
@@ -638,7 +647,8 @@ func main() {
 		}
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))

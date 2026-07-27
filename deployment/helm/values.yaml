@@ -307,11 +307,17 @@ hydra:
 # needs a person with a wallet.
 #
 # A contract target system is NOT configured here: it is a registry row
-# (contractTargets, or the admin UI) and its callback authenticates with the
-# DEPLOYMENT_CALLBACK_SECRET shared secret, not an OAuth client. See ADR-25.
+# (contractTargets, or the admin UI) and its callback credential is issued to
+# that row rather than declared. See ADR-25 and ADR-27.
 #
 # Token: POST /oauth2/token with grant_type=client_credentials, then send it as
 # a bearer token. See values.bdd.yml for all four classes wired up.
+#
+# These entries are a SEED, not the runtime source. They are reconciled into the
+# machine identity registry at startup so a deployment has the callers it needs
+# before anyone logs in to create them; everything after that is administered
+# through the UI, where a credential is issued once and rotated rather than
+# edited here (ADR-27).
 systemClients: []
 
 nats:

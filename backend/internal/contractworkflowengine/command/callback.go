@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -20,26 +19,13 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
-// ErrDeploymentCallbackUnauthorized is returned when the deployment callback
-// shared secret is missing or incorrect (DCS-IR-SI-05).
-var ErrDeploymentCallbackUnauthorized = errors.New("incorrect deployment callback shared secret")
+// ErrDeploymentCallbackUnauthorized is returned when the caller is not the
+// target system the deployment was dispatched to (DCS-IR-SI-05).
+var ErrDeploymentCallbackUnauthorized = errors.New("caller is not the target system this deployment was dispatched to")
 
 // ErrDeploymentNotFound is returned when a callback references a correlation
 // ID that was never dispatched by Deployer.
 var ErrDeploymentNotFound = errors.New("deployment correlation id not found")
-
-// DeploymentCallbackSecret returns the shared secret that authenticates the
-// Contract Target System's deployment callback. It is read from
-// DEPLOYMENT_CALLBACK_SECRET — a machine-to-machine callback, unlike the
-// signing ceremony's callback, which authenticates by the unguessable
-// ceremony id plus nonce binding instead (ADR-20; the ceremony no longer has
-// a shared-secret webhook to mirror — EUDIPLO is removed).
-func DeploymentCallbackSecret() string {
-	if v := strings.TrimSpace(os.Getenv("DEPLOYMENT_CALLBACK_SECRET")); v != "" {
-		return v
-	}
-	return "bdd-deployment-callback-secret"
-}
 
 // DeploymentReceiptPayload is the target's execution-evidence receipt
 // carried in an acknowledgement callback.
@@ -53,8 +39,12 @@ type DeploymentReceiptPayload struct {
 // request: either an ack/status update (Status/Receipt set) or a KPI report
 // (KPIMetric set), or both.
 type DeploymentCallbackCmd struct {
-	Secret        string
-	DID           string
+	// CallerClientID is the OAuth2 client the request authenticated as, taken
+	// from the validated access token. The callback is accepted only when it
+	// matches the credential of the target the deployment went to, so a target
+	// can report on its own deployments and on no one else's.
+	CallerClientID string
+	DID            string
 	CorrelationID string
 	Status        string
 	Receipt       *DeploymentReceiptPayload
@@ -71,11 +61,12 @@ type DeploymentCallbackHandler struct {
 	DB             *sqlx.DB
 	CRepo          db.ContractRepo
 	DeploymentRepo db.DeploymentRepo
+	TargetRepo     db.ContractTargetRepo
 	ArchiveTSA     ArchiveTimestampIssuer
 }
 
 func (h *DeploymentCallbackHandler) Handle(ctx context.Context, cmd DeploymentCallbackCmd) error {
-	if strings.TrimSpace(cmd.Secret) == "" || cmd.Secret != DeploymentCallbackSecret() {
+	if strings.TrimSpace(cmd.CallerClientID) == "" {
 		return ErrDeploymentCallbackUnauthorized
 	}
 
@@ -97,6 +88,14 @@ func (h *DeploymentCallbackHandler) Handle(ctx context.Context, cmd DeploymentCa
 		return ErrDeploymentNotFound
 	}
 
+	// One shared secret proved only that SOME target was calling. Binding the
+	// caller's own credential to the registry entry the deployment was
+	// dispatched to means a target can acknowledge its own deployments and
+	// nothing else, and a compromised target cannot speak for the others.
+	if err := h.authorizeCaller(ctx, tx, deployment, cmd.CallerClientID); err != nil {
+		return err
+	}
+
 	if cmd.Receipt != nil || strings.TrimSpace(cmd.Status) != "" {
 		if err := h.applyAcknowledgement(ctx, tx, deployment, cmd); err != nil {
 			return err
@@ -110,6 +109,29 @@ func (h *DeploymentCallbackHandler) Handle(ctx context.Context, cmd DeploymentCa
 	}
 
 	return tx.Commit()
+}
+
+// authorizeCaller refuses a callback that does not come from the registry entry
+// the deployment was dispatched to. A deployment with no target recorded, or a
+// target with no credential issued, cannot be acknowledged at all: there is
+// nothing to check the caller against, and accepting it would restore exactly
+// the "some target said so" property the shared secret had.
+func (h *DeploymentCallbackHandler) authorizeCaller(ctx context.Context, tx *sqlx.Tx, deployment *db.ContractDeployment, callerClientID string) error {
+	if deployment.TargetID == nil || strings.TrimSpace(*deployment.TargetID) == "" {
+		return ErrDeploymentCallbackUnauthorized
+	}
+
+	target, err := h.TargetRepo.ReadTarget(ctx, tx, *deployment.TargetID)
+	if err != nil {
+		return fmt.Errorf("could not read the target of deployment %s: %w", deployment.CorrelationID, err)
+	}
+	if target == nil || target.OAuthClientID == nil {
+		return ErrDeploymentCallbackUnauthorized
+	}
+	if strings.TrimSpace(*target.OAuthClientID) != strings.TrimSpace(callerClientID) {
+		return ErrDeploymentCallbackUnauthorized
+	}
+	return nil
 }
 
 func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx *sqlx.Tx, deployment *db.ContractDeployment, cmd DeploymentCallbackCmd) error {
