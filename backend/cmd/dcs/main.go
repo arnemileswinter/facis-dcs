@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -103,29 +104,23 @@ func computeListenURL(ctx context.Context, hostF, domainF, httpPortF string, sec
 	return u
 }
 
-// startBootstrapServer claims the service's listen address immediately at
-// process start and answers 503 (with a short explanation) to every request
-// until it's shut down. Exists so the pod is Ready (per Kubernetes — no
-// readinessProbe is configured, so "container running" is sufficient) the
-// moment the process starts, rather than only once hsm.Open succeeds:
-// hsm.Open needs the PKCS#11 token that hsm-provision-job.yaml's post-install
-// hook creates, and that hook only runs once the whole release is Healthy —
-// a circular wait if this pod can't report healthy until the hook has
-// already run. DCS-IR-HI-01 (no software fallback for signing) is unchanged:
-// this only defers *when* the real handlers start serving, not what key
-// material they end up using.
+// startBootstrapServer claims the service's listen address immediately and
+// reports 503 on /readyz until initialization is complete. This lets
+// Kubernetes distinguish a running bootstrap process from a ready DCS while
+// the HSM, FC functional gate, and schema synchronization are pending.
+//
+// The chart's supported deployment path intentionally runs Helm without
+// --wait: the HSM provisioner is a post-install hook and supplies material
+// needed before this endpoint can turn ready. deploy.sh waits for the backend
+// rollout only after Helm has executed that hook.
 func startBootstrapServer(ctx context.Context, u *url.URL) *http.Server {
 	srv := &http.Server{
-		Addr: u.Host,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("starting up: waiting for PKCS#11 signing key material to be provisioned\n"))
-		}),
+		Addr:              u.Host,
+		Handler:           bootstrapHTTPHandler(),
 		ReadHeaderTimeout: time.Second * 60,
 	}
 	go func() {
-		log.Printf(ctx, "bootstrap HTTP server listening on %q (waiting for HSM)", u.Host)
+		log.Printf(ctx, "bootstrap HTTP server listening on %q (initializing)", u.Host)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Errorf(ctx, err, "bootstrap HTTP server error")
 		}
@@ -242,7 +237,7 @@ func main() {
 	// software fallback once open, but opening itself is retried rather than
 	// immediately fatal: a fresh install/upgrade's hsm-provision Job may not
 	// have run yet (see openHSMWithRetry's doc comment). The bootstrap server
-	// claims the listen address now so the pod can report healthy while this
+	// claims the listen address now while /readyz remains unavailable during
 	// retries; handleHTTPServer takes over the same address once ready.
 	listenURL := computeListenURL(ctx, *hostF, *domainF, *httpPortF, *secureF)
 	bootstrapSrv := startBootstrapServer(ctx, listenURL)
@@ -476,11 +471,23 @@ func main() {
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
 	fcClientID := os.Getenv("FEDERATED_CATALOGUE_CLIENT_ID")
 	fcClientSecret := os.Getenv("FEDERATED_CATALOGUE_CLIENT_SECRET")
+	fcRealmURL := strings.TrimSpace(os.Getenv("FC_KEYCLOAK_REALM_URL"))
 	var templateCatalogueClient *fcclient.FederatedCatalogueClient
-	if fcURL != "" && fcClientID != "" && fcClientSecret != "" {
-		fcRealmURL := strings.TrimSpace(os.Getenv("FC_KEYCLOAK_REALM_URL"))
-		if fcRealmURL == "" {
-			log.Fatalf(ctx, nil, "Federated Catalogue requires FC_KEYCLOAK_REALM_URL (Keycloak for FC only, not Hydra)")
+	if fcURL != "" || fcClientID != "" || fcClientSecret != "" || fcRealmURL != "" {
+		var missing []string
+		for name, value := range map[string]string{
+			"FEDERATED_CATALOGUE_API_URL":       fcURL,
+			"FEDERATED_CATALOGUE_CLIENT_ID":     fcClientID,
+			"FEDERATED_CATALOGUE_CLIENT_SECRET": fcClientSecret,
+			"FC_KEYCLOAK_REALM_URL":             fcRealmURL,
+		} {
+			if strings.TrimSpace(value) == "" {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			slices.Sort(missing)
+			log.Fatalf(ctx, nil, "incomplete Federated Catalogue configuration; missing %s", strings.Join(missing, ", "))
 		}
 		templateCatalogueClient, err = fcclient.NewFederatedCatalogueClient(fcclient.Config{
 			APIURL:           fcURL,
@@ -491,7 +498,11 @@ func main() {
 		if err != nil {
 			log.Fatalf(ctx, err, "failed to initialize Federated Catalogue client")
 		}
-		if err := fcschemas.SyncWithRetry(ctx, templateCatalogueClient); err != nil {
+		requireFCHealth := strings.EqualFold(strings.TrimSpace(os.Getenv("FEDERATED_CATALOGUE_REQUIRE_NATIVE_HEALTH")), "true")
+		if err := templateCatalogueClient.CheckReadiness(ctx, requireFCHealth); err != nil {
+			log.Fatalf(ctx, err, "federated catalogue readiness gate failed")
+		}
+		if err := fcschemas.Sync(ctx, templateCatalogueClient); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
 	}

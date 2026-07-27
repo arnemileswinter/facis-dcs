@@ -3,17 +3,26 @@ package client
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
-	"log"
-
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// Readiness fixture from the Apache-2.0 upstream Federated Catalogue
+// fc-service-server test suite at revision c243a65955a16ff8bbc3a24deacfa8fa9a2192ca:
+// src/test/resources/mock-data/default-participant.json. Keeping the upstream
+// known-good credential as an embedded source avoids inventing a second DCS
+// domain payload solely for lifecycle probing.
+//
+//go:embed fixtures/fc-readiness-participant.json
+var readinessVerificationPayload []byte
 
 var (
 	ErrFederatedCatalogueNotConfigured      = errors.New("federated catalogue is not configured")
@@ -90,10 +99,88 @@ type FederatedCatalogueClient struct {
 
 const (
 	AssetsEndpointPath       = "/assets"
+	HealthEndpointPath       = "/actuator/health"
 	SchemaEndpointPath       = "/schemas"
 	VerificationEndpointPath = "/verification"
 	QuerySearchEndpointPath  = "/query/search"
 )
+
+// CheckReadiness performs exactly one functional verification request before
+// DCS may use the catalogue. For a co-deployed FC, requireNativeHealth adds the
+// native actuator check first. Remote catalogues skip that deployment-specific
+// check because operators commonly do not expose actuator endpoints.
+func (c *FederatedCatalogueClient) CheckReadiness(ctx context.Context, requireNativeHealth bool) error {
+	if requireNativeHealth {
+		healthURL, err := url.Parse(c.baseURL + HealthEndpointPath)
+		if err != nil {
+			return fmt.Errorf("invalid federated catalogue health url: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL.String(), nil)
+		if err != nil {
+			return fmt.Errorf("create federated catalogue health request: %w", err)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("federated catalogue health check failed: %w", err)
+		}
+		healthBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("read federated catalogue health response: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close federated catalogue health response: %w", closeErr)
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("federated catalogue health check failed with status %d: %s",
+				resp.StatusCode, strings.TrimSpace(string(healthBody)))
+		}
+		var health struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(healthBody, &health); err != nil {
+			return fmt.Errorf("decode federated catalogue health response: %w", err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(health.Status), "UP") {
+			return fmt.Errorf("federated catalogue health is %q, expected UP", health.Status)
+		}
+	}
+
+	query := url.Values{}
+	query.Set("verifySchema", "true")
+	query.Set("verifySemantics", "true")
+	query.Set("verifySignatures", "false")
+	query.Set("verifyVCSignature", "false")
+	query.Set("verifyVPSignature", "false")
+	verification, err := c.Post(ctx, VerificationEndpointPath, query, readinessVerificationPayload)
+	if err != nil {
+		return fmt.Errorf("federated catalogue functional verification failed: %w", err)
+	}
+	if verification.StatusCode < http.StatusOK || verification.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("federated catalogue functional verification failed with status %d: %s",
+			verification.StatusCode, strings.TrimSpace(string(verification.Body)))
+	}
+	var result struct {
+		VerificationTimestamp string         `json:"verificationTimestamp"`
+		LifecycleStatus       string         `json:"lifecycleStatus"`
+		Issuer                string         `json:"issuer"`
+		IssuedDateTime        string         `json:"issuedDateTime"`
+		BaseClass             string         `json:"baseClass"`
+		Claims                map[string]any `json:"claims"`
+	}
+	if err := json.Unmarshal(verification.Body, &result); err != nil {
+		return fmt.Errorf("decode federated catalogue functional verification result: %w", err)
+	}
+	if result.Issuer != "did:example:issuer" ||
+		result.IssuedDateTime != "2010-01-01T19:23:24Z" ||
+		strings.TrimSpace(result.VerificationTimestamp) == "" ||
+		strings.TrimSpace(result.LifecycleStatus) == "" ||
+		strings.TrimSpace(result.BaseClass) == "" ||
+		len(result.Claims) == 0 {
+		return fmt.Errorf("federated catalogue functional verification returned incomplete semantic result")
+	}
+	return nil
+}
 
 func NewFederatedCatalogueClient(cfg Config) (*FederatedCatalogueClient, error) {
 	apiURL := normalizeBaseURL(cfg.APIURL)

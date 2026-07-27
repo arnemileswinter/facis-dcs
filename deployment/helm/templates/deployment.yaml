@@ -1,3 +1,6 @@
+{{- if and .Values.federatedCatalogue.enabled (not .Values.fcservice.enabled) (not .Values.federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary) }}
+{{- fail "remote Federated Catalogue requires federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true: ADR-18 service credentials currently carry ADMIN_ALL and provide no tenant isolation" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,7 +32,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "digital-contracting-service.serviceAccountName" . }}
+      serviceAccountName: {{ if and .Values.fcservice.enabled .Values.fcservice.realmProvision.enabled }}{{ include "digital-contracting-service.fullname" . }}-fc-lifecycle{{ else }}{{ include "digital-contracting-service.serviceAccountName" . }}{{ end }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -41,6 +44,83 @@ spec:
       {{- if .Values.hostNetwork }}
       hostNetwork: true
       dnsPolicy: {{ default "ClusterFirstWithHostNet" .Values.dnsPolicy }}
+      {{- end }}
+      {{- if and .Values.fcservice.enabled .Values.fcservice.realmProvision.enabled }}
+      initContainers:
+        # Helm post-install/post-upgrade hooks are created after regular
+        # resources. Keep creation and completion as distinct Kubernetes watch
+        # gates: kubectl's --for option is singular and repeated values do not
+        # express a sequence.
+        - name: fc-realm-job-created
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
+          command:
+            - kubectl
+            - wait
+            - --for=create
+            - --timeout=-1s
+            - job/{{ include "digital-contracting-service.fullname" . }}-fc-realm-provision
+        - name: fc-realm-ready
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -u
+
+              job="{{ include "digital-contracting-service.fullname" . }}-fc-realm-provision"
+              complete_log=/tmp/fc-realm-complete-watch.log
+              failed_log=/tmp/fc-realm-failed-watch.log
+
+              kubectl wait --for=condition=complete --timeout=-1s "job/$job" >"$complete_log" 2>&1 &
+              complete_pid=$!
+              kubectl wait --for=condition=failed --timeout=-1s "job/$job" >"$failed_log" 2>&1 &
+              failed_pid=$!
+
+              finished_pid=""
+              wait -n -p finished_pid "$complete_pid" "$failed_pid"
+              watch_status=$?
+
+              if [ "$finished_pid" = "$complete_pid" ]; then
+                terminal_condition="Complete"
+                other_pid="$failed_pid"
+                finished_log="$complete_log"
+              else
+                terminal_condition="Failed"
+                other_pid="$complete_pid"
+                finished_log="$failed_log"
+              fi
+              kill "$other_pid" 2>/dev/null || true
+              wait "$other_pid" 2>/dev/null || true
+
+              if [ "$watch_status" -ne 0 ]; then
+                cat "$finished_log" >&2
+                echo "Federated Catalogue realm provisioning watch terminated before a terminal Job condition (exit $watch_status)." >&2
+                exit "$watch_status"
+              elif [ "$terminal_condition" = "Failed" ]; then
+                failure="$(kubectl get "job/$job" -o json | jq -r '
+                  .status.conditions[]?
+                  | select(.type == "Failed" and .status == "True")
+                  | "reason=\(.reason // "unknown"); message=\(.message // "not provided")"
+                ')"
+                echo "Federated Catalogue realm provisioning Job $job failed: ${failure:-reason unknown; message not provided}" >&2
+                exit 1
+              fi
+
+              echo "Federated Catalogue realm provisioning Job $job completed."
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -96,7 +176,7 @@ spec:
             - name: DCS_SYSTEM_CLIENTS
               value: {{ .Values.systemClients | toJson | quote }}
             {{- end }}
-            {{- if include "digital-contracting-service.fcKeycloakRealmURL" . }}
+            {{- if and .Values.federatedCatalogue.enabled (include "digital-contracting-service.fcKeycloakRealmURL" .) }}
             - name: FC_KEYCLOAK_REALM_URL
               value: {{ include "digital-contracting-service.fcKeycloakRealmURL" . | quote }}
             {{- end }}
@@ -118,6 +198,7 @@ spec:
               {{- else }}
               value: {{ include "digital-contracting-service.natsURL" . | quote }}
               {{- end }}
+            {{- if .Values.federatedCatalogue.enabled }}
             - name: FEDERATED_CATALOGUE_API_URL
               {{- if and .Values.federatedCatalogue.secretRef .Values.federatedCatalogue.secretRef.name }}
               valueFrom:
@@ -138,6 +219,11 @@ spec:
               {{- else }}
               value: {{ .Values.federatedCatalogue.oauth.clientSecret | quote }}
               {{- end }}
+            {{- if .Values.fcservice.enabled }}
+            - name: FEDERATED_CATALOGUE_REQUIRE_NATIVE_HEALTH
+              value: "true"
+            {{- end }}
+            {{- end }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
             - name: DCS_UI_PATH
@@ -330,7 +416,8 @@ spec:
               subPath: nginx.conf
               readOnly: true
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: {{ .Values.statusListLocalhostProxy.readinessPath | quote }}
               port: sl-proxy
             initialDelaySeconds: 2
             periodSeconds: 5

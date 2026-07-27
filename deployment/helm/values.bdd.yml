@@ -194,8 +194,7 @@ hydra:
       token_endpoint_auth_method: client_secret_post
 
 # The FC must run in the BDD kind scenario too (features/02, template_archive
-# and others exercise it against a real fc-service — see
-# tests/bdd/scripts/run_bdd_helm.sh's wait_for_fc_verification). Deployed via
+# and others exercise it against a real fc-service). Deployed via
 # our own local charts/federated-catalogue + charts/keycloak + charts/fuseki +
 # charts/fc-postgres (see Chart.yaml), scaled down for a fast/ephemeral KIND
 # cluster. No portal here — nothing in BDD exercises its demo UI, and one
@@ -218,10 +217,10 @@ fcservice:
     enabled: true
   resources:
     requests:
-      cpu: 100m
+      cpu: 500m
       memory: 512Mi
     limits:
-      cpu: "1"
+      cpu: "2"
       memory: 1Gi
   portal:
     enabled: false
@@ -289,6 +288,9 @@ statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
+  # The backend immediately dereferences this exact seeded credential list;
+  # Pod readiness therefore requires the full proxy→Ingress→list route.
+  readinessPath: "/statuslist/v1/tenants/credential/status/1"
 
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:

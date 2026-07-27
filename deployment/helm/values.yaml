@@ -138,6 +138,21 @@ identity:
   secretName: ""
   mountPath: "/app/identity"
 
+# Application readiness is intentionally distinct from process liveness.
+# /readyz remains 503 on the bootstrap server until initialization, including
+# the Federated Catalogue functional gate and schema sync, has completed.
+# The supported deploy.sh path invokes Helm without --wait so the HSM
+# post-install hook can run before this probe becomes successful; adding
+# `helm --wait` directly would deadlock that hook/bootstrap dependency.
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  periodSeconds: 2
+  timeoutSeconds: 1
+  failureThreshold: 3
+  successThreshold: 1
+
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
   realmURL: ""
@@ -287,6 +302,9 @@ statusListLocalhostProxy:
   listenPort: 18080
   upstream: ""
   ingressHost: localhost
+  # Functional HTTP route used by the sidecar readiness probe. Environments
+  # that require a particular seeded status list can override this path.
+  readinessPath: "/statuslist/health"
 
 # XFSC Status List Service (DCS-OR-C2PA-005)
 # Manages verifiable credential status lists (Status List 2021/2023 format).
@@ -339,9 +357,23 @@ federatedCatalogue:
     clientSecretSecretRef:
       name: ""
       key: "FEDERATED_CATALOGUE_CLIENT_SECRET"
+  remote:
+    # ADR-18: the current FC service account has ADMIN_ALL. A remote/shared FC
+    # is therefore safe only inside one mutually trusted administrative
+    # boundary; it is not tenant isolation. Remote deployments must explicitly
+    # acknowledge that constraint or Helm rendering fails.
+    acknowledgeAdminAllTrustBoundary: false
 
 fcservice:
   enabled: false
+  # The functional startup gate performs schema+semantic verification once.
+  # A one-core Java cold path exceeded the client budget in a live fresh
+  # install, so keep enough burst CPU for that deterministic request.
+  resources:
+    requests:
+      cpu: 500m
+    limits:
+      cpu: "2"
   route:
     path: ""
   # Explicit true (not left unset) so fc-realm-provision-job.yaml's
@@ -380,6 +412,13 @@ fcservice:
     # environment using this chart version, not a per-deploy secret.
     serviceAccountUserID: "25b4615a-b7e1-4554-be7d-85f50b2151cf"
     clientSecret: "**********"
+    image:
+      # Contains bash, curl, jq and kubectl. alpine/k8s is a Docker-Sponsored
+      # Open Source image; this exact multi-arch manifest was verified before
+      # pinning. It is independent from the mutable application image.
+      repository: alpine/k8s
+      tag: "1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68"
+      pullPolicy: IfNotPresent
 
 # Owned Keycloak backing fcservice above (see charts/keycloak). hostname MUST
 # be a real, externally reachable https URL for wallet/browser OIDC flows on

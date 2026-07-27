@@ -121,28 +121,15 @@ spec:
               mountPath: /tmp
             - name: filestore
               mountPath: /var/lib/fc-service/filestore
-          # Spring's cold boot (schema/context cache warm-up) can exceed 5
-          # minutes on I/O-constrained nodes; the startup probe gates
-          # liveness so a slow boot is not killed into a crashloop.
-          startupProbe:
-            httpGet:
-              path: {{ .Values.route.path | default "" }}/actuator/health
-              port: http
-            periodSeconds: 15
-            failureThreshold: 80
-            timeoutSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: {{ .Values.route.path | default "" }}/actuator/health
-              port: http
-            periodSeconds: 30
-            timeoutSeconds: 5
+          # Native actuator health is the sole workload-readiness signal. The
+          # DCS performs the one functional verification call after this turns
+          # UP; no artificial cache warm-up is used.
           readinessProbe:
             httpGet:
               path: {{ .Values.route.path | default "" }}/actuator/health
               port: http
-            periodSeconds: 10
-            timeoutSeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 2
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:

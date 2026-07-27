@@ -4,8 +4,9 @@
 #
 # Starts a SECOND, independent DCS instance ("instance B") alongside the one
 # started by dev-stack.sh ("instance A"): its own Helm release (Postgres,
-# Keycloak, Hydra, NATS, Neo4j, Federated Catalogue, statuslist-service, ORCE,
-# IPFS — see deployment/helm/values.dev2.yml for the full NodePort map),
+# Keycloak, Hydra, NATS, statuslist-service, ORCE and IPFS — see
+# deployment/helm/values.dev2.yml for the full NodePort map). Federated
+# Catalogue is intentionally disabled for this local second-instance profile,
 # backend on :8992, frontend on :5174. Instance B holds its own private keys in
 # a separate SoftHSM2 token (provisioned below), never in the cluster.
 #
@@ -37,14 +38,9 @@ BACKEND_BUILD_OUTPUT="tmp2/main2"
 
 echo "=== Setting up dev environment for instance B (:8992 / :5174) ==="
 
-echo "Updating Helm dependencies and deploying to Kubernetes..."
-helm dependency update "$HELM_CHART_PATH"
+echo "Building locked Helm dependencies and deploying to Kubernetes..."
+helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
-
-echo "Waiting for Federated Catalogue to become ready..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
-  --timeout=10m
 
 echo "Waiting for statuslist-service..."
 kubectl wait --for=condition=ready pod \

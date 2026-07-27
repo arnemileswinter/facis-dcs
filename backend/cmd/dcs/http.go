@@ -223,6 +223,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	outerMux := http.NewServeMux()
 	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
 	outerMux.Handle("/metrics", promhttp.Handler())
+	mountReadinessEndpoint(outerMux)
 	outerMux.Handle("/", mux)
 
 	var handler http.Handler = outerMux

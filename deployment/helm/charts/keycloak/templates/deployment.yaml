@@ -112,9 +112,13 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: {{ printf "/%s/realms/master/.well-known/openid-configuration" (trimAll "/" .Values.route.path) | quote }}
               port: http
-            periodSeconds: 10
-            timeoutSeconds: 5
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+            periodSeconds: 5
+            timeoutSeconds: 2
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
