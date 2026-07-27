@@ -189,17 +189,13 @@ export const contractWorkflowService: ContractWorkflowService = {
   // ---- Machine identities (ADR-27) -----------------------------------------
 
   async listMachineIdentities() {
-    return http
-      .get<{ identities: MachineIdentity[] }>('/machine-identities')
-      .then((res) => res.data.identities)
+    return http.get<{ identities: MachineIdentity[] }>('/machine-identities').then((res) => res.data.identities)
   },
 
   /** Registers the identity and issues its first credential. The secret is in
    *  this response and in no other. */
   async createMachineIdentity(request: MachineIdentityWriteRequest) {
-    return http
-      .post<MachineIdentityCreateResponse>('/machine-identities', request)
-      .then((res) => res.data)
+    return http.post<MachineIdentityCreateResponse>('/machine-identities', request).then((res) => res.data)
   },
 
   async updateMachineIdentity(request: MachineIdentityWriteRequest & { id: string; enabled: boolean }) {

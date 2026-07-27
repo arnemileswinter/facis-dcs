@@ -45,11 +45,11 @@ type DeploymentCallbackCmd struct {
 	// can report on its own deployments and on no one else's.
 	CallerClientID string
 	DID            string
-	CorrelationID string
-	Status        string
-	Receipt       *DeploymentReceiptPayload
-	KPIMetric     string
-	KPIValue      string
+	CorrelationID  string
+	Status         string
+	Receipt        *DeploymentReceiptPayload
+	KPIMetric      string
+	KPIValue       string
 }
 
 // DeploymentCallbackHandler validates the shared secret, then applies an

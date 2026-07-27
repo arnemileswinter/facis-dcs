@@ -10,8 +10,8 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/machineidentity"
-	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/middleware"
 
 	"github.com/google/uuid"
