@@ -95,3 +95,39 @@ func TestVerifyReproducesAReanchoredDocument(t *testing.T) {
 		t.Fatalf("verify must reproduce the re-anchor: %v", err)
 	}
 }
+
+// A VC-only update also carries an unchanged payload, so "payload unchanged"
+// alone cannot mean "re-anchor". Classifying one as the other replays it
+// without its credential, the bytes diverge, and verify reports the document as
+// not reproducing itself — which is how five signature scenarios and then six
+// format-review scenarios failed in turn.
+func TestVerifyDistinguishesAVCUpdateFromAReanchor(t *testing.T) {
+	compiled, err := CompilePDF(testSigningContext(), []byte(minimalPayloadBase), time.Now())
+	if err != nil {
+		t.Fatalf("CompilePDF: %v", err)
+	}
+	vc := []byte(`{"@context":"https://www.w3.org/ns/credentials/v2","type":["VerifiableCredential"],"id":"urn:dcs:vc:1"}`)
+
+	// Same payload, but the hop's point is the credential it attaches.
+	payload, err := ExtractEmbeddedJSONLD(compiled)
+	if err != nil {
+		t.Fatalf("extract payload: %v", err)
+	}
+	withVC, err := UpdatePDFWithVC(testSigningContext(), compiled, payload, vc, time.Now())
+	if err != nil {
+		t.Fatalf("UpdatePDFWithVC: %v", err)
+	}
+	if err := VerifyIncrementalUpdate(testSigningContext(), withVC); err != nil {
+		t.Fatalf("a VC-only update must still reproduce: %v", err)
+	}
+
+	// And a re-anchor on top of it still replays as a re-anchor, even though
+	// the VC from the previous hop is visible in the document.
+	reanchored, err := ReanchorProvenance(testSigningContext(), withVC, "", time.Now())
+	if err != nil {
+		t.Fatalf("ReanchorProvenance: %v", err)
+	}
+	if err := VerifyIncrementalUpdate(testSigningContext(), reanchored); err != nil {
+		t.Fatalf("a re-anchor after a VC update must reproduce: %v", err)
+	}
+}

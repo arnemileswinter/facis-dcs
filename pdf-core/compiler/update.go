@@ -881,20 +881,28 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		embeddedVC, vcPresent, _ := ExtractEmbeddedVC(hopEnd)
 		remoteManifestURL := extractRemoteManifestURLFromXMP(hopEnd)
 
-		// A hop that carries the payload unchanged is a re-anchor, not an
-		// amendment (ADR-26): provenance appended over a signature so the
-		// binding covers the signed bytes. Re-applying it through the amendment
-		// path would hit the no-changes guard and fail to reproduce it, so the
-		// hop is replayed the way it was produced.
+		// Which kind of revision this hop is decides how it must be replayed.
+		// ExtractEmbeddedVC sees the latest VC in hopEnd, which for a hop that
+		// added none is the one an EARLIER hop wrote — so "this hop carries a
+		// VC" means the attachment differs from the preceding bytes', not merely
+		// that one is present.
+		prevVC, prevVCPresent, _ := ExtractEmbeddedVC(boundary)
+		hopAddedVC := vcPresent && len(embeddedVC) > 0 &&
+			(!prevVCPresent || !bytes.Equal(prevVC, embeddedVC))
+
+		// With no new VC and an unchanged payload the hop is a re-anchor
+		// (ADR-26): provenance appended over a signature so the binding covers
+		// the signed bytes. Replaying that as an amendment hits the no-changes
+		// guard and fails to reproduce it.
 		prevPayload, prevErr := ExtractLatestEmbeddedJSONLD(boundary)
-		reanchorHop := prevErr == nil && bytes.Equal(prevPayload, newPayload)
+		reanchorHop := !hopAddedVC && prevErr == nil && bytes.Equal(prevPayload, newPayload)
 
 		var freshUpdated []byte
 		switch {
+		case hopAddedVC:
+			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
 		case reanchorHop:
 			freshUpdated, err = updatePDF(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt, true)
-		case vcPresent && len(embeddedVC) > 0:
-			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, embeddedVC, remoteManifestURL, updateCompiledAt)
 		default:
 			freshUpdated, err = UpdatePDFWithOptions(hopCtx, boundary, newPayload, nil, remoteManifestURL, updateCompiledAt)
 		}
