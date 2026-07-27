@@ -110,12 +110,17 @@ func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx
 
 func (r *PostgresContractRepo) ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.Contract, error) {
 	query := `
-        SELECT did, origin, state, name, description,
-               created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
-               target_id
-        FROM contracts_effective
-        WHERE did = $1
+        SELECT ce.did, ce.origin, ce.state, ce.name, ce.description,
+               ce.created_by, ce.created_at, ce.updated_at, ce.contract_version, ce.contract_data,
+               ce.start_date, ce.exp_date, ce.exp_policy, ce.exp_notice_period, ce.responsible,
+               ce.template_did, ce.template_version,
+               -- Joined rather than carried by contracts_effective: that view
+               -- has dependents, so widening it would mean dropping and
+               -- rebuilding them (ADR-25).
+               c.target_id
+        FROM contracts_effective ce
+        JOIN contracts c ON c.did = ce.did
+        WHERE ce.did = $1
     `
 	var ct db.Contract
 	err := tx.GetContext(ctx, &ct, query, did)

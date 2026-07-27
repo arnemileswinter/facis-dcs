@@ -44,35 +44,8 @@ ALTER TABLE contract_deployments
 
 CREATE INDEX idx_contract_deployments_status ON contract_deployments(status);
 
--- contracts_effective is the read path for a contract's live state; the
--- designated target has to travel with it or deployment cannot see it.
--- CREATE OR REPLACE cannot add a column to an existing view, so it is dropped
--- and rebuilt. Views are derived — nothing is lost.
-DROP VIEW IF EXISTS contracts_effective;
-CREATE VIEW contracts_effective AS
-SELECT
-    did,
-    origin,
-    created_by,
-    created_at,
-    updated_at,
-    start_date,
-    exp_date,
-    exp_policy,
-    exp_notice_period,
-    CASE
-        WHEN exp_date <= CURRENT_TIMESTAMP
-            AND state NOT IN ('TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')
-            THEN 'EXPIRED'::contract_state
-        ELSE state
-        END AS state,
-    contract_version,
-    name,
-    description,
-    contract_data,
-    search_vector,
-    responsible,
-    template_did,
-    template_version,
-    target_id
-FROM contracts;
+-- contracts_effective is deliberately NOT rebuilt to carry target_id.
+-- contracts_archive_metadata is defined on top of it, so dropping it needs a
+-- CASCADE and a faithful re-creation of a view that has evolved across five
+-- migrations — a large risk for one column. The contract read joins contracts
+-- for the designation instead (see PostgresContractRepo.ReadDataByDID).
