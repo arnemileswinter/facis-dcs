@@ -192,11 +192,6 @@ const exportBundle = async () => {
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />
 
-                <!-- The machine-readable side of the same payload (UC-04) -->
-                <div class="mt-4">
-                  <ContractMachineReadableView :contract="contract" />
-                </div>
-
                 <!-- Where this contract deploys to (ADR-25) -->
                 <div class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-2">
@@ -269,6 +264,12 @@ const exportBundle = async () => {
                         :verification-result="verificationResult"
                       />
                     </div>
+
+                    <!-- The machine-readable side of the same payload, beside
+                         the document it renders (UC-04 stimulus 5). After it,
+                         not before: the readable contract is what a person
+                         came for. -->
+                    <ContractMachineReadableView :contract="contract" />
                   </div>
                 </div>
               </div>

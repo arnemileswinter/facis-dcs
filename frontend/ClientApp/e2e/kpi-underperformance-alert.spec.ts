@@ -124,6 +124,13 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
         )
         .toBe('ACTIVE')
 
+      // The machine-readable side sits beside the document it renders, so the
+      // Content tab has to be open before it can be expanded.
+      await page
+        .getByRole('tab', { name: /content/i })
+        .or(page.getByText('Contract Content', { exact: true }))
+        .first()
+        .click()
       await page.getByTestId('machine-readable-toggle').click()
       const identifiers = page.getByTestId('machine-readable-field-id')
       await expect(
