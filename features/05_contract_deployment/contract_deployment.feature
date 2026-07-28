@@ -56,6 +56,7 @@ Feature: Contract deployment, execution evidence, and KPIs
   @DCS-FR-CWE-06
   Scenario: Deployment is triggered automatically once the signing workflow completes
     Given contract "Auto Deploy Contract" has reached contract state "APPROVED"
+    And contract "Auto Deploy Contract" deploys to the configured target system
     When the counterparty signer applies a signature to contract "Auto Deploy Contract"
     Then get http 200:Success code
     And the archive entry for contract "Auto Deploy Contract" records an automatic deployment correlation ID

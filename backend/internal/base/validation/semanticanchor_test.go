@@ -37,20 +37,13 @@ func TestSchemaAnchorRefsArePointedAtTheHub(t *testing.T) {
 	SetSchemaAnchorRefs(
 		"http://dcs.local/semantic/context/facis-dcs?version=1",
 		"http://dcs.local/semantic/shapes/facis-dcs?version=1",
-		"http://dcs.local/semantic/profile/facis.sla.basic?version=1",
 	)
-	defer func() {
-		SetSchemaAnchorRefs(SchemaJSONLDContextV1, SchemaSHACLShapesV1, "")
-		schemaRefProfile = ""
-	}()
+	defer SetSchemaAnchorRefs(SchemaJSONLDContextV1, SchemaSHACLShapesV1)
 
 	if schemaRefJSONLDContext != "http://dcs.local/semantic/context/facis-dcs?version=1" {
 		t.Fatalf("expected the context anchor to be re-pointed, got %q", schemaRefJSONLDContext)
 	}
 	if schemaRefSHACLShapes != "http://dcs.local/semantic/shapes/facis-dcs?version=1" {
 		t.Fatalf("expected the shapes anchor to be re-pointed, got %q", schemaRefSHACLShapes)
-	}
-	if schemaRefProfile != "http://dcs.local/semantic/profile/facis.sla.basic?version=1" {
-		t.Fatalf("expected the profile anchor to be re-pointed, got %q", schemaRefProfile)
 	}
 }

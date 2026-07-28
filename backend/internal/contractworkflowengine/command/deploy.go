@@ -27,6 +27,15 @@ var ErrSigningIncomplete = errors.New("signing workflow incomplete")
 
 // DeployCmd carries the inputs for deploying a SIGNED contract to the
 // configured Contract Target System (UC-05-01).
+// Deployment refusals that are the operator's to fix, not internal errors
+// (ADR-25). A contract that reaches signing with no destination does not deploy,
+// and saying so is the point — silently doing nothing is what this replaced.
+var (
+	ErrNoTargetDesignated  = errors.New("this contract designates no target system to deploy to")
+	ErrTargetNotRegistered = errors.New("no such target system is registered")
+	ErrTargetDisabled      = errors.New("target system is disabled and cannot receive deployments")
+)
+
 type DeployCmd struct {
 	DID         string
 	UpdatedAt   time.Time
@@ -34,6 +43,10 @@ type DeployCmd struct {
 	// LocalPeer is this instance's own did:web. Signature slots are named by
 	// the signing party, so it identifies which declared slot is ours.
 	LocalPeer string
+	// TargetIDOverride re-dispatches to a different registered target than the
+	// one the contract designates (ADR-25). The designation itself is unchanged:
+	// this is the operator directing one delivery, not editing the contract.
+	TargetIDOverride string
 }
 
 // DeployResult is what both the manual /contract/deploy endpoint and the
@@ -45,6 +58,8 @@ type DeployResult struct {
 	Timestamp       time.Time
 	CorrelationID   string
 	Payload         map[string]any
+	TargetID        string
+	TargetName      string
 }
 
 // Deployer handles DeployCmd: it gates on the contract being SIGNED (the
@@ -58,6 +73,7 @@ type Deployer struct {
 	DB             *sqlx.DB
 	CRepo          db.ContractRepo
 	DeploymentRepo db.DeploymentRepo
+	TargetRepo     db.ContractTargetRepo
 	Target         ContractTargetClient
 }
 
@@ -161,17 +177,38 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 	}
 	payload["dcs:contentHash"] = contentHash
 
-	targetURL := ContractTargetURL()
-	var targetURLPtr *string
-	if targetURL != "" {
-		targetURLPtr = &targetURL
+	// Where this contract goes is the contract's own property (ADR-25), so the
+	// automatic trigger on signing completion has a destination without a human
+	// present to choose one. A re-dispatch may be directed elsewhere.
+	targetID := strings.TrimSpace(cmd.TargetIDOverride)
+	if targetID == "" && data.TargetID != nil {
+		targetID = strings.TrimSpace(*data.TargetID)
 	}
+	if targetID == "" {
+		return nil, ErrNoTargetDesignated
+	}
+	target, err := h.TargetRepo.ReadTarget(ctx, tx, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read target system %s: %w", targetID, err)
+	}
+	if target == nil {
+		return nil, fmt.Errorf("%w: %s", ErrTargetNotRegistered, targetID)
+	}
+	if !target.Enabled {
+		return nil, fmt.Errorf("%w: %s", ErrTargetDisabled, target.Name)
+	}
+	// The endpoint is copied as it stands now, beside the reference: editing the
+	// registry entry later must not rewrite what this deployment actually did.
+	targetURL := target.URL
+	targetURLPtr := &targetURL
+	targetIDPtr := &target.ID
 
 	if err := h.DeploymentRepo.CreateDeployment(ctx, tx, db.ContractDeployment{
 		DID:             cmd.DID,
 		ContractVersion: data.ContractVersion,
 		CorrelationID:   correlationID,
 		ContentHash:     contentHash,
+		TargetID:        targetIDPtr,
 		TargetURL:       targetURLPtr,
 		Status:          "DISPATCHED",
 		RequestedBy:     cmd.RequestedBy,
@@ -184,12 +221,16 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	// Best-effort forward to the configured target: the target's own
-	// callback (POST /contract/deployment/callback) is the authoritative
-	// signal of a successful deployment, not this outbound call.
-	if h.Target != nil && targetURL != "" {
-		if err := h.Target.Deploy(ctx, payload); err != nil {
-			log.Printf("contractworkflowengine: could not dispatch deployment %s for contract %s to target: %v", correlationID, cmd.DID, err)
+	// The target's own callback (POST /contract/deployment/callback) remains the
+	// authoritative signal of a successful deployment, so a failed outbound call
+	// is not fatal to the request. It is recorded, though: the row was written
+	// DISPATCHED before this ran, and leaving it that way made a deployment the
+	// target never received indistinguishable from one it acknowledged. The
+	// compliance monitor reads these back and alerts on them (DCS-FR-CWE-31).
+	if h.Target != nil {
+		if err := h.Target.DeployTo(ctx, targetURL, payload); err != nil {
+			log.Printf("contractworkflowengine: could not dispatch deployment %s for contract %s to %s: %v", correlationID, cmd.DID, targetURL, err)
+			h.recordDispatchFailure(ctx, correlationID, err)
 		}
 	}
 
@@ -200,7 +241,29 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		Timestamp:       now,
 		CorrelationID:   correlationID,
 		Payload:         payload,
+		TargetID:        target.ID,
+		TargetName:      target.Name,
 	}, nil
+}
+
+// recordDispatchFailure marks the deployment row so the failure survives the
+// process log. Its own failure is logged and swallowed: the deployment already
+// happened as far as the caller is concerned, and losing the request over a
+// bookkeeping error would be worse than losing the alert.
+func (h *Deployer) recordDispatchFailure(ctx context.Context, correlationID string, cause error) {
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Printf("contractworkflowengine: could not record dispatch failure for %s: %v", correlationID, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := h.DeploymentRepo.MarkDispatchFailed(ctx, tx, correlationID, cause.Error()); err != nil {
+		log.Printf("contractworkflowengine: could not record dispatch failure for %s: %v", correlationID, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("contractworkflowengine: could not record dispatch failure for %s: %v", correlationID, err)
+	}
 }
 
 // hashDeploymentPayload computes the payload's canonical content hash:

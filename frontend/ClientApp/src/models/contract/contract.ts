@@ -44,6 +44,10 @@ export interface Contract {
   kpis?: ContractDeploymentKpi[]
   /** Metric names whose latest reported value violates its contractual SLA threshold */
   kpi_violations?: string[]
+  /** Registered target system this contract deploys to (ADR-25); absent until designated */
+  target_id?: string
+  /** Name of that target, so the destination is readable without a second lookup */
+  target_name?: string
 }
 
 export type ContractChangeRequest = Pick<Contract, 'name' | 'description' | 'exp_notice_period' | 'exp_policy'> & {

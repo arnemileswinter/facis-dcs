@@ -427,3 +427,29 @@ func TestValidateContractSemanticsAcceptsCanonicalContract(t *testing.T) {
 
 	require.NoError(t, ValidateContractSemantics(&contract))
 }
+
+// A produced document must not claim conformance to a validation profile.
+//
+// The anchor named one hardcoded entry, "facis.sla.basic", whose rules are
+// about the DCS envelope — a contract root and its party roles — and say
+// nothing about SLAs or about whatever vocabulary the contract's own data
+// uses. Stamping it on every document asserted something untrue of a contract
+// modelled against an arbitrary registered vocabulary, which is what
+// dcs:contractData is for (ADR-23). The profile's rules still run at
+// validation time; only the claim in the document is gone.
+func TestNormalizedDocumentsClaimNoValidationProfile(t *testing.T) {
+	// Anchors as a running instance has them: RefreshValidationAnchors points
+	// them at the hub's served URLs at startup and on every activation.
+	restore := schemaRefSHACLShapes
+	SetSchemaAnchorRefs("", "https://dcs.example/api/semantic/shapes/facis-dcs?version=2")
+	t.Cleanup(func() { schemaRefSHACLShapes = restore })
+
+	normalized, err := NormalizeTemplateData(canonicalTemplateData(t))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(*normalized, &result))
+	require.NotContains(t, result, "dcterms:conformsTo")
+	// The shapes anchor is standard SHACL and stays.
+	require.Contains(t, result, "sh:shapesGraph")
+}

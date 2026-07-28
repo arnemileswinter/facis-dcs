@@ -208,8 +208,13 @@ if [ -n "$PUBLIC_URL" ]; then
   done
 
   expected_did="$(backend_env ISSUER_DID)"
+  # Match each "id" separately and keep the one without a fragment: that is the
+  # document's own id, whatever order the keys are serialised in. A single
+  # s/.*"id"…/ over the whole document anchors on the LAST one instead, because
+  # .* is greedy — it reports a verification method and fails a valid document.
   served_did="$(curl -sS --max-time 20 "${PUBLIC_URL}/.well-known/did.json" 2>/dev/null \
-    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | sed -n 's/.*"\([^"]*\)"$/\1/p' | grep -v '#' | head -1)"
   if [ -n "$expected_did" ] && [ -n "$served_did" ] && [ "$expected_did" != "$served_did" ]; then
     note_problem "serves '$served_did' but ISSUER_DID is '$expected_did' — peers will reject it"
   elif [ -n "$served_did" ]; then

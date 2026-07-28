@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -166,6 +167,19 @@ func (s *service) version(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"version": compiler.RendererVersion})
 }
 
+// lifecycleAuthorityHeader names the DID of the DCS instance asserting the
+// lifecycle events of a render. It travels per request because pdf-core is a
+// stateless renderer several instances may share, and the value is recorded in
+// every dcs.lifecycle assertion the render writes.
+const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
+
+// renderContext carries the request's signer and asserting authority into the
+// compiler.
+func renderContext(r *http.Request, signer compiler.Signer) context.Context {
+	ctx := compiler.WithSigner(r.Context(), signer)
+	return compiler.WithLifecycleAuthority(ctx, strings.TrimSpace(r.Header.Get(lifecycleAuthorityHeader)))
+}
+
 func (s *service) render(w http.ResponseWriter, r *http.Request) {
 	if err := checkMediaType(r.Header.Get("Content-Type"), "application/ld+json", "application/json"); err != nil {
 		writeError(w, err)
@@ -188,7 +202,7 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 	signer := compiler.NewCapturingSigner()
 	// Pass the verbatim raw payload: CompilePDF canonicalizes internally for the
 	// render model + graph hash, but embeds these exact bytes as the attachment.
-	pdf, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), signer), raw, compiler.CanonicalCompiledAt)
+	pdf, err := compiler.CompilePDF(renderContext(r, signer), raw, compiler.CanonicalCompiledAt)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
@@ -198,11 +212,43 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 
 // verifyResponse is the JSON body returned by POST /verify.
 type verifyResponse struct {
-	Match              bool   `json:"match"`
+	Match bool `json:"match"`
+	// C2PASignatureValid reports that the manifest chain verified and the
+	// document reproduces its embedded payload. On a PAdES-signed contract the
+	// last manifest's whole-file hard binding does NOT cover the appended
+	// signature revisions — the signature is applied after the manifest so that
+	// it commits to the provenance (ADR-26) — so PAdESSigned states how far the
+	// binding reaches rather than leaving a consumer to assume it covers
+	// everything.
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	PAdESSigned        bool   `json:"pades_signed"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
 	VCProofValid       bool   `json:"vc_proof_valid"`
 	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
+}
+
+// renderReanchor appends a provenance-only C2PA manifest binding the submitted
+// PDF's current bytes (ADR-26). The payload is unchanged, so this is not an
+// amendment: it exists because a PAdES signature is applied after the lifecycle
+// manifest, leaving that manifest's whole-file binding short of the signed file.
+func (s *service) renderReanchor(w http.ResponseWriter, r *http.Request) {
+	if err := checkMediaType(r.Header.Get("Content-Type"), "application/pdf"); err != nil {
+		writeError(w, err)
+		return
+	}
+	raw, err := limitRead(r.Body, 32<<20)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	signer := compiler.NewCapturingSigner()
+	updated, err := compiler.ReanchorProvenance(renderContext(r, signer), raw,
+		strings.TrimSpace(r.URL.Query().Get("manifest_url")), compiler.CanonicalCompiledAt)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	writePrepared(w, updated, signer.Captured())
 }
 
 func (s *service) verify(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +285,13 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, errBadRequest(fmt.Errorf("extract lifecycle timestamp: %w", err)))
 			return
 		}
-		recompiled, err := compiler.CompilePDF(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), payload, compiledAt)
+		authority, err := compiler.ExtractLifecycleAuthority(raw)
+		if err != nil {
+			writeError(w, errBadRequest(fmt.Errorf("extract lifecycle authority: %w", err)))
+			return
+		}
+		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
+		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
 		if err != nil {
 			writeError(w, errUnprocessableEntity(err))
 			return
@@ -282,6 +334,7 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	resp := verifyResponse{
 		Match:              true,
 		C2PASignatureValid: true,
+		PAdESSigned:        compiler.IsPAdESSigned(raw),
 		VCProofValid:       vcProofValid,
 		Artifact:           base64.StdEncoding.EncodeToString(witness),
 	}
@@ -403,7 +456,7 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 
 	signer := compiler.NewCapturingSigner()
 	// Verbatim: the amended attachment is embedded exactly as submitted.
-	updated, err := compiler.UpdatePDFWithOptions(compiler.WithSigner(r.Context(), signer), oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
+	updated, err := compiler.UpdatePDFWithOptions(renderContext(r, signer), oldPDF, newPayload, vcBytes, manifestURL, compiler.CanonicalCompiledAt)
 	if err != nil {
 		if errors.Is(err, compiler.ErrNoChanges) {
 			writeError(w, errConflict(err))

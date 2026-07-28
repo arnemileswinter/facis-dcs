@@ -951,13 +951,42 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+
+  // A contract deploys to the target system it designates (ADR-25), so the
+  // manager picks one first. The registry is seeded by the chart
+  // (contractTargets in values.bdd.yml), so an entry is already there to pick.
+  // Wait for the picker itself before deciding: an isVisible() poll on a page
+  // that has not finished loading answers "no" and silently skips designation,
+  // which then surfaces as a deploy refusal further down.
+  await expect(inst.page.getByTestId('contract-target-picker')).toBeVisible({ timeout: 30_000 })
+  if (
+    await inst.page
+      .getByTestId('contract-target-unset')
+      .isVisible()
+      .catch(() => false)
+  ) {
+    // Index 0 is the "none" placeholder.
+    await inst.page.getByTestId('contract-target-select').selectOption({ index: 1 })
+    const designated = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/target/designate') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await inst.page.getByTestId('contract-target-save').click()
+    const designateResponse = await designated
+    expect(
+      designateResponse.ok(),
+      `designate target on ${inst.origin}: HTTP ${designateResponse.status()}`,
+    ).toBeTruthy()
+    await expect(inst.page.getByTestId('contract-target-name')).toBeVisible({ timeout: 15_000 })
+  }
+
   // Match ANY deploy response, then assert: filtering on r.ok() made a refusal
   // indistinguishable from no request at all.
   const deployed = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/deploy') && r.request().method() === 'POST',
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Deploy', exact: true }).click()
+  await inst.page.getByTestId('deploy-contract').click()
   const deployResponse = await deployed
   expect(
     deployResponse.ok(),

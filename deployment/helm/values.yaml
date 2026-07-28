@@ -277,6 +277,16 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
+  # Pointing another component's DSN at this server is not enough to create its
+  # database — list it here as well. Hydra in particular only runs
+  # `hydra migrate sql`, which assumes the database already exists; without an
+  # entry it stays unready and the backend cannot discover the OIDC provider.
+  additionalDatabases: []
+  # Defaults to an emptyDir, which loses every contract on a pod restart. Enable
+  # for anything longer-lived than a test cluster.
+  persistence:
+    enabled: false
+    size: 1Gi
 
 hydra:
   enabled: false
@@ -287,6 +297,42 @@ hydra:
 # no machine caller is accepted at all. Every entry needs a client_id that also
 # exists under hydra.clients, a participant_did its actions are attributed to,
 # and the DCS roles it may exercise.
+#
+# The roles are read from here by client_id, never from the token, so a client
+# cannot ask for more than it is given. Configuring the hydra.clients half alone
+# yields a client that authenticates and is then refused everywhere.
+#
+#   hydra:
+#     clients:
+#       - client_id: dcs-sys-creator
+#         client_secret: "<random>"
+#         grant_types: ["client_credentials"]
+#         response_types: []
+#         scope: ""
+#         token_endpoint_auth_method: client_secret_post
+#   systemClients:
+#     - client_id: dcs-sys-creator
+#       participant_did: "did:web:dcs.example.org"
+#       roles: ["Sys. Contract Creator"]
+#
+# Valid roles: Sys. Contract Creator, Sys. Contract Reviewer, Sys. Contract
+# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer. The
+# strings must match exactly; an unknown one stops the backend at startup.
+# Sys. Contract Signer holds no signing scope (ADR-17), so a signature always
+# needs a person with a wallet.
+#
+# A contract target system is NOT configured here: it is a registry row
+# (contractTargets, or the admin UI) and its callback credential is issued to
+# that row rather than declared. See ADR-25 and ADR-27.
+#
+# Token: POST /oauth2/token with grant_type=client_credentials, then send it as
+# a bearer token. See values.bdd.yml for all four classes wired up.
+#
+# These entries are a SEED, not the runtime source. They are reconciled into the
+# machine identity registry at startup so a deployment has the callers it needs
+# before anyone logs in to create them; everything after that is administered
+# through the UI, where a credential is issued once and rotated rather than
+# edited here (ADR-27).
 systemClients: []
 
 nats:
@@ -563,3 +609,103 @@ kubeStateMetrics:
 dss:
   enabled: false
   # url: http://<release>-dss:8080  # defaults to the in-cluster dss service
+
+# ---- ACME certificate renewal (opt-in) --------------------------------
+# For clusters where cert-manager cannot renew the ingress certificate itself.
+# The usual cause is a namespace LimitRange with a per-container minimum above
+# what cert-manager asks for its HTTP-01 solver pod (10m CPU / 64Mi): the solver
+# never schedules, the challenge is never presented, and the certificate simply
+# lapses. That cannot be worked around through cert-manager, because the Issuer
+# CRD only honours priorityClassName, nodeSelector, affinity, serviceAccountName
+# and tolerations under solvers[].http01.ingress.podTemplate.spec — resources are
+# ignored, and the request values are a controller-wide flag.
+#
+# This runs the same HTTP-01 exchange as an ordinary CronJob whose resources obey
+# the LimitRange, and writes the result into the TLS Secret the ingress serves.
+# Leave disabled wherever cert-manager works: this is a fallback, not a preference.
+acmeRenewal:
+  enabled: false
+  # Hostname to certify. Must be the host the ingress serves and must already
+  # resolve to this cluster, or the HTTP-01 challenge cannot be answered.
+  host: ""
+  # Contact address for the ACME account; Let's Encrypt rejects registration
+  # without one and uses it for expiry warnings.
+  email: ""
+  # Name of the kubernetes.io/tls Secret referenced by ingress.tls[].secretName.
+  secretName: ""
+  server: "https://acme-v02.api.letsencrypt.org/directory"
+  # Twice weekly. certbot renews only inside its own window and exits 0
+  # otherwise, so a frequent schedule costs nothing and leaves room to recover
+  # from a failed attempt well before expiry.
+  schedule: "17 3 * * 1,4"
+  image: "certbot/certbot:v2.11.0"
+  challengePort: 8080
+  rbac:
+    # The renewal pod needs its own ServiceAccount + Role + RoleBinding to write
+    # the TLS Secret. Set false on clusters that do not grant the installer
+    # rbac.authorization — the same namespace restriction pkcs11.provisioning.
+    # publishSecrets exists for — and name an existing account below that may
+    # already write secrets in this namespace.
+    create: true
+  serviceAccountName: ""
+  # Defaults to ingress.className when empty.
+  ingressClassName: ""
+  ingressAnnotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistence:
+    size: "1Gi"
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: ""
+
+# ---- Shared supporting services for a resource-constrained peer -------
+# Exposes this instance's stateless services under https://<host>/shared/<name>
+# so a peer that cannot run its own can consume them. Disabled by default: doing
+# this makes the peer depend on this deployment for validation and revocation
+# data, which weakens its independence and should be a considered choice.
+#
+# service is rendered with tpl, so it may reference the release, e.g.
+# "{{ .Release.Name }}-dss".
+sharedServices:
+  enabled: false
+  host: ""
+  ingressClassName: ""
+  proxyBodySize: "64m"
+  annotations: {}
+  tls: []
+  services:
+    - name: statuslist
+      service: "{{ .Release.Name }}-statuslist-service"
+      port: 8080
+    - name: dss
+      service: "{{ .Release.Name }}-dss"
+      port: 8080
+    - name: orce
+      service: "{{ .Release.Name }}-orce"
+      port: 1880
+    - name: ipfs-dm
+      service: "{{ .Release.Name }}-ipfs-document-manager"
+      port: 8080
+
+# ---- Contract target systems (ADR-25) ---------------------------------
+# Systems a signed contract can be deployed to. A fresh install has an empty
+# registry and nothing can be deployed until one exists, so declaring them here
+# makes an instance usable straight after install — and makes a test cluster
+# that is recreated on every run usable without manual setup.
+#
+# Seeding is CREATE-ONLY, matched on name. An entry an administrator later
+# repoints in the admin UI is not reverted by the next restart: changing a value
+# here affects new installs, and changing a running deployment's target is done
+# in the UI. Removing an entry here does not remove it from a running instance.
+#
+# Each entry: name (unique), url (endpoint the payload is POSTed to),
+# description (optional), enabled (optional, default true).
+contractTargets: []
+#  - name: "Reference ORCE target"
+#    url: "http://my-release-orce:1880/contract-target/deploy"
+#    description: "The shipped ORCE contract-target flow."

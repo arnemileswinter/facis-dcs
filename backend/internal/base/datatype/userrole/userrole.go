@@ -40,7 +40,12 @@ const (
 	SystemContractApprover UserRole = "Sys. Contract Approver"
 	SystemContractManager  UserRole = "Sys. Contract Manager"
 	SystemContractSigner   UserRole = "Sys. Contract Signer"
-	ContractTargetSystem   UserRole = "Contract Target System"
+	// ContractTargetSystem is SRS Table 5's "external system that receives and
+	// executes deployed contracts". It is carried by the credential issued to a
+	// registry entry (ADR-27) rather than configured by hand, and authorises
+	// only the deployment callback — and there only for deployments dispatched
+	// to that same target.
+	ContractTargetSystem UserRole = "Contract Target System"
 	// SystemAuditor extends the SRS System User classes (SRS §2.4 Table 5, all
 	// of which are contract-oriented) with the read-only integrity role an
 	// external notary needs: it may read the audit trail's tamper-evidence

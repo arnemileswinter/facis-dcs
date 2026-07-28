@@ -63,6 +63,16 @@ func ExtractLifecycleEffectiveAt(pdf []byte) (time.Time, error) {
 	return extractLifecycleEffectiveAt(c2paBytes, 0)
 }
 
+// ExtractLifecycleAuthority returns the DID recorded as the authority of the
+// PDF's genesis lifecycle assertion, or "" when the document names none.
+func ExtractLifecycleAuthority(pdf []byte) (string, error) {
+	c2paBytes, err := extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
+	if err != nil {
+		return "", fmt.Errorf("extract C2PA: %w", err)
+	}
+	return extractLifecycleAuthority(c2paBytes, 0)
+}
+
 func ExtractEmbeddedJSONLD(pdf []byte) ([]byte, error) {
 	return extractJSONLDStream(pdf, false)
 }

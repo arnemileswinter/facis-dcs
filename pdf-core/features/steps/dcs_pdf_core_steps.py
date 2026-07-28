@@ -163,6 +163,18 @@ def _ensure_c2patool_binary():
     return binary_path
 
 
+# c2patool exits 0 whenever it can *read* a manifest, including when it judges
+# that manifest invalid, so the exit code alone proves only that the JUMBF parses.
+# The verdict lives in validation_state / validation_results, which must be
+# asserted explicitly.
+#
+# signingCredential.untrusted is the one expected failure: the dev C2PA CA is not
+# in c2patool's trust list, and it does not by itself make the state Invalid.
+# Every other failure — a claim signature that does not verify, a hard binding
+# that does not match the bytes — is a defect.
+_C2PA_EXPECTED_FAILURES = {"signingCredential.untrusted"}
+
+
 def _run_c2patool(pdf_path):
     binary = _ensure_c2patool_binary()
     completed = subprocess.run(
@@ -176,6 +188,41 @@ def _run_c2patool(pdf_path):
         raise AssertionError(
             f"c2patool failed for {pdf_path.name}\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
+
+    try:
+        report = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"c2patool produced no JSON report for {pdf_path.name}: {exc}\nstdout:\n{completed.stdout}"
+        )
+
+    unexpected = [
+        f"{entry.get('code')} ({entry.get('explanation')}) at {entry.get('url')}"
+        for scope in _c2pa_validation_scopes(report)
+        for entry in scope.get("failure", [])
+        if entry.get("code") not in _C2PA_EXPECTED_FAILURES
+    ]
+    state = report.get("validation_state")
+    # Signed contracts included: provenance is re-anchored over the signature
+    # (ADR-26), so a signed artifact validates like any other and a dataHash
+    # mismatch on one is a regression, not an expected state.
+    if unexpected or state != "Valid":
+        raise AssertionError(
+            f"c2patool reports validation_state={state!r} for {pdf_path.name}; "
+            f"unexpected failures:\n  " + "\n  ".join(unexpected or ["(none)"])
+        )
+
+
+def _c2pa_validation_scopes(report):
+    """Yield every validation_results scope: the active manifest and each ingredient."""
+    results = report.get("validation_results", {})
+    active = results.get("activeManifest")
+    if active:
+        yield active
+    for delta in results.get("ingredientDeltas", []):
+        deltas = delta.get("validationDeltas")
+        if deltas:
+            yield deltas
 
 
 def _run_verapdf(pdf_path):

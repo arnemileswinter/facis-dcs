@@ -83,3 +83,59 @@ func TestUnderperformanceRisksSkipReportsWithoutContractDID(t *testing.T) {
 func TestUnderperformanceRisksEmptyWhenNothingViolating(t *testing.T) {
 	require.Empty(t, underperformanceRisksFromKPIs(nil, time.Now().UTC()))
 }
+
+// A deployment the target never received is the failure an operator most needs
+// told about: the contract is in force on this side and absent on the other,
+// and nothing else in the system says so. The alert must name the target and
+// the reason, or it only reports that something went wrong somewhere.
+func TestDeploymentFailureRisksNameTargetAndReason(t *testing.T) {
+	checkedAt := time.Now().UTC()
+	requested := checkedAt.Add(-2 * time.Minute)
+	target := "http://dcs-orce:1880/contract-target"
+
+	risks := deploymentFailureRisksFrom([]failedDispatch{{
+		DID:           "did:web:example:contract:1",
+		CorrelationID: "corr-1",
+		TargetURL:     &target,
+		Reason:        "connection refused",
+		RequestedAt:   requested,
+	}}, checkedAt)
+
+	require.Len(t, risks, 1)
+	require.Equal(t, RiskTypeDeploymentFailed, risks[0].RiskType)
+	require.Equal(t, "did:web:example:contract:1", risks[0].DID)
+	require.Contains(t, risks[0].Detail, target)
+	require.Contains(t, risks[0].Detail, "connection refused")
+	require.Contains(t, risks[0].Detail, "corr-1")
+	require.True(t, risks[0].DetectedAt.Equal(checkedAt))
+}
+
+// Each failed dispatch is its own alert: a contract redeployed after a failure
+// must not have its earlier failure silently folded away.
+func TestDeploymentFailureRisksOnePerDispatch(t *testing.T) {
+	risks := deploymentFailureRisksFrom([]failedDispatch{
+		{DID: "did:web:example:contract:2", CorrelationID: "a", Reason: "timeout"},
+		{DID: "did:web:example:contract:2", CorrelationID: "b", Reason: "502"},
+	}, time.Now().UTC())
+	require.Len(t, risks, 2)
+}
+
+// A row without a contract DID cannot be acted on and must not become an alert.
+func TestDeploymentFailureRisksSkipDispatchesWithoutContractDID(t *testing.T) {
+	risks := deploymentFailureRisksFrom([]failedDispatch{{CorrelationID: "a", Reason: "timeout"}}, time.Now().UTC())
+	require.Empty(t, risks)
+}
+
+// An unconfigured target still has to read as a target in the alert rather than
+// as an empty string an operator cannot interpret.
+func TestDeploymentFailureRisksTolerateMissingTargetURL(t *testing.T) {
+	risks := deploymentFailureRisksFrom([]failedDispatch{
+		{DID: "did:web:example:contract:3", CorrelationID: "a", Reason: "contract target URL is empty"},
+	}, time.Now().UTC())
+	require.Len(t, risks, 1)
+	require.Contains(t, risks[0].Detail, "contract target URL is empty")
+}
+
+func TestDeploymentFailureRisksEmptyWhenNothingFailed(t *testing.T) {
+	require.Empty(t, deploymentFailureRisksFrom(nil, time.Now().UTC()))
+}

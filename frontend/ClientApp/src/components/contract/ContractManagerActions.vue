@@ -68,9 +68,21 @@ const canTerminate = computed(() => {
   return isManager.value && props.contract.state !== ContractState.terminated
 })
 
+// SIGNED and ACTIVE both, because deployment is a Contract Manager action and
+// not only an automatic one. UC-05's stimulus is "a Contract Manager submits a
+// signed contract for deployment", alongside DCS-FR-SM-12's automatic trigger on
+// signing completion. Offering it only in SIGNED left the manager no way to
+// re-dispatch a contract the target has to receive again — a target that was
+// unreachable, lost its state, or was replaced — even though the state machine
+// deliberately allows it (contractstate.EventDeploy is an idempotent ACTIVE ->
+// ACTIVE re-dispatch) and the auto-deploy subscriber only logs its failures.
 const canDeploy = computed(() => {
-  return isManager.value && props.contract.state === ContractState.signed
+  return (
+    isManager.value && (props.contract.state === ContractState.signed || props.contract.state === ContractState.active)
+  )
 })
+
+const deployLabel = computed(() => (props.contract.state === ContractState.active ? 'Redeploy' : 'Deploy'))
 
 const offering = ref(false)
 
@@ -94,7 +106,7 @@ const offer = async () => {
 const deploying = ref(false)
 
 const deploy = async () => {
-  if (!isManager.value || props.contract.state !== ContractState.signed) return
+  if (!canDeploy.value) return
   deploying.value = true
   try {
     await contractWorkflowService.deploy({
@@ -146,8 +158,14 @@ const terminate = async () => {
   >
     {{ offering ? 'Offering…' : 'Offer to counterparty' }}
   </button>
-  <button v-if="canDeploy" :class="[filteredClass, 'btn-primary']" :disabled="deploying" @click="deploy">
-    {{ deploying ? 'Deploying…' : 'Deploy' }}
+  <button
+    v-if="canDeploy"
+    data-testid="deploy-contract"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="deploying"
+    @click="deploy"
+  >
+    {{ deploying ? 'Deploying…' : deployLabel }}
   </button>
   <button v-if="canTerminate" :class="[filteredClass, 'btn-error']" @click="terminate">Terminate</button>
   <ConfirmationModal ref="confirmation-modal" />

@@ -26,6 +26,23 @@ func signerFromContext(ctx context.Context) (Signer, bool) {
 	return signer, ok && signer != nil
 }
 
+// authorityCtxKey carries the DID of the instance asserting the lifecycle events
+// this render writes, which every dcs.lifecycle assertion records as its
+// authority. It is request-scoped rather than process-scoped because pdf-core is
+// a stateless renderer that several DCS instances may share.
+type authorityCtxKey struct{}
+
+// WithLifecycleAuthority returns a context naming the DID that asserts the
+// lifecycle events of this render.
+func WithLifecycleAuthority(ctx context.Context, did string) context.Context {
+	return context.WithValue(ctx, authorityCtxKey{}, did)
+}
+
+func lifecycleAuthorityFromContext(ctx context.Context) string {
+	did, _ := ctx.Value(authorityCtxKey{}).(string)
+	return did
+}
+
 // zeroedCOSESignature is the placeholder a CapturingSigner emits: a 64-byte run
 // the "embed" step later overwrites with the real ES256 r||s.
 var zeroedCOSESignature = make([]byte, 64)

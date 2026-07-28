@@ -35,6 +35,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	pg "digital-contracting-service/internal/auth/db/pq"
+	"digital-contracting-service/internal/auth/machineidentity"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
@@ -214,8 +215,8 @@ func main() {
 	}
 
 	// DCS_PUBLIC_URL is the base of every absolute IRI a produced document
-	// carries (@context, sh:shapesGraph, dcterms:conformsTo anchors, C2PA
-	// remote manifests) — these must dereference for external consumers.
+	// carries (@context, sh:shapesGraph, C2PA remote manifests) — these must
+	// dereference for external consumers.
 	if strings.TrimSpace(os.Getenv("DCS_PUBLIC_URL")) == "" {
 		log.Fatalf(ctx, errors.New("dcs configuration missing"), "DCS_PUBLIC_URL must be set: produced documents carry absolute, resolvable IRIs based on it")
 	}
@@ -319,15 +320,23 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not resolve document-retrieval client_id")
 	}
-	systemClients, err := loadSystemClients()
+	// Machine callers are resolved from the registry at request time, so an
+	// identity can be added, disabled or rotated without a redeploy (ADR-27).
+	// DCS_SYSTEM_CLIENTS remains a declarative seed for the callers a
+	// deployment must have before anyone logs in to create them.
+	machineIdentities := machineidentity.NewPostgresRepo(db)
+	seeded, err := loadSystemClients()
 	if err != nil {
 		log.Fatalf(ctx, err, "Invalid system client configuration")
+	}
+	if err := seedMachineIdentities(ctx, machineIdentities, seeded); err != nil {
+		log.Fatalf(ctx, err, "Could not seed the configured system clients")
 	}
 	hydraJWTValidator, err := middleware.NewHydraJWTValidator(ctx, middleware.HydraJWTConfig{
 		PublicIssuerURL:   authCfg.Hydra.PublicIssuerURL(),
 		InternalIssuerURL: authCfg.Hydra.InternalIssuerURL(),
 		ClientID:          authCfg.Hydra.ClientID(),
-		SystemClients:     systemClients,
+		SystemClients:     machineIdentities,
 	})
 	if err != nil {
 		log.Fatalf(ctx, err, "Failed to initialize Hydra JWT validator")
@@ -456,16 +465,37 @@ func main() {
 		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"))
 	}
 
-	// Contract deployment (UC-05-01): the Contract Target
-	// System client is optional — without CONTRACT_TARGET_URL set, deploy
-	// dispatches are still recorded (correlation ID, content hash, archive
-	// evidence) but no outbound call is made; the target's own callback
-	// (POST /contract/deployment/callback) is the authoritative signal.
+	// Contract deployment (UC-05-01): a contract designates a registered target
+	// system (ADR-25) and the client dispatches to that entry's endpoint. The
+	// target's own callback (POST /contract/deployment/callback) remains the
+	// authoritative signal of a successful deployment; a failed outbound call is
+	// recorded on the deployment row so the compliance monitor can alert on it.
 	cweDeploymentRepo := &cwerepo.PostgresDeploymentRepo{}
-	var contractTargetClient cwecommand.ContractTargetClient
-	if targetURL := cwecommand.ContractTargetURL(); targetURL != "" {
-		contractTargetClient = cwecommand.NewHTTPContractTargetClient(targetURL)
+	cweTargetRepo := cwerepo.PostgresContractTargetRepo{}
+
+	// Target systems declared in deployment configuration (ADR-25). A fresh
+	// install has an empty registry, so without this nothing can be deployed
+	// until somebody opens the admin UI — including in a test cluster that is
+	// recreated every run. Entries already present are left untouched, so an
+	// administrator who repoints one is not overruled by the next restart.
+	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
+		raw, err := os.ReadFile(seedPath)
+		if err != nil {
+			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
+		}
+		entries, err := cwecommand.ParseSeedTargets(raw)
+		if err != nil {
+			log.Fatalf(ctx, err, "invalid contract target configuration in %s", seedPath)
+		}
+		seeded, err := cwecommand.SeedContractTargets(ctx, db, &cweTargetRepo, entries)
+		if err != nil {
+			log.Fatalf(ctx, err, "could not register the configured contract targets")
+		}
+		log.Printf(ctx, "contract target registry: %d of %d configured targets registered", seeded, len(entries))
 	}
+	// One client for every registered target: the endpoint travels with each
+	// dispatch now that a contract names its own destination (ADR-25).
+	contractTargetClient := cwecommand.NewHTTPContractTargetClient()
 
 	// Initialize the Federated Catalogue client.
 	fcURL := os.Getenv("FEDERATED_CATALOGUE_API_URL")
@@ -582,9 +612,9 @@ func main() {
 	}); err != nil {
 		log.Fatalf(ctx, err, "pdf-core not reachable at %s", pdfCoreURL)
 	}
-	pdfCoreClient := pdfcore.New(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
+	pdfCoreClient := pdfcore.NewWithAuthority(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
 		return hsm.SignES256(c2paSigner, sigStructure)
-	})
+	}, issuerDID)
 
 	smCRepo := smrepo.PostgresContractRepo{
 		IPFSClient: ipfsAPIClient,
@@ -628,7 +658,8 @@ func main() {
 		}
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, contractTargetClient)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
@@ -690,6 +721,7 @@ func main() {
 			DB:             db,
 			CRepo:          &cweRepo,
 			DeploymentRepo: cweDeploymentRepo,
+			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
 		},
 	}

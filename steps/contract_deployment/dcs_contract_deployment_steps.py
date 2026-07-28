@@ -16,13 +16,13 @@ Endpoint surface (backend/design/contract_workflow_engine.go):
 2. `POST /contract/deployment/callback` (target -> DCS, DCS-IR-SI-05):
    payload `{"did", "correlation_id", "status", ...}` (ack/status update)
    or `{"did", "correlation_id", "kpi": {"metric", "value"}}` (KPI report),
-   protected by the shared-secret header `X-Deployment-Callback-Secret`
-   (env `BDD_DEPLOYMENT_CALLBACK_SECRET`, default
-   "bdd-deployment-callback-secret") — a machine-to-machine callback from the
-   Contract Target System, not a wallet, so a shared secret is the right
-   authentication for it (the signing ceremony's callback, by contrast,
-   authenticates by the unguessable ceremony id plus ADR-20 nonce binding,
-   see steps/real_signing_vertical).
+   authenticated as the target's own OAuth2 client (ADR-27): a bearer token
+   from the client_credentials grant, and accepted only for deployments
+   dispatched to that target. One shared secret proved merely that SOME
+   target was calling, so any registered target could acknowledge another's
+   deployment. (The signing ceremony's callback authenticates differently
+   again, by unguessable ceremony id plus ADR-20 nonce binding — see
+   steps/real_signing_vertical.)
 
 3. `GET /contract/retrieve/{did}` carries a `"kpis"` field (list of
    `{"metric", "value", "observed_at", "violation"}`). SLA violations are
@@ -83,6 +83,8 @@ from steps.support.api_client import (
     contract_deploy_url,
     contract_deployment_callback_url,
     contract_retrieve_by_id_url,
+    contract_target_designate_url,
+    contract_targets_url,
     get_with_headers,
     post_json,
 )
@@ -93,7 +95,11 @@ from steps.template_management.contract_state_machine_steps import (
     _apply_signature as _apply_signature_via_ceremony,
 )
 
-DEPLOYMENT_CALLBACK_SECRET_HEADER = "X-Deployment-Callback-Secret"
+# The target authenticates as its own registered OAuth2 client (ADR-27). One
+# shared secret proved only that SOME target was calling, so any registered
+# target could acknowledge another's deployment.
+TARGET_CLIENT_ID = os.getenv("BDD_TARGET_CLIENT_ID", "dcs-orce-target")
+TARGET_CLIENT_SECRET = os.getenv("BDD_TARGET_CLIENT_SECRET", "dcs-orce-target-secret")
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +107,42 @@ DEPLOYMENT_CALLBACK_SECRET_HEADER = "X-Deployment-Callback-Secret"
 # ---------------------------------------------------------------------------
 
 
-def _callback_secret() -> str:
-    return os.getenv("BDD_DEPLOYMENT_CALLBACK_SECRET", "bdd-deployment-callback-secret")
+def _target_access_token(client_id: str = TARGET_CLIENT_ID, secret: str = TARGET_CLIENT_SECRET) -> str:
+    """A client-credentials token for the contract target, the same grant a real
+    target system uses before calling back."""
+    response = _requests.post(
+        _hydra_token_url(),
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+    assert response.status_code == 200, (
+        f"Hydra refused the client_credentials grant for '{client_id}': "
+        f"{response.status_code} {response.text}"
+    )
+    token = response.json().get("access_token")
+    assert token, f"no access_token for '{client_id}': {response.text}"
+    return token
+
+
+def _hydra_token_url() -> str:
+    explicit = os.getenv("BDD_HYDRA_TOKEN_URL", "").strip()
+    if explicit:
+        return explicit
+    base = os.getenv("BDD_DCS_BASE_URL", "http://localhost:5173/api").rstrip("/")
+    origin = "/".join(base.split("/")[:3])
+    return f"{origin}/oauth2/token"
+
+
+def _target_callback_headers() -> dict:
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {_target_access_token()}",
+    }
 
 
 def _archive_entry_for(context, name):
@@ -195,6 +235,76 @@ def step_given_full_workflow_to_signed(context, name):
 # ---------------------------------------------------------------------------
 
 
+BDD_TARGET_NAME = "BDD Contract Target"
+
+
+def _registered_target_id(context) -> str:
+    """The registry entry for the shipped ORCE contract-target flow (ADR-25).
+
+    Deployment used to address one endpoint from CONTRACT_TARGET_URL; it now
+    goes to a target the contract designates, so the suite registers one once
+    and reuses it. Registration is idempotent by name.
+    """
+    cached = getattr(context, "bdd_target_id", None)
+    if cached:
+        return cached
+    admin_h = AuthService.get_headers_for_roles(["Sys. Administrator"])
+    listed = get_with_headers(context, contract_targets_url(context), headers=admin_h)
+    assert listed.status_code == 200, f"could not list contract targets: {listed.status_code} {listed.text}"
+    for entry in listed.json() or []:
+        if entry.get("name") == BDD_TARGET_NAME:
+            context.bdd_target_id = entry["id"]
+            return context.bdd_target_id
+
+    created = post_json(
+        context,
+        contract_targets_url(context),
+        {
+            "name": BDD_TARGET_NAME,
+            "url": os.getenv("BDD_CONTRACT_TARGET_URL", "http://dcs-orce:1880/contract-target/deploy"),
+            "description": "Shipped ORCE contract-target flow used by the BDD suite.",
+            "enabled": True,
+        },
+        headers=admin_h,
+    )
+    assert created.status_code == 200, f"could not register the contract target: {created.status_code} {created.text}"
+    context.bdd_target_id = created.json()["id"]
+    return context.bdd_target_id
+
+
+def _ensure_target_designated(context, name, target_id=None):
+    """Point the contract at a registered target so it has somewhere to deploy.
+
+    A contract designates its own destination (ADR-25) because the automatic
+    trigger on signing completion has no human present to choose one.
+    """
+    did, updated_at = ContractService._contract_data(context, name)
+    resolved = target_id if target_id is not None else _registered_target_id(context)
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
+    resp = post_json(
+        context,
+        contract_target_designate_url(context),
+        {"did": did, "updated_at": updated_at, "target_id": resolved},
+        headers=manager_h,
+    )
+    assert resp.status_code == 200, (
+        f"could not designate a target system for contract '{name}': {resp.status_code} {resp.text}"
+    )
+    ContractService._refresh_contract(context, name)
+
+
+@step('contract "{name}" deploys to the configured target system')
+def step_contract_deploys_to_configured_target(context, name):
+    """Point the contract at the seeded target (ADR-25).
+
+    Stated explicitly rather than folded into the workflow steps because
+    deployment is opt-in: a contract that designates no target simply does not
+    deploy, which is an ordinary outcome for a party that only holds an
+    agreement. A scenario that expects deployment has to say where to.
+    """
+    _ensure_target_designated(context, name)
+
+
 @step('an authorized user deploys contract "{name}" to the configured contract target')
 def step_when_deploy_contract(context, name):
     # Several scenarios use this step as an "And" continuing a *Given* block
@@ -204,6 +314,7 @@ def step_when_deploy_contract(context, name):
     # registered only via @when is "undefined" when behave looks it up as a
     # Given; `@step` registers this text under given/when/then alike, and
     # the step is also genuinely used as a real When.
+    _ensure_target_designated(context, name)
     did, updated_at = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     context.requests_response = post_json(
@@ -295,9 +406,11 @@ def step_when_callback_invalid_secret(context, name):
         "correlation_id": getattr(context, "deployment_correlation_id", None) or "bdd-unknown-correlation",
         "status": "ACKNOWLEDGED",
     }
+    # A token from a client that is not this deployment's target: it
+    # authenticates perfectly well and still may not speak for this target.
     headers = {
         "Content-Type": "application/json",
-        DEPLOYMENT_CALLBACK_SECRET_HEADER: "definitely-not-" + _callback_secret(),
+        "Authorization": f"Bearer {_target_access_token('dcs-orce-notary', 'dcs-orce-notary-secret')}",
     }
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
@@ -306,8 +419,8 @@ def step_when_callback_invalid_secret(context, name):
 def step_then_callback_rejected(context):
     resp = context.requests_response
     assert resp.status_code in (401, 403), (
-        "Expected POST /contract/deployment/callback to reject a request with an invalid "
-        f"{DEPLOYMENT_CALLBACK_SECRET_HEADER!r} header, got {resp.status_code}: {resp.text}"
+        "Expected POST /contract/deployment/callback to reject a caller that is not the "
+        f"target this deployment was dispatched to, got {resp.status_code}: {resp.text}"
     )
 
 
@@ -392,7 +505,7 @@ def step_when_target_reports_kpi(context, metric, value, name):
         "correlation_id": getattr(context, "deployment_correlation_id", None) or "bdd-unknown-correlation",
         "kpi": {"metric": metric, "value": value},
     }
-    headers = {"Content-Type": "application/json", DEPLOYMENT_CALLBACK_SECRET_HEADER: _callback_secret()}
+    headers = _target_callback_headers()
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
