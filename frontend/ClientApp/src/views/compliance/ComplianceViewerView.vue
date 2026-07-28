@@ -362,8 +362,8 @@ function exportPdf() {
           </select>
         </div>
 
-        <div v-if="loadingContracts" class="text-base-content/60">Loading contracts…</div>
-        <div v-else-if="filteredContracts.length === 0" class="text-base-content/60">No contracts match.</div>
+        <div v-if="loadingContracts" class="text-base-content/70">Loading contracts…</div>
+        <div v-else-if="filteredContracts.length === 0" class="text-base-content/70">No contracts match.</div>
         <ul v-else class="menu w-full rounded-box bg-base-200 p-1">
           <li v-for="contract in filteredContracts" :key="contract.did">
             <button

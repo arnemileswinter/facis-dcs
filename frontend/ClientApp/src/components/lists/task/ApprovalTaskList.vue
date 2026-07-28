@@ -92,9 +92,11 @@ const resolveViewRouteName = (task: ApprovalTask) => {
   }
 }
 
-const applySearchResult = (searchResult: ApprovalTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ApprovalTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 onUnmounted(() => stateFilterStore.reset())
