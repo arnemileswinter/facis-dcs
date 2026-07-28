@@ -40,6 +40,10 @@ interface ClauseField {
 interface ClauseAsset {
   id: string
   asset: HubAsset
+  /** Instance name distinguishing same-class declarations ("Legal Person 2"),
+   *  user-renamable — it names the instance in the target picker, on field
+   *  chips, and on the declared contract fields. */
+  name: string
 }
 
 const title = ref('')
@@ -84,7 +88,8 @@ function addObject() {
     if (!asset) return
     // Declaring an asset makes it an ODRL target and brings in its shape's properties as fields.
     const assetLocalId = uuid()
-    clauseAssets.value.push({ id: assetLocalId, asset })
+    const sameClass = clauseAssets.value.filter((a) => a.asset.id === asset.id).length
+    clauseAssets.value.push({ id: assetLocalId, asset, name: sameClass ? `${asset.label} ${sameClass + 1}` : asset.label })
     for (const property of asset.properties) {
       clauseFields.value.push({ id: uuid(), field: property, assetLocalId })
     }
@@ -102,10 +107,18 @@ function removeAsset(assetLocalId: string) {
   clauseFields.value = clauseFields.value.filter((cf) => cf.assetLocalId !== assetLocalId)
 }
 
+/** The instance-qualified display label of a clause field: a declared
+ *  asset's properties carry the instance name so two same-class assets stay
+ *  tellable apart everywhere the field appears. */
+function fieldDisplayLabel(cf: ClauseField): string {
+  const owner = cf.assetLocalId ? clauseAssets.value.find((a) => a.id === cf.assetLocalId) : undefined
+  return owner ? `${owner.name} · ${cf.field.label}` : cf.field.label
+}
+
 const proseConditions = computed<SemanticCondition[]>(() =>
   clauseFields.value.map((cf) => ({
     conditionId: cf.id,
-    conditionName: cf.field.label,
+    conditionName: fieldDisplayLabel(cf),
     schemaVersion: 'v1',
     parameters: [
       {
@@ -121,8 +134,8 @@ const proseConditions = computed<SemanticCondition[]>(() =>
   })),
 )
 
-const fieldAnchors = computed(() => clauseFields.value.map((cf) => ({ id: cf.id, label: cf.field.label })))
-const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, label: a.asset.label })))
+const fieldAnchors = computed(() => clauseFields.value.map((cf) => ({ id: cf.id, label: fieldDisplayLabel(cf) })))
+const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, label: a.name })))
 
 const canSave = computed(() => !!title.value.trim() && content.value.length > 0)
 
@@ -136,11 +149,13 @@ function save() {
         id: cf.id,
         parameterName: cf.field.parameterName,
         domainFieldIri: cf.field.ontologyId,
+        label: fieldDisplayLabel(cf),
       })),
       ...clauseAssets.value.map((a) => ({
         id: a.id,
         parameterName: localName(a.asset.id),
         domainFieldIri: a.asset.id,
+        label: a.name,
       })),
     ],
     rule: rule.value,
@@ -177,14 +192,20 @@ function save() {
       </div>
 
       <div v-if="clauseAssets.length" class="flex flex-wrap items-center gap-1">
-        <span v-for="ca in clauseAssets" :key="ca.id" class="badge gap-1 badge-sm badge-primary">
-          ▣ {{ ca.asset.label }}
+        <span v-for="ca in clauseAssets" :key="ca.id" class="badge gap-1 badge-sm badge-primary" :title="ca.asset.label">
+          ▣
+          <input
+            v-model="ca.name"
+            class="w-28 bg-transparent outline-none placeholder:text-primary-content/50"
+            :placeholder="ca.asset.label"
+            aria-label="Instance name"
+          />
           <button type="button" class="text-primary-content/70" @click="removeAsset(ca.id)">✕</button>
         </span>
       </div>
       <div v-if="clauseFields.length" class="flex flex-wrap items-center gap-1">
         <span v-for="cf in clauseFields" :key="cf.id" class="badge gap-1 badge-outline badge-sm">
-          {{ cf.field.label }}
+          {{ fieldDisplayLabel(cf) }}
           <button type="button" class="text-error" @click="removeField(cf.id)">✕</button>
         </span>
       </div>

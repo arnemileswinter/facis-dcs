@@ -135,6 +135,19 @@ function onFillInput(leaf: { fieldId: string; label: string }, event: Event) {
 }
 
 const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object['@type']))
+
+// The first filled literal distinguishes same-class instances ("Legal
+// Person · Musterfirma GmbH") in a graph with several of them.
+const instanceHint = computed(() => {
+  for (const property of shape.value?.properties ?? []) {
+    const value = props.object[property.path]
+    if (typeof value === 'string' && value) return value
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && '@value' in value) {
+      return String(value['@value'])
+    }
+  }
+  return ''
+})
 </script>
 
 <template>
@@ -144,7 +157,10 @@ const typeLabel = computed(() => shape.value?.label ?? localNameOf(props.object[
     :data-testid="`data-object-${localNameOf(object['@type'])}`"
   >
     <div class="mb-2 flex items-center justify-between">
-      <span class="font-semibold">{{ typeLabel }}</span>
+      <span class="font-semibold">
+        {{ typeLabel }}
+        <span v-if="instanceHint" class="font-normal opacity-60">· {{ instanceHint }}</span>
+      </span>
       <button
         v-if="mode === 'template' && editable && depth === 0"
         type="button"

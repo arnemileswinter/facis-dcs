@@ -445,12 +445,12 @@ export const useDcsDraftStore = defineStore(storeId, {
     addClauseWithMeaning(payload: {
       title: string
       content: DcsContentSegment[]
-      fields: { id: string; parameterName: string; domainFieldIri: string }[]
+      fields: { id: string; parameterName: string; domainFieldIri: string; label?: string }[]
       rule: OdrlRule | null
     }): void {
       const blockId = this.addClause({ title: payload.title, content: payload.content })
       for (const f of payload.fields) {
-        this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri))
+        this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri, f.label))
       }
       if (payload.rule) {
         this.policies.push({ ...payload.rule, 'dcs:prose': { '@id': blockId } })
@@ -1142,12 +1142,17 @@ function semanticParamToContractField(
 }
 
 /** Builds a ContractField for a clause-editor field binding. */
-function contractFieldFromDomainField(id: string, parameterName: string, domainFieldIri: string): DcsContractField {
+function contractFieldFromDomainField(
+  id: string,
+  parameterName: string,
+  domainFieldIri: string,
+  label?: string,
+): DcsContractField {
   const domainField = ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri)
   return {
     '@id': id,
     '@type': 'dcs:ContractField',
-    'dcs:label': domainField?.label ?? parameterName,
+    'dcs:label': label ?? domainField?.label ?? parameterName,
     'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
     'dcs:required': true,
