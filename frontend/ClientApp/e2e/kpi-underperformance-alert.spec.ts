@@ -1,5 +1,6 @@
 import { expect, test } from './dcs-test'
 import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
+import type { APIRequestContext } from '@playwright/test'
 
 /**
  * A breached KPI must reach the compliance officer's screen (DCS-FR-CWE-31:
@@ -37,10 +38,31 @@ import { buildApprovedContract, gotoAs, signApprovedContractViaViewer } from './
  * it. Nothing here is seeded behind the UI's back.
  */
 
-const CALLBACK_SECRET = process.env.E2E_DEPLOYMENT_CALLBACK_SECRET ?? 'bdd-deployment-callback-secret'
+// The target authenticates its callback as its own registered client (ADR-27),
+// so the suite obtains a token the same way a real target system would.
+const TARGET_CLIENT_ID = process.env.E2E_TARGET_CLIENT_ID ?? 'dcs-orce-target'
+const TARGET_CLIENT_SECRET = process.env.E2E_TARGET_CLIENT_SECRET ?? 'dcs-orce-target-secret'
 
-/** The shipped ORCE contract-target flow the kind stack runs (values.bdd.yml). */
-const E2E_CONTRACT_TARGET_URL = process.env.E2E_CONTRACT_TARGET_URL ?? 'http://dcs-orce:1880/contract-target/deploy'
+const targetAccessToken = async (request: APIRequestContext) => {
+  const res = await request.post('/oauth2/token', {
+    form: {
+      grant_type: 'client_credentials',
+      client_id: TARGET_CLIENT_ID,
+      client_secret: TARGET_CLIENT_SECRET,
+    },
+  })
+  expect(res.ok(), `target token ${res.status()}: ${await res.text()}`).toBeTruthy()
+  return (await res.json()).access_token as string
+}
+
+/** The shipped ORCE contract-target flow the kind stack runs (values.bdd.yml).
+ *  The flow holds ONE credential, issued to the seeded registry entry below, and
+ *  a callback is accepted only from the target its deployment went to (ADR-27).
+ *  So the contract must be deployed to that entry: a target registered here
+ *  would have no credential, and its acknowledgement would be refused —
+ *  correctly, but the deployment would never reach ACTIVE. Registering a target
+ *  through the UI is covered by machine-credentials.spec.ts. */
+const SEEDED_TARGET_NAME = process.env.E2E_CONTRACT_TARGET_NAME ?? 'BDD Contract Target'
 
 test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance alert the compliance officer can see', async ({
   page,
@@ -50,27 +72,20 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
   // signing through the UI; each leg is slow and this test owns all of them.
   test.setTimeout(20 * 60_000)
 
-  const targetName = `E2E Target ${Date.now()}`
+  const targetName = SEEDED_TARGET_NAME
 
-  await test.step('the administrator registers a target system', async () => {
+  await test.step('the target system the ORCE flow answers for is registered and credentialed', async () => {
     await gotoAs(page, loginAs, 'Sys. Administrator', '/ui/admin/targets')
     await expect(page.getByTestId('target-admin')).toBeVisible()
 
-    await page.getByTestId('target-name').fill(targetName)
-    // The shipped ORCE contract-target flow, the same endpoint the BDD suite
-    // registers: it verifies the payload hash and acknowledges over the
-    // callback channel, which is what drives SIGNED -> ACTIVE.
-    await page.getByTestId('target-url').fill(E2E_CONTRACT_TARGET_URL)
-    await page.getByTestId('target-description').fill('Registered by the KPI alert e2e.')
-
-    const registered = page.waitForResponse(
-      (r) => r.url().includes('/contract/targets') && r.request().method() === 'POST',
-    )
-    await page.getByTestId('target-save').click()
-    const response = await registered
-    expect(response.ok(), `register target ${response.status()}`).toBeTruthy()
-
-    await expect(page.getByTestId('target-row').filter({ hasText: targetName })).toHaveCount(1)
+    // It verifies the payload hash and acknowledges over the callback channel,
+    // which is what drives SIGNED -> ACTIVE.
+    const row = page.getByTestId('target-row').filter({ hasText: targetName })
+    await expect(row, `the seeded target ${targetName} is registered`).toHaveCount(1)
+    await expect(
+      row.getByTestId('target-row-credentialed'),
+      'it holds the credential the flow authenticates with',
+    ).toBeVisible()
   })
 
   const contractDid = await test.step('author and approve a contract whose ODRL policy bounds a numeric field', () =>
@@ -183,7 +198,7 @@ test('@DCS-FR-CWE-31 @DCS-IR-PACM-03 a breached KPI raises an underperformance a
     // 900 against "Payment Amount <= 500" — the constraint authored in the
     // clause editor by the fixture.
     const res = await page.request.post('/api/contract/deployment/callback', {
-      headers: { 'X-Deployment-Callback-Secret': CALLBACK_SECRET },
+      headers: { Authorization: `Bearer ${await targetAccessToken(page.request)}` },
       data: {
         did: contractDid,
         correlation_id: correlationId,

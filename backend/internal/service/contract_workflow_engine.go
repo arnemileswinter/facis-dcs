@@ -21,6 +21,7 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -63,6 +64,12 @@ type contractWorkflowEnginesrvc struct {
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
+	// MachineIdentities is the registry every machine caller is resolved
+	// against, and HydraAdmin provisions the OAuth2 clients they present
+	// (ADR-27).
+	MachineIdentities    machineidentity.Repo
+	HydraAdmin           MachineCredentialIssuer
+	HydraPublicIssuerURL string
 	auth.JWTAuthenticator
 }
 
@@ -73,7 +80,9 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	fcClient *fcclient.FederatedCatalogueClient, auditTrailReader base.AuditTrailReader, didDocument identity.DIDDocument,
 	ipfsClient *ipfs.APIClient, archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
 	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
-	targetClient command.ContractTargetClient) contractworkflowengine.Service {
+	targetClient command.ContractTargetClient,
+	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
+	hydraPublicIssuerURL string) contractworkflowengine.Service {
 
 	return &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -95,6 +104,10 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,
+
+		MachineIdentities:    machineIdentities,
+		HydraAdmin:           hydraAdmin,
+		HydraPublicIssuerURL: hydraPublicIssuerURL,
 	}
 }
 
@@ -1543,12 +1556,13 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	// The target authenticates as itself: for a machine caller the validated
+	// token's client_id is carried as the holder identity, and the handler only
+	// accepts it for deployments dispatched to that target (ADR-27).
 	cmd := command.DeploymentCallbackCmd{
-		DID:           req.Did,
-		CorrelationID: req.CorrelationID,
-	}
-	if req.CallbackSecret != nil {
-		cmd.Secret = *req.CallbackSecret
+		DID:            req.Did,
+		CorrelationID:  req.CorrelationID,
+		CallerClientID: middleware.GetHolderDID(ctx),
 	}
 	if req.Status != nil {
 		cmd.Status = *req.Status
@@ -1579,6 +1593,7 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 		DB:             s.DB,
 		CRepo:          s.CRepo,
 		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
 		ArchiveTSA:     s.ArchiveTSA,
 	}
 	if err := handler.Handle(ctx, cmd); err != nil {
@@ -1622,6 +1637,15 @@ func contractTargetView(target *db.ContractTarget) *contractworkflowengine.Contr
 	}
 	if target.Description != nil {
 		view.Description = target.Description
+	}
+	// Which client the target authenticates its callbacks as, and how old that
+	// credential is. The secret itself is not here and is not stored: Hydra
+	// keeps only a hash of it (ADR-27).
+	if target.OAuthClientID != nil {
+		view.OauthClientID = target.OAuthClientID
+	}
+	if target.SecretIssuedAt != nil {
+		view.SecretIssuedAt = ptr(target.SecretIssuedAt.UTC().Format(time.RFC3339))
 	}
 	return view
 }

@@ -6,6 +6,7 @@ import {
   ClipboardDocumentListIcon,
   DocumentTextIcon,
   EyeIcon,
+  KeyIcon,
   PencilSquareIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -30,6 +31,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
 import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
+import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
@@ -100,6 +102,7 @@ const ROUTES = {
   },
   ADMIN: {
     TARGETS: 'admin.targets',
+    SYSTEM_USERS: 'admin.system-users',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -457,6 +460,19 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Target Systems',
       order: 9,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/system-users',
+    name: ROUTES.ADMIN.SYSTEM_USERS,
+    component: MachineIdentityAdminView,
+    meta: {
+      name: 'System Users',
+      icon: KeyIcon,
+      requiresAuth: true,
+      title: 'DCS - System Users',
+      order: 10,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },

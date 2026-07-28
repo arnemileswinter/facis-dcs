@@ -21,6 +21,7 @@ import type {
   ContractTargetWriteRequest,
   ContractTerminateRequest,
   ContractUpdateRequest,
+  MachineIdentityWriteRequest,
 } from '@/models/requests/contract-request'
 import type {
   ApprovedContractTemplateRetrieveResponse,
@@ -43,6 +44,9 @@ import type {
   ContractTarget,
   ContractTerminateResponse,
   ContractUpdateResponse,
+  MachineCredential,
+  MachineIdentity,
+  MachineIdentityCreateResponse,
 } from '@/models/responses/contract-response'
 import type { ContractWorkflowService } from '@/models/services/contract-workflow-service'
 
@@ -172,6 +176,42 @@ export const contractWorkflowService: ContractWorkflowService = {
 
   async deleteTarget(id: string) {
     return http.delete('/contract/targets', { data: { id } }).then((res) => res.data)
+  },
+
+  /** Issue a new callback credential for a target. The secret comes back once
+   *  and the previous one stops working immediately (ADR-27). */
+  async rotateTargetSecret(id: string) {
+    return http
+      .post<MachineCredential>(`/contract/targets/${encodeURIComponent(id)}/credential`)
+      .then((res) => res.data)
+  },
+
+  // ---- Machine identities (ADR-27) -----------------------------------------
+
+  async listMachineIdentities() {
+    return http.get<{ identities: MachineIdentity[] }>('/machine-identities').then((res) => res.data.identities)
+  },
+
+  /** Registers the identity and issues its first credential. The secret is in
+   *  this response and in no other. */
+  async createMachineIdentity(request: MachineIdentityWriteRequest) {
+    return http.post<MachineIdentityCreateResponse>('/machine-identities', request).then((res) => res.data)
+  },
+
+  async updateMachineIdentity(request: MachineIdentityWriteRequest & { id: string; enabled: boolean }) {
+    return http
+      .put<MachineIdentity>(`/machine-identities/${encodeURIComponent(request.id)}`, request)
+      .then((res) => res.data)
+  },
+
+  async deleteMachineIdentity(id: string) {
+    return http.delete(`/machine-identities/${encodeURIComponent(id)}`).then((res) => res.data)
+  },
+
+  async rotateMachineIdentitySecret(id: string) {
+    return http
+      .post<MachineCredential>(`/machine-identities/${encodeURIComponent(id)}/credential`)
+      .then((res) => res.data)
   },
 
   async designateTarget(request: ContractTargetDesignateRequest) {

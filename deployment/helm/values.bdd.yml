@@ -193,6 +193,14 @@ hydra:
       response_types: []
       scope: ""
       token_endpoint_auth_method: client_secret_post
+    # The contract-target flow, authenticating its deployment callback as the
+    # registry entry it is (ADR-27).
+    - client_id: dcs-orce-target
+      client_secret: dcs-orce-target-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
 
 # The FC must run in the BDD kind scenario too (features/02, template_archive
 # and others exercise it against a real fc-service — see
@@ -346,6 +354,11 @@ systemClients:
   - client_id: dcs-orce-signer
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Sys. Contract Signer"]
+  # Authorises the deployment callback and nothing else, and only for the
+  # deployments dispatched to this target (ADR-27).
+  - client_id: dcs-orce-target
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Contract Target System"]
 
 orce:
   enabled: true
@@ -357,18 +370,22 @@ orce:
   persistence:
     enabled: true
   # The contract-target-flow's callback legs (deployment ack + measured KPI,
-  # flows/contract-target-flow.json) post to this instance's backend with the
-  # shared deployment-callback secret (command/callback.go's
-  # DeploymentCallbackSecret; the value below is its BDD default, stated
-  # explicitly so the pairing is visible in one place).
+  # flows/contract-target-flow.json) post to this instance's backend as their
+  # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
+  # reporting, so a target can acknowledge its own deployments and no others.
   extraEnv:
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
     # legs append /contract/deployment/callback to it.
     - name: DCS_URL
       value: "http://dcs-digital-contracting-service:8991/digital-contracting-service/api"
-    - name: DEPLOYMENT_CALLBACK_SECRET
-      value: "bdd-deployment-callback-secret"
+    # The credential the contract-target flow authenticates its callback with.
+    # It matches the contractTargets entry's oauth_client_id below, which is
+    # what binds the caller to the registry row the deployment went to.
+    - name: DCS_TARGET_CLIENT_ID
+      value: "dcs-orce-target"
+    - name: DCS_TARGET_CLIENT_SECRET
+      value: "dcs-orce-target-secret"
     # Machine identities for the system-user flows (ADR-16/ADR-17): a plain
     # OAuth2 client credentials grant against this deployment's Hydra, one
     # client per capability. No wallet, no alg:none, no shared credential.
@@ -458,3 +475,7 @@ contractTargets:
   - name: "BDD Contract Target"
     url: "http://dcs-orce:1880/contract-target/deploy"
     description: "The shipped ORCE contract-target flow used by the test suites."
+    # Provisioned by this same configuration rather than issued through the
+    # admin UI, because the suite has no operator to click through it. A real
+    # deployment issues the credential once and rotates it (ADR-27).
+    oauth_client_id: "dcs-orce-target"

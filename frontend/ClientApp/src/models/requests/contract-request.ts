@@ -140,3 +140,13 @@ export interface ContractTargetDesignateRequest {
   updated_at: string
   target_id?: string
 }
+
+/** Register or change a machine identity: a non-human caller that reaches DCS
+ *  over its API (ADR-27). The credential is issued separately so a change of
+ *  roles never silently reissues a secret. */
+export interface MachineIdentityWriteRequest {
+  name: string
+  participant_did: string
+  roles: string[]
+  description?: string
+}
