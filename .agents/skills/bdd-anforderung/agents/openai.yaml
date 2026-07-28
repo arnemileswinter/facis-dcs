@@ -1,0 +1,4 @@
+interface:
+  display_name: "BDD-Anforderung"
+  short_description: "FACIS-Anforderungen risikobasiert umsetzen"
+  default_prompt: "Verwende $bdd-anforderung, um diese FACIS-DCS-Anforderung im passenden FULL- oder COMPACT-Workflow umzusetzen und zu verifizieren."
