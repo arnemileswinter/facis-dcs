@@ -87,11 +87,24 @@ kubectl version --request-timeout=15s >/dev/null 2>&1 \
 
 BACKEND="deployment/${RELEASE}-digital-contracting-service"
 
+diagnose_fc() {
+  echo "Federated Catalogue workload diagnosis:" >&2
+  kubectl -n "$NAMESPACE" get deployment,job,pod -l \
+    "app.kubernetes.io/instance=${RELEASE}" -o wide >&2 || true
+  for workload in fc-service fc-fuseki fc-keycloak fc-postgres; do
+    kubectl -n "$NAMESPACE" describe "deployment/$workload" >&2 || true
+    kubectl -n "$NAMESPACE" logs "deployment/$workload" --all-containers --tail=100 >&2 || true
+  done
+  kubectl -n "$NAMESPACE" describe "job/${RELEASE}-digital-contracting-service-fc-realm-provision" >&2 || true
+  kubectl -n "$NAMESPACE" logs "job/${RELEASE}-digital-contracting-service-fc-realm-provision" \
+    --all-containers --tail=100 >&2 || true
+}
+
 # Subcharts are file:// dependencies, and Helm prefers a packaged charts/*.tgz
 # over the source directory. A .tgz left from an earlier build therefore shadows
 # edits to charts/<name>/ and deploys stale templates, so repackage every run.
-log "Repackaging subchart dependencies"
-helm dependency update "$CHART_DIR" >/dev/null
+log "Building dependencies from the committed Chart.lock"
+helm dependency build --skip-refresh "$CHART_DIR" >/dev/null
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "Validating release '$RELEASE' against namespace '$NAMESPACE' (dry run, no changes)"
@@ -104,18 +117,35 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 log "Deploying release '$RELEASE' into namespace '$NAMESPACE'"
-helm upgrade --install "$RELEASE" "$CHART_DIR" \
+if ! helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --namespace "$NAMESPACE" \
   "${HELM_VALUES_ARGS[@]}" \
-  --timeout "$TIMEOUT"
+  --timeout "$TIMEOUT"; then
+  diagnose_fc
+  fail "Helm deployment failed"
+fi
 
 if [ "$SKIP_VERIFY" -eq 1 ]; then
   log "Deployed. Verification skipped."
   exit 0
 fi
 
-log "Waiting for the backend rollout"
-kubectl -n "$NAMESPACE" rollout status "$BACKEND" --timeout=10m
+fc_local=0
+if kubectl -n "$NAMESPACE" get deployment/fc-service >/dev/null 2>&1; then
+  fc_local=1
+  log "Waiting for native Federated Catalogue health readiness"
+  if ! kubectl -n "$NAMESPACE" rollout status deployment/fc-service --timeout="$TIMEOUT"; then
+    diagnose_fc
+    fail "co-deployed Federated Catalogue did not become healthy"
+  fi
+fi
+
+log "Waiting for the backend startup gate"
+if ! kubectl -n "$NAMESPACE" rollout status "$BACKEND" --timeout="$TIMEOUT"; then
+  [ "$fc_local" -eq 0 ] || diagnose_fc
+  kubectl -n "$NAMESPACE" logs "$BACKEND" --all-containers --tail=200 >&2 || true
+  fail "backend startup gate failed"
+fi
 
 problems=0
 note_problem() { echo "  FAIL: $*"; problems=$((problems + 1)); }
@@ -137,6 +167,9 @@ else
 fi
 if grep -q "failed to sync federated catalogue" <<<"$backend_log"; then
   note_problem "federated catalogue sync failed — the backend treats this as fatal and will restart"
+fi
+if grep -q "federated catalogue readiness gate failed" <<<"$backend_log"; then
+  note_problem "federated catalogue readiness gate failed — see the terminal diagnosis above"
 fi
 
 # The trust gate is fail-closed: unset or unreachable means federation is off,
@@ -175,8 +208,13 @@ if [ -n "$PUBLIC_URL" ]; then
   done
 
   expected_did="$(backend_env ISSUER_DID)"
+  # Match each "id" separately and keep the one without a fragment: that is the
+  # document's own id, whatever order the keys are serialised in. A single
+  # s/.*"id"…/ over the whole document anchors on the LAST one instead, because
+  # .* is greedy — it reports a verification method and fails a valid document.
   served_did="$(curl -sS --max-time 20 "${PUBLIC_URL}/.well-known/did.json" 2>/dev/null \
-    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | sed -n 's/.*"\([^"]*\)"$/\1/p' | grep -v '#' | head -1)"
   if [ -n "$expected_did" ] && [ -n "$served_did" ] && [ "$expected_did" != "$served_did" ]; then
     note_problem "serves '$served_did' but ISSUER_DID is '$expected_did' — peers will reject it"
   elif [ -n "$served_did" ]; then

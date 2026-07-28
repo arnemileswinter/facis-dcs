@@ -74,10 +74,6 @@ wait_for_running_pod() {
   return 1
 }
 
-DCS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
-  "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
-export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec ${DCS_POD} -c digital-contracting-service --"
-
 # IPFS CID-swap tamper seam (steps/support/tamper_seam.py): several
 # verify-shaped endpoints always re-fetch the SERVER'S OWN stored PDF from
 # IPFS by CID, so tampered-artifact scenarios inject bytes as a NEW CID via
@@ -86,17 +82,6 @@ export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec ${DCS_POD} -c d
 # a SINGLE instance shared across both BDD releases (values.bdd2.yml's
 # ipfsClient.mfsBaseURL points at "dcs-ipfs" regardless of caller instance),
 # so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
-IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
-  "app.kubernetes.io/name=ipfs,app.kubernetes.io/instance=dcs")"
-# -i/--stdin is required (not just harmless) here: `ipfs add -` reads its
-# content from stdin, and without --stdin the API server may not have a
-# stdin stream attached before the remote command starts reading — observed
-# in practice as an intermittent race where `ipfs add` silently succeeds
-# against an EMPTY stdin (producing the well-known empty-file CID
-# Qmb...4Q7Vs-style hash) instead of the intended bytes, rather than a
-# reliable failure.
-export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} --"
-
 mkdir -p .tmp .reports/junit
 REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 
@@ -127,8 +112,8 @@ DCS_HEALTH_URL="${BDD_DCS_BASE_URL%/}/auth/login"
 
 verify_host_ingress() {
   local body http_code
-  body=$(curl -s -X POST "$DCS_HEALTH_URL" -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL" \
+  body=$(curl -s --max-time 10 -X POST "$DCS_HEALTH_URL" -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)
+  http_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL" \
     -H 'Content-Type: application/json' -d '{}' 2>/dev/null || echo "000")
   if [[ "$body" == "404 page not found" ]] || [[ "$http_code" == "404" && "$body" == *"page not found"* ]]; then
     echo "Host port 18080 is not reaching the kind Traefik ingress (got Go default 404)."
@@ -139,77 +124,75 @@ verify_host_ingress() {
 }
 
 wait_for_dcs_http() {
-  # Generous: on a cold cluster the backend blocks its HTTP server on the
-  # Federated Catalogue schema sync, and FC's own first boot takes minutes.
-  local deadline=$(( $(date +%s) + 900 ))
   local http_code
-  until http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL" \
-      -H 'Content-Type: application/json' -d '{}' 2>/dev/null) \
-      && [[ "$http_code" =~ ^[24][0-9]{2}$ ]] && [[ "$http_code" != 404 ]]; do
-    if [ "$(date +%s)" -gt "$deadline" ]; then
-      echo "Timed out waiting for DCS HTTP on $DCS_HEALTH_URL"
-      verify_host_ingress || true
-      echo "Ensure kind exposes port 18080 and the BDD stack is deployed: make -C tests/bdd kind_up"
-      "$KUBECTL_BIN" get pods -n kube-system -l app.kubernetes.io/name=traefik -o wide || true
-      return 1
-    fi
-    sleep 2
-  done
-}
-
-echo "Waiting for DCS deployment ($DCS_DEPLOYMENT) to be available"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=available --timeout=180s "deployment/$DCS_DEPLOYMENT"
-echo "Waiting for DCS backend pod to accept traffic"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=ready pod \
-  -l "app.kubernetes.io/name=digital-contracting-service,app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}" \
-  --timeout=180s
-
-echo "Waiting for DCS HTTP via Traefik ingress at $DCS_HEALTH_URL ..."
-if ! verify_host_ingress; then
-  exit 1
-fi
-wait_for_dcs_http
-echo "DCS is reachable at $DCS_HEALTH_URL"
-
-# The Federated Catalogue's /verification endpoint needs its Fuseki-backed
-# schema cache warm before it answers within the DCS client timeout;
-# template registration flows (features/02, template_archive) fail with
-# gateway timeouts when the suite starts against a cold FC. Warm it with
-# real verification requests through a temporary port-forward until one
-# completes, however it completes.
-wait_for_fc_verification() {
-  # Fixed name, not release-prefixed — see charts/federated-catalogue's
-  # deployment.yaml (matches fc-realm-provision-job.yaml's own hardcoded
-  # Deployment name and ingress.yaml's hardcoded Service name).
-  local fc_deploy="fc-service"
-  if ! "$KUBECTL_BIN" -n "$K8S_NAMESPACE" get "deployment/$fc_deploy" >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Warming the Federated Catalogue verification endpoint ($fc_deploy)"
-  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=available --timeout=300s "deployment/$fc_deploy"
-  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "deployment/$fc_deploy" 18581:8081 >/dev/null 2>&1 &
-  local pf_pid=$!
-  local deadline=$(( $(date +%s) + 300 ))
-  local warmed=1
-  sleep 2
-  until curl -s -o /dev/null --max-time 8 -X POST \
-      "http://localhost:18581/verification?verifySchema=true&verifySemantics=true&verifySignatures=false&verifyVCSignature=false&verifyVPSignature=false" \
-      -H 'Content-Type: application/json' -d '{}' 2>/dev/null; do
-    if [ "$(date +%s)" -gt "$deadline" ]; then
-      echo "Timed out warming the Federated Catalogue verification endpoint"
-      warmed=0
-      break
-    fi
-    sleep 5
-  done
-  kill "$pf_pid" >/dev/null 2>&1 || true
-  if [ "$warmed" -eq 1 ]; then
-    echo "Federated Catalogue verification endpoint is responding"
-  else
+  http_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL" \
+    -H 'Content-Type: application/json' -d '{}' 2>/dev/null) || {
+    echo "DCS pod is Ready but HTTP is unreachable at $DCS_HEALTH_URL"
+    verify_host_ingress || true
+    "$KUBECTL_BIN" get pods -n kube-system -l app.kubernetes.io/name=traefik -o wide || true
+    return 1
+  }
+  if [[ ! "$http_code" =~ ^[24][0-9]{2}$ ]] || [[ "$http_code" == 404 ]]; then
+    echo "DCS pod is Ready but HTTP returned $http_code at $DCS_HEALTH_URL"
+    verify_host_ingress || true
     return 1
   fi
 }
-wait_for_fc_verification
+
+diagnose_fc_startup() {
+  echo "Federated Catalogue startup diagnosis:" >&2
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" get deployment,job,pod \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE}" -o wide >&2 || true
+  for workload in fc-service fc-fuseki fc-keycloak fc-postgres; do
+    "$KUBECTL_BIN" -n "$K8S_NAMESPACE" describe "deployment/$workload" >&2 || true
+    "$KUBECTL_BIN" -n "$K8S_NAMESPACE" logs "deployment/$workload" \
+      --all-containers --tail=100 >&2 || true
+  done
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" logs "deployment/$DCS_DEPLOYMENT" \
+    --all-containers --tail=200 >&2 || true
+}
+
+echo "Waiting for DCS deployment ($DCS_DEPLOYMENT) to be available"
+if ! "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=available --timeout=180s "deployment/$DCS_DEPLOYMENT"; then
+  diagnose_fc_startup
+  exit 1
+fi
+echo "Waiting for DCS backend pod to accept traffic"
+if ! "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=ready pod \
+  -l "app.kubernetes.io/name=digital-contracting-service,app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}" \
+  --timeout=180s; then
+  diagnose_fc_startup
+  exit 1
+fi
+
+echo "Waiting for DCS HTTP via Traefik ingress at $DCS_HEALTH_URL ..."
+if ! verify_host_ingress; then
+  diagnose_fc_startup
+  exit 1
+fi
+if ! wait_for_dcs_http; then
+  diagnose_fc_startup
+  exit 1
+fi
+echo "DCS is reachable at $DCS_HEALTH_URL"
+
+# Resolve test seams only after the deployment startup gate is green. Doing
+# this earlier hid terminal FC failures behind a generic "no Running pod"
+# timeout and delayed the actual workload diagnostics.
+DCS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
+  "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
+export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec ${DCS_POD} -c digital-contracting-service --"
+
+IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
+  "app.kubernetes.io/name=ipfs,app.kubernetes.io/instance=dcs")"
+# -i/--stdin is required (not just harmless) here: `ipfs add -` reads its
+# content from stdin, and without --stdin the API server may not have a
+# stdin stream attached before the remote command starts reading — observed
+# in practice as an intermittent race where `ipfs add` silently succeeds
+# against an EMPTY stdin (producing the well-known empty-file CID
+# Qmb...4Q7Vs-style hash) instead of the intended bytes, rather than a
+# reliable failure.
+export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} --"
 
 # Instance B (dcs2, features/17_peer_trust @two-instance): only checked when
 # the caller tells us it exists (DCS_DEPLOYMENT_B set AND actually present in
@@ -227,7 +210,7 @@ if [[ -n "${DCS_DEPLOYMENT_B:-}" ]] && "$KUBECTL_BIN" -n "$K8S_NAMESPACE" get "d
   echo "Waiting for DCS HTTP via Traefik ingress (instance B) at $DCS_HEALTH_URL_B ..."
   deadline_b=$(( $(date +%s) + 120 ))
   http_code_b=""
-  until http_code_b=$(curl -s "${CURL_RESOLVE_B[@]}" -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL_B" \
+  until http_code_b=$(curl -s --max-time 10 "${CURL_RESOLVE_B[@]}" -o /dev/null -w "%{http_code}" -X POST "$DCS_HEALTH_URL_B" \
       -H 'Content-Type: application/json' -d '{}' 2>/dev/null) \
       && [[ "$http_code_b" =~ ^[24][0-9]{2}$ ]] && [[ "$http_code_b" != 404 ]]; do
     if [ "$(date +%s)" -gt "$deadline_b" ]; then
@@ -383,7 +366,7 @@ export BDD_TRUST_PDP_DEFAULT_FLOW_WIRED=1
 echo "Waiting for authenticated ORCE archive audit-log endpoint"
 deadline=$(( $(date +%s) + 60 ))
 orce_archive_code=""
-until orce_archive_code=$(curl -s -o /dev/null -w "%{http_code}" \
+until orce_archive_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
     -H "Authorization: Bearer $ORCE_TOKEN" "$BDD_ORCE_ARCHIVE_AUDIT_LOG_URL" 2>/dev/null) \
     && [[ "$orce_archive_code" == "200" || "$orce_archive_code" == "404" ]]; do
   if [ "$(date +%s)" -gt "$deadline" ]; then
@@ -402,7 +385,7 @@ echo "ORCE archive endpoints are reachable"
 export BDD_ORCE_TARGET_URL="${BDD_ORCE_TARGET_URL:-${BDD_PUBLIC_ORIGIN}/contract-target/deploy}"
 echo "Waiting for ORCE contract-target flow at $BDD_ORCE_TARGET_URL ..."
 deadline=$(( $(date +%s) + 60 ))
-until orce_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BDD_ORCE_TARGET_URL" \
+until orce_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -X POST "$BDD_ORCE_TARGET_URL" \
     -H 'Content-Type: application/json' -d '{}' 2>/dev/null) \
     && [[ "$orce_code" =~ ^[24][0-9]{2}$|^400$ ]] && [[ "$orce_code" != 404 ]]; do
   if [ "$(date +%s)" -gt "$deadline" ]; then
@@ -449,8 +432,13 @@ fi
 if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
+  # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed
+  # Hydra through the same ingress everything else uses. Left unset it defaults
+  # to localhost:4444, where nothing listens in CI, so anything reaching for a
+  # token gets a proxy error instead of an answer.
   E2E_DCS_API_BASE="${BDD_PUBLIC_ORIGIN}/digital-contracting-service/api" \
   E2E_BDD_PYTHON="$VENV_PATH/bin/python3" \
+  DCS_HYDRA_TARGET="${BDD_PUBLIC_ORIGIN}" \
     npm run e2e
 else
   echo "Running BDD suite via bdd-executor environment"

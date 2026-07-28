@@ -127,9 +127,12 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 // loadSystemClients reads the SRS System User clients (SRS §2.4 Table 5) from
 // DCS_SYSTEM_CLIENTS, a JSON array of {client_id, participant_did, roles}.
 // These are machine callers that authenticate with the OAuth2 client
-// credentials grant, so their authority comes from this configuration and not
-// from token claims — a system client can present nothing that widens it.
-// Unset means no system client may call DCS at all.
+// credentials grant, so their authority comes from configuration and not from
+// token claims — a system client can present nothing that widens it.
+//
+// This is a seed, not the runtime source: entries are written into the machine
+// identity registry at startup and resolved from there, so an operator can add
+// or rotate a caller without a redeploy (ADR-27). Unset seeds nothing.
 func loadSystemClients() ([]middleware.SystemClient, error) {
 	raw := strings.TrimSpace(os.Getenv("DCS_SYSTEM_CLIENTS"))
 	if raw == "" {

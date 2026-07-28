@@ -9,7 +9,14 @@
 
 set -euo pipefail
 
-trap 'kill $(jobs -p) 2>/dev/null; exit' INT TERM
+cleanup() {
+  local pids
+  pids="$(jobs -p)"
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 # Config
 HELM_RELEASE="dcs"
@@ -25,8 +32,8 @@ echo "=== Setting up dev environment ==="
 
 # Helm: idempotent install-or-upgrade so this script works whether or not
 # the release was already installed manually first.
-echo "Updating Helm dependencies and deploying to Kubernetes..."
-helm dependency update "$HELM_CHART_PATH"
+echo "Building locked Helm dependencies and deploying to Kubernetes..."
+helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
 
 # The host-side backend verifies every RFC 3161 token against the same
@@ -36,11 +43,6 @@ kubectl wait --for=create "secret/$TSA_TRUST_SECRET" --timeout=2m
 kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
-
-echo "Waiting for Federated Catalogue to become ready..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
-  --timeout=10m
 
 echo "Waiting for statuslist-service..."
 kubectl wait --for=condition=ready pod \
@@ -149,7 +151,25 @@ echo "=== Starting backend (air) ==="
 air &> /tmp/backend-live.log &
 BACKEND_PID=$!
 
-# Cleanup on exit
-wait $VITE_PID 2>/dev/null || true
-wait $PDF_CORE_PID 2>/dev/null || true
-wait $BACKEND_PID 2>/dev/null || true
+# All three processes are long-lived. The first one that exits is therefore a
+# terminal stack event, not something to hide while another dev server keeps
+# running. In particular, propagate backend startup-gate failures immediately.
+set +e
+wait -n "$VITE_PID" "$PDF_CORE_PID" "$BACKEND_PID"
+EXIT_STATUS=$?
+set -e
+
+if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+  echo "Backend exited; startup diagnostics:" >&2
+  tail -n 200 /tmp/backend-live.log >&2 || true
+elif ! kill -0 "$PDF_CORE_PID" 2>/dev/null; then
+  echo "pdf-core exited; diagnostics:" >&2
+  tail -n 200 /tmp/pdf-core-live.log >&2 || true
+else
+  echo "Vite dev server exited unexpectedly." >&2
+fi
+
+if [[ "$EXIT_STATUS" -eq 0 ]]; then
+  exit 1
+fi
+exit "$EXIT_STATUS"

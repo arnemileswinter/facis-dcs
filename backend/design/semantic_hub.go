@@ -265,7 +265,7 @@ var _ = Service("SemanticHub", func() {
 	})
 
 	Method("resolve_profile", func() {
-		Description("Serve a registered validation-profile version at the anchor URL produced documents carry (dcterms:conformsTo) — semantichub.AnchorURL emits /semantic/profile/{name}?version=N, so this path must dereference for external verifiers the same way /semantic/shapes/{name} does.")
+		Description("Serve a registered validation-profile version at /semantic/profile/{name}?version=N. Documents carry no dcterms:conformsTo anchor — one envelope profile said nothing about the vocabulary a contract's own data uses — but profiles stay readable and their rules still run at validation time.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
 		NoSecurity()
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -19,39 +18,34 @@ import (
 // system's own acknowledgement (POST /contract/deployment/callback) is the
 // authoritative signal of a successful deployment (DCS-FR-SM-12).
 type ContractTargetClient interface {
-	Deploy(ctx context.Context, payload map[string]any) error
+	// DeployTo posts the payload to one registered target's endpoint. The URL is
+	// a parameter rather than client state because a DCS may serve several
+	// execution environments and each contract names its own (ADR-25).
+	DeployTo(ctx context.Context, url string, payload map[string]any) error
 }
 
 // HTTPContractTargetClient POSTs the deployment payload to a configured URL
 // (deployment/helm/charts/orce/flows/contract-target-flow.json is the
 // reference implementation of the receiving side).
 type HTTPContractTargetClient struct {
-	url        string
 	httpClient *http.Client
 }
 
-// ContractTargetURL returns the configured Contract Target System endpoint,
-// or "" if none is configured.
-func ContractTargetURL() string {
-	return strings.TrimSpace(os.Getenv("CONTRACT_TARGET_URL"))
-}
-
-func NewHTTPContractTargetClient(url string) *HTTPContractTargetClient {
+func NewHTTPContractTargetClient() *HTTPContractTargetClient {
 	return &HTTPContractTargetClient{
-		url:        strings.TrimSpace(url),
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-func (c *HTTPContractTargetClient) Deploy(ctx context.Context, payload map[string]any) error {
-	if c == nil || c.url == "" {
-		return fmt.Errorf("contract target URL is empty")
+func (c *HTTPContractTargetClient) DeployTo(ctx context.Context, url string, payload map[string]any) error {
+	if strings.TrimSpace(url) == "" {
+		return fmt.Errorf("target system has no URL configured")
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal deployment payload: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(url), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create deployment request: %w", err)
 	}

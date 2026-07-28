@@ -78,6 +78,9 @@ type GetByIDResult struct {
 	ExpNoticePeriod *int
 	Responsible     *db.Responsible
 	Origin          string
+	// TargetID is the registered target system this contract deploys to
+	// (ADR-25); nil until one is designated.
+	TargetID *string
 }
 
 type GetByIDHandler struct {
@@ -178,6 +181,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		ExpPolicy:       expPolicy,
 		ExpNoticePeriod: data.ExpNoticePeriod,
 		Responsible:     data.Responsible,
+		TargetID:        data.TargetID,
 		Origin:          data.Origin,
 	}
 	return result, nil

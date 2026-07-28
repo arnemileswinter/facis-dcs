@@ -151,3 +151,50 @@ export interface ContractHistoryItem {
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]
+
+/** A configured Contract Target System deployments may be dispatched to
+ *  (ADR-25). Disabled entries stay referenceable so a contract naming one keeps
+ *  a readable destination, but dispatch to them is refused. */
+export interface ContractTarget {
+  id: string
+  name: string
+  url: string
+  description?: string
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+  /** The OAuth2 client this target authenticates its callbacks as (ADR-27).
+   *  Absent until a credential has been issued. */
+  oauth_client_id?: string
+  secret_issued_at?: string
+}
+
+/** A freshly issued machine credential. The secret is returned by this response
+ *  and by no other: Hydra keeps only a hash, so it cannot be read back and must
+ *  be rotated if lost (ADR-27). */
+export interface MachineCredential {
+  client_id: string
+  client_secret: string
+  token_url?: string
+  issued_at?: string
+}
+
+/** A registered non-human caller: an SRS Table 5 System User reaching DCS over
+ *  its API (ADR-27). */
+export interface MachineIdentity {
+  id: string
+  name: string
+  oauth_client_id: string
+  participant_did: string
+  roles: string[]
+  description?: string
+  enabled: boolean
+  secret_issued_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MachineIdentityCreateResponse {
+  identity: MachineIdentity
+  credential: MachineCredential
+}

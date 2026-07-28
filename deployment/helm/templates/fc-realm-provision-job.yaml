@@ -25,11 +25,9 @@
 # correct value with a stale internal-only one, 401ing every DCS→FC call
 # again after every sync (confirmed live).
 #
-# Idempotent; runs on every install/upgrade. No --wait on the helm invocation
-# (see tests/bdd/Makefile's kind_deploy) — Helm hooks don't gate on
-# Deployment readiness, so this isn't blocked by fc-service/fc-demo-portal
-# not yet being Ready (matches the same reasoning as hsm-provision-job.yaml's
-# devCertChain deadlock note).
+# Idempotent; runs on every install/upgrade. The event-driven dependency gate
+# below is only for Keycloak realm provisioning. It is not an FC functional
+# warm-up; the backend owns the single functional verification call.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -41,22 +39,45 @@ metadata:
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  backoffLimit: 5
+  backoffLimit: 0
   template:
     metadata:
       labels:
         {{- include "digital-contracting-service.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: fc-realm-provision
     spec:
-      restartPolicy: OnFailure
+      restartPolicy: Never
+      serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-fc-lifecycle
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: wait-for-keycloak-readiness
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
+          command:
+            - kubectl
+            - wait
+            - --for=condition=available
+            - --timeout=-1s
+            - deployment/fc-keycloak
       containers:
         - name: fc-realm-provision
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          image: "{{ .Values.fcservice.realmProvision.image.repository }}:{{ .Values.fcservice.realmProvision.image.tag }}"
+          imagePullPolicy: {{ .Values.fcservice.realmProvision.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
           {{- with (.Values.fcservice.realmProvision.resources | default .Values.resources) }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -83,25 +104,6 @@ spec:
             - -c
             - |
               set -eu
-
-              # fc-keycloak takes a while to come up (Quarkus augmentation);
-              # helm runs this hook without waiting for Deployment readiness,
-              # so retry until it actually answers.
-              echo "Waiting for $KC_BASE_URL ..."
-              for i in $(seq 1 60); do
-                # KC_PROXY_HEADERS=xforwarded + master realm's default
-                # sslRequired=EXTERNAL means Keycloak 403s any request that
-                # lacks this header, even the read-only well-known endpoint —
-                # confirmed live against IONOS's fc-keycloak (curl -sf without
-                # it returns 403, never 200, so this loop never detects "up"
-                # and the Job always fails via BackoffLimitExceeded).
-                if curl -sf -o /dev/null -H "X-Forwarded-Proto: https" "$KC_BASE_URL/realms/master/.well-known/openid-configuration"; then
-                  echo "Keycloak is up."
-                  break
-                fi
-                if [ "$i" = "60" ]; then echo "Keycloak never came up." >&2; exit 1; fi
-                sleep 5
-              done
 
               admin_token() {
                 curl -sf -X POST "$KC_BASE_URL/realms/master/protocol/openid-connect/token" \

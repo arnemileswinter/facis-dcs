@@ -113,6 +113,14 @@ def contract_deploy_url(context) -> str:
     return f"{context.base_url}/contract/deploy"
 
 
+def contract_targets_url(context) -> str:
+    return f"{context.base_url}/contract/targets"
+
+
+def contract_target_designate_url(context) -> str:
+    return f"{context.base_url}/contract/target/designate"
+
+
 def contract_deployment_callback_url(context) -> str:
     return f"{context.base_url}/contract/deployment/callback"
 

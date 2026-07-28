@@ -178,6 +178,8 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("exp_date", String, "The timestamp when the contract expired")
 	Attribute("exp_policy", String, "The policy what should happen if the contract is expired")
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("latest_template_did", String, "The DID of the latest template for this contract")
 	Attribute("template_is_deprecated", Boolean, "Whether the template is deprecated")
@@ -289,6 +291,9 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract (DCS-FR-CWE-31, DCS-FR-CWE-09)")
 	Attribute("kpi_violations", ArrayOf(String), "Metric names whose latest reported value violates its contractual SLA threshold (DCS-FR-CWE-09)")
+
+	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
+	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_data", "negotiations", "contract_version", "template_did", "template_version")
 })
@@ -600,6 +605,7 @@ var ContractDeployRequest = Type("ContractDeployRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Optional: dispatch to this registered target instead of the one the contract designates (ADR-25). A re-dispatch may be directed elsewhere; the contract's own designation is unchanged.")
 
 	Required("did", "updated_at")
 })
@@ -613,8 +619,182 @@ var ContractDeployResponse = Type("ContractDeployResponse", func() {
 	Attribute("timestamp", String, "When the deployment was dispatched")
 	Attribute("correlation_id", String, "Correlation ID for matching the target's later ack/status/KPI callbacks")
 	Attribute("payload", Any, "The machine-readable JSON-LD payload sent to the contract target, including the odrl:Set policy")
+	Attribute("target_id", String, "Registered target system the contract was dispatched to (ADR-25)")
+	Attribute("target_name", String, "Name of that target system, as configured")
 
 	Required("did", "contract_version", "content_hash", "timestamp", "correlation_id", "payload")
+})
+
+// ---- Contract target registry (ADR-25, UC-09-01 system configuration) -------
+
+var ContractTarget = Type("ContractTarget", func() {
+	Description("A configured Contract Target System deployments may be dispatched to (DCS-IR-SI-05)")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Disabled targets stay referenceable so a contract naming one keeps a readable destination, but dispatch to them is refused")
+	Attribute("created_at", String, "When the target was registered")
+	Attribute("updated_at", String, "When the target was last changed")
+	Attribute("oauth_client_id", String, "The OAuth2 client this target authenticates its callbacks as. Absent until a credential is issued (ADR-27)")
+	Attribute("secret_issued_at", String, "When the current secret was issued. The secret itself is not stored and cannot be read back")
+
+	Required("id", "name", "url", "enabled")
+})
+
+// ---- Machine credentials (ADR-27) -------------------------------------------
+
+var MachineCredential = Type("MachineCredential", func() {
+	Description("A freshly issued machine credential. The secret is returned by this response and by no other: Hydra keeps only a hash of it, so it cannot be read back and must be rotated if lost")
+
+	Attribute("client_id", String, "OAuth2 client id to authenticate as")
+	Attribute("client_secret", String, "The secret, shown this once")
+	Attribute("token_url", String, "Token endpoint to present it to, with grant_type=client_credentials")
+	Attribute("issued_at", String, "When it was issued")
+
+	Required("client_id", "client_secret")
+})
+
+var MachineIdentity = Type("MachineIdentity", func() {
+	Description("A registered non-human caller: an SRS Table 5 System User reaching DCS over its API (ADR-27)")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("oauth_client_id", String, "The OAuth2 client it authenticates as")
+	Attribute("participant_did", String, "Identity its actions are attributed to in the audit trail")
+	Attribute("roles", ArrayOf(String), "What it may do. Read from here by client_id and never from the token, so a caller cannot widen its own reach")
+	Attribute("description", String, "What this integration is, for whoever inherits it")
+	Attribute("enabled", Boolean, "A disabled identity is refused at once, without waiting for its secret to expire")
+	Attribute("secret_issued_at", String, "When the current secret was issued")
+	Attribute("created_at", String, "When it was registered")
+	Attribute("updated_at", String, "When it was last changed")
+
+	Required("id", "name", "oauth_client_id", "participant_did", "roles", "enabled")
+})
+
+var MachineIdentityListRequest = Type("MachineIdentityListRequest", func() {
+	Description("List the registered machine identities")
+	Token("token", String, "JWT token")
+})
+
+var MachineIdentityListResponse = Type("MachineIdentityListResponse", func() {
+	Description("The registered machine identities")
+	Attribute("identities", ArrayOf(MachineIdentity), "Registered identities")
+	Required("identities")
+})
+
+var MachineIdentityCreateRequest = Type("MachineIdentityCreateRequest", func() {
+	Description("Register a machine identity and issue its first credential")
+	Token("token", String, "JWT token")
+
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("participant_did", String, "Identity its actions are attributed to")
+	Attribute("roles", ArrayOf(String), "What it may do")
+	Attribute("description", String, "What this integration is")
+
+	Required("name", "participant_did", "roles")
+})
+
+var MachineIdentityCreateResponse = Type("MachineIdentityCreateResponse", func() {
+	Description("The registered identity together with its one-time credential")
+
+	Attribute("identity", MachineIdentity, "The registered identity")
+	Attribute("credential", MachineCredential, "Its secret, shown this once")
+
+	Required("identity", "credential")
+})
+
+var MachineIdentityUpdateRequest = Type("MachineIdentityUpdateRequest", func() {
+	Description("Change a registered machine identity. The credential is untouched: rotate it separately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Attribute("name", String, "Operator-facing name")
+	Attribute("participant_did", String, "Identity its actions are attributed to")
+	Attribute("roles", ArrayOf(String), "What it may do")
+	Attribute("description", String, "What this integration is")
+	Attribute("enabled", Boolean, "Whether it may call at all")
+
+	Required("id", "name", "participant_did", "roles", "enabled")
+})
+
+var MachineIdentityDeleteRequest = Type("MachineIdentityDeleteRequest", func() {
+	Description("Remove a machine identity and the OAuth2 client behind it, so the credential cannot outlive the entry")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Required("id")
+})
+
+var MachineIdentityRotateRequest = Type("MachineIdentityRotateRequest", func() {
+	Description("Issue a new secret for a registered identity. The previous one stops working immediately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered identity")
+	Required("id")
+})
+
+var ContractTargetRotateRequest = Type("ContractTargetRotateRequest", func() {
+	Description("Issue a new callback credential for a registered target. The previous one stops working immediately")
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Required("id")
+})
+
+var ContractTargetListRequest = Type("ContractTargetListRequest", func() {
+	Description("List the registered Contract Target Systems")
+	Token("token", String, "JWT token")
+})
+
+var ContractTargetCreateRequest = Type("ContractTargetCreateRequest", func() {
+	Description("Register a Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("name", "url")
+})
+
+var ContractTargetUpdateRequest = Type("ContractTargetUpdateRequest", func() {
+	Description("Change a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+	Attribute("name", String, "Operator-facing name, unique within this deployment")
+	Attribute("url", String, "Endpoint the deployment payload is POSTed to")
+	Attribute("description", String, "What this system is, for whoever picks it")
+	Attribute("enabled", Boolean, "Whether deployments may be dispatched to it")
+
+	Required("id", "name", "url")
+})
+
+var ContractTargetDeleteRequest = Type("ContractTargetDeleteRequest", func() {
+	Description("Remove a registered Contract Target System")
+
+	Token("token", String, "JWT token")
+
+	Attribute("id", String, "Identifier of the registered target")
+
+	Required("id")
+})
+
+var ContractTargetDesignateRequest = Type("ContractTargetDesignateRequest", func() {
+	Description("Designate the target system a contract deploys to (ADR-25)")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+	Attribute("target_id", String, "Registered target to designate, or empty to clear the designation")
+
+	Required("did", "updated_at")
 })
 
 var ContractDeploymentReceiptPayload = Type("ContractDeploymentReceiptPayload", func() {
@@ -633,9 +813,9 @@ var ContractDeploymentKPIReport = Type("ContractDeploymentKPIReport", func() {
 })
 
 var ContractDeploymentCallbackRequest = Type("ContractDeploymentCallbackRequest", func() {
-	Description("Contract Target System -> DCS deployment callback: ack/status update and/or KPI report, authenticated via a shared-secret header (not a JWT)")
+	Description("Contract Target System -> DCS deployment callback: ack/status update and/or KPI report, authenticated as the target's own OAuth2 client (ADR-27)")
 
-	Attribute("callback_secret", String, "Shared secret proving the caller is the configured contract target")
+	Token("token", String, "JWT token issued to the target system")
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("correlation_id", String, "Correlation ID from the original deployment")
 	Attribute("status", String, "Deployment status (e.g. ACKNOWLEDGED)")
@@ -1402,22 +1582,278 @@ var _ = Service("ContractWorkflowEngine", func() {
 		})
 	})
 
+	// ---- Contract target registry (ADR-25) ---------------------------------
+
+	Method("listContractTargets", func() {
+		Description("List the registered Contract Target Systems a contract may be deployed to (ADR-25).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		// Readable by whoever has to pick one, writable only by the administrator.
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetListRequest)
+		Result(ArrayOf(ContractTarget))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/targets")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("createContractTarget", func() {
+		Description("Register a Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetCreateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("updateContractTarget", func() {
+		Description("Change a registered Contract Target System (UC-09-01 system configuration).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetUpdateRequest)
+		Result(ContractTarget)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			PUT("/contract/targets")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deleteContractTarget", func() {
+		Description("Remove a registered Contract Target System. Refused while a contract still designates it, so no contract is left undeployable with no record of where it was meant to go.")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetDeleteRequest)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			DELETE("/contract/targets")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("designateContractTarget", func() {
+		Description("Designate the target system a contract deploys to (ADR-25). The automatic trigger on signing completion has no human present to choose one, so the destination belongs to the contract.")
+		Meta("dcs:requirements", "DCS-FR-SM-12", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Contract Management Dashboard")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractTargetDesignateRequest)
+		Result(ContractRetrieveByIDResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/target/designate")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("rotateContractTargetSecret", func() {
+		Description("Issue a new callback credential for a registered Contract Target System. The secret is returned once and the previous one stops working immediately (ADR-27).")
+		Meta("dcs:requirements", "DCS-IR-SI-05")
+		Meta("dcs:ui", "Target System Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(ContractTargetRotateRequest)
+		Result(MachineCredential)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/targets/{id}/credential")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("listMachineIdentities", func() {
+		Description("List the registered machine identities: the SRS Table 5 System Users that reach DCS over its API (ADR-27).")
+		Meta("dcs:requirements", "DCS-FR-UM-01")
+		Meta("dcs:ui", "System User Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityListRequest)
+		Result(MachineIdentityListResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/machine-identities")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("createMachineIdentity", func() {
+		Description("Register a machine identity and issue its first credential. The secret is returned once and cannot be read back (ADR-27).")
+		Meta("dcs:requirements", "DCS-FR-UM-01")
+		Meta("dcs:ui", "System User Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityCreateRequest)
+		Result(MachineIdentityCreateResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/machine-identities")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("updateMachineIdentity", func() {
+		Description("Change a registered machine identity. Disabling one refuses its calls at once, without waiting for the secret to expire (ADR-27).")
+		Meta("dcs:requirements", "DCS-FR-UM-01")
+		Meta("dcs:ui", "System User Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityUpdateRequest)
+		Result(MachineIdentity)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			PUT("/machine-identities/{id}")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("deleteMachineIdentity", func() {
+		Description("Remove a machine identity and the OAuth2 client behind it, so no credential outlives the entry that justified it (ADR-27).")
+		Meta("dcs:requirements", "DCS-FR-UM-01")
+		Meta("dcs:ui", "System User Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityDeleteRequest)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			DELETE("/machine-identities/{id}")
+			Response(StatusNoContent)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("rotateMachineIdentitySecret", func() {
+		Description("Issue a new secret for a registered machine identity. It is returned once and the previous one stops working immediately (ADR-27).")
+		Meta("dcs:requirements", "DCS-FR-UM-01")
+		Meta("dcs:ui", "System User Administration")
+
+		Security(JWTAuth, func() {
+			Scope("Sys. Administrator")
+		})
+
+		Payload(MachineIdentityRotateRequest)
+		Result(MachineCredential)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/machine-identities/{id}/credential")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("deploymentCallback", func() {
-		Description("Accept a deployment ack/status update and/or KPI report from the configured Contract Target System, authenticated by a shared-secret header (DCS-IR-SI-05).")
+		Description("Accept a deployment ack/status update and/or KPI report from the Contract Target System the deployment was dispatched to, authenticated as that target's own OAuth2 client (DCS-IR-SI-05, ADR-27).")
 		Meta("dcs:requirements", "DCS-IR-SI-05")
 
-		NoSecurity()
+		Security(JWTAuth, func() {
+			Scope("Contract Target System")
+		})
 
 		Payload(ContractDeploymentCallbackRequest)
 		Result(ContractDeploymentCallbackResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
-		Error("unauthorized", ErrorResult, "Missing or invalid shared secret")
+		Error("unauthorized", ErrorResult, "Not the target system this deployment was dispatched to")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/contract/deployment/callback")
-			Header("callback_secret:X-Deployment-Callback-Secret")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("unauthorized", StatusUnauthorized)

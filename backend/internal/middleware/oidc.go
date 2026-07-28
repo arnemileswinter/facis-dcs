@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base/datatype/userrole"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -18,10 +19,18 @@ type HydraJWTConfig struct {
 	InternalIssuerURL string
 	// Example: "dcs-client". Hydra JWT access tokens use the client_id claim (RFC 9068).
 	ClientID string
-	// SystemClients are the machine identities of the SRS System User classes
-	// (SRS §2.4 Table 5): integrated platforms and orchestration layers that
-	// reach DCS over its API instead of through a browser.
-	SystemClients []SystemClient
+	// SystemClients resolves the machine identities of the SRS System User
+	// classes (SRS §2.4 Table 5): integrated platforms and orchestration layers
+	// that reach DCS over its API instead of through a browser. Nil accepts no
+	// machine caller at all.
+	SystemClients MachineIdentityResolver
+}
+
+// MachineIdentityResolver looks up a registered machine caller by the client_id
+// its access token carries. It is satisfied by the machineidentity registry;
+// the interface keeps this package from depending on storage.
+type MachineIdentityResolver interface {
+	FindByClientID(ctx context.Context, clientID string) (*machineidentity.Identity, error)
 }
 
 // SystemClient is one non-human caller, authenticated by the OAuth2 client
@@ -107,10 +116,13 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
-	// A system client's token is a client-credentials token: Hydra signed it, so
+	// A machine caller's token is a client-credentials token: Hydra signed it, so
 	// the client secret was presented, but no OID4VP ceremony ran and there are
-	// no ext claims to read. Its authority comes from configuration.
-	if system, ok := v.systemClientFor(claims); ok {
+	// no ext claims to read. Its authority is looked up by client_id in the
+	// registry, never taken from the token.
+	if system, ok, err := v.systemClientFor(ctx, claims); err != nil {
+		return nil, err
+	} else if ok {
 		return &TokenInfo{
 			Roles:          system.Roles,
 			HolderDID:      system.ClientID,
@@ -134,19 +146,61 @@ func (v *HydraJWTValidator) ValidateToken(ctx context.Context, token string) (*T
 	}, nil
 }
 
-// systemClientFor matches a token against the configured system clients. Only
-// an exact client_id/audience match counts — a system client's rights are not
+// systemClientFor resolves a token against the machine identity registry. Only
+// an exact client_id/audience match counts — a machine caller's rights are not
 // something a token can ask for.
-func (v *HydraJWTValidator) systemClientFor(claims Claims) (SystemClient, bool) {
-	for _, system := range v.config.SystemClients {
-		if system.ClientID == "" {
+//
+// A disabled entry resolves to no caller rather than to an unauthorised error:
+// the token then falls through to the human path and is refused there, so
+// disabling an integration revokes it without waiting for its secret to expire.
+func (v *HydraJWTValidator) systemClientFor(ctx context.Context, claims Claims) (SystemClient, bool, error) {
+	if v.config.SystemClients == nil {
+		return SystemClient{}, false, nil
+	}
+
+	for _, candidate := range clientIDCandidates(claims) {
+		identity, err := v.config.SystemClients.FindByClientID(ctx, candidate)
+		if err != nil {
+			return SystemClient{}, false, fmt.Errorf("could not resolve the calling machine identity: %w", err)
+		}
+		if identity == nil || !identity.Enabled {
 			continue
 		}
-		if matchesClientID(claims, system.ClientID) {
-			return system, true
+
+		roles, err := identity.Roles()
+		if err != nil {
+			return SystemClient{}, false, err
+		}
+		return SystemClient{
+			ClientID:       identity.OAuthClientID,
+			ParticipantDID: identity.ParticipantDID,
+			Roles:          roles,
+		}, true, nil
+	}
+	return SystemClient{}, false, nil
+}
+
+// clientIDCandidates lists the identifiers a token could name itself by. Hydra
+// puts the client on client_id (RFC 9068), but a token that only carries an
+// audience is still resolvable, which is what the human path relies on too.
+func clientIDCandidates(claims Claims) []string {
+	candidates := []string{}
+	if id := strings.TrimSpace(claims.ClientID); id != "" {
+		candidates = append(candidates, id)
+	}
+	switch aud := claims.Audience.(type) {
+	case string:
+		if trimmed := strings.TrimSpace(aud); trimmed != "" {
+			candidates = append(candidates, trimmed)
+		}
+	case []interface{}:
+		for _, item := range aud {
+			if audience, ok := item.(string); ok && strings.TrimSpace(audience) != "" {
+				candidates = append(candidates, strings.TrimSpace(audience))
+			}
 		}
 	}
-	return SystemClient{}, false
+	return candidates
 }
 
 // extractRoles extracts DCS roles from a Hydra access token.

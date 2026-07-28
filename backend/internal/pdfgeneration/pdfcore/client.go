@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -31,15 +32,37 @@ type Client struct {
 	// never lets pdf-core see key material, so every C2PA signature is produced
 	// here and posted back to pdf-core's /c2pa/embed.
 	sign C2PASignFunc
+	// authority is this instance's DID, recorded as the asserting party in every
+	// C2PA lifecycle assertion pdf-core writes for this client's renders. It is
+	// sent per request because pdf-core is stateless and may be shared.
+	authority string
 }
+
+// lifecycleAuthorityHeader carries the asserting instance's DID to pdf-core.
+const lifecycleAuthorityHeader = "X-DCS-Lifecycle-Authority"
 
 // New returns a Client pointed at baseURL. sign is the in-process dcs-c2pa
 // signer the two-step render flow uses; it must be non-nil.
 func New(baseURL string, sign C2PASignFunc) *Client {
+	return NewWithAuthority(baseURL, sign, "")
+}
+
+// NewWithAuthority returns a Client that names issuerDID as the party asserting
+// the lifecycle events of every render it requests.
+func NewWithAuthority(baseURL string, sign C2PASignFunc, issuerDID string) *Client {
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		sign:       sign,
+		authority:  strings.TrimSpace(issuerDID),
+	}
+}
+
+// setLifecycleAuthority tags a render request with this instance's DID, leaving
+// the header off entirely when none is configured.
+func (c *Client) setLifecycleAuthority(req *http.Request) {
+	if c.authority != "" {
+		req.Header.Set(lifecycleAuthorityHeader, c.authority)
 	}
 }
 
@@ -131,6 +154,7 @@ func (c *Client) Download(ctx context.Context, jsonld []byte) (pdf []byte, versi
 		return nil, "", fmt.Errorf("pdf-core download request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/ld+json")
+	c.setLifecycleAuthority(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -189,6 +213,7 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 		return nil, "", fmt.Errorf("pdf-core update request: %w", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.setLifecycleAuthority(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -208,6 +233,38 @@ func (c *Client) Update(ctx context.Context, existingPDF, jsonld, vcBytes []byte
 		return nil, "", fmt.Errorf("pdf-core update: %w", err)
 	}
 	return pdf, version, nil
+}
+
+// Reanchor appends a provenance-only C2PA manifest binding the signed PDF's
+// current bytes (ADR-26), returning the re-anchored PDF. It changes no payload:
+// the signature is applied after the lifecycle manifest so that it commits to
+// the provenance, and this restores a whole-file binding over the result
+// without touching the signature's byte range.
+func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) ([]byte, error) {
+	url := c.BaseURL + "/render/reanchor"
+	if manifestURL != "" {
+		url += "?manifest_url=" + neturl.QueryEscape(manifestURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(pdf))
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+	c.setLifecycleAuthority(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return nil, err
+	}
+	var prepared preparedC2PA
+	if err := json.NewDecoder(resp.Body).Decode(&prepared); err != nil {
+		return nil, fmt.Errorf("pdf-core reanchor decode prepared: %w", err)
+	}
+	return c.signAndEmbed(ctx, prepared)
 }
 
 // EmbedEvidence posts pdf + evidence to POST /evidence/embed and returns the

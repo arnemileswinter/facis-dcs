@@ -9,6 +9,7 @@ from . import template_workflow_steps  # noqa: F401
 from . import schema_api_steps  # noqa: F401
 from . import dcs_contract_hierarchy_steps  # noqa: F401
 from . import template_catalogue_steps  # noqa: F401
+from . import federated_catalogue_deployment_lifecycle_steps  # noqa: F401
 from . import template_integrity_audit_steps  # noqa: F401
 from . import contract_creation_extra_steps  # noqa: F401
 from . import contract_approval_extra_steps  # noqa: F401

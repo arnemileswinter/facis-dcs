@@ -14,13 +14,19 @@ import (
 )
 
 // Anchors stamped into newly produced documents: the hub-served versioned
-// URLs for the JSON-LD context ("@context"), the SHACL shapes
-// ("sh:shapesGraph"), and the validation profile ("dcterms:conformsTo").
-// Re-pointed at startup and on every hub activation (SetSchemaAnchorRefs).
+// URLs for the JSON-LD context ("@context") and the SHACL shapes
+// ("sh:shapesGraph"). Re-pointed at startup and on every hub activation
+// (SetSchemaAnchorRefs).
+//
+// No validation profile is stamped. The anchor named one hardcoded entry
+// whose rules are about the DCS envelope — a contract root and its party
+// roles — so claiming conformance to it said nothing about the vocabulary a
+// contract's own data is modelled against, which may be any registered SHACL
+// library (ADR-23). The profile's rules still run at validation time; only
+// the claim in the document is gone.
 var (
 	schemaRefJSONLDContext = SchemaJSONLDContextV1
 	schemaRefSHACLShapes   = SchemaSHACLShapesV1
-	schemaRefProfile       = ""
 	// canonicalOntologyIRIs is the active hub context's prefix -> IRI map;
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
@@ -28,15 +34,12 @@ var (
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
 // the Semantic Hub's served URLs.
-func SetSchemaAnchorRefs(contextRef, shapesRef, profileRef string) {
+func SetSchemaAnchorRefs(contextRef, shapesRef string) {
 	if contextRef != "" {
 		schemaRefJSONLDContext = contextRef
 	}
 	if shapesRef != "" {
 		schemaRefSHACLShapes = shapesRef
-	}
-	if profileRef != "" {
-		schemaRefProfile = profileRef
 	}
 }
 
@@ -387,9 +390,6 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 	// versions it was authored under.
 	if _, exists := data["sh:shapesGraph"]; !exists {
 		data["sh:shapesGraph"] = map[string]any{"@id": schemaRefSHACLShapes}
-	}
-	if _, exists := data["dcterms:conformsTo"]; !exists && schemaRefProfile != "" {
-		data["dcterms:conformsTo"] = map[string]any{"@id": schemaRefProfile}
 	}
 	if _, ok := topLevelValue(data, "contractData").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "contractData"); !exists {

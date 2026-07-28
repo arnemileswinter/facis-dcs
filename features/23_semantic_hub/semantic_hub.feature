@@ -5,7 +5,7 @@
 # docs/semantic-ontology). Reads are public — produced artifacts carry
 # hub-served anchors external verifiers resolve without a DCS login —
 # writes are Template Manager-scoped. The normalization layer anchors every
-# produced canonical document to the hub (@context URL, sh:shapesGraph, dcterms:conformsTo) and rejects
+# produced canonical document to the hub (@context URL, sh:shapesGraph) and rejects
 # documents that redefine a hub-declared ontology prefix.
 
 @DCS-FR-TR-03 @UC-02-08

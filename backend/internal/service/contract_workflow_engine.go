@@ -9,6 +9,7 @@ import (
 	"log"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/dcstodcs"
@@ -20,6 +21,7 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -52,6 +54,7 @@ type contractWorkflowEnginesrvc struct {
 	SRepo                db2.SyncRepository
 	CTRepo               db.ContractTemplateRepo
 	DeploymentRepo       db.DeploymentRepo
+	TargetRepo           db.ContractTargetRepo
 	FCClient             *fcclient.FederatedCatalogueClient
 	DIDDocument          identity.DIDDocument
 	ATrailReader         base.AuditTrailReader
@@ -61,6 +64,12 @@ type contractWorkflowEnginesrvc struct {
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
+	// MachineIdentities is the registry every machine caller is resolved
+	// against, and HydraAdmin provisions the OAuth2 clients they present
+	// (ADR-27).
+	MachineIdentities    machineidentity.Repo
+	HydraAdmin           MachineCredentialIssuer
+	HydraPublicIssuerURL string
 	auth.JWTAuthenticator
 }
 
@@ -70,7 +79,10 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	sRepo db2.SyncRepository, trustPool *identity.EUTrustPool,
 	fcClient *fcclient.FederatedCatalogueClient, auditTrailReader base.AuditTrailReader, didDocument identity.DIDDocument,
 	ipfsClient *ipfs.APIClient, archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
-	deploymentRepo db.DeploymentRepo, targetClient command.ContractTargetClient) contractworkflowengine.Service {
+	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
+	targetClient command.ContractTargetClient,
+	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
+	hydraPublicIssuerURL string) contractworkflowengine.Service {
 
 	return &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -83,6 +95,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		SRepo:            sRepo,
 		CTRepo:           ctRepo,
 		DeploymentRepo:   deploymentRepo,
+		TargetRepo:       targetRepo,
 		FCClient:         fcClient,
 		DIDDocument:      didDocument,
 		ATrailReader:     auditTrailReader,
@@ -91,6 +104,10 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,
+
+		MachineIdentities:    machineIdentities,
+		HydraAdmin:           hydraAdmin,
+		HydraPublicIssuerURL: hydraPublicIssuerURL,
 	}
 }
 
@@ -108,6 +125,12 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
+		// Deployment refusals are the operator's to fix — no target designated,
+		// one that is not registered, one that is disabled. Returning 500 made
+		// each read as an outage rather than as the answer to what was asked.
+		errors.Is(err, command.ErrNoTargetDesignated) ||
+		errors.Is(err, command.ErrTargetNotRegistered) ||
+		errors.Is(err, command.ErrTargetDisabled) ||
 		errors.Is(err, command.ErrSigningIncomplete) ||
 		errors.Is(err, command.ErrContractNotRenewable) ||
 		errors.Is(err, command.ErrNotAParty) ||
@@ -430,6 +453,8 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			LatestTemplateDid:    item.LatestTemplateDID,
 			TemplateIsDeprecated: item.TemplateIsDeprecated,
 			ParentContractDid:    item.ParentContractDID,
+			TargetID:             item.TargetID,
+			TargetName:           item.TargetName,
 		})
 	}
 
@@ -551,6 +576,24 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
+	// The designated target's name, so the contract view can say where it
+	// deploys to without a second round trip (ADR-25).
+	var targetName *string
+	if contractResult.TargetID != nil {
+		targetTx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		target, err := s.TargetRepo.ReadTarget(ctx, targetTx, *contractResult.TargetID)
+		_ = targetTx.Rollback()
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		if target != nil {
+			targetName = &target.Name
+		}
+	}
+
 	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String()))
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
 		Did:                contractResult.DID,
@@ -573,6 +616,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		Responsible:        contractResult.Responsible,
 		Kpis:               kpis,
 		KpiViolations:      kpiViolations,
+		TargetID:           contractResult.TargetID,
+		TargetName:         targetName,
 	}, nil
 }
 
@@ -1471,6 +1516,7 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		DB:             s.DB,
 		CRepo:          s.CRepo,
 		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
 	}
 	localPeer, err := s.DIDDocument.GetID()
@@ -1482,6 +1528,12 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		UpdatedAt:   updatedAt,
 		RequestedBy: middleware.GetParticipantID(ctx),
 		LocalPeer:   localPeer,
+		TargetIDOverride: func() string {
+			if req.TargetID != nil {
+				return *req.TargetID
+			}
+			return ""
+		}(),
 	})
 	if err != nil {
 		return nil, mapContractCommandError(err)
@@ -1494,6 +1546,8 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		Timestamp:       result.Timestamp.Format(time.RFC3339Nano),
 		CorrelationID:   result.CorrelationID,
 		Payload:         result.Payload,
+		TargetID:        &result.TargetID,
+		TargetName:      &result.TargetName,
 	}, nil
 }
 
@@ -1502,12 +1556,13 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	// The target authenticates as itself: for a machine caller the validated
+	// token's client_id is carried as the holder identity, and the handler only
+	// accepts it for deployments dispatched to that target (ADR-27).
 	cmd := command.DeploymentCallbackCmd{
-		DID:           req.Did,
-		CorrelationID: req.CorrelationID,
-	}
-	if req.CallbackSecret != nil {
-		cmd.Secret = *req.CallbackSecret
+		DID:            req.Did,
+		CorrelationID:  req.CorrelationID,
+		CallerClientID: middleware.GetHolderDID(ctx),
 	}
 	if req.Status != nil {
 		cmd.Status = *req.Status
@@ -1538,6 +1593,7 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 		DB:             s.DB,
 		CRepo:          s.CRepo,
 		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
 		ArchiveTSA:     s.ArchiveTSA,
 	}
 	if err := handler.Handle(ctx, cmd); err != nil {
@@ -1565,4 +1621,222 @@ func (s *contractWorkflowEnginesrvc) Resolve(ctx context.Context, req *contractw
 		return nil, err
 	}
 	return contract.ContractData, nil
+}
+
+// ---- Contract target registry (ADR-25) -------------------------------------
+
+// contractTargetView maps a stored registry entry to its API shape.
+func contractTargetView(target *db.ContractTarget) *contractworkflowengine.ContractTarget {
+	view := &contractworkflowengine.ContractTarget{
+		ID:        target.ID,
+		Name:      target.Name,
+		URL:       target.URL,
+		Enabled:   target.Enabled,
+		CreatedAt: ptr(target.CreatedAt.UTC().Format(time.RFC3339)),
+		UpdatedAt: ptr(target.UpdatedAt.UTC().Format(time.RFC3339)),
+	}
+	if target.Description != nil {
+		view.Description = target.Description
+	}
+	// Which client the target authenticates its callbacks as, and how old that
+	// credential is. The secret itself is not here and is not stored: Hydra
+	// keeps only a hash of it (ADR-27).
+	if target.OAuthClientID != nil {
+		view.OauthClientID = target.OAuthClientID
+	}
+	if target.SecretIssuedAt != nil {
+		view.SecretIssuedAt = ptr(target.SecretIssuedAt.UTC().Format(time.RFC3339))
+	}
+	return view
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func (s *contractWorkflowEnginesrvc) ListContractTargets(ctx context.Context, req *contractworkflowengine.ContractTargetListRequest) (res []*contractworkflowengine.ContractTarget, err error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	targets, err := s.TargetRepo.ListTargets(ctx, tx)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	res = make([]*contractworkflowengine.ContractTarget, 0, len(targets))
+	for i := range targets {
+		res = append(res, contractTargetView(&targets[i]))
+	}
+	return res, nil
+}
+
+func (s *contractWorkflowEnginesrvc) CreateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetCreateRequest) (res *contractworkflowengine.ContractTarget, err error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
+	}
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	created, err := s.TargetRepo.CreateTarget(ctx, tx, db.ContractTarget{
+		Name:        strings.TrimSpace(req.Name),
+		URL:         strings.TrimSpace(req.URL),
+		Description: req.Description,
+		Enabled:     enabled,
+		CreatedBy:   middleware.GetParticipantID(ctx),
+	})
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	return contractTargetView(created), nil
+}
+
+func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetUpdateRequest) (res *contractworkflowengine.ContractTarget, err error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
+	}
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	updated, err := s.TargetRepo.UpdateTarget(ctx, tx, db.ContractTarget{
+		ID:          req.ID,
+		Name:        strings.TrimSpace(req.Name),
+		URL:         strings.TrimSpace(req.URL),
+		Description: req.Description,
+		Enabled:     enabled,
+	})
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+	if updated == nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s is registered", req.ID))
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	return contractTargetView(updated), nil
+}
+
+func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetDeleteRequest) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Refused while a contract still names it: removing the entry would leave
+	// those contracts undeployable with no record of where they were meant to
+	// go. The admin repoints them first (ADR-25).
+	designating, err := s.TargetRepo.CountContractsDesignating(ctx, tx, req.ID)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	if designating > 0 {
+		return contractworkflowengine.MakeBadRequest(fmt.Errorf(
+			"%d contract(s) still deploy to this target system; designate another one for them first", designating))
+	}
+	if err := s.TargetRepo.DeleteTarget(ctx, tx, req.ID); err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	return nil
+}
+
+func (s *contractWorkflowEnginesrvc) DesignateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetDesignateRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// An empty target_id clears the designation; anything else must name a
+	// registered, enabled entry. Designating a disabled target would produce a
+	// contract that deploys nowhere and only says so at signing time.
+	var targetID *string
+	if req.TargetID != nil && strings.TrimSpace(*req.TargetID) != "" {
+		id := strings.TrimSpace(*req.TargetID)
+		target, err := s.TargetRepo.ReadTarget(ctx, tx, id)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		if target == nil {
+			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s is registered", id))
+		}
+		if !target.Enabled {
+			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("target system %q is disabled and cannot receive deployments", target.Name))
+		}
+		targetID = &id
+	}
+
+	// Staleness is compared at second granularity against the stored value,
+	// the way every other contract mutation does it: updated_at is handed to
+	// clients as RFC3339, which carries no sub-second part, so an exact match
+	// could never succeed.
+	stored, err := s.CRepo.ReadDataByDID(ctx, tx, req.Did)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if stored == nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no contract %s", req.Did))
+	}
+	if updatedAt.Unix() < stored.UpdatedAt.Unix() {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("the contract changed since it was read; reload and try again"))
+	}
+
+	changed, err := s.TargetRepo.DesignateForContract(ctx, tx, req.Did, targetID)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if !changed {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no contract %s", req.Did))
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	return s.RetrieveByID(ctx, &contractworkflowengine.ContractRetrieveByIDRequest{Did: req.Did, Token: req.Token})
 }
