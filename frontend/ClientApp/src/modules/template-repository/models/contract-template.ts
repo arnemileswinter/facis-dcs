@@ -9,6 +9,9 @@ export interface SemanticCondition {
   entityType?: SemanticEntityType
   entityRole?: SemanticEntityRole
   parameters: SemanticConditionParameter[]
+  /** Accent color of the declared asset instance this condition belongs to —
+   *  carried onto its placeholder chips so same-class assets stay apart. */
+  accentColor?: string
 }
 
 export type SemanticParameterType = ParameterType

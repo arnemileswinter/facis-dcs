@@ -446,11 +446,22 @@ export const useDcsDraftStore = defineStore(storeId, {
       title: string
       content: DcsContentSegment[]
       fields: { id: string; parameterName: string; domainFieldIri: string; label?: string }[]
+      /** Declared assets: each becomes a typed dcs:contractData object whose
+       *  properties reference the declared fields — the ODRL target names
+       *  the object, never a pseudo-field (ADR-23). */
+      assets?: { id: string; classIri: string; properties: { fieldId: string; path: string }[] }[]
       rule: OdrlRule | null
     }): void {
       const blockId = this.addClause({ title: payload.title, content: payload.content })
       for (const f of payload.fields) {
         this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri, f.label))
+      }
+      for (const asset of payload.assets ?? []) {
+        this.contractData.push({
+          '@id': asset.id,
+          '@type': asset.classIri,
+          ...Object.fromEntries(asset.properties.map((p) => [p.path, { '@id': p.fieldId }])),
+        })
       }
       if (payload.rule) {
         this.policies.push({ ...payload.rule, 'dcs:prose': { '@id': blockId } })
