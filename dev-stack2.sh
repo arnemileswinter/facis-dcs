@@ -35,21 +35,42 @@ HELM_VALUES_FILE="deployment/helm/values.dev2.yml"
 BACKEND_ENV_FILE=".env.dev2"
 BACKEND_BUILD_OUTPUT="tmp2/main2"
 
+# What this stack runs is decided by the values file, not by this script.
+# Reading the toggles from there keeps the two from drifting: waiting for a
+# component the values file disables aborts the run under `set -e`.
+values_enabled() {
+  python3 - "$HELM_VALUES_FILE" "$1" <<'PYEOF'
+import sys, yaml
+values = yaml.safe_load(open(sys.argv[1])) or {}
+section = values.get(sys.argv[2])
+enabled = bool(section.get("enabled")) if isinstance(section, dict) else False
+sys.exit(0 if enabled else 1)
+PYEOF
+}
+
 echo "=== Setting up dev environment for instance B (:8992 / :5174) ==="
 
 echo "Updating Helm dependencies and deploying to Kubernetes..."
 helm dependency update "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
 
-echo "Waiting for Federated Catalogue to become ready..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
-  --timeout=10m
+if values_enabled federatedCatalogue; then
+  echo "Waiting for Federated Catalogue to become ready..."
+  kubectl wait --for=condition=ready pod \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
+    --timeout=10m
+else
+  echo "Federated Catalogue disabled in $HELM_VALUES_FILE — skipping"
+fi
 
-echo "Waiting for statuslist-service..."
-kubectl wait --for=condition=ready pod \
-  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
-  --timeout=5m
+if values_enabled statuslistService; then
+  echo "Waiting for statuslist-service..."
+  kubectl wait --for=condition=ready pod \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
+    --timeout=5m
+else
+  echo "statuslist-service disabled in $HELM_VALUES_FILE — skipping"
+fi
 
 # pdf-core is shared with instance A (same PDF_CORE_URL=http://localhost:8080
 # in both backend/.env.dev1 and backend/.env.dev2) — verify it's already up

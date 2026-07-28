@@ -127,8 +127,46 @@ nats:
 # dev instance needs it.
 # A dangling apiURL would crash-loop the backend (DCS's blocking
 # fcschemas.SyncWithRetry at startup), same failure IONOS hit.
+# The Federated Catalogue backs template publishing, so local dev runs it.
+# The backend runs on the host under air, so both fc-service and its Keycloak
+# are exposed on fixed NodePorts that backend/.env.dev1 points at.
 federatedCatalogue:
-  enabled: false
+  enabled: true
+  apiURL: "http://fc-service:8081"
+  oauth:
+    # The service-account client the chart's realm actually provisions. It is
+    # not "dcs-fc-client": nothing creates that, so the token grant 401s.
+    clientID: "federated-catalogue"
+    clientSecret: "**********"
+
+fcservice:
+  enabled: true
+  portal:
+    enabled: false
+  realmProvision:
+    enabled: true
+    # The backend runs on the host under air, so there is no DCS image in this
+    # cluster for the job to borrow. It only needs a shell, curl and jq.
+    image: "alpine:3.19"
+  service:
+    type: NodePort
+    nodePort: 30081
+  keycloak:
+    # The backend runs on the host and mints its FC token through the NodePort,
+    # so the token's iss is the localhost URL. fc-service must expect that same
+    # issuer or it rejects every call with 401. It still fetches the signing
+    # keys in-cluster: the JWKS URL is configured separately.
+    issuerUrl: "http://localhost:30080/auth"
+
+# Keycloak mints FC tokens with the issuer the caller used, so the host-side
+# backend and the in-cluster fc-service must agree on one address: the NodePort.
+fcKeycloakApp:
+  service:
+    type: NodePort
+    nodePort: 30080
+
+fcKeycloak:
+  realmURL: "http://localhost:30080/auth/realms/federated-catalogue-realm"
 # Not used when replicaCount=0, but kept as documentation for the backend .env.
 signing:
   issuerDID: "did:web:localhost"
