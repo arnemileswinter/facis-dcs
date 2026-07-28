@@ -1638,6 +1638,15 @@ func contractTargetView(target *db.ContractTarget) *contractworkflowengine.Contr
 	if target.Description != nil {
 		view.Description = target.Description
 	}
+	// Which client the target authenticates its callbacks as, and how old that
+	// credential is. The secret itself is not here and is not stored: Hydra
+	// keeps only a hash of it (ADR-27).
+	if target.OAuthClientID != nil {
+		view.OauthClientID = target.OAuthClientID
+	}
+	if target.SecretIssuedAt != nil {
+		view.SecretIssuedAt = ptr(target.SecretIssuedAt.UTC().Format(time.RFC3339))
+	}
 	return view
 }
 
