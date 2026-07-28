@@ -1,11 +1,13 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOpenDecisionsOn,
   apiAuthHeaders,
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
   createContractViaUi,
   fillContractAmountOn,
+  type Instance,
   instanceA,
   offerToCounterparty,
   openInstanceB,
@@ -14,8 +16,8 @@ import {
   resolveDidWeb,
   settleToApprovedOn,
   signOnInstance,
+  stagedCounterOffer,
   submitReviewApproveTemplateOn,
-  type Instance,
 } from './multi-dcs-helpers'
 import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
 
@@ -125,7 +127,15 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await offerToCounterparty(a, contractDid)
     await assertReceivedInState(b, contractDid, 'OFFERED')
 
+    // While the contract is OFFERED the turn belongs to the counterparty, so A
+    // has no Submit to press. B responds, A accepts the record B authored
+    // (FR-CWE-07 refuses an accept by its own author), and only then can either
+    // side consolidate — settling is mutual, as in full-vertical-2dcs.
+    await stagedCounterOffer(b, contractDid, { value: '20000' })
+    await acceptOpenDecisionsOn(a, contractDid)
+
     await settleToApprovedOn(a, contractDid)
+    await settleToApprovedOn(b, contractDid)
     await signOnInstance(a, contractDid, 'Erasure Signatory')
     await assertReceivedInState(a, contractDid, 'SIGNED')
   })
