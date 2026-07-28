@@ -62,12 +62,19 @@ Feature: PKI consolidation - PKCS#11 + SoftHSM2, ECDSA P-256, trust anchors, rot
     Then get http 200:Success code
     And the DID document's verificationMethod key is an ECDSA P-256 JWK, not RSA
 
+  # The key custody requirement is unchanged: a real HSM ECDSA P-256 operation
+  # signs the request object. What it carries changed. A wallet is given an
+  # x509_san_dns client identifier, so it resolves trust from the certificate
+  # chain naming that hostname — the signature must therefore verify against
+  # that chain, which is the DID key's, and the header carries x5c rather than
+  # a bare jwk. A self-describing jwk proves possession of a key the wallet has
+  # no reason to trust.
   @DCS-IR-HI-01
-  Scenario: The OpenID4VP authorization request JWT (JAR) is ES256-signed by the dcs-oid4vp-jar HSM key
+  Scenario: The OpenID4VP authorization request JWT (JAR) is ES256-signed by an HSM key
     When I start an OpenID4VP login and fetch the signed authorization request object
     Then get http 200:Success code
-    And the authorization request JWT is ES256-signed with an embedded EC P-256 JWK verifiable against itself
-    And the authorization request JWT's kid names the dcs-oid4vp-jar HSM key label
+    And the authorization request JWT is ES256-signed with an EC P-256 key verifiable against its own certificate chain
+    And the authorization request JWT's certificate names the hostname its client_id claims
 
   @DCS-IR-HI-01
   Scenario: The exported PDF's Contract-Lifecycle-VC proof is ECDSA/ES256, not Ed25519Signature2020

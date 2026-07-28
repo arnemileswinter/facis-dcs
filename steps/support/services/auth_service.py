@@ -94,6 +94,28 @@ class AuthService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _authorization_request_key(header: dict[str, Any]):
+        """Resolve the key that signed the authorization request object.
+
+        A verifier that identifies itself with the x509_san_dns client id
+        prefix proves it owns that hostname with a certificate chain, so the
+        request object carries x5c rather than a bare jwk. Both encodings are
+        accepted here: the request is signed either way, and which one arrives
+        depends on how the deployment names itself to the wallet.
+        """
+        jwk = header.get("jwk")
+        if isinstance(jwk, dict):
+            return ECAlgorithm.from_jwk(json.dumps(jwk))
+
+        x5c = header.get("x5c")
+        if isinstance(x5c, list) and x5c:
+            from cryptography import x509 as _x509
+
+            return _x509.load_der_x509_certificate(base64.b64decode(str(x5c[0]))).public_key()
+
+        raise RuntimeError("authorization request JWT header missing jwk or x5c")
+
+    @staticmethod
     def resolve_wallet_root() -> Path:
         """Locate testWallet root (repo checkout or helm/BDD override)."""
         override = os.getenv("BDD_TEST_WALLET_DIR", "").strip()
@@ -293,14 +315,12 @@ class AuthService:
 
         if str(header.get("typ") or "") != "oauth-authz-req+jwt":
             raise RuntimeError("authorization request JWT typ is invalid")
-        jwk = header.get("jwk")
-        if not isinstance(jwk, dict):
-            raise RuntimeError("authorization request JWT header missing jwk")
+        verification_key = AuthService._authorization_request_key(header)
 
         try:
             payload = jwt.decode(
                 jar_token,
-                ECAlgorithm.from_jwk(json.dumps(jwk)),
+                verification_key,
                 algorithms=["ES256"],
                 options={"verify_aud": False, "require": ["exp"]},
             )
