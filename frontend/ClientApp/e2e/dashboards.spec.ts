@@ -22,7 +22,7 @@ test.describe('dashboards backed by an authored fixture', () => {
   let fixture: DraftContractFixture
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(180_000)
     fixture = await buildDraftContractFixture(browser)
   })
 

@@ -14,12 +14,15 @@ import {
 import { isLoginPollError, isLoginStatusResponse, LOGIN_POLL_ERROR } from '@/models/responses/auth-response'
 import { ROUTES } from '@/router/router'
 import { authenticationService } from '@/services/authentication-service'
+import { useErrorStore } from '@/stores/error-store'
 
 const route = useRoute()
 const router = useRouter()
 const presentationUrl = ref('')
 const copyHint = ref('')
 const qrCodeDataUrl = useQRCode(computed(() => presentationUrl.value || ''))
+
+const errorStore = useErrorStore()
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -200,6 +203,7 @@ async function pollLoginOnce(state: string, generation: number): Promise<'contin
     stopPolling()
     clearOid4vpBrowserSession()
     console.error('OpenID4VP login failed:', status.error_message ?? status.status)
+    errorStore.add(status.error_message ?? status.status)
     return 'done'
   }
   return 'continue'

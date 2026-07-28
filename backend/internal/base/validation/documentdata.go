@@ -680,6 +680,7 @@ func validateBlockFieldReferences(block map[string]any, fieldIDs map[string]bool
 // reference must resolve in-document — the graph stays self-contained, so
 // SHACL traversal and rendering never consult anything outside the document.
 func validateContractDataGraph(data documentData, fieldIDs map[string]bool) error {
+	documentID, _ := data["@id"].(string)
 	contractData, _ := topLevelValue(data, "contractData").([]any)
 	objectIDs := map[string]bool{}
 	for index, rawObject := range contractData {
@@ -707,7 +708,7 @@ func validateContractDataGraph(data documentData, fieldIDs map[string]bool) erro
 				values = []any{rawValue}
 			}
 			for _, value := range values {
-				if err := validateContractDataValue(value, fieldIDs, objectIDs); err != nil {
+				if err := validateContractDataValue(value, documentID, fieldIDs, objectIDs); err != nil {
 					return fmt.Errorf("contractData.%d.%s %w", index, property, err)
 				}
 			}
@@ -716,24 +717,41 @@ func validateContractDataGraph(data documentData, fieldIDs map[string]bool) erro
 	return nil
 }
 
-// validateContractDataValue admits the three value kinds of the contract-data
-// graph — a JSON literal, a typed {"@value"} literal, or a single-key {"@id"}
-// reference into the document — and nothing else.
-func validateContractDataValue(value any, fieldIDs, objectIDs map[string]bool) error {
+// validateContractDataValue admits the value kinds of the contract-data
+// graph — a JSON literal, a typed {"@value"} literal, a single-key {"@id"}
+// reference into the document, or a single-key {"@id"} absolute IRI naming an
+// external resource (an sh:nodeKind sh:IRI leaf) — and nothing else. A
+// document-scoped @id must resolve within the document: it is a dangling
+// internal reference, not an external resource.
+func validateContractDataValue(value any, documentID string, fieldIDs, objectIDs map[string]bool) error {
 	object, ok := value.(map[string]any)
 	if !ok {
 		return nil // a bare JSON literal: fixed data
 	}
 	if id, isRef := object["@id"].(string); isRef && len(object) == 1 {
-		if !fieldIDs[id] && !objectIDs[id] {
-			return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
+		if fieldIDs[id] || objectIDs[id] || isExternalResourceIRI(id, documentID) {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
 	}
 	if _, isLiteral := object["@value"]; isLiteral {
 		return nil // a typed literal
 	}
 	return errors.New("must be a literal, a contract-field reference, or a {\"@id\"} reference to another domain object — an embedded blank node is not addressable")
+}
+
+// isExternalResourceIRI reports whether an unresolved @id names a resource
+// outside the document: an absolute IRI that is neither draft-scoped
+// (urn:uuid:, the editor's pre-registration node scheme) nor scoped to the
+// document's own IRI.
+func isExternalResourceIRI(id, documentID string) bool {
+	if strings.HasPrefix(id, "urn:uuid:") {
+		return false
+	}
+	if documentID != "" && (id == documentID || strings.HasPrefix(id, documentID+"#")) {
+		return false
+	}
+	return strings.Contains(id, "://") || strings.HasPrefix(id, "did:") || strings.HasPrefix(id, "urn:")
 }
 
 func validatePolicyOperands(data documentData, fieldIDs map[string]bool) error {

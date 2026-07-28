@@ -348,3 +348,10 @@ function shortDid(did: string): string {
     <ConfirmationModal ref="confirmation-modal" />
   </div>
 </template>
+
+<style scoped>
+.stat-title,
+.stat-desc {
+  color: color-mix(in oklab, var(--color-base-content) /* var(--color-base-content) */ 70%, transparent);
+}
+</style>
