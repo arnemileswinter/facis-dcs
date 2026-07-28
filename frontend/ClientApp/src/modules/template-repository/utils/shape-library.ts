@@ -153,6 +153,43 @@ interface SchemaListEntry {
   name: string
   kind: string
   active_version: number
+  latest_version?: number
+  updated_at?: string
+}
+
+// A registered library can be megabytes of Turtle (the Gaia-X development
+// shapes are ~2.4 MB / 165k quads), and the editor mounts on every template
+// page — so parsed classes are cached (through full page reloads, via
+// sessionStorage) and reused until the hub inventory changes.
+let cache: { fingerprint: string; classes: ShapeClass[] } | null = null
+
+const SHAPE_CACHE_KEY = 'dcs.hub.shapeclasses.v1'
+
+function readStoredCache(fingerprint: string): ShapeClass[] | null {
+  try {
+    const raw = sessionStorage.getItem(SHAPE_CACHE_KEY)
+    if (!raw) return null
+    const stored = JSON.parse(raw) as { fingerprint: string; classes: ShapeClass[] }
+    return stored.fingerprint === fingerprint ? stored.classes : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredCache(fingerprint: string, classes: ShapeClass[]): void {
+  try {
+    sessionStorage.setItem(SHAPE_CACHE_KEY, JSON.stringify({ fingerprint, classes }))
+  } catch {
+    // Storage quota or unavailable storage — the in-memory copy still serves
+    // this page view.
+  }
+}
+
+function fingerprintOf(entries: SchemaListEntry[]): string {
+  return entries
+    .map((e) => `${e.name}|${e.kind}|${e.active_version}|${e.latest_version ?? ''}|${e.updated_at ?? ''}`)
+    .sort()
+    .join(';')
 }
 
 /** Loads every authorable class from the hub's ACTIVE registered shape
@@ -160,6 +197,13 @@ interface SchemaListEntry {
  *  fault, not an empty palette. */
 export async function loadShapeLibraries(): Promise<ShapeClass[]> {
   const entries = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const fingerprint = fingerprintOf(entries)
+  if (cache?.fingerprint === fingerprint) return cache.classes
+  const stored = readStoredCache(fingerprint)
+  if (stored) {
+    cache = { fingerprint, classes: stored }
+    return stored
+  }
   const libraries = entries.filter(
     (entry) => entry.kind === 'shapes' && entry.active_version > 0 && !ENVELOPE_SCHEMA_NAMES.has(entry.name),
   )
@@ -169,5 +213,8 @@ export async function loadShapeLibraries(): Promise<ShapeClass[]> {
     const graph = new OntologyGraph(new Parser().parse(body.content))
     classes.push(...parseLibrary(graph, library.name))
   }
-  return classes.sort((a, b) => a.label.localeCompare(b.label))
+  classes.sort((a, b) => a.label.localeCompare(b.label))
+  cache = { fingerprint, classes }
+  writeStoredCache(fingerprint, classes)
+  return classes
 }

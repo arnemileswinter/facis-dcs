@@ -423,7 +423,48 @@ function fingerprintOf(inventory: SchemaListEntry[]): string {
     .join(';')
 }
 
-const hub = await loadHub()
+type HubVocabulary = Awaited<ReturnType<typeof loadHub>>
+
+// Registered libraries can be megabytes of Turtle (the Gaia-X development
+// shapes are ~2.4 MB), and this module re-parses them on every full page
+// load — so the parsed vocabulary rides sessionStorage, keyed by the hub
+// inventory fingerprint. A quota failure just means parsing again next load.
+const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v1'
+
+function readHubCache(fingerprint: string): HubVocabulary | null {
+  try {
+    const raw = sessionStorage.getItem(HUB_CACHE_KEY)
+    if (!raw) return null
+    const cached = JSON.parse(raw) as { fingerprint: string; hub: HubVocabulary }
+    return cached.fingerprint === fingerprint ? cached.hub : null
+  } catch {
+    return null
+  }
+}
+
+function writeHubCache(fingerprint: string, vocabulary: HubVocabulary): void {
+  try {
+    sessionStorage.setItem(HUB_CACHE_KEY, JSON.stringify({ fingerprint, hub: vocabulary }))
+  } catch {
+    // Storage quota or unavailable storage — the in-memory copy still serves
+    // this page view.
+  }
+}
+
+async function loadHubCached(): Promise<HubVocabulary> {
+  const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  const fingerprint = fingerprintOf(inventory)
+  const cached = readHubCache(fingerprint)
+  if (cached) {
+    hubFingerprint = fingerprint
+    return cached
+  }
+  const fresh = await loadHub()
+  writeHubCache(hubFingerprint, fresh)
+  return fresh
+}
+
+const hub = await loadHubCached()
 const reactiveFields = shallowReactive<DomainFieldDefinition[]>(hub.fields)
 const reactiveAssets = shallowReactive<HubAsset[]>(hub.assets)
 const reactiveConstraints = shallowReactive<SemanticValueConstraint[]>(hub.constraints)
@@ -445,6 +486,7 @@ export function refreshOntologyDomainFields(): Promise<void> {
     const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
     if (fingerprintOf(inventory) === hubFingerprint) return
     const fresh = await loadHub()
+    writeHubCache(hubFingerprint, fresh)
     reactiveFields.splice(0, reactiveFields.length, ...fresh.fields)
     reactiveAssets.splice(0, reactiveAssets.length, ...fresh.assets)
     reactiveConstraints.splice(0, reactiveConstraints.length, ...fresh.constraints)
