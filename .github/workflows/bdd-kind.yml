@@ -112,6 +112,13 @@ jobs:
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
+          # The backend is not the only container in that pod. A sidecar that
+          # never becomes ready holds the whole rollout open, and naming one
+          # container here meant the one that failed was the one never logged.
+          kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
+            --all-containers --tail=200 --prefix || true
+          # "1/2 Running" does not say which container is unready.
+          kubectl get pods -n dcs-bdd -o 'custom-columns=POD:.metadata.name,CONTAINER:.status.containerStatuses[*].name,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount' || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=200 --prefix --previous || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=pdf-core --tail=100 --prefix || true
