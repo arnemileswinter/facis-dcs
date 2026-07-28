@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"digital-contracting-service/internal/base/artifactstore"
-	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
