@@ -476,7 +476,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - System Users',
       order: 12,
-      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
+      roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
   {

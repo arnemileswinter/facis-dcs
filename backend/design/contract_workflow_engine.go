@@ -1736,7 +1736,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
-			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityListRequest)
@@ -1760,7 +1759,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
-			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityCreateRequest)
@@ -1784,7 +1782,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
-			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityUpdateRequest)
@@ -1808,7 +1805,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
-			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityDeleteRequest)
@@ -1831,7 +1827,6 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
-			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityRotateRequest)
