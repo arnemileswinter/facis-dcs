@@ -6,8 +6,16 @@ spec:
   replicas: 1
   # The repo volume is RWO, so the default rolling update deadlocks: the
   # replacement pod cannot attach while the outgoing one still holds it.
+  # maxSurge 0 retires the old pod before the replacement is created, which
+  # frees the volume. Switching type to Recreate would do the same, but the API
+  # refuses that alongside the rollingUpdate block an existing Deployment
+  # already carries, so upgrading a release created before the change failed
+  # outright instead of converting.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: ipfs
