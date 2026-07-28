@@ -79,7 +79,23 @@ spec:
             - -c
             - |
               set -eu
-              apk add --no-cache curl jq openssl > /dev/null
+              # Installed at run time because no pinned image carries all three
+              # (the chart's other hooks use alpine/k8s, which has no openssl).
+              # A single attempt makes every deploy depend on a package mirror
+              # being reachable at that instant: one hiccup fails the pre-upgrade
+              # hook and the whole release with it. Retry, and let the last
+              # failure print rather than swallowing it into /dev/null.
+              for attempt in 1 2 3; do
+                if apk add --no-cache curl jq openssl > /dev/null 2>/tmp/apk.err; then
+                  break
+                fi
+                if [ "$attempt" = 3 ]; then
+                  echo "apk add failed after 3 attempts:" >&2
+                  cat /tmp/apk.err >&2
+                  exit 1
+                fi
+                sleep 3
+              done
 
               k8s_host="https://kubernetes.default.svc"
               ca_path="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
