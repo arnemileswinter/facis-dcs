@@ -130,6 +130,22 @@ func appendAndCache(
 	return updatedPDF, nil
 }
 
+// tamperedVerifyResult is the verdict for an artifact that failed
+// authenticated decryption. Every check reports negative rather than absent:
+// the stored bytes are not the ones this instance sealed, so nothing about
+// them verifies, and the hashes stay empty because there is no trustworthy
+// content to hash.
+func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
+	return &pdfgen.PDFVerifyResult{
+		Match:              false,
+		C2paManifestFound:  false,
+		C2paSignatureValid: false,
+		VcProofValid:       false,
+		LifecycleStatus:    ptrToString(lifecycleStatus),
+		PdfSignatureStatus: pdfSignatureNotAvailable,
+	}
+}
+
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
