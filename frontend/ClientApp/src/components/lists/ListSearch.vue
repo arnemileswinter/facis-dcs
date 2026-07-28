@@ -78,8 +78,11 @@ async function searchList(event?: Event) {
       await searchRequest()
     }
   }
-  if (searchQuery.value.trim().length > 0) emit('searchResult', searchedItems.value)
-  else emit('searchResult', null)
+  if (searchQuery.value.trim().length > 0) {
+    emit('searchResult', searchedItems.value)
+  } else {
+    emit('searchResult', null)
+  }
 }
 
 function getDisplayValue(template: T | null): string {

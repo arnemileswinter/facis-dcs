@@ -14,7 +14,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  searchResult: [value: T[]]
+  searchResult: [value: T[] | null]
 }>()
 
 const templatesStore = useContractTemplatesStore()
@@ -71,6 +71,8 @@ const search = (request: Record<string, unknown>): Promise<Searchable[]> => {
 }
 
 const handleSearchResult = (searchResults: Searchable[] | null) => {
+  if (!searchResults) return emit('searchResult', null)
+
   const resultDids = new Set(searchResults?.map((item) => item.did))
   const filteredTasks = props.tasks.filter((task) => resultDids.has(task.did))
   emit('searchResult', filteredTasks)
