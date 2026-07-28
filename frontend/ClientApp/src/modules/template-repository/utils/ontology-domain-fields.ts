@@ -1,4 +1,5 @@
 import { Parser, type Quad } from 'n3'
+import { shallowReactive } from 'vue'
 import type {
   DomainFieldDefinition,
   SemanticParameterType,
@@ -78,6 +79,9 @@ export class OntologyGraph {
 interface SchemaListEntry {
   name: string
   kind: string
+  active_version?: number
+  latest_version?: number
+  updated_at?: string
 }
 
 // Raw fetch, deliberately not the app's http client: this module loads at
@@ -262,7 +266,7 @@ function parseOntologyDomainFields(
 }
 
 /** Reads an RDF collection (rdf:first/rdf:rest) into its member IRIs/literals. */
-function readRdfList(graph: OntologyGraph, head: string): string[] {
+export function readRdfList(graph: OntologyGraph, head: string): string[] {
   const members: string[] = []
   let node = head
   const guard = new Set<string>()
@@ -362,6 +366,7 @@ async function loadHub(): Promise<{
   constraints: SemanticValueConstraint[]
 }> {
   const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+  hubFingerprint = fingerprintOf(inventory)
   const loadedSources = await Promise.all(
     inventory
       .filter((entry) => entry.kind === 'ontology' || entry.kind === 'shapes')
@@ -409,7 +414,42 @@ async function loadHub(): Promise<{
   }
 }
 
+let hubFingerprint = ''
+
+function fingerprintOf(inventory: SchemaListEntry[]): string {
+  return inventory
+    .map((e) => `${e.name}|${e.kind}|${e.active_version ?? ''}|${e.latest_version ?? ''}|${e.updated_at ?? ''}`)
+    .sort()
+    .join(';')
+}
+
 const hub = await loadHub()
-export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = hub.fields
-export const ONTOLOGY_ASSETS: readonly HubAsset[] = hub.assets
-export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = hub.constraints
+const reactiveFields = shallowReactive<DomainFieldDefinition[]>(hub.fields)
+const reactiveAssets = shallowReactive<HubAsset[]>(hub.assets)
+const reactiveConstraints = shallowReactive<SemanticValueConstraint[]>(hub.constraints)
+
+export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = reactiveFields
+export const ONTOLOGY_ASSETS: readonly HubAsset[] = reactiveAssets
+export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = reactiveConstraints
+
+let refreshInFlight: Promise<void> | null = null
+
+/**
+ * Re-reads the Semantic Hub and updates the exported pickable vocabulary in
+ * place — a schema registered after app startup becomes pickable without a
+ * page reload. Cheap when nothing changed: the schema inventory is
+ * fingerprinted and schema contents are only refetched on a change.
+ */
+export function refreshOntologyDomainFields(): Promise<void> {
+  refreshInFlight ??= (async () => {
+    const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
+    if (fingerprintOf(inventory) === hubFingerprint) return
+    const fresh = await loadHub()
+    reactiveFields.splice(0, reactiveFields.length, ...fresh.fields)
+    reactiveAssets.splice(0, reactiveAssets.length, ...fresh.assets)
+    reactiveConstraints.splice(0, reactiveConstraints.length, ...fresh.constraints)
+  })().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}

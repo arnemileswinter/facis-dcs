@@ -291,12 +291,23 @@ export const useDcsDraftStore = defineStore(storeId, {
       return id
     },
     /** Sets a fixed literal on a domain-object property, serialized as a
-     *  typed {@value} literal of the property's datatype. */
-    setDataObjectLiteral(objectId: string, path: string, value: string, datatype: XsdDatatype): void {
+     *  typed {@value} literal of the property's datatype (a compact xsd
+     *  term, or an external library's exact datatype IRI). xsd:string emits
+     *  the bare form — RDF 1.1's simple literal — so strict term-comparing
+     *  validators match it against a library's plain sh:in members. */
+    setDataObjectLiteral(objectId: string, path: string, value: string, datatype: string): void {
       const object = this.contractData.find((entry) => entry['@id'] === objectId)
       if (!object) return
       if (value === '') delete object[path]
-      else object[path] = typedFieldFill(value, datatype)
+      else object[path] = datatype === 'xsd:string' ? value : typedFieldFill(value, datatype)
+    },
+    /** Sets a fixed IRI value on a domain-object property (an sh:nodeKind
+     *  sh:IRI leaf naming an external resource). */
+    setDataObjectIri(objectId: string, path: string, iri: string): void {
+      const object = this.contractData.find((entry) => entry['@id'] === objectId)
+      if (!object) return
+      if (iri === '') delete object[path]
+      else object[path] = { '@id': iri }
     },
     /**
      * Makes a domain-object leaf negotiable: declares a dcs:ContractField
@@ -309,6 +320,7 @@ export const useDcsDraftStore = defineStore(storeId, {
       label: string,
       datatype: XsdDatatype,
       required: boolean,
+      allowedValues?: readonly string[],
     ): string {
       const object = this.contractData.find((entry) => entry['@id'] === objectId)
       if (!object) return ''
@@ -320,6 +332,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         'dcs:label': label,
         'dcs:datatype': datatype,
         'dcs:required': required,
+        ...(allowedValues?.length ? { 'dcs:valueConstraint': { allowedValues } } : {}),
       })
       object[path] = { '@id': fieldId }
       return fieldId

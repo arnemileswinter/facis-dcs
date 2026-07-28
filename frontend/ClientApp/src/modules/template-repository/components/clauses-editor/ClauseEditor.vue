@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref, useId } from 'vue'
+import { computed, onMounted, ref, useId } from 'vue'
 import ClauseTextEditor from '@template-repository/components/clauses-editor/ClauseTextEditor.vue'
 import OdrlRuleBuilder from '@template-repository/components/clauses-editor/OdrlRuleBuilder.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
@@ -8,6 +8,7 @@ import {
   type HubAsset,
   ONTOLOGY_ASSETS,
   ONTOLOGY_DOMAIN_FIELDS,
+  refreshOntologyDomainFields,
 } from '@template-repository/utils/ontology-domain-fields'
 import type { DcsContentSegment, OdrlRule } from '@/models/dcs-jsonld'
 import type { DomainFieldDefinition, SemanticCondition } from '@template-repository/models/contract-template'
@@ -23,6 +24,12 @@ import type { DomainFieldDefinition, SemanticCondition } from '@template-reposit
 
 const store = useDcsDraftStore()
 const { partyAnchors, contractTargetIri } = storeToRefs(store)
+
+// A schema registered in the hub after app startup becomes pickable here on
+// the next mount; a failed refresh keeps the startup vocabulary.
+onMounted(() => {
+  refreshOntologyDomainFields().catch(() => undefined)
+})
 
 interface ClauseField {
   id: string

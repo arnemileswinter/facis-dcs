@@ -4,6 +4,7 @@ import {
   formatOntologyLabel,
   localName,
   OntologyGraph,
+  readRdfList,
 } from '@template-repository/utils/ontology-domain-fields'
 import type { XsdDatatype } from '@/models/dcs-jsonld'
 
@@ -28,6 +29,13 @@ export interface ShapeProperty {
   label: string
   /** Compact xsd datatype for a literal-valued property. */
   datatype?: XsdDatatype
+  /** Exact datatype IRI when the shape declares a non-XSD datatype — the
+   *  emitted literal must carry it verbatim to conform to the library. */
+  datatypeIri?: string
+  /** Enumerated allowed lexical values (sh:in). */
+  options?: readonly string[]
+  /** IRI-valued leaf without a target class (sh:nodeKind sh:IRI). */
+  iri?: boolean
   /** Target class IRI for an object-valued property (sh:class / sh:node). */
   classRef?: string
   required: boolean
@@ -56,57 +64,80 @@ const XSD_TO_COMPACT: Record<string, XsdDatatype> = {
   [`${XSD}dateTime`]: 'xsd:dateTime',
 }
 
-function parseProperty(
-  graph: OntologyGraph,
-  propertyNode: string,
-  shapeByTarget: Map<string, string>,
-): ShapeProperty | null {
+type LeafConstraint = Pick<ShapeProperty, 'datatype' | 'datatypeIri' | 'options' | 'iri' | 'classRef'>
+
+/** Resolves one constraint node (a property shape or an sh:or / sh:xone
+ *  branch) to an authorable input: an sh:in enumeration, a typed literal, an
+ *  object reference (sh:class / sh:node), or a bare IRI (sh:nodeKind sh:IRI). */
+function leafConstraint(graph: OntologyGraph, node: string): LeafConstraint | null {
+  const declaredDatatype = graph.first(node, `${SH}datatype`)
+  const datatype = XSD_TO_COMPACT[declaredDatatype] ?? (declaredDatatype ? 'xsd:string' : undefined)
+  const datatypeIri = declaredDatatype && !XSD_TO_COMPACT[declaredDatatype] ? declaredDatatype : undefined
+
+  const inList = graph.first(node, `${SH}in`)
+  if (inList) {
+    const options = readRdfList(graph, inList).filter(Boolean)
+    if (options.length) {
+      return { options, datatype: datatype ?? 'xsd:string', ...(datatypeIri ? { datatypeIri } : {}) }
+    }
+  }
+  if (datatype) return { datatype, ...(datatypeIri ? { datatypeIri } : {}) }
+
+  let classRef = graph.first(node, `${SH}class`)
+  if (!classRef) {
+    const nodeShape = graph.first(node, `${SH}node`)
+    if (nodeShape) classRef = graph.first(nodeShape, `${SH}targetClass`)
+  }
+  if (classRef) return { classRef }
+
+  if (graph.first(node, `${SH}nodeKind`) === `${SH}IRI`) return { iri: true }
+  return null
+}
+
+function parseProperty(graph: OntologyGraph, propertyNode: string): ShapeProperty | null {
   const path = graph.first(propertyNode, `${SH}path`)
   // Sequence/inverse paths arrive as blank nodes — only direct predicate
   // paths are authorable form inputs.
   if (!path?.includes('://')) return null
 
-  const datatypeIri = graph.first(propertyNode, `${SH}datatype`)
-  let classRef = graph.first(propertyNode, `${SH}class`)
-  if (!classRef) {
-    const nodeShape = graph.first(propertyNode, `${SH}node`)
-    if (nodeShape) {
-      classRef = graph.first(nodeShape, `${SH}targetClass`) || (shapeByTarget.get(nodeShape) ?? '')
+  let constraint = leafConstraint(graph, propertyNode)
+  if (!constraint) {
+    // sh:or / sh:xone alternatives: the first authorable branch drives the input.
+    for (const alternatives of [`${SH}or`, `${SH}xone`]) {
+      const head = graph.first(propertyNode, alternatives)
+      if (!head) continue
+      for (const branch of readRdfList(graph, head)) {
+        constraint = leafConstraint(graph, branch)
+        if (constraint) break
+      }
+      if (constraint) break
     }
   }
-  const datatype = XSD_TO_COMPACT[datatypeIri]
-  if (!datatype && !classRef) return null
+  if (!constraint) return null
 
   const minCount = graph.firstNumber(propertyNode, `${SH}minCount`) ?? 0
   const maxCount = graph.firstNumber(propertyNode, `${SH}maxCount`)
   return {
     path,
     label: graph.first(propertyNode, `${SH}name`) || formatOntologyLabel(localName(path)),
-    ...(datatype ? { datatype } : {}),
-    ...(classRef ? { classRef } : {}),
+    ...constraint,
     required: minCount >= 1,
     multiple: maxCount === undefined || maxCount > 1,
   }
 }
 
 function parseLibrary(graph: OntologyGraph, library: string): ShapeClass[] {
-  // sh:node references name a NodeShape; instances are typed with its
-  // target class — resolve shape IRI -> target class up front.
-  const shapeByTarget = new Map<string, string>()
-  for (const shape of graph.subjectsOfType(`${SH}NodeShape`)) {
-    const target = graph.first(shape, `${SH}targetClass`)
-    if (target) shapeByTarget.set(shape, target)
-  }
-
   const classes: ShapeClass[] = []
   for (const shape of graph.subjectsOfType(`${SH}NodeShape`)) {
     const target = graph.first(shape, `${SH}targetClass`)
     if (!target) continue
+    // A class stays pickable with zero authorable properties — marker shapes
+    // (e.g. gx:RegistrationNumber, everything under sh:ignoredProperties)
+    // are still typed objects other shapes reference via sh:node.
     const properties = graph
       .values(shape, `${SH}property`)
-      .map((node) => parseProperty(graph, node, shapeByTarget))
+      .map((node) => parseProperty(graph, node))
       .filter((property): property is ShapeProperty => property !== null)
-    if (!properties.length) continue
     classes.push({
       iri: target,
       shapeIri: shape,
