@@ -8,13 +8,15 @@ precondition directly via the test DB connection (context.db); the seam is
 documented at its point of use.
 """
 
+import base64
 import json
 import os
 
 import jwt
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec
 import requests as _requests
 from behave import given, then, when
-from jwt.algorithms import ECAlgorithm
 
 from steps.support.api_client import (
     did_document_url,
@@ -87,10 +89,10 @@ def step_when_fetch_jar(context):
 
 
 @then(
-    "the authorization request JWT is ES256-signed with an embedded EC P-256 JWK "
-    "verifiable against itself"
+    "the authorization request JWT is ES256-signed with an EC P-256 key "
+    "verifiable against its own certificate chain"
 )
-def step_then_jar_is_es256_self_verifiable(context):
+def step_then_jar_is_es256_chain_verifiable(context):
     token = context.requests_response.text.strip()
     assert token, "authorization request response body is empty"
 
@@ -98,21 +100,26 @@ def step_then_jar_is_es256_self_verifiable(context):
     assert header.get("alg") == "ES256", (
         f"Expected the JAR JWT header 'alg' to be 'ES256', got: {header}"
     )
-    embedded_jwk = header.get("jwk")
-    assert isinstance(embedded_jwk, dict), (
-        f"Expected the JAR JWT header to carry an embedded 'jwk' claim, got header: {header}"
-    )
-    assert embedded_jwk.get("kty") == "EC" and embedded_jwk.get("crv") == "P-256", (
-        f"Expected the embedded JWK to be an EC P-256 key, got: {embedded_jwk}"
+    x5c = header.get("x5c")
+    assert isinstance(x5c, list) and x5c, (
+        f"Expected the JAR JWT header to carry an x5c certificate chain, got header: {header}"
     )
 
-    # Self-consistency check: the JWT genuinely verifies against its own
-    # embedded JWK. Combined with the alg=ES256 assertion above, this proves
-    # a real ECDSA P-256 private-key operation produced these bytes (not
-    # merely that the header CLAIMS ES256) - the concrete instantiation of
-    # "hsm.Signer produces a signature verifiable against hsm.PublicJWK" for
-    # the dcs-oid4vp-jar label.
-    public_key = ECAlgorithm.from_jwk(json.dumps(embedded_jwk))
+    # The wallet resolves trust from the certificate the x509_san_dns client
+    # identifier names, so the check is that the signature verifies against
+    # THAT chain — a stricter statement than a self-describing jwk, which only
+    # proves possession of some key. Combined with alg=ES256 it still proves a
+    # real ECDSA P-256 private-key operation produced these bytes, which is
+    # what the HSM custody requirement is about.
+    leaf = x509.load_der_x509_certificate(base64.b64decode(str(x5c[0])))
+    public_key = leaf.public_key()
+    assert isinstance(public_key, ec.EllipticCurvePublicKey), (
+        f"Expected the signing certificate to carry an EC key, got: {type(public_key).__name__}"
+    )
+    assert public_key.curve.name == "secp256r1", (
+        f"Expected the signing certificate's key to be P-256, got: {public_key.curve.name}"
+    )
+
     try:
         jwt.decode(
             token,
@@ -122,20 +129,35 @@ def step_then_jar_is_es256_self_verifiable(context):
         )
     except Exception as exc:  # noqa: BLE001 - re-raised as an assertion for behave
         raise AssertionError(
-            f"authorization request JWT signature does not verify against its own "
-            f"embedded JWK: {exc}"
+            f"authorization request JWT signature does not verify against the "
+            f"certificate in its own x5c chain: {exc}"
         ) from exc
 
 
-@then("the authorization request JWT's kid names the dcs-oid4vp-jar HSM key label")
-def step_then_jar_kid_names_hsm_label(context):
+@then("the authorization request JWT's certificate names the hostname its client_id claims")
+def step_then_jar_certificate_matches_client_id(context):
+    """The x509_san_dns prefix is a claim about a hostname; the certificate has
+    to back it. A wallet that cannot match the two refuses the request."""
     token = context.requests_response.text.strip()
     header = jwt.get_unverified_header(token)
-    expected_kid = os.getenv("DCS_HSM_KEY_JAR", "dcs-oid4vp-jar")
-    assert header.get("kid") == expected_kid, (
-        f"Expected the JAR JWT header 'kid' to name the HSM key label used for signing "
-        f"('{expected_kid}', from env DCS_HSM_KEY_JAR or its documented default), got: "
-        f"{header.get('kid')!r} (full header: {header})"
+    payload = jwt.decode(token, options={"verify_signature": False})
+
+    client_id = str(payload.get("client_id") or "")
+    prefix = "x509_san_dns:"
+    assert client_id.startswith(prefix), (
+        f"Expected a prefixed client_id a wallet can resolve, got: {client_id!r}. "
+        f"An unprefixed value means the 'pre-registered' prefix, which a wallet "
+        f"outside a pre-agreed federation refuses."
+    )
+    hostname = client_id[len(prefix):]
+
+    leaf = x509.load_der_x509_certificate(base64.b64decode(str(header["x5c"][0])))
+    sans = leaf.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value.get_values_for_type(x509.DNSName)
+    assert hostname in sans, (
+        f"client_id claims hostname {hostname!r} but the signing certificate's "
+        f"SAN carries {sans}"
     )
 
 

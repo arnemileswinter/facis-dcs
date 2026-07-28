@@ -110,7 +110,7 @@ func (s *authSvc) buildLoginResult(ctx context.Context, presentationState, nonce
 
 	return &genauth.LoginResult{
 		RequestURI:      requestURI,
-		PresentationURL: buildOpenID4VPPresentationURI(s.hydra.ClientID(), requestURI),
+		PresentationURL: buildOpenID4VPPresentationURI(s.oid4vpClientID, requestURI),
 		State:           presentationState,
 		AuthorizeURL:    authorizeURL,
 		ExpiresIn:       expiresIn,
@@ -170,7 +170,7 @@ func (s *authSvc) PresentationRequest(ctx context.Context, p *genauth.Presentati
 
 	responseURI := strings.TrimRight(s.publicAPIBase, "/") + "/auth/presentation/callback"
 	jwt, err := oid4vprequest.BuildJWT(s.requestSigner, oid4vprequest.Params{
-		ClientID:    s.hydra.ClientID(),
+		ClientID:    s.oid4vpClientID,
 		ResponseURI: responseURI,
 		State:       attempt.PresentationState,
 		Nonce:       attempt.Nonce,
@@ -235,7 +235,7 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 
 	verified, err := oid4vp.NewVerifier(s.trust).Verify(presentation, oid4vp.PresentationContext{
 		Nonce:    attempt.Nonce,
-		ClientID: s.hydra.ClientID(),
+		ClientID: s.oid4vpClientID,
 	})
 
 	if err != nil {

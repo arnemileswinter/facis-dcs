@@ -52,10 +52,10 @@ type DeploymentCallbackCmd struct {
 	KPIValue       string
 }
 
-// DeploymentCallbackHandler validates the shared secret, then applies an
-// ack (sealing an RFC-3161-timestamped execution-evidence receipt into the
-// archive entry and moving the contract SIGNED -> ACTIVE, DCS-FR-SM-10/
-// DCS-FR-SM-12) and/or records a reported KPI value, flagging a violation
+// DeploymentCallbackHandler checks the caller is the target the deployment was
+// dispatched to (ADR-27), then applies an ack (sealing an RFC-3161-timestamped
+// execution-evidence receipt into the archive entry and moving the contract
+// SIGNED -> ACTIVE, DCS-FR-SM-10/DCS-FR-SM-12) and/or records a reported KPI value, flagging a violation
 // when it crosses the contract's own ODRL SLA constraint (DCS-FR-CWE-09).
 type DeploymentCallbackHandler struct {
 	DB             *sqlx.DB
