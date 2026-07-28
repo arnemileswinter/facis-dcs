@@ -1589,9 +1589,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Meta("dcs:requirements", "DCS-IR-SI-05")
 		Meta("dcs:ui", "Target System Administration")
 
-		// Readable by whoever has to pick one, writable only by the administrator.
+		// Readable by whoever has to pick one, writable only by the roles that
+		// configure integrations.
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
 		})
@@ -1615,6 +1617,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(ContractTargetCreateRequest)
@@ -1638,6 +1641,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(ContractTargetUpdateRequest)
@@ -1661,6 +1665,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(ContractTargetDeleteRequest)
@@ -1707,6 +1712,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(ContractTargetRotateRequest)
@@ -1730,6 +1736,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityListRequest)
@@ -1753,6 +1760,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityCreateRequest)
@@ -1776,6 +1784,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityUpdateRequest)
@@ -1799,6 +1808,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityDeleteRequest)
@@ -1821,6 +1831,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Sys. Administrator")
+			Scope("Integration Manager")
 		})
 
 		Payload(MachineIdentityRotateRequest)
