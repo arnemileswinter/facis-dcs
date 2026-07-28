@@ -76,9 +76,19 @@ spec:
             httpGet:
               path: /health/ready
               port: admin
+          # Deliberately /health/ready, not /health/alive. Hydra runs
+          # `hydra migrate sql` once at container start, so a database that is
+          # reinitialised under a running Hydra — an ephemeral dev postgres, a
+          # restored volume — leaves it alive but permanently unready, and
+          # nothing recovers it without a restart. The thresholds give postgres
+          # five minutes to come back before that restart is triggered, so a
+          # blip does not cause churn.
           livenessProbe:
             httpGet:
-              path: /health/alive
+              path: /health/ready
               port: admin
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
