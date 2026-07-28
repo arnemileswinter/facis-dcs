@@ -89,10 +89,10 @@ def step_when_fetch_jar(context):
 
 
 @then(
-    "the authorization request JWT is ES256-signed with an embedded EC P-256 JWK "
-    "verifiable against itself"
+    "the authorization request JWT is ES256-signed with an EC P-256 key "
+    "verifiable against its own certificate chain"
 )
-def step_then_jar_is_es256_self_verifiable(context):
+def step_then_jar_is_es256_chain_verifiable(context):
     token = context.requests_response.text.strip()
     assert token, "authorization request response body is empty"
 
