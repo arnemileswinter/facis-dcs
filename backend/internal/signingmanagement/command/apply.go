@@ -17,12 +17,12 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/base/validation"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -145,7 +145,7 @@ type Applier struct {
 	CRepo        db.ContractRepo
 	CeremonyRepo db.CeremonyRepo
 	PDFCore      *pdfcore.Client
-	IPFSClient   *ipfs.APIClient
+	Artifacts    *artifactstore.Store
 	VCSigner     provenance.VCSigner
 	// VCIssuer issues the C2PA lifecycle-assertion VC stamped into the base
 	// PDF before signing (DCS-OR-C2PA-004) — see stampActiveLifecycle below.
@@ -924,19 +924,18 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 	signedPDFSum := sha256.Sum256(in.signedPDF)
 	signedPDFHash := hex.EncodeToString(signedPDFSum[:])
 
-	ipfsRes, err := h.IPFSClient.CreateFile(ctx, in.signedPDF)
+	cid, err := h.Artifacts.Put(ctx, artifactstore.ContractScope(cmd.DID), in.signedPDF)
 	if err != nil {
 		return fmt.Errorf("store signed PDF in IPFS: %w", err)
 	}
-	cid := ipfsRes.Identifier.Value
 
 	// Confirm the artefact resolves through the read path before persisting its
-	// CID. The tenant store is eventually consistent, so a CID CreateFile has
+	// CID. The tenant store is eventually consistent, so a CID the store has
 	// just returned is not always immediately retrievable; persisting it early
 	// would let a later export/verify fetch the contract's PDF and fail
-	// (DCS-FR-SM-16). FetchFile retries the transient not-yet-resolvable window.
-	readback, err := h.IPFSClient.FetchFile(cid)
-	if err != nil || readback == nil || len(readback.Data) == 0 {
+	// (DCS-FR-SM-16). The underlying fetch retries the transient window.
+	readback, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(cmd.DID), cid)
+	if err != nil || len(readback) == 0 {
 		return fmt.Errorf("signed PDF CID %s not resolvable after store: %w", cid, err)
 	}
 
@@ -1022,14 +1021,14 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 	if h.IPFSStorer == nil {
 		return errors.New("archive snapshot IPFS storer is required")
 	}
-	snapshotResult, err := h.IPFSStorer.CreateFile(ctx, archiveEntry.ContractSnapshot)
+	snapshotCID, err := h.IPFSStorer.Put(ctx, artifactstore.ContractScope(did), []byte(archiveEntry.ContractSnapshot))
 	if err != nil {
 		return fmt.Errorf("could not store archive snapshot in IPFS: %w", err)
 	}
-	if snapshotResult == nil || snapshotResult.Identifier.Value == "" {
+	if snapshotCID == "" {
 		return errors.New("archive snapshot IPFS storer returned empty CID")
 	}
-	archiveEntry.SnapshotCID = snapshotResult.Identifier.Value
+	archiveEntry.SnapshotCID = snapshotCID
 
 	archiveEntryID := fmt.Sprintf("%s#%d", did, signedContract.ContractVersion)
 	notaryPayload := cwecommand.ArchiveNotaryPayload{

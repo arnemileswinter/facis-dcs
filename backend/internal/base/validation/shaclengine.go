@@ -2,14 +2,48 @@ package validation
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/piprate/json-gold/ld"
 	"github.com/tggo/goRDFlib/jsonld"
 	"github.com/tggo/goRDFlib/shacl"
 )
+
+// Parsed shapes graphs, keyed by content hash. Validation runs on every
+// submit/offer/approve/sign, and a registered shapes library can be
+// megabytes of Turtle (an imported Gaia-X hub entry) — re-parsing it per
+// call dominates request latency. Validation only reads the graph, and its
+// lazy read indexes are warmed at cache-fill time, so cached graphs are
+// safe to share across concurrent validations.
+var (
+	shapesGraphCacheMu sync.Mutex
+	shapesGraphCache   = map[[sha256.Size]byte]*shacl.Graph{}
+)
+
+func parsedShapesGraph(shapesTTL string, shapesVersion int) (*shacl.Graph, error) {
+	key := sha256.Sum256([]byte(shapesTTL))
+	shapesGraphCacheMu.Lock()
+	defer shapesGraphCacheMu.Unlock()
+	if graph, ok := shapesGraphCache[key]; ok {
+		return graph, nil
+	}
+	graph, err := shacl.LoadTurtleString(shapesTTL, "urn:dcs:hub:shapes")
+	if err != nil {
+		return nil, fmt.Errorf("parse SHACL shapes (hub version %d): %w", shapesVersion, err)
+	}
+	graph.Triples() // builds the read indexes while still single-threaded
+	// Version churn is rare; a handful of entries covers active + pinned
+	// shapes without growing unbounded.
+	if len(shapesGraphCache) >= 8 {
+		shapesGraphCache = map[[sha256.Size]byte]*shacl.Graph{}
+	}
+	shapesGraphCache[key] = graph
+	return graph, nil
+}
 
 // validateAgainstHubShapes checks a decoded JSON-LD document against the
 // Semantic Hub's SHACL shapes: the version pinned by the document's
@@ -71,9 +105,9 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 	if err != nil {
 		return nil, 0, fmt.Errorf("parse contract document as JSON-LD: %w", err)
 	}
-	shapesGraph, err := shacl.LoadTurtleString(shapesTTL, "urn:dcs:hub:shapes")
+	shapesGraph, err := parsedShapesGraph(shapesTTL, shapesVersion)
 	if err != nil {
-		return nil, 0, fmt.Errorf("parse SHACL shapes (hub version %d): %w", shapesVersion, err)
+		return nil, 0, err
 	}
 
 	report := shacl.Validate(dataGraph, shapesGraph)

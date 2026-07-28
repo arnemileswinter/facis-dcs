@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 
@@ -83,7 +83,7 @@ type signatureManagementsrvc struct {
 	VCSigner      provenance.VCSigner
 	VCIssuer      provenance.VCIssuer
 	IssuerDID     string
-	IPFSClient    *ipfs.APIClient
+	Artifacts     *artifactstore.Store
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
@@ -124,7 +124,7 @@ type signatureManagementsrvc struct {
 
 func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, ceremonyRepo db.CeremonyRepo,
 	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string,
-	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
+	artifacts *artifactstore.Store, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
 	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
@@ -140,7 +140,7 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		VCSigner:             vcSigner,
 		VCIssuer:             vcIssuer,
 		IssuerDID:            issuerDID,
-		IPFSClient:           ipfsClient,
+		Artifacts:            artifacts,
 		ArchiveRepo:          archiveRepo,
 		ArchiveNotary:        archiveNotary,
 		ArchiveTSA:           archiveTSA,
@@ -344,12 +344,12 @@ func (s *signatureManagementsrvc) newApplier() command.Applier {
 		CRepo:         s.CRepo,
 		CeremonyRepo:  s.CeremonyRepo,
 		PDFCore:       s.PDFCore,
-		IPFSClient:    s.IPFSClient,
+		Artifacts:     s.Artifacts,
 		VCSigner:      s.VCSigner,
 		VCIssuer:      s.VCIssuer,
 		IssuerDID:     s.IssuerDID,
 		ArchiveRepo:   s.ArchiveRepo,
-		IPFSStorer:    s.IPFSClient,
+		IPFSStorer:    s.Artifacts,
 		ArchiveNotary: s.ArchiveNotary,
 		ArchiveTSA:    s.ArchiveTSA,
 		Validator:     validator,

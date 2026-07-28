@@ -104,6 +104,7 @@ type VerificationMethod struct {
 
 type DIDDocument struct {
 	VerificationMethod []VerificationMethod `json:"verificationMethod"`
+	KeyAgreement       []string             `json:"keyAgreement"`
 	didContent         map[string]interface{}
 	signer             crypto.Signer
 	publicKey          *ecdsa.PublicKey
@@ -197,6 +198,44 @@ func (d DIDDocument) GetHostname() (string, error) {
 		return "", err
 	}
 	return DIDWebToHostname(id)
+}
+
+// KeyAgreementPublicKey returns the P-256 public key of the keyAgreement
+// verification method whose id ends in "#"+label. The method is found via the
+// keyAgreement relationship plus id suffix, never by array position, so a
+// document that adds or reorders verification methods keeps resolving the
+// right key.
+func (d *DIDDocument) KeyAgreementPublicKey(label string) (*ecdsa.PublicKey, error) {
+	suffix := "#" + label
+	for _, id := range d.KeyAgreement {
+		if !strings.HasSuffix(id, suffix) {
+			continue
+		}
+		for i := range d.VerificationMethod {
+			if d.VerificationMethod[i].ID == id {
+				return d.VerificationMethod[i].PublicKeyJWK.ECPublicKey()
+			}
+		}
+		return nil, fmt.Errorf("keyAgreement %q has no matching verificationMethod", id)
+	}
+	return nil, fmt.Errorf("did document has no keyAgreement method with suffix %q", suffix)
+}
+
+// SoleKeyAgreementPublicKey returns the public key of the document's single
+// keyAgreement verification method — how a PEER's CEK-wrap key is resolved,
+// since a remote instance's HSM key label is not known here. A document with
+// zero or several keyAgreement methods is rejected as ambiguous.
+func (d *DIDDocument) SoleKeyAgreementPublicKey() (*ecdsa.PublicKey, error) {
+	if len(d.KeyAgreement) != 1 {
+		return nil, fmt.Errorf("did document must carry exactly one keyAgreement method, has %d", len(d.KeyAgreement))
+	}
+	id := d.KeyAgreement[0]
+	for i := range d.VerificationMethod {
+		if d.VerificationMethod[i].ID == id {
+			return d.VerificationMethod[i].PublicKeyJWK.ECPublicKey()
+		}
+	}
+	return nil, fmt.Errorf("keyAgreement %q has no matching verificationMethod", id)
 }
 
 // Sign signs content with ECDSA (SHA-256), returning an ASN.1 DER signature.

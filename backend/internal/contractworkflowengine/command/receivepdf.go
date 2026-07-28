@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -49,12 +49,12 @@ type PeerPdfReceiveCmd struct {
 // store and opens its own local workflow tasks (ADR-13): each DCS runs its own
 // RBAC; nothing crosses the boundary.
 type PeerPdfReceiver struct {
-	DB         *sqlx.DB
-	CRepo      db.ContractRepo
-	RTRepo     db.ReviewTaskRepo
-	ATRepo     db.ApprovalTaskRepo
-	NTRepo     db.NegotiationTaskRepo
-	IPFSClient *ipfs.APIClient
+	DB        *sqlx.DB
+	CRepo     db.ContractRepo
+	RTRepo    db.ReviewTaskRepo
+	ATRepo    db.ApprovalTaskRepo
+	NTRepo    db.NegotiationTaskRepo
+	Artifacts *artifactstore.Store
 }
 
 // Handle upserts the local copy from the shipped contract's JSON-LD. A first
@@ -153,7 +153,9 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// before this; this instance's own later changes append to this base (so the
 	// C2PA chain grows rather than resetting).
 	if len(cmd.Pdf) > 0 {
-		stored, err := h.IPFSClient.CreateFile(ctx, cmd.Pdf)
+		// The receiver encrypts the peer's verbatim bytes with its OWN CEK; the
+		// inbound PDF stays authoritative and byte-identical after decrypt.
+		storedCID, err := h.Artifacts.Put(ctx, artifactstore.ContractScope(cmd.ContractIRI), cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not store carried-over peer PDF in IPFS: %w", err)
 		}
@@ -177,7 +179,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		}
 		payloadSum := sha256.Sum256(persistedData)
 		if err := h.CRepo.UpdatePDFState(ctx, tx, cmd.ContractIRI, db.ContractPDFState{
-			IPFSCID:     stored.Identifier.Value,
+			IPFSCID:     storedCID,
 			C2PAState:   c2paState,
 			PayloadHash: hex.EncodeToString(payloadSum[:]),
 		}); err != nil {

@@ -8,7 +8,7 @@ import (
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
 	"digital-contracting-service/internal/auth"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/bundleexport"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/middleware"
@@ -21,22 +21,22 @@ import (
 )
 
 type pdfGenerationSrvc struct {
-	DB         *sqlx.DB
-	IPFSClient *ipfs.APIClient
-	CRepo      cwedb.ContractRepo
-	TRepo      tpldb.ContractTemplateRepo
-	SignRepo   bundleexport.SignatureLoader
-	PDFCore    *pdfcore.Client
-	IssuerDID  string
-	VCIssuer   provenance.VCIssuer
-	LocalPeer  string
+	DB        *sqlx.DB
+	Artifacts *artifactstore.Store
+	CRepo     cwedb.ContractRepo
+	TRepo     tpldb.ContractTemplateRepo
+	SignRepo  bundleexport.SignatureLoader
+	PDFCore   *pdfcore.Client
+	IssuerDID string
+	VCIssuer  provenance.VCIssuer
+	LocalPeer string
 	auth.JWTAuthenticator
 }
 
 func NewPDFGeneration(
 	db *sqlx.DB,
 	jwtAuth auth.JWTAuthenticator,
-	ipfsClient *ipfs.APIClient,
+	artifacts *artifactstore.Store,
 	cRepo cwedb.ContractRepo,
 	tRepo tpldb.ContractTemplateRepo,
 	signRepo bundleexport.SignatureLoader,
@@ -53,7 +53,7 @@ func NewPDFGeneration(
 	}
 	return &pdfGenerationSrvc{
 		DB:               db,
-		IPFSClient:       ipfsClient,
+		Artifacts:        artifacts,
 		CRepo:            cRepo,
 		TRepo:            tRepo,
 		SignRepo:         signRepo,
@@ -67,15 +67,15 @@ func NewPDFGeneration(
 
 func (s *pdfGenerationSrvc) newBundler() *bundleexport.Bundler {
 	return &bundleexport.Bundler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		TRepo:      s.TRepo,
-		SignRepo:   s.SignRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
-		LocalPeer:  s.LocalPeer,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		TRepo:     s.TRepo,
+		SignRepo:  s.SignRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
+		LocalPeer: s.LocalPeer,
 	}
 }
 
@@ -126,16 +126,16 @@ func (s *pdfGenerationSrvc) ExportTemplateBundle(ctx context.Context, p *pdfgen.
 
 func (s *pdfGenerationSrvc) ExportContractPdf(ctx context.Context, p *pdfgen.ExportContractPdfPayload) (io.ReadCloser, error) {
 	handler := pdfquery.ExportContractPdfHandler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.ExportContractPdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("export contract PDF %s: %w", p.Did, err))
@@ -145,16 +145,16 @@ func (s *pdfGenerationSrvc) ExportContractPdf(ctx context.Context, p *pdfgen.Exp
 
 func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.ExportTemplatePdfPayload) (io.ReadCloser, error) {
 	handler := pdfquery.ExportTemplatePdfHandler{
-		DB:         s.DB,
-		TRepo:      s.TRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		TRepo:     s.TRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.ExportTemplatePdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("export template PDF %s: %w", p.Did, err))
@@ -164,16 +164,16 @@ func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.Exp
 
 func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.VerifyContractPdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyContractPdfHandler{
-		DB:         s.DB,
-		CRepo:      s.CRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify contract PDF %s: %w", p.Did, err))
@@ -183,16 +183,16 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 
 func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.VerifyTemplatePdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyTemplatePdfHandler{
-		DB:         s.DB,
-		TRepo:      s.TRepo,
-		IPFSClient: s.IPFSClient,
-		PDFCore:    s.PDFCore,
-		VCIssuer:   s.VCIssuer,
-		IssuerDID:  s.IssuerDID,
+		DB:        s.DB,
+		TRepo:     s.TRepo,
+		Artifacts: s.Artifacts,
+		PDFCore:   s.PDFCore,
+		VCIssuer:  s.VCIssuer,
+		IssuerDID: s.IssuerDID,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
 			return nil, pdfgen.MakeNotFound(err)
 		}
 		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify template PDF %s: %w", p.Did, err))

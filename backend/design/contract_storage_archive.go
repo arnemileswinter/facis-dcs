@@ -79,6 +79,36 @@ var ArchiveAnnotationResponse = Type("ArchiveAnnotationResponse", func() {
 	Required("did", "summary")
 })
 
+var ArchiveErasurePeerStatus = Type("ArchiveErasurePeerStatus", func() {
+	Description("The erasure-handshake state of one counterparty instance: pending while the peer erase request is still queued for retry, confirmed once the peer acknowledged shredding its wrapped CEKs")
+
+	Attribute("peer_did", String, "Decentralized Identifier of the counterparty instance")
+	Attribute("status", String, "Handshake state: pending or confirmed", func() {
+		Enum("pending", "confirmed")
+	})
+	Attribute("requested_at", String, "When the peer erase was triggered (RFC3339)")
+	Attribute("confirmed_at", String, "When the peer confirmed shredding its CEKs (RFC3339); absent while pending")
+	Attribute("retry_count", Int, "Number of failed delivery attempts so far")
+	Attribute("last_tried_at", String, "When delivery was last attempted (RFC3339); absent before the first retry")
+
+	Required("peer_did", "status", "requested_at", "retry_count")
+})
+
+var ArchiveErasureStatusResponse = Type("ArchiveErasureStatusResponse", func() {
+	Description("The erasure state of a contract's content-encryption keys (DCS-NFR-COMP-03, DCS-NFR-SEC-13): live or shredded locally, plus the per-peer erase-handshake state on federated contracts")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("local_status", String, "Local CEK state: live (content decryptable) or shredded (keys destroyed, content erased)", func() {
+		Enum("live", "shredded")
+	})
+	Attribute("shredded_at", String, "When the local CEK records were destroyed (RFC3339); absent while live")
+	Attribute("shredded_by", String, "Who destroyed the local CEK records — a local participant or the requesting peer DID; absent while live")
+	Attribute("shred_reason", String, "The recorded destruction reason; absent while live")
+	Attribute("peers", ArrayOfRequired(ArchiveErasurePeerStatus), "Erase-handshake state per counterparty instance; empty for purely local contracts")
+
+	Required("did", "local_status", "peers")
+})
+
 // Contract Storage & Archive Service  (/archive/...)
 var _ = Service("ContractStorageArchive", func() {
 	Description("Contract Storage & Archive APIs (/archive/...)")
@@ -210,6 +240,34 @@ var _ = Service("ContractStorageArchive", func() {
 
 		HTTP(func() {
 			POST("/archive/annotate")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("erasure_status", func() {
+		Description("Return the erasure state of a contract's content-encryption keys (DCS-NFR-COMP-03, DCS-NFR-SEC-13): whether the local wrapped CEKs are live or shredded (with timestamp, actor, and reason), and — for federated contracts — whether each counterparty instance has confirmed shredding its own CEKs or the erase request is still pending retry.")
+		Meta("dcs:requirements", "DCS-NFR-COMP-03", "DCS-NFR-SEC-13", "DCS-IR-CSA-03")
+		Meta("dcs:ui", "Archive Manager Dashboard")
+		Meta("dcs:csa:components", "Signed Contract Archive")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Decentralized Identifier of the contract")
+			Required("did")
+		})
+		Result(ArchiveErasureStatusResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/erasure-status")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

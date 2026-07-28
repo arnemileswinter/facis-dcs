@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
@@ -42,7 +42,7 @@ type DCSToDCSSynchronizer struct {
 	DB          *sqlx.DB
 	CRepo       db.ContractRepo
 	SRepo       db2.SyncRepository
-	IPFSClient  *ipfs.APIClient
+	Artifacts   *artifactstore.Store
 	DIDDocument identity.DIDDocument
 	TrustGate   TrustGate
 }
@@ -211,11 +211,10 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 	recipients := contractData.Responsible.GetParties()
 
-	pdfResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
-	if err != nil || len(pdfResult.Data) == 0 {
+	pdfBytes, err := s.Artifacts.Get(ctx, artifactstore.ContractScope(did), pdfState.IPFSCID)
+	if err != nil || len(pdfBytes) == 0 {
 		return fmt.Errorf("fetch PDF %s from IPFS for %s: %w", pdfState.IPFSCID, did, err)
 	}
-	pdfBytes := []byte(pdfResult.Data)
 
 	jadesSignature, err := s.jadesForSignedContract(state, contractData)
 	if err != nil {
@@ -299,6 +298,26 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		if err := s.TrustGate.Check(ctx, peer, Outbound, did, state); err != nil {
 			return err
 		}
+
+		// Ship the contract CEK wrapped to the peer's keyAgreement key
+		// (DCS-NFR-SEC-14): the receiver re-wraps it to its own key, so both
+		// instances hold the same CEK for the contract. Sent with every ship —
+		// the receiver adopts it only when it has none yet, so repeats are
+		// idempotent. A peer without a resolvable keyAgreement key cannot
+		// receive the CEK and the ship hard-fails into the retry queue.
+		remoteDIDDocument, err := identity.FetchDIDDocument(peer)
+		if err != nil {
+			return fmt.Errorf("fetch did document of peer %s: %w", peer, err)
+		}
+		peerKeyAgreement, err := remoteDIDDocument.SoleKeyAgreementPublicKey()
+		if err != nil {
+			return fmt.Errorf("resolve keyAgreement key of peer %s: %w", peer, err)
+		}
+		wrappedCEK, err := s.Artifacts.WrapForPeer(ctx, artifactstore.ContractScope(did), peer, peerKeyAgreement)
+		if err != nil {
+			return fmt.Errorf("wrap contract cek of %s for peer %s: %w", did, peer, err)
+		}
+
 		hostname, segments, err := identity.DIDWebPath(peer)
 		if err != nil {
 			return err
@@ -321,6 +340,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			SecretHash:     secretHash,
 			JadesSignature: &jadesSignature,
 			ContractState:  &state,
+			WrappedCek:     WireWrappedCEK(wrappedCEK),
 		}); err != nil {
 			return err
 		}

@@ -94,6 +94,17 @@ func main() {
 	vcJWK["alg"] = "ES256"
 	vcJWK["x5c"] = []string{base64.StdEncoding.EncodeToString(vcCertDER)}
 
+	// Key-agreement key: peers wrap content-encryption keys to this public
+	// key. Published without x5c — it never signs anything.
+	ecdhLabel := hsm.KeyLabelECDH()
+	ecdhJWK, err := h.PublicJWK(ecdhLabel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gendid: load ecdh key: %v\n", err)
+		os.Exit(1)
+	}
+	ecdhJWK["kid"] = ecdhLabel
+	ecdhJWK["use"] = "enc"
+
 	doc := map[string]any{
 		"@context": []string{
 			"https://www.w3.org/ns/did/v1",
@@ -113,8 +124,15 @@ func main() {
 				"controller":   *did,
 				"publicKeyJwk": vcJWK,
 			},
+			{
+				"id":           *did + "#" + ecdhLabel,
+				"type":         "JsonWebKey2020",
+				"controller":   *did,
+				"publicKeyJwk": ecdhJWK,
+			},
 		},
 		"assertionMethod": []string{*did + "#dev-key-1", *did + "#" + vcLabel},
+		"keyAgreement":    []string{*did + "#" + ecdhLabel},
 	}
 	if *endpoint != "" {
 		doc["services"] = []map[string]any{

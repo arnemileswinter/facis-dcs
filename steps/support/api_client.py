@@ -145,6 +145,13 @@ def archive_delete_url(context) -> str:
     return f"{context.base_url}/archive/delete"
 
 
+def archive_erasure_status_url(context) -> str:
+    """GET /archive/erasure-status?did= (backend/design/contract_storage_archive.go
+    erasure_status): local CEK shred state plus the per-peer erase-handshake
+    ledger for one contract."""
+    return f"{context.base_url}/archive/erasure-status"
+
+
 def archive_annotate_url(context) -> str:
     return f"{context.base_url}/archive/annotate"
 
@@ -155,6 +162,20 @@ def signature_view_url(context) -> str:
 
 def pac_audit_url(context) -> str:
     return f"{context.base_url}/pac/audit"
+
+
+def pac_checkpoint_head_url(context) -> str:
+    return f"{context.base_url}/pac/audit/checkpoint/head"
+
+
+def pac_checkpoint_proof_url(context, entry_cid: str) -> str:
+    return f"{context.base_url}/pac/audit/checkpoint/proof/{entry_cid}"
+
+
+def admin_hsm_keys_url(context) -> str:
+    """GET /admin/hsm-keys (backend/design/key_inventory.go): the read-only
+    HSM key inventory for the Sys. Administrator."""
+    return f"{context.base_url}/admin/hsm-keys"
 
 
 def pac_report_url(context) -> str:

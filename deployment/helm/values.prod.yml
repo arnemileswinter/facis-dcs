@@ -94,3 +94,18 @@ ipfs:
   mfsBaseURLSecretRef:
     name: dcs-prod-ipfs-credentials
     key: IPFS_MFS_BASE_URL
+  # Storage at rest (DCS-NFR-SEC-14): the Kubo repo persists all pinned
+  # artifact ciphertext. Set your platform's encrypted StorageClass here —
+  # deploy.sh then asserts the bound class. Left empty, the cluster default
+  # applies and disk encryption becomes an operator prerequisite deploy.sh
+  # cannot assert.
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: ""   # e.g. "encrypted-gp3" — your encrypted StorageClass
+
+# Storage at rest for the components prod does NOT co-deploy: the external
+# PostgreSQL server (database.url above) and the real HSM hold their own
+# storage — encrypting them is an operator prerequisite outside this chart.
+# If you co-deploy postgresql instead, set
+# postgresql.persistence.storageClassName to an encrypted class as well.

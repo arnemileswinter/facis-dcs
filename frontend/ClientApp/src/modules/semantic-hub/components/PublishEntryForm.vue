@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
+import { refreshOntologyDomainFields } from '@template-repository/utils/ontology-domain-fields'
 import { registerSchema } from '@/services/semantic-hub-service'
 
 /**
@@ -10,14 +11,15 @@ import { registerSchema } from '@/services/semantic-hub-service'
  * own panel (RegisterVersionForm).
  */
 
-const KINDS = ['context', 'shapes', 'profile', 'ontology', 'clause-catalog'] as const
+// The backend's schema kinds; the clause catalog is the `shapes` entry named
+// "clause-catalog", not a kind of its own.
+const KINDS = ['context', 'shapes', 'profile', 'ontology'] as const
 
 const MEDIA_TYPE_BY_KIND: Record<(typeof KINDS)[number], string> = {
   context: 'application/ld+json',
   shapes: 'text/turtle',
   profile: 'application/yaml',
   ontology: 'text/turtle',
-  'clause-catalog': 'text/turtle',
 }
 
 const emit = defineEmits<{
@@ -63,6 +65,7 @@ async function submit() {
       activate: activate.value,
     })
     emit('published', name.value.trim(), kind.value, result.version)
+    refreshOntologyDomainFields().catch(() => undefined)
     name.value = ''
     content.value = ''
     sourceUrl.value = ''

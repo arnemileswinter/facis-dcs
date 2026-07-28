@@ -27,7 +27,6 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/identity"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/command"
@@ -60,7 +59,6 @@ type contractWorkflowEnginesrvc struct {
 	ATrailReader         base.AuditTrailReader
 	DCSToDCSSynchronizer dcstodcs.DCSToDCSSynchronizer
 	TrustPool            *identity.EUTrustPool
-	IPFSClient           *ipfs.APIClient
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
@@ -78,7 +76,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo,
 	sRepo db2.SyncRepository, trustPool *identity.EUTrustPool,
 	fcClient *fcclient.FederatedCatalogueClient, auditTrailReader base.AuditTrailReader, didDocument identity.DIDDocument,
-	ipfsClient *ipfs.APIClient, archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
+	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
 	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
 	targetClient command.ContractTargetClient,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
@@ -100,7 +98,6 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		DIDDocument:      didDocument,
 		ATrailReader:     auditTrailReader,
 		TrustPool:        trustPool,
-		IPFSClient:       ipfsClient,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,

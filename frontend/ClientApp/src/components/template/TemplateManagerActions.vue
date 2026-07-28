@@ -111,6 +111,6 @@ async function register() {
     <span v-if="isPublishing" class="loading loading-sm loading-spinner"></span>
     Publish
   </button>
-  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" class="z-1000" @click="archive">Archive</button>
+  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">Archive</button>
   <ConfirmationModal ref="confirmation-modal" />
 </template>

@@ -58,9 +58,11 @@ const getContractName = (task: ContractNegotiationTask) => {
   return contractsStore.findContractByDid(task.did)?.name ?? 'Nameless Contract'
 }
 
-const applySearchResult = (searchResult: ContractNegotiationTask[]) => {
-  isSearchActive.value = searchResult.length !== props.tasks.length
-  searchedTasks.value = searchResult
+const applySearchResult = (searchResult: ContractNegotiationTask[] | null) => {
+  isSearchActive.value = !!searchResult
+  if (searchResult) {
+    searchedTasks.value = searchResult
+  }
 }
 
 const resolveViewRouteName = (task: ContractNegotiationTask) => {

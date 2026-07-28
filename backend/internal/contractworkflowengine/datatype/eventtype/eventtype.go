@@ -58,6 +58,13 @@ const (
 	// stored a contract's PDF. The DCS-to-DCS synchronizer ships that PDF to the
 	// counterparty on shippable transitions (ADR-13).
 	PDFRegenerated EventType = "PDF_REGENERATED"
+
+	// KeyShredded records the destruction of a contract's wrapped
+	// content-encryption keys (DCS-NFR-SEC-13, DCS-NFR-COMP-03) — locally on
+	// archive deletion or on an authenticated peer's erase request. Its body
+	// carries no contract content and is anchored under the instance scope so
+	// the destruction record survives the shredding it documents.
+	KeyShredded EventType = "KEY_SHREDDED"
 )
 
 var validStates = map[EventType]bool{
@@ -96,6 +103,7 @@ var validStates = map[EventType]bool{
 	Revoke:                   true,
 	Export:                   true,
 	PDFRegenerated:           true,
+	KeyShredded:              true,
 }
 
 func NewEventType(s string) (EventType, error) {

@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   KeyIcon,
+  LockClosedIcon,
   PencilSquareIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -31,6 +32,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
 import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
+import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
@@ -103,6 +105,7 @@ const ROUTES = {
   ADMIN: {
     TARGETS: 'admin.targets',
     SYSTEM_USERS: 'admin.system-users',
+    KEY_INVENTORY: 'admin.key-inventory',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -421,7 +424,7 @@ const routes: RouteRecordRaw[] = [
       icon: PencilSquareIcon,
       requiresAuth: true,
       title: 'DCS - Signing',
-      order: 6,
+      order: 7,
       roles: ['CONTRACT_SIGNER', 'CONTRACT_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
@@ -446,7 +449,7 @@ const routes: RouteRecordRaw[] = [
       icon: ShieldCheckIcon,
       requiresAuth: true,
       title: 'DCS - Signature Compliance Viewer',
-      order: 7,
+      order: 8,
       roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'CONTRACT_MANAGER'],
     },
   },
@@ -459,8 +462,8 @@ const routes: RouteRecordRaw[] = [
       icon: ServerStackIcon,
       requiresAuth: true,
       title: 'DCS - Target Systems',
-      order: 9,
-      roles: ['SYSTEM_ADMINISTRATOR'],
+      order: 11,
+      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
     },
   },
   {
@@ -472,7 +475,20 @@ const routes: RouteRecordRaw[] = [
       icon: KeyIcon,
       requiresAuth: true,
       title: 'DCS - System Users',
-      order: 10,
+      order: 12,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/hsm-keys',
+    name: ROUTES.ADMIN.KEY_INVENTORY,
+    component: KeyInventoryAdminView,
+    meta: {
+      name: 'Key Inventory',
+      icon: LockClosedIcon,
+      requiresAuth: true,
+      title: 'DCS - Key Inventory',
+      order: 11,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
@@ -485,7 +501,7 @@ const routes: RouteRecordRaw[] = [
       icon: ShieldExclamationIcon,
       requiresAuth: true,
       title: 'DCS - Non-Compliance Investigation',
-      order: 7,
+      order: 9,
       roles: ['COMPLIANCE_OFFICER'],
     },
   },
@@ -498,7 +514,7 @@ const routes: RouteRecordRaw[] = [
       icon: CircleStackIcon,
       requiresAuth: true,
       title: 'DCS - Semantic Hub',
-      order: 8,
+      order: 10,
       roles: ['TEMPLATE_MANAGER'],
     },
   },

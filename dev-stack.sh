@@ -36,6 +36,23 @@ echo "Building locked Helm dependencies and deploying to Kubernetes..."
 helm dependency build --skip-refresh "$HELM_CHART_PATH"
 helm upgrade --install "$HELM_RELEASE" "$HELM_CHART_PATH" -f "$HELM_VALUES_FILE"
 
+# The backend's catalogue readiness gate makes exactly one verification call and
+# exits if it fails — deliberately, so a broken catalogue is not papered over by
+# retries. That leaves the ordering to whoever starts the backend: fc-service is
+# a Spring Boot app behind Fuseki and answers nothing for a while after a
+# deploy, so starting air straight away races it and kills the process:
+#
+#   federated catalogue functional verification failed: ... context deadline
+#   exceeded (Client.Timeout exceeded while awaiting headers)
+#
+# Only wait when the values file actually deploys it.
+if python3 -c "import sys,yaml; sys.exit(0 if (yaml.safe_load(open('$HELM_VALUES_FILE')) or {}).get('federatedCatalogue',{}).get('enabled') else 1)"; then
+  echo "Waiting for the Federated Catalogue to answer before starting the backend..."
+  kubectl wait --for=condition=ready pod \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
+    --timeout=10m
+fi
+
 # The host-side backend verifies every RFC 3161 token against the same
 # certificate used by the in-cluster ORCE TSA. Keep the local trust anchor in
 # sync with the release Secret on every stack start.

@@ -484,14 +484,12 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	}
 	contentHash := hashBytes(content)
 	contentCID := ""
-	if s.ATrailReader.IPFSClient != nil {
-		stored, err := s.ATrailReader.IPFSClient.CreateFile(ctx, content)
+	if s.ATrailReader.Artifacts != nil {
+		stored, err := s.ATrailReader.Artifacts.Put(ctx, s.ATrailReader.Artifacts.InstanceScope(), content)
 		if err != nil {
 			return nil, processauditandcompliance.MakeInternalError(fmt.Errorf("archive audit report bytes: %w", err))
 		}
-		if stored != nil {
-			contentCID = stored.Identifier.Value
-		}
+		contentCID = stored
 	}
 	justification := ""
 	if p != nil {

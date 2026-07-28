@@ -58,7 +58,13 @@ resources: {}
 # and is refused once the release's own containers consume the quota.
 jobResources: {}
 
-# Mount the chart's merged flows/*.json as Node-RED's startup flows file —
+# Which chart flow set this release runs. `flows` is the DCS-side set (trust
+# PDP, archive, TSA, contract targets); `flows-issuer` is the OID4VCI credential
+# issuer (did.json, VCI, status list, admin). They claim overlapping routes, so
+# a release serves one set, not both.
+flowsDir: flows
+
+# Mount the chart's merged <flowsDir>/*.json as Node-RED's startup flows file —
 # deterministic, rollout-race-free. When enabled, the flowImport hook job is
 # skipped for chart flows (flows.json is a read-only mount; runtime /flows
 # deploys would fail to persist anyway).
