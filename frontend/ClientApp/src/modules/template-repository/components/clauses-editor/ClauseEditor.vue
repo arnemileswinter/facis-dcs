@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref, useId } from 'vue'
+import { computed, onMounted, ref, useId } from 'vue'
 import ClauseTextEditor from '@template-repository/components/clauses-editor/ClauseTextEditor.vue'
 import OdrlRuleBuilder from '@template-repository/components/clauses-editor/OdrlRuleBuilder.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
@@ -8,6 +8,7 @@ import {
   type HubAsset,
   ONTOLOGY_ASSETS,
   ONTOLOGY_DOMAIN_FIELDS,
+  refreshOntologyDomainFields,
 } from '@template-repository/utils/ontology-domain-fields'
 import type { DcsContentSegment, OdrlRule } from '@/models/dcs-jsonld'
 import type { DomainFieldDefinition, SemanticCondition } from '@template-repository/models/contract-template'
@@ -24,6 +25,12 @@ import type { DomainFieldDefinition, SemanticCondition } from '@template-reposit
 const store = useDcsDraftStore()
 const { partyAnchors, contractTargetIri } = storeToRefs(store)
 
+// A schema registered in the hub after app startup becomes pickable here on
+// the next mount; a failed refresh keeps the startup vocabulary.
+onMounted(() => {
+  refreshOntologyDomainFields().catch(() => undefined)
+})
+
 interface ClauseField {
   id: string
   field: DomainFieldDefinition
@@ -33,7 +40,16 @@ interface ClauseField {
 interface ClauseAsset {
   id: string
   asset: HubAsset
+  /** Instance name distinguishing same-class declarations ("Legal Person 2"),
+   *  user-renamable — it names the instance in the target picker, on field
+   *  chips, and on the declared contract fields. */
+  name: string
+  /** Accent color marking this instance's row, chips, and placeholders. */
+  color: string
 }
+
+/** Deterministic, well-spread accent per declaration order (golden-angle hue). */
+const assetAccent = (index: number) => `hsl(${(index * 137) % 360} 65% 45%)`
 
 const title = ref('')
 const content = ref<DcsContentSegment[]>([])
@@ -47,7 +63,6 @@ const contentId = useId()
 const objectToAddId = useId()
 
 const uuid = () => `urn:uuid:${crypto.randomUUID()}`
-const localName = (iri: string) => iri.replace(/^.*[:#/]/, '')
 
 // One picker of hub objects: an object may be an asset (a shape's target class,
 // carrying properties) or a bare data field (a property). Its role — an ODRL
@@ -77,7 +92,13 @@ function addObject() {
     if (!asset) return
     // Declaring an asset makes it an ODRL target and brings in its shape's properties as fields.
     const assetLocalId = uuid()
-    clauseAssets.value.push({ id: assetLocalId, asset })
+    const sameClass = clauseAssets.value.filter((a) => a.asset.id === asset.id).length
+    clauseAssets.value.push({
+      id: assetLocalId,
+      asset,
+      name: sameClass ? `${asset.label} ${sameClass + 1}` : asset.label,
+      color: assetAccent(clauseAssets.value.length),
+    })
     for (const property of asset.properties) {
       clauseFields.value.push({ id: uuid(), field: property, assetLocalId })
     }
@@ -95,10 +116,28 @@ function removeAsset(assetLocalId: string) {
   clauseFields.value = clauseFields.value.filter((cf) => cf.assetLocalId !== assetLocalId)
 }
 
+/** The instance-qualified display label of a clause field: a declared
+ *  asset's properties carry the instance name so two same-class assets stay
+ *  tellable apart everywhere the field appears. A property named like its
+ *  owner (gx:TaxID's schema:taxID) shows once, not "Tax ID · Tax ID". */
+function fieldDisplayLabel(cf: ClauseField): string {
+  const owner = ownerAsset(cf)
+  if (!owner || owner.name === cf.field.label) return cf.field.label
+  return `${owner.name} · ${cf.field.label}`
+}
+
+const assetFields = (assetLocalId: string) => clauseFields.value.filter((cf) => cf.assetLocalId === assetLocalId)
+const standaloneFields = computed(() => clauseFields.value.filter((cf) => !cf.assetLocalId))
+
+function ownerAsset(cf: ClauseField): ClauseAsset | undefined {
+  return cf.assetLocalId ? clauseAssets.value.find((a) => a.id === cf.assetLocalId) : undefined
+}
+
 const proseConditions = computed<SemanticCondition[]>(() =>
   clauseFields.value.map((cf) => ({
     conditionId: cf.id,
-    conditionName: cf.field.label,
+    conditionName: fieldDisplayLabel(cf),
+    accentColor: ownerAsset(cf)?.color,
     schemaVersion: 'v1',
     parameters: [
       {
@@ -114,8 +153,8 @@ const proseConditions = computed<SemanticCondition[]>(() =>
   })),
 )
 
-const fieldAnchors = computed(() => clauseFields.value.map((cf) => ({ id: cf.id, label: cf.field.label })))
-const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, label: a.asset.label })))
+const fieldAnchors = computed(() => clauseFields.value.map((cf) => ({ id: cf.id, label: fieldDisplayLabel(cf) })))
+const assetAnchors = computed(() => clauseAssets.value.map((a) => ({ id: a.id, label: a.name })))
 
 const canSave = computed(() => !!title.value.trim() && content.value.length > 0)
 
@@ -124,18 +163,22 @@ function save() {
   store.addClauseWithMeaning({
     title: title.value.trim(),
     content: content.value,
-    fields: [
-      ...clauseFields.value.map((cf) => ({
-        id: cf.id,
-        parameterName: cf.field.parameterName,
-        domainFieldIri: cf.field.ontologyId,
-      })),
-      ...clauseAssets.value.map((a) => ({
-        id: a.id,
-        parameterName: localName(a.asset.id),
-        domainFieldIri: a.asset.id,
-      })),
-    ],
+    fields: clauseFields.value.map((cf) => ({
+      id: cf.id,
+      parameterName: cf.field.parameterName,
+      domainFieldIri: cf.field.ontologyId,
+      label: fieldDisplayLabel(cf),
+    })),
+    // A declared asset is NOT a fillable field — it becomes a typed domain
+    // object in dcs:contractData whose properties reference the declared
+    // fields (ADR-23), and the ODRL target names that object.
+    assets: clauseAssets.value.map((a) => ({
+      id: a.id,
+      classIri: a.asset.id,
+      properties: clauseFields.value
+        .filter((cf) => cf.assetLocalId === a.id)
+        .map((cf) => ({ fieldId: cf.id, path: cf.field.ontologyId })),
+    })),
     rule: rule.value,
   })
   title.value = ''
@@ -169,14 +212,37 @@ function save() {
         <span class="text-[10px] text-base-content/40">▣ = asset (carries a shape)</span>
       </div>
 
-      <div v-if="clauseAssets.length" class="flex flex-wrap items-center gap-1">
-        <span v-for="ca in clauseAssets" :key="ca.id" class="badge gap-1 badge-sm badge-primary">
-          ▣ {{ ca.asset.label }}
+      <!-- One row per declared asset instance: its accent color marks the
+           row, its field chips, and the matching prose placeholders. -->
+      <div
+        v-for="ca in clauseAssets"
+        :key="ca.id"
+        class="flex flex-wrap items-center gap-1 border-l-4 pl-2"
+        :style="{ borderLeftColor: ca.color }"
+        :data-asset-row="ca.id"
+      >
+        <span class="badge gap-1 badge-sm badge-primary" :title="ca.asset.label">
+          ▣
+          <input
+            v-model="ca.name"
+            class="w-28 bg-transparent outline-none placeholder:text-primary-content/50"
+            :placeholder="ca.asset.label"
+            aria-label="Instance name"
+          />
           <button type="button" class="text-primary-content/70" @click="removeAsset(ca.id)">✕</button>
         </span>
+        <span
+          v-for="cf in assetFields(ca.id)"
+          :key="cf.id"
+          class="badge gap-1 badge-outline badge-sm"
+          :style="{ borderLeft: `3px solid ${ca.color}` }"
+        >
+          {{ cf.field.label }}
+          <button type="button" class="text-error" @click="removeField(cf.id)">✕</button>
+        </span>
       </div>
-      <div v-if="clauseFields.length" class="flex flex-wrap items-center gap-1">
-        <span v-for="cf in clauseFields" :key="cf.id" class="badge gap-1 badge-outline badge-sm">
+      <div v-if="standaloneFields.length" class="flex flex-wrap items-center gap-1">
+        <span v-for="cf in standaloneFields" :key="cf.id" class="badge gap-1 badge-outline badge-sm">
           {{ cf.field.label }}
           <button type="button" class="text-error" @click="removeField(cf.id)">✕</button>
         </span>

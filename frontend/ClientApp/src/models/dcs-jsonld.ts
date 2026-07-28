@@ -4,7 +4,8 @@ export interface JsonLdReference {
 
 export interface JsonLdTypedValue {
   '@value': string
-  '@type': `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
+  /** A compact xsd term, or an external library's exact datatype IRI. */
+  '@type': string
 }
 
 export interface DcsTemplateMetadata {
@@ -46,9 +47,10 @@ export function localNameOf(iri: string): string {
 }
 
 /** Serializes a fill as a typed literal carrying the field's declared
- *  datatype. The lexical form is a string, so the document carries the
- *  exact token the user agreed to — deterministic across round trips. */
-export function typedFieldFill(value: string | number | boolean, datatype: XsdDatatype): JsonLdTypedValue {
+ *  datatype — a compact xsd term, or an external library's exact datatype
+ *  IRI. The lexical form is a string, so the document carries the exact
+ *  token the user agreed to — deterministic across round trips. */
+export function typedFieldFill(value: string | number | boolean, datatype: string): JsonLdTypedValue {
   return { '@value': String(value), '@type': datatype }
 }
 
