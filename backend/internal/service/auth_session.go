@@ -26,11 +26,16 @@ const oauthStateSizeBytes = 24
 
 // AuthConfig wires auth dependencies from cmd/dcs/main.go (no env reads in handlers).
 type AuthConfig struct {
-	Hydra             *hydra.Client
-	Trust             *oid4vp.TrustConfig
-	DCQLQuery         any
-	PIDDCQLQuery      any
-	RequestSigner     oid4vprequest.Signer
+	Hydra         *hydra.Client
+	Trust         *oid4vp.TrustConfig
+	DCQLQuery     any
+	PIDDCQLQuery  any
+	RequestSigner oid4vprequest.Signer
+	// OID4VPClientID identifies this verifier to a wallet. It is NOT the Hydra
+	// OAuth client id: OpenID4VP requires a prefixed identifier, and a bare
+	// value means the "pre-registered" prefix, which wallets outside a
+	// pre-agreed federation refuse outright.
+	OID4VPClientID    string
 	PublicAPIBase     string
 	LogoutRedirectURI string
 	UIPath            string
@@ -48,6 +53,7 @@ type authSvc struct {
 	oid4vpStateTTL    time.Duration
 	presentations     authdb.PresentationAttemptRepo
 	requestSigner     oid4vprequest.Signer
+	oid4vpClientID    string
 }
 
 func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
@@ -91,6 +97,7 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		oid4vpStateTTL:    oid4vpStateTTL,
 		presentations:     presentations,
 		requestSigner:     cfg.RequestSigner,
+		oid4vpClientID:    cfg.OID4VPClientID,
 	}, nil
 }
 
