@@ -204,6 +204,23 @@ $(KIND_GOALS): export KUBECONFIG := $(KIND_KUBECONFIG)
 kind_export_kubeconfig:
 	@mkdir -p "$(CURDIR)/.tmp"
 	@"$(KIND_BIN)" export kubeconfig --name "$(KIND_CLUSTER_NAME)" --kubeconfig "$(KIND_KUBECONFIG)"
+	@server="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
+		-o jsonpath='{.clusters[0].cluster.server}')"; \
+	if ! curl -ksS --max-time 2 "$${server}/readyz" >/dev/null 2>&1 && \
+		ip link show veth-rd-wsl >/dev/null 2>&1; then \
+		rd_gateway="$$(ip -4 -o addr show dev veth-rd-wsl | \
+			awk '{ split($$4, a, "[./]"); print a[1] "." a[2] "." a[3] ".1"; exit }')"; \
+		api_port="$${server##*:}"; \
+		if [[ -n "$$rd_gateway" ]] && \
+			curl -ksS --max-time 2 "https://$${rd_gateway}:$${api_port}/readyz" >/dev/null 2>&1; then \
+			cluster_name="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
+				-o jsonpath='{.clusters[0].name}')"; \
+			echo "Using Rancher Desktop WSL gateway $${rd_gateway}:$${api_port} for kind API"; \
+			"$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config set-cluster "$$cluster_name" \
+				--server="https://$${rd_gateway}:$${api_port}" \
+				--tls-server-name=localhost >/dev/null; \
+		fi; \
+	fi
 
 kind_create: ensure_kind ensure_k8s_tools
 	@cluster_healthy=false; \

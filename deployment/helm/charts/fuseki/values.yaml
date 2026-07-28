@@ -9,7 +9,7 @@
 # API; confirmed again live: ImagePullBackOff "not found" pulling 5.5.0).
 image:
   repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-fuseki
-  tag: "latest"
+  tag: "sha-c243a65@sha256:98660d5ecb27afa457afae103c80ad1d44964801ad4883f5e480b2b5caa0b95f"
   pullPolicy: IfNotPresent
 
 dataset: "ds"

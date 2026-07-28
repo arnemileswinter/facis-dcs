@@ -57,7 +57,7 @@ func syncFCSchemasOnce(t *testing.T, ctx context.Context, fc *fcclient.Federated
 	fcSchemaSyncOnce.Do(func() {
 		syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		if err := fcschemas.SyncWithRetry(syncCtx, fc); err != nil {
+		if err := fcschemas.Sync(syncCtx, fc); err != nil {
 			t.Fatalf("fc schema sync failed: %v", err)
 		}
 	})
