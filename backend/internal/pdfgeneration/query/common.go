@@ -35,6 +35,14 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // actually perform.
 const pdfSignatureNotAvailable = "not_available"
 
+// Failure classes reported in PDFVerifyResult.Discrepancy.
+const (
+	discrepancyNone         = ""
+	discrepancyHashMismatch = "content_hash_mismatch"
+	discrepancyNotAuthentic = "artifact_not_authentic"
+	discrepancyFailed       = "verification_failed"
+)
+
 // stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-004) for the
 // given contract state into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It performs no IPFS storage or DB
@@ -143,6 +151,7 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 		VcProofValid:       false,
 		LifecycleStatus:    ptrToString(lifecycleStatus),
 		PdfSignatureStatus: pdfSignatureNotAvailable,
+		Discrepancy:        ptrToString(discrepancyNotAuthentic),
 	}
 }
 
@@ -154,6 +163,18 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		c2paManifestFound = strings.Contains(verifyErr.Error(), "status 409")
 	}
 	c2paSignatureValid := verifyErr == nil
+
+	// pdf-core answers 409 specifically for "manifest present, content hash
+	// comparison failed" — the genuine MR/HR discrepancy — which is a different
+	// finding from a manifest that is missing or a call that never landed.
+	discrepancy := discrepancyNone
+	switch {
+	case verifyErr == nil:
+	case c2paManifestFound:
+		discrepancy = discrepancyHashMismatch
+	default:
+		discrepancy = discrepancyFailed
+	}
 
 	statusListURI := ""
 	statusListStatus := ""
@@ -180,6 +201,7 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		// no cryptographic PAdES re-verification, so it honestly reports
 		// "not_available" rather than faking a passed PDF-signature verification.
 		PdfSignatureStatus: pdfSignatureNotAvailable,
+		Discrepancy:        ptrToString(discrepancy),
 	}, nil
 }
 

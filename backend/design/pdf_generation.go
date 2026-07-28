@@ -27,6 +27,13 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// than faking a passed PDF-signature verification.
 	Attribute("pdf_signature_status", String, "PAdES/PDF signature verification status (DCS-OR-C2PA-006): 'not_available' when the PDF carries no PAdES signature, otherwise 'valid'/'invalid'. Never falsely reports a passed PDF signature check.")
 
+	// Names WHY a verification failed, so a caller can tell failure classes
+	// apart without inferring them from combinations of the booleans above.
+	// 'artifact_not_authentic' is reachable only once artifacts are encrypted
+	// at rest: the stored bytes fail authenticated decryption, so no claim can
+	// be made about the content they were supposed to carry.
+	Attribute("discrepancy", String, "Failure class when match is false: 'content_hash_mismatch' (manifest present, content differs from the embedded JSON-LD), 'artifact_not_authentic' (stored bytes failed authenticated decryption — altered or substituted at rest), or 'verification_failed' (any other check failure). Empty when match is true.")
+
 	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_valid", "vc_proof_valid", "pdf_signature_status")
 })
 

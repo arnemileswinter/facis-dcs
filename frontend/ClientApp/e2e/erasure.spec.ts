@@ -100,7 +100,11 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string): P
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
-  test.setTimeout(750_000)
+  // Higher than the other two-instance specs: this one drives the full
+  // template + contract lifecycle on BOTH instances (the counterparty's turn
+  // and each side's own submit -> review -> approve) before it can even begin
+  // testing erasure.
+  test.setTimeout(1_500_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
