@@ -394,11 +394,11 @@ def step_then_archive_records_auto_deployment(context, name):
 
 
 # ---------------------------------------------------------------------------
-# When/Then — callback shared-secret auth
+# When/Then — callback caller authorisation
 # ---------------------------------------------------------------------------
 
 
-@when('the target sends a deployment callback for contract "{name}" with an invalid shared secret')
+@when('another registered system sends a deployment callback for contract "{name}"')
 def step_when_callback_invalid_secret(context, name):
     did, _ = ContractService._contract_data(context, name)
     payload = {
@@ -415,7 +415,7 @@ def step_when_callback_invalid_secret(context, name):
     context.requests_response = post_json(context, contract_deployment_callback_url(context), payload, headers=headers)
 
 
-@then("the callback request is rejected for the missing or invalid shared secret")
+@then("the callback request is rejected because that caller is not this deployment's target")
 def step_then_callback_rejected(context):
     resp = context.requests_response
     assert resp.status_code in (401, 403), (
@@ -435,7 +435,7 @@ def step_when_target_acknowledges(context, name):
     backend dispatched the deployment to the shipped ORCE
     contract-target-flow (CONTRACT_TARGET_URL), whose callback legs POST the
     authoritative ack (status + execution-evidence receipt) back to
-    /contract/deployment/callback with the shared secret. Nothing is
+    /contract/deployment/callback as its own registered client. Nothing is
     simulated here — this step only waits for that ack to land, observable
     as the SIGNED -> ACTIVE transition it drives. Registered as @step so it
     reads naturally in Given ("And the contract target acknowledges ...")

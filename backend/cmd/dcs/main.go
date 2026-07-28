@@ -304,7 +304,6 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
-	authCfg.RequestSigner = requestSigner
 
 	// The Document-Retrieval signing ceremony's request object declares
 	// client_id_scheme=x509_san_dns (docretrieval.go) — a real wallet resolves
@@ -320,6 +319,15 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not resolve document-retrieval client_id")
 	}
+
+	// Login and PID presentation use the same certificate-backed identity. The
+	// wallet is handed an OpenID4VP client identifier — prefix and value — not
+	// the Hydra OAuth client id: an unprefixed value means the "pre-registered"
+	// prefix, which a wallet outside a pre-agreed federation refuses before it
+	// looks at any credential. The request object is therefore signed with the
+	// chain the prefix names, so x5c travels with it.
+	authCfg.RequestSigner = docRetrievalSigner
+	authCfg.OID4VPClientID = oid4vprequest.X509SANDNSClientID(docRetrievalClientID)
 	// Machine callers are resolved from the registry at request time, so an
 	// identity can be added, disabled or rotated without a redeploy (ADR-27).
 	// DCS_SYSTEM_CLIENTS remains a declarative seed for the callers a

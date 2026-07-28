@@ -3,6 +3,7 @@ package request
 import (
 	"crypto/elliptic"
 	"fmt"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -65,4 +66,34 @@ func (s *X5CSigner) SignAuthorizationRequestJWT(claims jwt.MapClaims) (string, e
 		}
 		return hsm.ECDSADERToRaw(der, elliptic.P256())
 	})
+}
+
+// X509SANDNSClientPrefix is the OpenID4VP client identifier prefix for a
+// verifier that proves itself with an X.509 certificate whose SAN carries the
+// DNS name it claims.
+const X509SANDNSClientPrefix = "x509_san_dns"
+
+// X509SANDNSClientID renders the client identifier a wallet is given. The
+// prefix is part of the identifier, not a separate parameter: a bare value is
+// read as the "pre-registered" prefix, which means "you already know me out of
+// band" and is refused by any wallet that has no such prior arrangement.
+func X509SANDNSClientID(hostname string) string {
+	host := strings.TrimSpace(hostname)
+	// Strip any prefix first: what follows it is the name, and the prefix's own
+	// colon must not be mistaken for a port separator below.
+	host = strings.TrimPrefix(host, X509SANDNSClientPrefix+":")
+	if host == "" {
+		return ""
+	}
+	// A dNSName SAN holds a name, never a port, so an identifier carrying one
+	// can match no certificate. Deployments reached on a non-default port —
+	// dev and the test cluster — would otherwise claim a hostname their own
+	// certificate cannot back, and a wallet refuses exactly that.
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		host = host[:idx]
+	}
+	if host == "" {
+		return ""
+	}
+	return X509SANDNSClientPrefix + ":" + host
 }

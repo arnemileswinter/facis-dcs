@@ -81,7 +81,7 @@ func (s *authSvc) buildPidPresentationResult(presentationState string, expiresIn
 	requestURI := strings.TrimRight(s.publicAPIBase, "/") + "/auth/pid/presentation/request/" + url.PathEscape(presentationState)
 
 	return &genauth.PidPresentationResult{
-		PresentationURL: buildOpenID4VPPresentationURI(s.hydra.ClientID(), requestURI),
+		PresentationURL: buildOpenID4VPPresentationURI(s.oid4vpClientID, requestURI),
 		State:           presentationState,
 		ExpiresIn:       expiresIn,
 	}, nil
@@ -97,7 +97,7 @@ func (s *authSvc) PidPresentationRequest(ctx context.Context, p *genauth.PidPres
 	walletNonce := strings.TrimSpace(pointerString(p.WalletNonce))
 	responseURI := strings.TrimRight(s.publicAPIBase, "/") + "/auth/pid/presentation/callback"
 	jwt, err := oid4vprequest.BuildJWT(s.requestSigner, oid4vprequest.Params{
-		ClientID:    s.hydra.ClientID(),
+		ClientID:    s.oid4vpClientID,
 		ResponseURI: responseURI,
 		State:       attempt.PresentationState,
 		Nonce:       attempt.Nonce,
@@ -157,7 +157,7 @@ func (s *authSvc) PidPresentationCallback(ctx context.Context, p *genauth.Presen
 
 	verified, err := oid4vp.NewVerifier(s.trust).VerifyPID(presentation, oid4vp.PresentationContext{
 		Nonce:    attempt.Nonce,
-		ClientID: s.hydra.ClientID(),
+		ClientID: s.oid4vpClientID,
 	})
 
 	if err != nil {

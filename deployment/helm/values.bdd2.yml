@@ -164,6 +164,11 @@ statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
+  # Same seeded list instance A probes: B has no status list of its own and
+  # reaches A's through the same Ingress. Without this the probe falls back to
+  # the chart default /statuslist/health, which nothing serves — the sidecar
+  # then never turns ready and holds B's rollout open until it times out.
+  readinessPath: "/statuslist/v1/tenants/credential/status/1"
 
 # IPFS / IPFS Document Manager: instance B runs its OWN, like a real second
 # organization (two independent provenance stores) — sharing instance A's Kubo

@@ -4,7 +4,7 @@
 # Endpoint surface exercised here:
 #   - POST /contract/deploy (manual deploy trigger, UC-05-01)
 #   - POST /contract/deployment/callback (target -> DCS ack/status/KPI,
-#     protected by a shared-secret header)
+#     authenticated as the target's own registered client, ADR-27)
 #   - GET /contract/retrieve/{did} "kpis" field
 #   - archive entries (GET /archive/search) with an
 #     evidence.deployment{correlation_id, payload_hash, receipt_hash,
@@ -62,12 +62,12 @@ Feature: Contract deployment, execution evidence, and KPIs
     And the archive entry for contract "Auto Deploy Contract" records an automatic deployment correlation ID
 
   @DCS-IR-SI-05
-  Scenario: The deployment callback rejects a request without a valid shared secret
+  Scenario: The deployment callback rejects a caller that is not this deployment's target
     Given contract "Callback Auth Contract" has reached contract state "SIGNED"
     And an authorized user deploys contract "Callback Auth Contract" to the configured contract target
     And get http 200:Success code
-    When the target sends a deployment callback for contract "Callback Auth Contract" with an invalid shared secret
-    Then the callback request is rejected for the missing or invalid shared secret
+    When another registered system sends a deployment callback for contract "Callback Auth Contract"
+    Then the callback request is rejected because that caller is not this deployment's target
 
   @DCS-IR-SI-02 @DCS-IR-SI-05 @DCS-IR-CI-07
   Scenario: The shipped ORCE contract-target-flow verifies the content hash and returns a matching ack
@@ -98,8 +98,8 @@ Feature: Contract deployment, execution evidence, and KPIs
 
   # The target system itself reports a KPI it genuinely measures — the
   # latency between receiving the dispatch and activating the contract —
-  # over the shared-secret callback channel (DCS-FR-CWE-31: "KPIs ... sent
-  # from the target system").
+  # over the callback channel it authenticates on (DCS-FR-CWE-31: "KPIs ...
+  # sent from the target system").
   @DCS-FR-CWE-31 @DCS-FR-CWE-09 @DCS-IR-SI-02 @DCS-IR-SI-05
   Scenario: The contract target itself reports a measured KPI over the callback channel
     Given contract "Target Reported KPI Contract" has reached contract state "SIGNED"
