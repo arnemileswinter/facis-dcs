@@ -90,30 +90,6 @@ hydra:
       post_logout_redirect_uris: ["http://localhost:5173/api/auth/logout-complete"]
       token_endpoint_auth_method: client_secret_post
       skip_consent: true
-    # The contract-target flow authenticates its deployment callback as the
-    # registry entry it serves (ADR-27). Without it a locally deployed contract
-    # is dispatched but never acknowledged, so it stays SIGNED.
-    - client_id: dcs-orce-target
-      client_secret: dcs-orce-target-secret
-      grant_types: ["client_credentials"]
-      response_types: []
-      scope: ""
-      token_endpoint_auth_method: client_secret_post
-
-# Authorises the deployment callback and nothing else, and only for deployments
-# dispatched to the target below (ADR-27).
-systemClients:
-  - client_id: dcs-orce-target
-    participant_did: "did:web:localhost%3A8991"
-    roles: ["Contract Target System"]
-
-# The shipped ORCE contract-target flow, credentialed so a local deploy can be
-# acknowledged end to end. Seeding is create-only, matched on name.
-contractTargets:
-  - name: "Local ORCE Target"
-    url: "http://dcs-orce:1880/contract-target/deploy"
-    description: "The shipped ORCE contract-target flow running in this dev cluster."
-    oauth_client_id: "dcs-orce-target"
 
 nats:
   enabled: true
@@ -127,46 +103,8 @@ nats:
 # dev instance needs it.
 # A dangling apiURL would crash-loop the backend (DCS's blocking
 # fcschemas.SyncWithRetry at startup), same failure IONOS hit.
-# The Federated Catalogue backs template publishing, so local dev runs it.
-# The backend runs on the host under air, so both fc-service and its Keycloak
-# are exposed on fixed NodePorts that backend/.env.dev1 points at.
 federatedCatalogue:
-  enabled: true
-  apiURL: "http://fc-service:8081"
-  oauth:
-    # The service-account client the chart's realm actually provisions. It is
-    # not "dcs-fc-client": nothing creates that, so the token grant 401s.
-    clientID: "federated-catalogue"
-    clientSecret: "**********"
-
-fcservice:
-  enabled: true
-  portal:
-    enabled: false
-  realmProvision:
-    enabled: true
-    # The backend runs on the host under air, so there is no DCS image in this
-    # cluster for the job to borrow. It only needs a shell, curl and jq.
-    image: "alpine:3.19"
-  service:
-    type: NodePort
-    nodePort: 30081
-  keycloak:
-    # The backend runs on the host and mints its FC token through the NodePort,
-    # so the token's iss is the localhost URL. fc-service must expect that same
-    # issuer or it rejects every call with 401. It still fetches the signing
-    # keys in-cluster: the JWKS URL is configured separately.
-    issuerUrl: "http://localhost:30080/auth"
-
-# Keycloak mints FC tokens with the issuer the caller used, so the host-side
-# backend and the in-cluster fc-service must agree on one address: the NodePort.
-fcKeycloakApp:
-  service:
-    type: NodePort
-    nodePort: 30080
-
-fcKeycloak:
-  realmURL: "http://localhost:30080/auth/realms/federated-catalogue-realm"
+  enabled: false
 # Not used when replicaCount=0, but kept as documentation for the backend .env.
 signing:
   issuerDID: "did:web:localhost"
@@ -208,13 +146,6 @@ orce:
   enabled: true
   persistence:
     enabled: false
-  extraEnv:
-    - name: HYDRA_TOKEN_URL
-      value: "http://dcs-hydra:4444/oauth2/token"
-    - name: DCS_TARGET_CLIENT_ID
-      value: "dcs-orce-target"
-    - name: DCS_TARGET_CLIENT_SECRET
-      value: "dcs-orce-target-secret"
   service:
     type: NodePort
     nodePort: 30180

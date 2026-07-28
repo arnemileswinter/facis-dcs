@@ -8,10 +8,6 @@ replicas: 1
 service:
   type: ClusterIP
   port: 8080
-  # Pin the port when type is NodePort, so a backend running outside the
-  # cluster (dev-stack.sh runs it under air on the host) has a fixed address
-  # to put in its .env rather than whatever the scheduler picks.
-  nodePort: null
   annotations: {}
 
 # Legacy "/auth" context path — kept so every already-working fixed URL

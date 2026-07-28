@@ -21,19 +21,6 @@ PDF_CORE_ENV="$PDF_CORE_DIR/.env"
 TSA_TRUST_CERT_FILE="backend/certs/dev/orce-tsa-cert.pem"
 TSA_TRUST_SECRET="${HELM_RELEASE}-orce-tsa-material"
 
-# What this stack runs is decided by the values file, not by this script.
-# Reading the toggles from there keeps the two from drifting: waiting for a
-# component the values file disables aborts the run under `set -e`.
-values_enabled() {
-  python3 - "$HELM_VALUES_FILE" "$1" <<'PYEOF'
-import sys, yaml
-values = yaml.safe_load(open(sys.argv[1])) or {}
-section = values.get(sys.argv[2])
-enabled = bool(section.get("enabled")) if isinstance(section, dict) else False
-sys.exit(0 if enabled else 1)
-PYEOF
-}
-
 echo "=== Setting up dev environment ==="
 
 # Helm: idempotent install-or-upgrade so this script works whether or not
@@ -50,31 +37,21 @@ kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
 
-if values_enabled federatedCatalogue; then
-  echo "Waiting for Federated Catalogue to become ready..."
-  kubectl wait --for=condition=ready pod \
-    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
-    --timeout=10m
-else
-  echo "Federated Catalogue disabled in $HELM_VALUES_FILE — skipping"
-fi
+echo "Waiting for Federated Catalogue to become ready..."
+kubectl wait --for=condition=ready pod \
+  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=federated-catalogue" \
+  --timeout=10m
 
-if values_enabled statuslistService; then
-  echo "Waiting for statuslist-service..."
-  kubectl wait --for=condition=ready pod \
-    -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
-    --timeout=5m
-else
-  echo "statuslist-service disabled in $HELM_VALUES_FILE — skipping"
-fi
+echo "Waiting for statuslist-service..."
+kubectl wait --for=condition=ready pod \
+  -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
+  --timeout=5m
 
 echo "Installing testWallet dependencies..."
 make -C testWallet install
 
-if values_enabled statuslistService; then
-  echo "Initializing statuslist for dev (NATS create when list is empty)..."
-  make -C testWallet ensure-statuslist
-fi
+echo "Initializing statuslist for dev (NATS create when list is empty)..."
+make -C testWallet ensure-statuslist
 
 # Setup backend .env
 cp backend/.env.dev1 backend/.env
