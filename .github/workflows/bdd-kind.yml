@@ -13,13 +13,45 @@ jobs:
   # is max(bdd, e2e) instead of bdd+e2e, and each gets a full disk/memory budget
   # (the heavy DSS bundle + both DCS instances no longer share one runner).
   bdd-kind:
+    name: bdd-kind-${{ matrix.shard }}
     permissions:
       contents: read
       checks: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: core
+            features: >-
+              features/01_authentication_authorization
+              features/02_template_management
+              features/03_contract_creation
+          - shard: lifecycle
+            features: >-
+              features/04_contract_signing
+              features/05_contract_deployment
+              features/06_contract_lifecycle
+              features/07_contract_storage_security
+              features/08_audit_compliance
+              features/12_system_based_contract_management
+              features/14_credential_acquisition
+              features/15_access_revocation
+              features/16_other
+          - shard: advanced
+            features: >-
+              features/17_peer_trust
+              features/18_odrl_soundness
+              features/19_c2pa_conformance
+              features/20_contract_hierarchy_bundle_export
+              features/21_pki_consolidation_pkcs11
+              features/22_real_signing_vertical
+              features/23_semantic_hub
+              features/24_contract_bundle_export
+              features/25_federated_catalogue_deployment_lifecycle
     concurrency:
-      group: bdd-kind-${{ github.ref }}
+      group: bdd-kind-${{ matrix.shard }}-${{ github.ref }}
       cancel-in-progress: true
 
     steps:
@@ -87,7 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests/bdd run_bdd_kind_ci \
-            KIND_CLUSTER_NAME=dcs-bdd \
+            KIND_CLUSTER_NAME="dcs-bdd-${{ matrix.shard }}" \
+            FEATURES_PATH="${{ matrix.features }}" \
             DOCKER_IMAGE_REPOSITORY=digital-contracting-service \
             DOCKER_IMAGE_TAG=bdd \
             DOCKER_BUILD="docker buildx build --load" \
@@ -154,7 +187,7 @@ jobs:
         if: always() && hashFiles('tests/bdd/.reports/junit/*.xml') != ''
         uses: dorny/test-reporter@v1
         with:
-          name: BDD Test Results
+          name: BDD Test Results (${{ matrix.shard }})
           path: tests/bdd/.reports/junit/*.xml
           reporter: java-junit
           fail-on-error: false
@@ -165,7 +198,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bdd-reports
+          name: bdd-reports-${{ matrix.shard }}
           path: tests/bdd/.reports/**
           include-hidden-files: true
           if-no-files-found: warn
@@ -175,7 +208,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          make -C tests/bdd kind_delete KIND_CLUSTER_NAME=dcs-bdd || true
+          make -C tests/bdd kind_delete KIND_CLUSTER_NAME="dcs-bdd-${{ matrix.shard }}" || true
 
   audit-isolated-ci-gate:
     name: audit-isolated-ci-gate

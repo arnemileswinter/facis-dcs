@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 #-- Frontend Build Stage --
 FROM node:22-alpine AS frontend-builder
 
@@ -8,7 +10,7 @@ COPY frontend/ClientApp/package*.json ./
 COPY frontend/ClientApp/package-lock.json ./
 
 # Install frontend dependencies
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
 # Copy frontend source
 COPY frontend/ClientApp/ ./
@@ -29,28 +31,26 @@ COPY backend/go.mod backend/go.sum ./
 
 # Download dependencies ("all" also covers cmd/goa's tool-only deps so the
 # gen step below runs entirely from the module cache).
-RUN go mod download all
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    go mod download all
 
 # Copy source code
 COPY backend/ ./
 
 # Generate Goa transport/types from the design package, at the goa version
 # pinned in go.mod. GOPROXY=off keeps the step hermetic.
-RUN GOPROXY=off go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    GOPROXY=off go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
-# Build binary (cgo enabled so the PKCS#11 signing path links).
-RUN CGO_ENABLED=1 GOOS=linux go build -o dcs ./cmd/dcs
-# BDD/CI helpers: gendid regenerates did.json from the token key inside the
-# hsm-provision hook job; hsmsign lets the BDD harness sign did:web challenges
-# with the in-cluster token via kubectl exec (no extractable private keys).
-RUN CGO_ENABLED=1 GOOS=linux go build -o gendid ./cmd/gendid && \
-    CGO_ENABLED=1 GOOS=linux go build -o hsmsign ./cmd/hsmsign
-
-# gendid regenerates did.json from the HSM dcs-did token key (see dev-stack.sh);
-# the hsm-provision Job reuses the same binary so CI derives did.json from the
-# freshly-provisioned token key exactly like native dev-stack does, rather
-# than duplicating that logic in shell.
-RUN CGO_ENABLED=1 GOOS=linux go build -o gendid ./cmd/gendid
+# Build the service and both BDD/CI helpers in one cache-backed invocation.
+# gendid regenerates did.json from the HSM token key; hsmsign lets the harness
+# sign did:web challenges through the non-extractable in-cluster key.
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    mkdir -p /out && \
+    CGO_ENABLED=1 GOOS=linux go build -o /out/ \
+      ./cmd/dcs ./cmd/gendid ./cmd/hsmsign
 
 
 #-- Runtime Stage --
@@ -93,11 +93,10 @@ WORKDIR /app
 USER $DOCKER_USER
 
 # Copy compiled binaries from go-builder stage
-COPY --from=go-builder /build/dcs /app/dcs
-COPY --from=go-builder /build/gendid /app/gendid
+COPY --from=go-builder /out/dcs /app/dcs
 
 # Copy BDD/CI helper binaries (gendid, hsmsign) — see go-builder stage above.
-COPY --from=go-builder /build/gendid /build/hsmsign /app/
+COPY --from=go-builder /out/gendid /out/hsmsign /app/
 
 # Copy OID4VP issuer trust for DCS.
 COPY --from=go-builder --chown=$DOCKER_USER:$DOCKER_USER \
