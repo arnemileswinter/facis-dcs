@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   KeyIcon,
+  LockClosedIcon,
   PencilSquareIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -31,6 +32,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
 import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
+import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
@@ -103,6 +105,7 @@ const ROUTES = {
   ADMIN: {
     TARGETS: 'admin.targets',
     SYSTEM_USERS: 'admin.system-users',
+    KEY_INVENTORY: 'admin.key-inventory',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -473,6 +476,19 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - System Users',
       order: 10,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/hsm-keys',
+    name: ROUTES.ADMIN.KEY_INVENTORY,
+    component: KeyInventoryAdminView,
+    meta: {
+      name: 'Key Inventory',
+      icon: LockClosedIcon,
+      requiresAuth: true,
+      title: 'DCS - Key Inventory',
+      order: 11,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },

@@ -13,7 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
@@ -95,7 +95,8 @@ func appendAndCache(
 	tx *sqlx.Tx,
 	did, state string,
 	jsonldBytes, pdfBytes []byte,
-	ipfsClient *ipfs.APIClient,
+	artifacts *artifactstore.Store,
+	scope artifactstore.Scope,
 	pdfCore *pdfcore.Client,
 	vcIssuer provenance.VCIssuer,
 	issuerDID string,
@@ -111,11 +112,10 @@ func appendAndCache(
 		return pdfBytes, err
 	}
 
-	ipfsResult, err := ipfsClient.CreateFile(ctx, updatedPDF)
+	pdfCID, err := artifacts.Put(ctx, scope, updatedPDF)
 	if err != nil {
 		return updatedPDF, fmt.Errorf("store PDF in IPFS for %s: %w", did, err)
 	}
-	pdfCID := ipfsResult.Identifier.Value
 
 	if err := updateState(ctx, tx, did, PDFStateData{
 		IPFSCID:         pdfCID,

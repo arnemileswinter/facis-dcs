@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -27,6 +28,7 @@ import (
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
@@ -38,8 +40,10 @@ import (
 	"digital-contracting-service/internal/auth/machineidentity"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/envelope"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/federation"
 	"digital-contracting-service/internal/base/hsm"
@@ -408,6 +412,25 @@ func main() {
 		log.Fatalf(ctx, err, "could not read DID")
 	}
 
+	// Encrypting artifact store (DCS-NFR-SEC-14): every IPFS artifact is
+	// encrypted per scope; CEKs are wrapped to the instance's keyAgreement key.
+	// The dcs-ecdh key is a required dependency: a startup wrap/unwrap self-test
+	// proves the served did.json keyAgreement key and the HSM key agree.
+	ecdhLabel := hsm.KeyLabelECDH()
+	keyAgreementPub, err := didDocument.KeyAgreementPublicKey(ecdhLabel)
+	if err != nil {
+		log.Fatalf(ctx, err, "did.json carries no usable keyAgreement method for %s", ecdhLabel)
+	}
+	hsmAgreement := envelope.HSMKeyAgreement(ecdhLabel)
+	if testCEK, err := envelope.NewCEK(); err != nil {
+		log.Fatalf(ctx, err, "could not draw CEK for the key-agreement self-test")
+	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementPub); err != nil {
+		log.Fatalf(ctx, err, "could not wrap the self-test CEK to the %s key", ecdhLabel)
+	} else if unwrapped, err := envelope.Unwrap(wrapped, hsmAgreement); err != nil || !bytes.Equal(unwrapped, testCEK) {
+		log.Fatalf(ctx, err, "HSM key %s cannot unwrap what did.json's keyAgreement key wraps — key mismatch or missing derive capability", ecdhLabel)
+	}
+	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementPub)
+
 	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
 	// security-critical mounted config files, enforce any operator pins, and
 	// record the attestation in the audit outbox. A pin mismatch or an
@@ -424,6 +447,7 @@ func main() {
 		DB:           db,
 		CEPPubClient: cepPubClient,
 		IPFSClient:   ipfsAPIClient,
+		Artifacts:    artifactStore,
 		ARepo:        &aRepo,
 		TSAClient:    tsaClient,
 	}
@@ -452,11 +476,26 @@ func main() {
 		DB:          db,
 		CRepo:       &cweRepo,
 		SRepo:       &syncRepo,
-		IPFSClient:  ipfsAPIClient,
+		Artifacts:   artifactStore,
 		DIDDocument: *didDocument,
 		TrustGate:   trustGate,
 	}
 	dcsToDcsSynchronizer.StartSynchronizerJob(ctx, cepSubClient)
+
+	// Contract erasure (DCS-NFR-COMP-03, DCS-NFR-SEC-13): local CEK shredding
+	// with KEY_SHREDDED audit events plus the peer erase handshake, retried
+	// from contract_erasures on the sync-fail interval.
+	cekRepo := &artifactstore.PostgresCEKRepo{DB: db}
+	eraseRepo := &pq2.PostgresEraseRepository{DB: db}
+	shredder := &dcstodcs2.AuditedShredder{DB: db, Keys: cekRepo, Artifacts: artifactStore}
+	contractEraser := &dcstodcs2.ContractEraser{
+		DIDDocument: *didDocument,
+		Shredder:    shredder,
+		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo},
+		ERepo:       eraseRepo,
+		Sender:      dcstodcs2.HTTPPeerEraseSender{},
+	}
+	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
 
 	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
 		event.StartEventLogger(ctx, cepSubClient)
@@ -464,6 +503,7 @@ func main() {
 
 	auditTrailReader := base.AuditTrailReader{
 		IPFSClient: ipfsAPIClient,
+		Artifacts:  artifactStore,
 		ARepo:      &aRepo,
 	}
 
@@ -625,8 +665,8 @@ func main() {
 	}, issuerDID)
 
 	smCRepo := smrepo.PostgresContractRepo{
-		IPFSClient: ipfsAPIClient,
-		PDFCore:    pdfCoreClient,
+		Artifacts: artifactStore,
+		PDFCore:   pdfCoreClient,
 	}
 
 	// Build and sign this instance's federation agreement credential once at
@@ -657,6 +697,7 @@ func main() {
 		didSrv                          didservice.Service
 		c2paSvc                         c2paservice.Service
 		semanticHubSvc                  semantichubgen.Service
+		keyInventorySvc                 keyinventory.Service
 	)
 	{
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
@@ -665,18 +706,19 @@ func main() {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
 
-		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, ipfsAPIClient, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
-		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, shredder)
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
+		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, ipfsAPIClient, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService
 		semanticHubSvc = service.NewSemanticHub(db, jwtAuth)
+		keyInventorySvc = service.NewKeyInventory(db, jwtAuth)
 	}
 
 	// Channel used by background workers and signal handler to notify main to exit.
@@ -696,14 +738,14 @@ func main() {
 		}
 	}(pdfSubClient)
 	pdfSub := &pdfevent.Subscriber{
-		DB:         db,
-		IPFSClient: ipfsAPIClient,
-		CRepo:      &cweRepo,
-		TRepo:      &ctRepo,
-		PDFCore:    pdfCoreClient,
-		IssuerDID:  issuerDID,
-		LocalPeer:  did,
-		VCIssuer:   provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
+		DB:        db,
+		Artifacts: artifactStore,
+		CRepo:     &cweRepo,
+		TRepo:     &ctRepo,
+		PDFCore:   pdfCoreClient,
+		IssuerDID: issuerDID,
+		LocalPeer: did,
+		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
 	}
 	go func() {
 		if err := pdfSub.Start(pdfSubClient); err != nil {
@@ -754,6 +796,7 @@ func main() {
 		didEntpoints                          *didservice.Endpoints
 		c2paEndpoints                         *c2paservice.Endpoints
 		semanticHubEndpoints                  *semantichubgen.Endpoints
+		keyInventoryEndpoints                 *keyinventory.Endpoints
 	)
 	{
 		authEndpoints = genauth.NewEndpoints(authSvc)
@@ -793,6 +836,9 @@ func main() {
 		semanticHubEndpoints = semantichubgen.NewEndpoints(semanticHubSvc)
 		semanticHubEndpoints.Use(debug.LogPayloads())
 		semanticHubEndpoints.Use(log.Endpoint)
+		keyInventoryEndpoints = keyinventory.NewEndpoints(keyInventorySvc)
+		keyInventoryEndpoints.Use(debug.LogPayloads())
+		keyInventoryEndpoints.Use(log.Endpoint)
 	}
 
 	// Setup interrupt handler. This optional step configures the process so
@@ -812,7 +858,7 @@ func main() {
 	if err := bootstrapSrv.Shutdown(ctx); err != nil {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, webhookPlatform, &wg, errc, *dbgF)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, webhookPlatform, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

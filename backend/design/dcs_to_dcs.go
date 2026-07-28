@@ -4,6 +4,27 @@ import (
 	. "goa.design/goa/v3/dsl"
 )
 
+var DCSToDCSEphemeralPublicKey = Type("DCSToDCSEphemeralPublicKey", func() {
+	Description("The sender's ephemeral P-256 public key of an ECDH-ES+A256KW CEK wrap, as a JWK")
+
+	Attribute("kty", String, "JWK key type (EC)")
+	Attribute("crv", String, "JWK curve (P-256)")
+	Attribute("x", String, "Base64url-encoded X coordinate")
+	Attribute("y", String, "Base64url-encoded Y coordinate")
+
+	Required("kty", "crv", "x", "y")
+})
+
+var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
+	Description("The contract's content-encryption key wrapped to the receiving peer's keyAgreement public key via ECDH-ES+A256KW (DCS-NFR-SEC-14) — the same shape a content_encryption_keys.wrapped_cek record has. The receiver unwraps it with its HSM and re-wraps it to its own keyAgreement key, so both instances hold the same contract CEK, each unwrappable only by its own HSM.")
+
+	Attribute("alg", String, "CEK wrap algorithm (ECDH-ES+A256KW)")
+	Attribute("epk", DCSToDCSEphemeralPublicKey, "The sender's ephemeral public key")
+	Attribute("wrapped", Bytes, "The wrapped CEK (RFC 3394 key wrap output)")
+
+	Required("alg", "epk", "wrapped")
+})
+
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Description("A contract PDF shipped to the counterparty (ADR-13). The PDF is the wire format: it carries the machine-readable JSON-LD, the C2PA provenance chain, and any signatures. A bare PDF is a proposal (offer or negotiation counter); a PDF accompanied by a JAdES is a signature (acceptance).")
 
@@ -15,8 +36,29 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("pdf", Bytes, "The contract PDF")
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
+	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
+})
+
+var DCSToDCSContractEraseRequest = Type("DCSToDCSContractEraseRequest", func() {
+	Description("A counterparty's request to shred this instance's wrapped CEKs for a contract (DCS-NFR-COMP-03, DCS-NFR-SEC-13): erasure of a federated contract completes only when both instances have destroyed their key records. Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
+
+	Attribute("secret_value", String, "Secret value")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the peer requesting the erasure")
+	Attribute("contract_iri", String, "IRI of the contract whose wrapped CEKs are to be shredded")
+
+	Required("from_peer_did", "contract_iri", "secret_value", "secret_hash")
+})
+
+var DCSToDCSContractEraseResponse = Type("DCSToDCSContractEraseResponse", func() {
+	Description("Result for a contract erasure request")
+
+	Attribute("from_peer_did", String, "Decentralized Identifier of the confirming peer")
+
+	Required("from_peer_did")
 })
 
 var DCSToDCSContractPdfResponse = Type("DCSToDCSContractPdfResponse", func() {
@@ -54,6 +96,24 @@ var _ = Service("DcsToDcs", func() {
 
 		HTTP(func() {
 			POST("/peer/contracts/pdf")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("erase", func() {
+		Description("Shred this instance's wrapped CEKs for a contract on request of the authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13). The requester is verified via the same did:web challenge-response signature as post_pdf and must be a party of the contract. All CEK records of the contract scope are marked destroyed (never hard-deleted — the shredded row is the destruction record) and a KEY_SHREDDED audit event is written. Idempotent: repeating the request against an already-shredded contract confirms again.")
+		Meta("dcs:cwe:components", "DCS-to-DCS Synchronization")
+
+		Payload(DCSToDCSContractEraseRequest)
+		Result(DCSToDCSContractEraseResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/erase")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

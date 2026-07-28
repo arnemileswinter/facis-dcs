@@ -254,6 +254,9 @@ pkcs11:
       # surfaces as pods stuck Pending rather than as an install error.
       size: "1Gi"
       accessModes: ["ReadWriteOnce"]
+      # Empty uses the cluster default StorageClass. The token directory holds
+      # the SoftHSM2 private keys — set an encrypted class per environment
+      # (DCS-NFR-SEC-14); deploy.sh asserts the bound class when one is set.
       storageClassName: ""
     # Resource block for the provisioning job itself. Set it on namespaces with a
     # limits.cpu quota — see the template for why an unset block blocks install.
@@ -287,6 +290,10 @@ postgresql:
   persistence:
     enabled: false
     size: 1Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — this volume holds the dcs/hydra/statuslist
+    # databases; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 hydra:
   enabled: false
@@ -540,6 +547,13 @@ ipfs:
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
+  persistence:
+    enabled: false
+    size: 5Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class per
+    # environment (DCS-NFR-SEC-14) — the Kubo repo holds all pinned artifact
+    # ciphertext; deploy.sh asserts the bound class when one is set.
+    storageClassName: ""
 
 ipfsDocumentManager:
   enabled: false

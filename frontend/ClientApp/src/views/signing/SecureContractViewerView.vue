@@ -7,6 +7,7 @@ import { useContractDataPreprocess } from '@contract-workflow-engine/composables
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import SigningCeremonyDialog from '@/components/signing/SigningCeremonyDialog.vue'
+import { ERASED_CONTENT_MESSAGE, isErasedContentMessage } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { getLocalDIDFile } from '@/services/did-service'
 import {
@@ -171,6 +172,9 @@ function loadContractContent(contractData: unknown) {
 }
 
 function message(e: unknown): string {
+  const data = (e as { response?: { data?: { message?: unknown } } }).response?.data
+  const serverMessage = typeof data?.message === 'string' ? data.message : ''
+  if (serverMessage && isErasedContentMessage(serverMessage)) return ERASED_CONTENT_MESSAGE
   return e instanceof Error ? e.message : String(e)
 }
 

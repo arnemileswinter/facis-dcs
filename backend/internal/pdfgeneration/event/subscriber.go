@@ -15,10 +15,10 @@ import (
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/base/ipfs"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
@@ -72,12 +72,12 @@ type minimalCWEEvent struct {
 // Subscriber listens to the NATS event bus and appends C2PA lifecycle
 // assertions to the PDF stored in IPFS for each CWE state-change event.
 type Subscriber struct {
-	DB         *sqlx.DB
-	IPFSClient *ipfs.APIClient
-	CRepo      cwedb.ContractRepo
-	TRepo      tpldb.ContractTemplateRepo
-	PDFCore    *pdfcore.Client
-	IssuerDID  string
+	DB        *sqlx.DB
+	Artifacts *artifactstore.Store
+	CRepo     cwedb.ContractRepo
+	TRepo     tpldb.ContractTemplateRepo
+	PDFCore   *pdfcore.Client
+	IssuerDID string
 	// LocalPeer is this instance's own did:web. A contract whose Origin is not
 	// this DID was received from a peer (ADR-13); its stored PDF carries the
 	// counterparty's C2PA chain, so a content change must amend that base rather
@@ -202,11 +202,10 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 	// genesis, when there is no stored PDF yet.
 	var basePDF []byte
 	if pdfState.IPFSCID != "" {
-		ipfsResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
-		if err != nil || len(ipfsResult.Data) == 0 {
+		basePDF, err = s.Artifacts.Get(ctx, artifactstore.ContractScope(cweEvt.DID), pdfState.IPFSCID)
+		if err != nil || len(basePDF) == 0 {
 			return fmt.Errorf("fetch PDF from IPFS %s for contract %s: %w", pdfState.IPFSCID, cweEvt.DID, err)
 		}
-		basePDF = ipfsResult.Data
 	} else {
 		basePDF, _, err = s.PDFCore.Download(ctx, jsonldBytes)
 		if err != nil {
@@ -230,24 +229,18 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return fmt.Errorf("pdf-core update for contract %s: %w", cweEvt.DID, err)
 	}
 
-	// Store updated PDF in IPFS. CreateFile must receive the raw PDF bytes, not
-	// a pre-base64-encoded string: passed a string, it JSON-marshals the value
-	// (wrapping it in an extra quoted layer) instead of using it as the raw
-	// upload body, so a later plain FetchFile (export/verify) would decode back
-	// a JSON-string literal rather than the PDF (the same raw-bytes contract
-	// query/appendAndCache and signingmanagement/apply.go's CreateFile calls use).
-	storeResult, err := s.IPFSClient.CreateFile(ctx, updatedPDF)
+	storedCID, err := s.Artifacts.Put(ctx, artifactstore.ContractScope(cweEvt.DID), updatedPDF)
 	if err != nil {
 		return fmt.Errorf("store updated PDF in IPFS for contract %s: %w", cweEvt.DID, err)
 	}
 
-	if err = s.CRepo.UpdatePDFState(ctx, tx, cweEvt.DID, cwedb.ContractPDFState{IPFSCID: storeResult.Identifier.Value, RendererVersion: rendererVersion, C2PAState: c2paState, PayloadHash: currentPayloadHash}); err != nil {
+	if err = s.CRepo.UpdatePDFState(ctx, tx, cweEvt.DID, cwedb.ContractPDFState{IPFSCID: storedCID, RendererVersion: rendererVersion, C2PAState: c2paState, PayloadHash: currentPayloadHash}); err != nil {
 		return fmt.Errorf("update pdf_ipfs_cid for %s: %w", cweEvt.DID, err)
 	}
 
 	if err := event.Create(ctx, tx, cweevent.PdfRegeneratedEvent{
 		DID:        cweEvt.DID,
-		IPFSCID:    storeResult.Identifier.Value,
+		IPFSCID:    storedCID,
 		State:      string(contract.State),
 		OccurredAt: time.Now().UTC(),
 	}, componenttype.ContractWorkflowEngine); err != nil {
@@ -258,7 +251,7 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return fmt.Errorf("commit pdf_ipfs_cid update for %s: %w", cweEvt.DID, err)
 	}
 
-	log.Printf("pdfgeneration: regenerated PDF for contract %s (state=%s, contentChanged=%t) → IPFS CID %s", cweEvt.DID, contract.State, contentChanged, storeResult.Identifier.Value)
+	log.Printf("pdfgeneration: regenerated PDF for contract %s (state=%s, contentChanged=%t) → IPFS CID %s", cweEvt.DID, contract.State, contentChanged, storedCID)
 	return nil
 }
 
@@ -310,11 +303,10 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 	// renders fresh from the current content.
 	var pdfBytes []byte
 	if tplPDFState.IPFSCID != "" && !contentChanged {
-		ipfsResult, err := s.IPFSClient.FetchFile(tplPDFState.IPFSCID)
-		if err != nil || len(ipfsResult.Data) == 0 {
+		pdfBytes, err = s.Artifacts.Get(ctx, artifactstore.TemplateScope(tplEvt.DID), tplPDFState.IPFSCID)
+		if err != nil || len(pdfBytes) == 0 {
 			return fmt.Errorf("fetch PDF from IPFS %s for template %s: %w", tplPDFState.IPFSCID, tplEvt.DID, err)
 		}
-		pdfBytes = ipfsResult.Data
 	} else {
 		pdfBytes, _, err = s.PDFCore.Download(ctx, jsonldBytes)
 		if err != nil {
@@ -369,13 +361,12 @@ func (s *Subscriber) appendOneTemplateManifest(
 		return nil, fmt.Errorf("pdf-core update for template %s: %w", did, err)
 	}
 
-	// See appendC2PA: CreateFile must receive raw bytes, not a base64 string.
-	storeResult, err := s.IPFSClient.CreateFile(ctx, updatedPDF)
+	storedCID, err := s.Artifacts.Put(ctx, artifactstore.TemplateScope(did), updatedPDF)
 	if err != nil {
 		return nil, fmt.Errorf("store updated PDF in IPFS for template %s: %w", did, err)
 	}
 
-	if err := s.TRepo.UpdatePDFState(ctx, tx, did, tpldb.ContractTemplatePDFState{IPFSCID: storeResult.Identifier.Value, RendererVersion: rendererVersion, C2PAState: c2paState, PayloadHash: currentPayloadHash}); err != nil {
+	if err := s.TRepo.UpdatePDFState(ctx, tx, did, tpldb.ContractTemplatePDFState{IPFSCID: storedCID, RendererVersion: rendererVersion, C2PAState: c2paState, PayloadHash: currentPayloadHash}); err != nil {
 		return nil, fmt.Errorf("update contract_templates pdf_ipfs_cid: %w", err)
 	}
 

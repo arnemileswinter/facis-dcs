@@ -327,6 +327,8 @@ reinstall in a maintenance window. Plan this rather than discovering it.
 
 ## Production Deployment
 
+Backup and restore procedures — including how backup retention interacts with GDPR key-shredding erasure — are specified in the [backup integration guide](../docs/backup-integration-guide.md).
+
 ### Signing keys (PKCS#11) and the C2PA x5chain
 
 Every DCS private key lives in a PKCS#11 token (DCS-IR-HI-01). For dev, staging

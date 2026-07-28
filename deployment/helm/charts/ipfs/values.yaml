@@ -32,5 +32,8 @@ persistence:
   size: 5Gi
   accessModes:
     - ReadWriteOnce
+  # Empty uses the cluster default StorageClass. Set an encrypted class per
+  # environment; the Kubo repo stores all pinned artifact ciphertext.
+  storageClassName: ""
 
 resources: {}

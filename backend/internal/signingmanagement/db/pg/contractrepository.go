@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 
 	"digital-contracting-service/internal/base/datatype"
@@ -19,8 +19,8 @@ import (
 )
 
 type PostgresContractRepo struct {
-	IPFSClient *ipfs.APIClient
-	PDFCore    *pdfcore.Client
+	Artifacts *artifactstore.Store
+	PDFCore   *pdfcore.Client
 }
 
 // ReadDataByDID reads the contract regardless of lifecycle state — like
@@ -249,11 +249,7 @@ func (r *PostgresContractRepo) FetchContractPDFBytes(ctx context.Context, tx *sq
 	if cidStr == "" {
 		return nil, nil
 	}
-	result, err := r.IPFSClient.FetchFile(cidStr)
-	if err != nil {
-		return nil, err
-	}
-	return result.Data, nil
+	return r.Artifacts.Get(ctx, artifactstore.ContractScope(did), cidStr)
 }
 
 func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {

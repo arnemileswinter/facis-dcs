@@ -10,6 +10,8 @@ interface Editor {
 interface ModalData {
   message: string
   editor?: Editor
+  /** Warning the user must tick a checkbox to acknowledge before confirming. */
+  acknowledgement?: string
 }
 
 interface ConfirmData {
@@ -24,10 +26,15 @@ const dialogDescriptionId = 'confirmation-modal-description'
 const editorLabelId = 'confirmation-modal-editor-label'
 
 const inputText = ref('')
+const acknowledged = ref(false)
 
 const hasEditor = computed(() => !!modalData.value.editor)
 
 const inputRequired = computed(() => !!modalData.value.editor?.requiredText && !inputText.value.trim())
+
+const acknowledgementRequired = computed(() => !!modalData.value.acknowledgement && !acknowledged.value)
+
+const confirmDisabled = computed(() => inputRequired.value || acknowledgementRequired.value)
 
 const { isRevealed, reveal, confirm, cancel, onReveal } = useConfirmDialog<ModalData, string | undefined>()
 
@@ -40,6 +47,7 @@ onReveal((data) => {
 watch(isRevealed, (value) => {
   if (value) {
     inputText.value = ''
+    acknowledged.value = false
     actionModal.value?.showModal()
     focusFirstControl()
   } else {
@@ -63,8 +71,8 @@ function focusFirstControl() {
 }
 
 const handleConfirm = () => {
+  if (confirmDisabled.value) return
   if (hasEditor.value) {
-    if (inputRequired.value) return
     confirm(inputText.value)
   } else {
     confirm()
@@ -107,12 +115,28 @@ defineExpose<ModalExpose>({ reveal: reveal })
             A comment is required before submitting.
           </p>
         </div>
+        <div
+          v-if="modalData.acknowledgement"
+          class="my-2 alert rounded-box alert-warning"
+          data-testid="confirmation-acknowledgement"
+        >
+          <label class="flex cursor-pointer items-start gap-3">
+            <input
+              v-model="acknowledged"
+              type="checkbox"
+              class="checkbox mt-0.5 checkbox-sm"
+              data-testid="confirmation-acknowledgement-checkbox"
+            />
+            <span class="text-sm font-semibold">{{ modalData.acknowledgement }}</span>
+          </label>
+        </div>
         <div class="modal-action flex-col" :class="{ 'flex-row-reverse justify-start': hasEditor }">
           <button
             type="button"
             class="btn btn-sm btn-primary"
-            :class="{ 'btn-disabled': inputRequired }"
-            :disabled="inputRequired"
+            :class="{ 'btn-disabled': confirmDisabled }"
+            :disabled="confirmDisabled"
+            data-testid="confirmation-confirm"
             @click="handleConfirm"
           >
             {{ hasEditor ? 'Submit' : 'Confirm' }}
