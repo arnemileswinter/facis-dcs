@@ -34,15 +34,47 @@ var PACResourceAuditTrailEntry = Type("PACResourceAuditTrailEntry", func() {
 	Required("id", "component", "event_type", "event_data", "created_at")
 })
 
+// PACAuditResponse remains the shared timeline response used by the archive
+// component API. POST /pac/audit itself returns PACExternalAuditResponse.
 var PACAuditResponse = Type("PACAuditResponse", func() {
 	Description("Resource audit trail")
-
 	Attribute("did", String, "Decentralized Identifier of the resource")
 	Attribute("component", String, "Name of the component")
 	Attribute("created_at", String, "Creation date of the audit response")
 	Attribute("audit_trail", ArrayOfRequired(PACResourceAuditTrailEntry), "Resource audit trails entries")
-
 	Required("did", "component", "created_at", "audit_trail")
+})
+
+var PACAuditExecutor = Type("PACAuditExecutor", func() {
+	Description("Identity of the external audit executor")
+	Attribute("id", String, "Stable executor identifier")
+	Attribute("version", String, "Executor implementation version")
+	Required("id", "version")
+})
+
+var PACAuditFinding = Type("PACAuditFinding", func() {
+	Description("A finding produced by the configured external audit executor")
+	Attribute("rule_id", String, "Stable rule identifier")
+	Attribute("result", String, "PASSED, FAILED, or REVIEW")
+	Attribute("reason", String, "Human-readable finding reason")
+	Attribute("severity", String, "Finding severity")
+	Attribute("evidence_refs", ArrayOf(String), "References into the submitted evidence")
+	Required("rule_id", "result", "reason")
+})
+
+var PACExternalAuditResponse = Type("PACExternalAuditResponse", func() {
+	Description("Validated result returned by the configured external audit executor")
+	Attribute("contract_version", String, "Versioned audit-executor HTTP contract")
+	Attribute("audit_id", String, "Audit run UUID")
+	Attribute("correlation_id", String, "Request correlation UUID")
+	Attribute("scope", String, "Audited scope")
+	Attribute("resource", Any, "Optional audited resource identity")
+	Attribute("executor", PACAuditExecutor, "Executor identity and version")
+	Attribute("executed_at", String, "Execution timestamp (RFC3339)")
+	Attribute("findings", ArrayOfRequired(PACAuditFinding), "Executor-produced findings")
+	Attribute("receipt", Any, "Optional executor receipt")
+	Attribute("timeline", ArrayOfRequired(PACResourceAuditTrailEntry), "Optional DCS-procured timeline evidence retained for compatibility")
+	Required("contract_version", "audit_id", "correlation_id", "scope", "executor", "executed_at", "findings")
 })
 
 var PACComplianceRisk = Type("PACComplianceRisk", func() {
@@ -122,11 +154,12 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 
 		Payload(PACAuditRequest)
-		Result(ArrayOfRequired(PACAuditResponse))
+		Result(PACExternalAuditResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("forbidden", ErrorResult, "Forbidden")
 		Error("internal_error", ErrorResult, "Internal server error")
+		Error("executor_error", ErrorResult, "External audit executor infrastructure error")
 
 		HTTP(func() {
 			POST("/pac/audit")
@@ -134,6 +167,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
+			Response("executor_error", StatusBadGateway)
 		})
 	})
 
@@ -155,6 +189,9 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Required("justification")
 		})
 		Error("forbidden", ErrorResult, "Forbidden")
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "No matching persisted audit run")
+		Error("internal_error", ErrorResult, "Internal server error")
 		Result(Bytes)
 		HTTP(func() {
 			GET("/pac/report")
@@ -164,6 +201,9 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Param("justification")
 			Response(StatusOK)
 			Response("forbidden", StatusForbidden)
+			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
 		})
 	})
 

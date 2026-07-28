@@ -105,11 +105,23 @@ archiveNotary:
     name: ""
     key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
 
+# External PAC audit executor. The bundled ORCE endpoint is selected when URL
+# is empty and orce.enabled=true; a customer replaces it through configuration
+# only, without changing DCS code.
+auditExecutor:
+  url: ""
+  path: "/audit/run"
+  timeout: "10s"
+
 global:
   archiveAuditToken: ""
   archiveAuditTokenSecretRef:
     name: ""
     key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
 
 # Route and path configuration
 route:

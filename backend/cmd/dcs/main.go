@@ -55,6 +55,7 @@ import (
 	pdfevent "digital-contracting-service/internal/pdfgeneration/event"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/service"
 	smrepo "digital-contracting-service/internal/signingmanagement/db/pg"
@@ -659,6 +660,22 @@ func main() {
 		semanticHubSvc                  semantichubgen.Service
 	)
 	{
+		auditExecutorTimeout := 10 * time.Second
+		if configured := strings.TrimSpace(os.Getenv("PAC_AUDIT_EXECUTOR_TIMEOUT")); configured != "" {
+			parsed, parseErr := time.ParseDuration(configured)
+			if parseErr != nil || parsed <= 0 {
+				log.Fatalf(ctx, parseErr, "invalid PAC_AUDIT_EXECUTOR_TIMEOUT %q", configured)
+			}
+			auditExecutorTimeout = parsed
+		}
+		auditExecutorClient, clientErr := auditexecutor.NewHTTPClient(
+			os.Getenv("PAC_AUDIT_EXECUTOR_URL"),
+			os.Getenv("PAC_AUDIT_EXECUTOR_BEARER_TOKEN"),
+			auditExecutorTimeout,
+		)
+		if clientErr != nil {
+			log.Fatalf(ctx, clientErr, "audit executor configuration is invalid")
+		}
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
 		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
 		if err != nil {
@@ -671,7 +688,7 @@ func main() {
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, ipfsAPIClient, pdfCoreClient, trustGate)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, ipfsAPIClient, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, ipfsAPIClient, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
-		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
+		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, auditExecutorClient)
 		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, ipfsAPIClient, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)

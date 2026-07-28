@@ -376,6 +376,8 @@ orce:
   # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
   # reporting, so a target can acknowledge its own deployments and no others.
   extraEnv:
+    - name: ORCE_AUDIT_EXECUTOR_TEST_CONTROLS_ENABLED
+      value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
     # legs append /contract/deployment/callback to it.
@@ -414,6 +416,12 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
+      - host: "localhost"
+        path: /orce
+
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.

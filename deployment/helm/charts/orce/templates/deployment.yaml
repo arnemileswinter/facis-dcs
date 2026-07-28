@@ -57,10 +57,21 @@ spec:
             - name: http
               containerPort: 1880
               protocol: TCP
-          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.extraEnv }}
+          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.extraEnv }}
           env:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if or .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken }}
+            - name: ORCE_AUDIT_EXECUTOR_BEARER_TOKEN
+              {{- if .Values.global.auditExecutorTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.auditExecutorTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.auditExecutorTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.auditExecutorToken | quote }}
+              {{- end }}
             {{- end }}
             {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken }}
             - name: ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN

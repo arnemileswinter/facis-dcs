@@ -32,6 +32,10 @@ global:
   archiveAuditTokenSecretRef:
     name: ""
     key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
 
 # Local RFC3161 dev TSA: the /tsa flow signs timestamp replies in-pod with a
 # provisioned dev cert (see configmap-tsa.yaml) instead of forwarding to an
