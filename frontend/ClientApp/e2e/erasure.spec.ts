@@ -135,7 +135,10 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     // has no Submit to press. B responds, A accepts the record B authored
     // (FR-CWE-07 refuses an accept by its own author), and only then can either
     // side consolidate — settling is mutual, as in full-vertical-2dcs.
-    await stagedCounterOffer(b, contractDid, { value: '20000' })
+    // Must differ from the amount A filled: an unchanged field leaves the
+    // editor undirty, so "Save draft" stays disabled and the staged-draft PUT
+    // this helper waits for never fires.
+    await stagedCounterOffer(b, contractDid, { value: '10000' })
     await acceptOpenDecisionsOn(a, contractDid)
 
     await settleToApprovedOn(a, contractDid)
