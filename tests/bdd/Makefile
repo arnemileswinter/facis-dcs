@@ -164,6 +164,7 @@ run_bdd_helm: setup_environment ensure_k8s_tools
 		BDD_DCS_BASE_URL_B="$(BDD_DCS_BASE_URL_B)" \
 		BDD_PUBLIC_ORIGIN_B="$(BDD_PUBLIC_ORIGIN_B)" \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
+		ARG_BDD_TAGS="$(ARG_BDD_TAGS)" \
 		ARG_BDD="$(ARG_BDD)" \
 		RUN_MODE="$(RUN_MODE)" \
 		bash "$(BDD_RUNNER_SCRIPT)"
@@ -477,6 +478,7 @@ run_bdd_audit_kind_once:
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		DCS_DEPLOYMENT_B="" \
+		ARG_BDD_TAGS="--tags=isolated_stack" \
 		FEATURES_PATH="features/08_audit_compliance/audit_ui_archive_orce.feature"
 
 # Shutdown deployment, cluster and clean test artifacts

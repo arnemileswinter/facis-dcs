@@ -84,6 +84,10 @@ wait_for_running_pod() {
 # so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
 mkdir -p .tmp .reports/junit
 REPORTS_JUNIT_DIR="$PWD/.reports/junit"
+# A previous local run must not satisfy the fail-closed scenario-count gate
+# below. Behave writes one report per feature, so remove only its generated
+# JUnit XML artifacts before starting the selected suite.
+find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
 
 # Emits `--resolve <host>:<port>:127.0.0.1` for a URL's host[:port], so
 # *.localhost hostnames the host machine's own resolver may not know (e.g.
@@ -447,4 +451,5 @@ else
 
   JUNIT_COUNT=$(find "$REPORTS_JUNIT_DIR" -name "*.xml" 2>/dev/null | wc -l || true)
   echo "Generated $JUNIT_COUNT junit XML files in $REPORTS_JUNIT_DIR/"
+  python "$PWD/tests/bdd/scripts/assert_junit_scenarios.py" "$REPORTS_JUNIT_DIR"
 fi

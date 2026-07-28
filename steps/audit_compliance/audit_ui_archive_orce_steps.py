@@ -285,9 +285,23 @@ def step_pre_effective_contract(context, name):
 @then("the contract audit contains lifecycle evidence for that contract")
 def step_pre_effective_lifecycle_visible(context):
     did = _did(context, _last_contract_name(context))
-    entries = [entry for entry in _audit_entries(context.requests_response.json()) if entry.get("did") == did]
+    deadline = time.monotonic() + 90
+    entries = []
+    while time.monotonic() < deadline:
+        entries = [entry for entry in _audit_entries(context.requests_response.json()) if entry.get("did") == did]
+        if any(_entry_kind(entry) == "TIMELINE" for entry in entries):
+            return
+        time.sleep(2)
+        _request_audit(
+            context,
+            context.last_audit_role,
+            context.last_audit_request["scope"],
+            context.last_audit_request["justification"],
+            did,
+        )
+        assert context.requests_response.status_code == 200, context.requests_response.text
     assert entries, f"No audit evidence returned for pre-effective contract {did}"
-    assert any(_entry_kind(entry) == "TIMELINE" for entry in entries), entries
+    raise AssertionError(f"No timeline audit evidence returned for pre-effective contract {did}: {entries!r}")
 
 
 @then("no failed finding is caused solely by the contract being pre-effective")
@@ -425,6 +439,24 @@ def _auth_header(context) -> dict:
     return {"Authorization": f"Bearer {context.orce_token}", "Content-Type": "application/json"}
 
 
+def _orce_request(method: str, url: str, **kwargs):
+    """Retry only transient port-forward disconnects during an ORCE rollout.
+
+    The persistent keep_port_forward supervisor reconnects to the replacement
+    pod, but requests made in that short handover window can still see a
+    ConnectionError. HTTP responses are returned immediately so all existing
+    status and payload assertions retain their original semantics.
+    """
+    deadline = time.monotonic() + 90
+    while True:
+        try:
+            return requests.request(method, url, **kwargs)
+        except requests.ConnectionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
+
+
 def _orce_payload(context, archive_id: str, variant: str = "original") -> dict:
     unique_id = getattr(context, "orce_ids", {}).get(archive_id)
     if not unique_id:
@@ -446,13 +478,19 @@ def _orce_payload(context, archive_id: str, variant: str = "original") -> dict:
 @given("the configured ORCE archive notary is reachable with its bearer token")
 def step_orce_reachable(context):
     _orce_config(context)
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), f"ORCE archive log is unreachable: {response.status_code} {response.text}"
 
 
 @step('archive event "{archive_id}" is notarized')
 def step_notarize(context, archive_id):
-    response = requests.post(
+    response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id),
         headers=_auth_header(context),
@@ -482,14 +520,20 @@ def step_receipt_chained(context):
 
 @when("the current ORCE audit log is remembered")
 def step_remember_orce_log(context):
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), response.text
     context.orce_log_before = response.content if response.status_code == 200 else b""
 
 
 @step('archive event "{archive_id}" is posted without a bearer token')
 def step_unauthorized_append(context, archive_id):
-    context.requests_response = requests.post(
+    context.requests_response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id),
         headers={"Content-Type": "application/json"},
@@ -504,7 +548,12 @@ def step_orce_unauthorized(context):
 
 @then("the ORCE audit log is unchanged")
 def step_orce_log_unchanged(context):
-    response = requests.get(context.orce_audit_log_url, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert response.status_code in (200, 404), response.text
     after = response.content if response.status_code == 200 else b""
     assert after == context.orce_log_before, "Unauthorized POST mutated the persistent ORCE audit log"
@@ -512,14 +561,30 @@ def step_orce_log_unchanged(context):
 
 @when("the ORCE audit log is requested without a bearer token")
 def step_unauthorized_log_get(context):
-    context.requests_response = requests.get(context.orce_audit_log_url, timeout=context.http_timeout_seconds)
+    context.requests_response = _orce_request(
+        "GET",
+        context.orce_audit_log_url,
+        timeout=context.http_timeout_seconds,
+    )
 
 
 @when('archive event "{archive_id}" is notarized twice with identical content')
 def step_duplicate_identical(context, archive_id):
     payload = _orce_payload(context, archive_id)
-    first = requests.post(context.orce_notary_url, json=payload, headers=_auth_header(context), timeout=context.http_timeout_seconds)
-    second = requests.post(context.orce_notary_url, json=payload, headers=_auth_header(context), timeout=context.http_timeout_seconds)
+    first = _orce_request(
+        "POST",
+        context.orce_notary_url,
+        json=payload,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
+    second = _orce_request(
+        "POST",
+        context.orce_notary_url,
+        json=payload,
+        headers=_auth_header(context),
+        timeout=context.http_timeout_seconds,
+    )
     assert first.status_code == 200 and second.status_code == 200, f"{first.text} / {second.text}"
     context.duplicate_receipts = (first.json(), second.json())
 
@@ -531,7 +596,8 @@ def step_same_receipt(context):
 
 @when('archive event "{archive_id}" is notarized with different content')
 def step_duplicate_conflict(context, archive_id):
-    context.requests_response = requests.post(
+    context.requests_response = _orce_request(
+        "POST",
         context.orce_notary_url,
         json=_orce_payload(context, archive_id, variant="conflict"),
         headers=_auth_header(context),
@@ -612,25 +678,38 @@ def step_report_bytes_archived(context):
     assert all(data.get("report_cid") for data in matching), matching
 
 
-def _access_log_row(context, success: bool, method: str) -> tuple:
+def _access_log_row(context, method: str, require_auth_success: bool | None) -> tuple:
+    request = context.last_access_request
+    success_clause = " AND success = TRUE" if require_auth_success else ""
     cursor = context.db.cursor()
     cursor.execute(
-        """
+        f"""
         SELECT attempt_by, roles, attempted_at, scope, did, justification
         FROM access_attempts
-        WHERE service = 'ProcessAuditAndCompliance' AND method = %s AND success = %s
+        WHERE service = 'ProcessAuditAndCompliance'
+          AND method = %s
+          AND scope = %s
+          AND justification = %s
+          AND did IS NOT DISTINCT FROM %s
+          {success_clause}
         ORDER BY attempted_at DESC LIMIT 1
         """,
-        (method, success),
+        (method, request["scope"], request["justification"], request.get("did")),
     )
     row = cursor.fetchone()
     cursor.close()
-    assert row is not None, f"No {method} access-attempt row found for success={success}"
+    expected_success = " with authentication success=true" if require_auth_success else ""
+    assert row is not None, (
+        f"No {method} access-attempt row found{expected_success} for "
+        f"scope={request['scope']!r}, justification={request['justification']!r}, did={request.get('did')!r}"
+    )
     return row
 
 
-def _assert_access_metadata(context, success: bool, method: str):
-    actor, roles, attempted_at, scope, did, justification = _access_log_row(context, success, method)
+def _assert_access_metadata(context, method: str, require_auth_success: bool | None):
+    actor, roles, attempted_at, scope, did, justification = _access_log_row(
+        context, method, require_auth_success
+    )
     assert actor and roles and attempted_at and scope and justification
     assert scope == context.last_access_request["scope"]
     assert justification == context.last_access_request["justification"]
@@ -639,22 +718,22 @@ def _assert_access_metadata(context, success: bool, method: str):
 
 @then("the denied audit access is logged with actor, roles, time, scope, and justification")
 def step_denied_access_logged(context):
-    _assert_access_metadata(context, False, "audit")
+    _assert_access_metadata(context, "audit", None)
 
 
 @then("the audit action is logged with actor, roles, time, scope, and justification")
 def step_allowed_access_logged(context):
-    _assert_access_metadata(context, True, "audit")
+    _assert_access_metadata(context, "audit", True)
 
 
 @then("the denied report access is logged with actor, roles, time, scope, and justification")
 def step_denied_report_access_logged(context):
-    _assert_access_metadata(context, False, "audit_report")
+    _assert_access_metadata(context, "audit_report", None)
 
 
 @then("the report action is logged with actor, roles, time, scope, and justification")
 def step_allowed_report_access_logged(context):
-    _assert_access_metadata(context, True, "audit_report")
+    _assert_access_metadata(context, "audit_report", True)
 
 
 def _findings_for_did(body, did: str) -> list[tuple[str, str, str]]:

@@ -226,6 +226,9 @@ def step_given_full_workflow_to_signed(context, name):
     # Reuses the ceremony-aware helpers from contract_state_machine_steps.py
     # / real_signing_vertical rather than re-implementing the
     # submit -> review -> approve -> sign chain a third time.
+    contract_dids = getattr(context, "contract_dids", None) or {}
+    if name not in contract_dids:
+        ContractService._create_contract_in_draft(context, name)
     _advance_to_approved(context, name)
     _apply_signature_via_ceremony(context, name)
 
