@@ -64,3 +64,22 @@ func TestBuildJWTCarriesThePrefixedClientIDAsIssuer(t *testing.T) {
 		t.Fatal("client_id_scheme must not accompany a prefixed client_id")
 	}
 }
+
+// A deployment reached on a non-default port still identifies itself by name:
+// a dNSName SAN holds no port, so carrying one produces an identifier no
+// certificate can back and every wallet refuses it.
+func TestX509SANDNSClientIDDropsThePort(t *testing.T) {
+	got := X509SANDNSClientID("dcs-a.localhost:18080")
+	if got != "x509_san_dns:dcs-a.localhost" {
+		t.Fatalf("port leaked into the client id: %q", got)
+	}
+}
+
+// Applying it to an already-prefixed value must still drop the port and not
+// mistake the prefix's own colon for a port separator.
+func TestX509SANDNSClientIDIsIdempotentWithAPort(t *testing.T) {
+	once := X509SANDNSClientID("dcs-a.localhost:18080")
+	if twice := X509SANDNSClientID(once); twice != once {
+		t.Fatalf("re-rendering changed the client id: %q -> %q", once, twice)
+	}
+}
