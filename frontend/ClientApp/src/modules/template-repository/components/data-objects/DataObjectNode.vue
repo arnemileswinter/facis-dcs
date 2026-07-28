@@ -207,7 +207,7 @@ const instanceHint = computed(() => {
               <select
                 v-if="property.options"
                 :value="fillValue((binding(property) as { fieldId: string }).fieldId)"
-                class="select-bordered select select-sm w-48"
+                class="select-bordered select w-48 select-sm"
                 :data-testid="`fill-${localNameOf(property.path)}`"
                 :disabled="!editable"
                 @change="onFillInput(binding(property) as { fieldId: string; label: string }, $event)"
@@ -234,7 +234,7 @@ const instanceHint = computed(() => {
             <select
               v-if="property.options"
               :value="literalText(property)"
-              class="select-bordered select select-sm w-48"
+              class="select-bordered select w-48 select-sm"
               :data-testid="`literal-${localNameOf(property.path)}`"
               :disabled="!editable"
               @change="onLiteralInput(property, $event)"
