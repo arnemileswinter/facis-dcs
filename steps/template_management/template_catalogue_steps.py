@@ -7,6 +7,8 @@ harness (deployment/helm/charts/federated-catalogue), already exercised
 indirectly by the passing "register" scenarios in template_workflow.feature.
 """
 
+import time
+
 from behave import given, then, when
 
 from steps.support.api_client import (
@@ -21,9 +23,11 @@ from steps.support.services.template_service import TemplateService
 @when('I publish template "{name}"')
 def step_when_publish_template(context, name):
     t = TemplateService.named(context, name)
+    started = time.monotonic()
     context.requests_response = post_json(
         context, template_publish_url(context), {"did": t["did"], "updated_at": t["updated_at"]}
     )
+    _record_catalogue_call(context, "publish", started)
     if context.requests_response.status_code == 200:
         updated_at = TemplateService.fetch_template(context, t["did"]).get("updated_at")
         TemplateService.store_named(context, name, t["did"], updated_at)
@@ -54,23 +58,35 @@ def step_when_attempt_publish_template(context, name):
 def step_when_retrieve_catalogue(context):
     import requests as _requests  # noqa: PLC0415
 
+    started = time.monotonic()
     context.requests_response = _requests.get(
         catalogue_template_retrieve_url(context),
         params={"offset": 0, "limit": 100},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
     )
+    _record_catalogue_call(context, "retrieve", started)
 
 
 @when('I search the template catalogue by name "{name}"')
 def step_when_search_catalogue(context, name):
     import requests as _requests  # noqa: PLC0415
 
+    started = time.monotonic()
     context.requests_response = _requests.get(
         catalogue_template_search_url(context),
         params={"name": name, "offset": 0, "limit": 100},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
+    )
+    _record_catalogue_call(context, "search", started)
+
+
+def _record_catalogue_call(context, operation, started):
+    if not hasattr(context, "catalogue_calls"):
+        context.catalogue_calls = []
+    context.catalogue_calls.append(
+        {"operation": operation, "duration": time.monotonic() - started}
     )
 
 
@@ -84,40 +100,26 @@ def _catalogue_items(context):
     return body
 
 
-def _poll_catalogue_for_template(context, name, refetch):
-    """The Federated Catalogue ingests published self-descriptions
-    asynchronously (verification + Neo4j claims-graph load), so a search or
-    retrieval issued right after /template/publish can legitimately miss the
-    template for a few seconds — poll by re-issuing the same request."""
-    import time  # noqa: PLC0415
+def _assert_catalogue_contains_template(context, name):
+    """Assert the first catalogue response.
 
+    Readiness now includes functional FC verification, so retrying here would
+    hide precisely the cold-start/timeout regression covered by AC6.
+    """
     t = TemplateService.named(context, name)
-    dids = []
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        items = _catalogue_items(context)
-        dids = [i.get("did") for i in items if isinstance(i, dict)]
-        if t["did"] in dids:
-            return
-        time.sleep(2)
-        refetch(context)
-        assert context.requests_response.status_code == 200, (
-            f"catalogue re-query failed: {context.requests_response.status_code} "
-            f"{context.requests_response.text}"
-        )
-    raise AssertionError(
-        f"Expected the template catalogue to include template '{name}' (did={t['did']}) "
-        f"within 60s of publish, got dids: {dids}"
+    items = _catalogue_items(context)
+    dids = [item.get("did") for item in items if isinstance(item, dict)]
+    assert t["did"] in dids, (
+        f"Expected the first catalogue response to include template '{name}' "
+        f"(did={t['did']}), got dids: {dids}"
     )
 
 
 @then('the catalogue result includes template "{name}"')
 def step_then_catalogue_includes(context, name):
-    _poll_catalogue_for_template(context, name, step_when_retrieve_catalogue)
+    _assert_catalogue_contains_template(context, name)
 
 
 @then('the catalogue search result includes template "{name}"')
 def step_then_catalogue_search_includes(context, name):
-    _poll_catalogue_for_template(
-        context, name, lambda ctx: step_when_search_catalogue(ctx, name)
-    )
+    _assert_catalogue_contains_template(context, name)

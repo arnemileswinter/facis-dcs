@@ -4,6 +4,8 @@
 
 Accepted (2026-07-24). Revised same day after a quota-capped testbed
 deployment showed the co-deployed assumption below does not hold everywhere.
+Revised 2026-07-27 to make that trust boundary an enforced deployment
+decision.
 
 ## Context
 
@@ -52,6 +54,15 @@ which is Keycloak-internal), including `ADMIN_ALL` — see
 `fc-realm-provision-job.yaml`'s role-mapping step. This remains a stand-in
 for the per-deployment client above, not the end state.
 
+The Helm chart now enforces the distinction between an owned catalogue and a
+remote one. When FC integration is enabled without co-deploying `fcservice`,
+rendering fails unless the operator explicitly sets
+`federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true`
+(`deployment/helm/templates/deployment.yaml:1-3`,
+`deployment/helm/values.yaml:346-365`). This acknowledgement is not tenant
+isolation and does not reduce the account's authority; it records that the
+remote catalogue is inside one mutually trusted administrative boundary.
+
 ## Consequences
 
 - Every contract template DCS publishes to its own FC instance is
@@ -70,3 +81,7 @@ for the per-deployment client above, not the end state.
   prerequisite before FC is shared across DCS deployments that don't fully
   trust each other — do not point a second DCS at a shared, non-co-deployed
   FC while this service account still holds `ADMIN_ALL`.
+- Misconfigured remote use now fails during Helm rendering instead of silently
+  deploying cross-tenant administrator credentials. The lifecycle contract
+  verifies both rejection without acknowledgement and acceptance with it
+  (`deployment/helm/tests/federated_catalogue_lifecycle_test.sh:309-318`).

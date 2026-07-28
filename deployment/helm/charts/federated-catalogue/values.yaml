@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-service-server
-  tag: "sha-c243a65"
+  tag: "sha-c243a65@sha256:535024f1b92fa8e48b59e93bc7040c0a32aed0d06f73c35260eb408dc4ff3594"
   pullPolicy: IfNotPresent
 
 service:
@@ -68,10 +68,13 @@ persistence:
 
 resources:
   requests:
-    cpu: 100m
+    # Semantic JSON-LD verification is CPU-bound during the JVM cold path.
+    # Live measurement with one core exceeded the DCS client's single-call
+    # budget; reserve half a core and allow two without changing memory.
+    cpu: 500m
     memory: 256Mi
   limits:
-    cpu: 500m
+    cpu: "2"
     memory: 1Gi
 
 portal:
@@ -79,7 +82,7 @@ portal:
   replicaCount: 1
   image:
     repository: ghcr.io/eclipse-xfsc/federated-catalogue/fc-demo-portal
-    tag: "latest"
+    tag: "sha-c243a65@sha256:a9a16cbc9cdcdf991551d49bbedcb42df5e1d7371edd013c42f4de95d0a1c4c5"
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
