@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI-Verbesserung"
+  short_description: "FACIS-UI systematisch analysieren und verbessern"
+  default_prompt: "Use $ui-verbesserung to improve a FACIS-DCS user interface with focused UX, implementation, and verification."

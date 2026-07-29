@@ -29,3 +29,15 @@ config_file = "agents/revisor.toml"
 [agents.dokumentierer]
 description = "Dokumentiert eine vollständig verifizierte und revidierte FACIS-DCS-Umsetzung ausschließlich unter docs/."
 config_file = "agents/dokumentierer.toml"
+
+[agents."ui-analyst"]
+description = "Analysiert FACIS-DCS-UI-Probleme, Nutzerflüsse, Accessibility und responsive Zustände ausschließlich lesend."
+config_file = "agents/ui-analyst.toml"
+
+[agents."ui-implementierer"]
+description = "Implementiert freigegebene FACIS-DCS-UI-Verbesserungen und direkt gekoppelte Full-Stack-Korrekturen mit fokussierten Tests."
+config_file = "agents/ui-implementierer.toml"
+
+[agents."ui-verifier"]
+description = "Verifiziert UI-Akzeptanzkriterien unabhängig über Code, Frontend-Gates, Browserzustände, Accessibility und Breakpoints; arbeitet lesend."
+config_file = "agents/ui-verifier.toml"
