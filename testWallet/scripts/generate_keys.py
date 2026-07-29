@@ -20,6 +20,12 @@ WALLET_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WALLET_ROOT))
 
 from dcs_wallet.issuer import DEFAULT_ISSUER_DID, POA_VCT, TRUSTED_ISSUER_DIDS
+
+# The demo PID issuer publishes its key through a certificate chain rather than a
+# JWKS, so it needs an entry of its own -- regenerating without it produces a
+# trust document under which the x5c PID scenario cannot pass.
+PID_X5C_ISSUER_DID = "did:web:dev.example:issuer:pid-x5c"
+PID_X5C_VCT = "urn:dcs:pid:demo:v1"
 from dcs_wallet.keys import (
     build_trust_json,
     generate_ec_private_jwk,
@@ -79,7 +85,12 @@ def materialize_keys(*, keys_dir: Path, trust_path: Path, issuer_did: str, regen
     issuer_public = public_jwk(issuer_private)
     wallet_public = public_jwk(wallet_private)
     trusted_dids = list(dict.fromkeys([issuer_did, *TRUSTED_ISSUER_DIDS]))
-    trust = build_trust_json(issuer_public=issuer_public, issuer_dids=trusted_dids, vcts=[POA_VCT])
+    trust = build_trust_json(
+        issuer_public=issuer_public,
+        issuer_dids=trusted_dids,
+        vcts=[POA_VCT, PID_X5C_VCT],
+        x5c_issuers=[PID_X5C_ISSUER_DID],
+    )
 
     write_json(issuer_path, issuer_private)
     write_json(keys_dir / "issuer-dev.public.jwk", issuer_public)

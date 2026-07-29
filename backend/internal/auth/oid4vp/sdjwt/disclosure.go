@@ -11,6 +11,20 @@ import (
 
 const defaultSDAlg = "sha-256"
 
+// reservedDisclosureNames are claims a disclosure must never carry (RFC 9901
+// §5.2 forbids a disclosure overriding an existing claim).
+//
+// The registered claims are validated against the raw signed payload before the
+// merge, but several are read again from the merged map afterwards: `iss`
+// decides which issuer entry the organization entitlement is checked against,
+// `cnf` is the holder binding, and `status` is where revocation is looked up. A
+// disclosure named for one of those would move a check to a target the issuer
+// never signed for.
+var reservedDisclosureNames = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true, "nbf": true, "iat": true,
+	"cnf": true, "vct": true, "status": true, "_sd": true, "_sd_alg": true,
+}
+
 // MergeDisclosedClaims merges selectively disclosed claims into issuer-signed payload claims.
 func MergeDisclosedClaims(issuerClaims jwt.MapClaims, disclosures []string) (jwt.MapClaims, error) {
 	out := make(jwt.MapClaims, len(issuerClaims)+len(disclosures))
@@ -30,6 +44,12 @@ func MergeDisclosedClaims(issuerClaims jwt.MapClaims, disclosures []string) (jwt
 		claimName, ok := arr[1].(string)
 		if !ok || strings.TrimSpace(claimName) == "" {
 			return nil, fmt.Errorf("disclosure claim name must be a non-empty string")
+		}
+		if reservedDisclosureNames[claimName] {
+			return nil, fmt.Errorf("disclosure may not carry the registered claim %q", claimName)
+		}
+		if _, taken := out[claimName]; taken {
+			return nil, fmt.Errorf("disclosure %q overrides a claim the issuer already signed", claimName)
 		}
 		out[claimName] = arr[2]
 	}
