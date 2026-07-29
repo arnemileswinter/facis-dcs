@@ -35,6 +35,10 @@ pdfCore:
     pullPolicy: Never
 
 extraEnv:
+  # This stack trusts the issuer fixture committed to the repo. It has to
+  # declare that, so no deployment inherits it by omission.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
   - name: JWT_ALG_NONE_SUPPORTED
     value: "true"
   - name: AUTH_INSECURE_COOKIES

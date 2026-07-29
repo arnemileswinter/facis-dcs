@@ -33,7 +33,7 @@ and PID binding.
    signed-document callback later reuses once the ceremony is published. Both
    presentations are built with the existing testWallet/dcs_wallet signing
    primitives, the same library AuthService already uses for the OID4VP login
-   flow, just with PID-shaped claims (vct urn:eudi:pid:de:1, given_name/
+   flow, just with PID-shaped claims (vct urn:dcs:pid:demo:v1, given_name/
    family_name) instead of the role-credential shape, and bound to the
    ceremony's own request nonce (fetched from its pending-stage request
    object, never invented locally).
@@ -158,7 +158,7 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     """Build a real, protocol-correct PID SD-JWT VC + KB-JWT presentation
     using the same testWallet/dcs_wallet signing primitives already used by
     AuthService for the DCS role-credential OID4VP login flow — just with
-    PID-shaped claims (vct urn:eudi:pid:de:1) instead of organization/roles.
+    PID-shaped claims (vct urn:dcs:pid:demo:v1) instead of organization/roles.
     Returns (compact_presentation, issuer_jwt, disclosures, subject_did).
 
     holder_private lets a scenario present as a DIFFERENT natural person than
@@ -195,7 +195,7 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
     visible_claims = {
         "iss": DEFAULT_ISSUER_DID,
         "sub": subject_did,
-        "vct": "urn:eudi:pid:de:1",
+        "vct": "urn:dcs:pid:demo:v1",
         "iat": now - 3600,
         "exp": now + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},
@@ -289,7 +289,7 @@ def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, 
     visible_claims = {
         "iss": issuer_did,
         "sub": subject_did,
-        "vct": "urn:eudi:pid:de:1",
+        "vct": "urn:dcs:pid:demo:v1",
         "iat": now_ts - 3600,
         "exp": now_ts + 3600,
         "cnf": {"jwk": cnf_jwk(holder_public)},

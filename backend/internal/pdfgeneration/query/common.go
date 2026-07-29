@@ -176,15 +176,20 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		discrepancy = discrepancyFailed
 	}
 
+	// An unreachable status service means the revocation state is UNKNOWN. Left
+	// empty it reads as "nothing to report", so a revoked contract verified
+	// clean for the duration of an outage.
 	statusListURI := ""
 	statusListStatus := ""
 	if result.VCProofValid && len(result.VCBytes) > 0 {
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
 		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			if status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx); err == nil {
-				statusListStatus = status
+			status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
+			if err != nil {
+				status = "UNKNOWN (status service unreachable)"
 			}
+			statusListStatus = status
 		}
 	}
 

@@ -18,7 +18,11 @@ func writeTrust(t *testing.T, body string) string {
 	return path
 }
 
-const jwksBlock = `{"keys":[{"kty":"EC","crv":"P-256","x":"sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss","y":"0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"}]}`
+const jwksBlock = `{"keys":[{"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}]}`
+
+// The x-coordinate of testWallet/keys/issuer-dev.jwk, whose private half is
+// committed to this repository.
+const committedDevJWKS = `{"keys":[{"kty":"EC","crv":"P-256","x":"sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss","y":"0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"}]}`
 
 // A peer's issuer must not be usable to mint a session here: that is the whole
 // reason trust is scoped by purpose rather than being one boolean.
@@ -173,6 +177,9 @@ func TestOrganizationsWildcard(t *testing.T) {
 }
 
 func TestDevTrustConfigLoads(t *testing.T) {
+	// The shipped fixture is keyed to committed material by design, so loading
+	// it is exactly the case that now requires saying so.
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
 	cfg, err := LoadTrustConfig("../../../config/oid4vp/trust.dev.json")
 	if err != nil {
 		t.Fatalf("shipped dev trust config must load: %v", err)
@@ -405,5 +412,25 @@ func TestExplicitEntryDeniesRatherThanFallingThrough(t *testing.T) {
 	}
 	if cfg.For(PurposePeer).IssuerTrusted("did:web:listed.example:issuer") {
 		t.Error("an entry granting only login must not also grant peer via the dynamic path")
+	}
+}
+
+// The dev fixture is baked into the runtime image and is the chart default, so
+// a deployment could trust an issuer whose private key ships in this repo.
+func TestCommittedDevKeyIsRefusedUnlessExplicitlyAllowed(t *testing.T) {
+	body := `{"vcts":["urn:dcs:poa:v1"],"issuers":{"did:web:dev.example:issuer:poa":{
+      "purposes":["login"],"organizations":["*"],"mechanism":"jwks","jwks":` + committedDevJWKS + `}}}`
+
+	path := writeTrust(t, body)
+	if _, err := LoadTrustConfig(path); err == nil {
+		t.Fatal("a trust config keyed to repo-committed material must be refused")
+	} else if !strings.Contains(err.Error(), "committed in this repository") {
+		t.Errorf("the refusal must say why: %v", err)
+	}
+
+	// The dev and CI stacks legitimately use it, and say so out loud.
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	if _, err := LoadTrustConfig(writeTrust(t, body)); err != nil {
+		t.Fatalf("DCS_ALLOW_DEV_TRUST must permit the dev fixture: %v", err)
 	}
 }

@@ -30,7 +30,10 @@ func DefaultPIDDCQLQuery() map[string]any {
 				"id":     PIDCredentialQueryID,
 				"format": "dc+sd-jwt",
 				"meta": map[string]any{
-					"vct_values": []string{PIDVCT},
+					// The demo type by default: a deployment served by the demo
+					// issuer must not ask for the EUDI type, and asking for what
+					// nobody can honestly issue only fails later and less clearly.
+					"vct_values": []string{DemoPIDVCT},
 				},
 				"require_cryptographic_holder_binding": true,
 			},

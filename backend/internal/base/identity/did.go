@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -468,7 +469,7 @@ func FetchDIDDocument(did string) (*DIDDocument, error) {
 	docPath := DIDWebDocumentPath(segments)
 
 	var lastErr error
-	for _, scheme := range []string{"https", "http"} {
+	for _, scheme := range DIDWebSchemes(host) {
 		doc, err := fetchDIDDocumentFromURL(DIDWebBaseURL(scheme, host, nil) + docPath)
 		if err == nil {
 			return doc, nil
@@ -579,4 +580,34 @@ func fetchDIDDocumentFromURL(url string) (*DIDDocument, error) {
 	doc.publicKey = pubKey
 
 	return &doc, nil
+}
+
+// DIDWebSchemes returns the URL schemes a did:web document may be fetched over.
+//
+// The method mandates HTTPS. Falling back to plaintext let an on-path attacker
+// serve both the DID document holding a peer's key AND the agreement credential
+// verified against it, which collapses the federation gate entirely. Loopback
+// is the exception, because the dev and CI stacks resolve each other over
+// http://*.localhost and no attacker sits on that path.
+func DIDWebSchemes(host string) []string {
+	if isLoopbackHost(host) {
+		return []string{"https", "http"}
+	}
+	return []string{"https"}
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if idx := strings.LastIndex(h, ":"); idx != -1 {
+		if _, err := strconv.Atoi(h[idx+1:]); err == nil {
+			h = h[:idx]
+		}
+	}
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

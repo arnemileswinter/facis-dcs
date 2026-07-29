@@ -154,6 +154,35 @@ func (t TrustedIssuer) MayAttest(org string) bool {
 	return false
 }
 
+// devIssuerKeyX are the x-coordinates of key material committed to this
+// repository (testWallet/keys/issuer-dev.jwk and friends). Anyone with a clone
+// holds the private half, so an issuer using one can mint any credential.
+//
+// The dev fixture is baked into the runtime image and is the chart default, so
+// nothing stopped a deployment from trusting it — the rule was written in two
+// documents and enforced nowhere. Set DCS_ALLOW_DEV_TRUST=true for the dev and
+// CI stacks, which is the one place it is legitimate.
+var devIssuerKeyX = map[string]bool{
+	"sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss": true,
+}
+
+func containsDevIssuerKey(raw json.RawMessage) bool {
+	var doc struct {
+		Keys []struct {
+			X string `json:"x"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false
+	}
+	for _, key := range doc.Keys {
+		if devIssuerKeyX[strings.TrimSpace(key.X)] {
+			return true
+		}
+	}
+	return false
+}
+
 // LoadTrustConfig reads trust data from a JSON file (ConfigMap mount).
 func LoadTrustConfig(path string) (*TrustConfig, error) {
 	path = strings.TrimSpace(path)
@@ -181,7 +210,12 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		return nil, fmt.Errorf("trust config %q: issuers is required", path)
 	}
 
+	allowDev := strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true")
+
 	for iss, entry := range cfg.Issuers {
+		if !allowDev && containsDevIssuerKey(entry.JWKS) {
+			return nil, fmt.Errorf("trust config %q: issuer %q is keyed to material committed in this repository, so anyone holding a clone could mint credentials it would accept; set DCS_ALLOW_DEV_TRUST=true if this really is a development stack", path, iss)
+		}
 		if len(entry.Purposes) == 0 {
 			return nil, fmt.Errorf("trust config %q: issuer %q declares no purposes; an entry without purposes would have to mean either none or all, and defaulting to all is how a peer's issuer silently becomes a login issuer", path, iss)
 		}

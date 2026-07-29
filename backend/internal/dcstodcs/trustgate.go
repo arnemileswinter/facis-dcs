@@ -287,7 +287,7 @@ func fetchAgreementCredential(peerDID string) (json.RawMessage, error) {
 		return nil, err
 	}
 	var lastErr error
-	for _, scheme := range []string{"https", "http"} {
+	for _, scheme := range identity.DIDWebSchemes(host) {
 		url := identity.DIDWebBaseURL(scheme, host, segments) + "/.well-known/dcs-agreement-credential.json"
 		body, err := fetchAgreementCredentialFromURL(url)
 		if err == nil {
