@@ -113,6 +113,13 @@ auditExecutor:
   path: "/audit/run"
   timeout: "10s"
 
+# Consequential contract transitions use this distinct, snapshot-pinned
+# executor contract. Missing/invalid configuration is a backend boot failure.
+workflowGateExecutor:
+  url: ""
+  path: "/workflow-gate/run"
+  timeout: "10s"
+
 global:
   archiveAuditToken: ""
   archiveAuditTokenSecretRef:
@@ -122,6 +129,10 @@ global:
   auditExecutorTokenSecretRef:
     name: ""
     key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
+  workflowGateToken: ""
+  workflowGateTokenSecretRef:
+    name: ""
+    key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
 
 # Route and path configuration
 route:
@@ -291,6 +302,10 @@ pkcs11:
 # Only fields referenced by the parent chart's helpers are listed here.
 # All other sub-chart options (images, resources, persistence, etc.) can
 # be set directly in your values override file.
+
+orce:
+  checkpointSink:
+    internalTimeoutSeconds: 30
 
 postgresql:
   enabled: false

@@ -364,6 +364,13 @@ systemClients:
 
 orce:
   enabled: true
+  checkpointSink:
+    enabled: true
+    url: "https://host.docker.internal:18443/checkpoints"
+    timeoutSeconds: 2
+    internalTimeoutSeconds: 30
+    allowInsecureTLS: true
+    bearerToken: "bdd-checkpoint-sink-token"
   # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
   # did:web against the same ORCE pod; off by default in the chart because it is
   # a test fixture.
@@ -421,6 +428,10 @@ orce:
 
 auditExecutor:
   url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
   timeout: "2s"
 
 signing:

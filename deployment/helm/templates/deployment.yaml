@@ -362,6 +362,26 @@ spec:
               value: {{ .Values.global.auditExecutorToken | quote }}
               {{- end }}
             {{- end }}
+            # ---- Semantic workflow-gate executor -------------------------------
+            {{- $workflowGateURL := .Values.workflowGateExecutor.url | default "" }}
+            {{- if and (not $workflowGateURL) .Values.orce.enabled }}
+            {{- $workflowGateURL = printf "http://%s-orce:%v%s" .Release.Name (.Values.orce.service.port | default 1880) .Values.workflowGateExecutor.path }}
+            {{- end }}
+            - name: PAC_WORKFLOW_GATE_EXECUTOR_URL
+              value: {{ $workflowGateURL | quote }}
+            - name: PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT
+              value: {{ .Values.workflowGateExecutor.timeout | quote }}
+            {{- if or .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken }}
+            - name: PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN
+              {{- if .Values.global.workflowGateTokenSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.workflowGateTokenSecretRef.name | quote }}
+                  key: {{ .Values.global.workflowGateTokenSecretRef.key | quote }}
+              {{- else }}
+              value: {{ .Values.global.workflowGateToken | quote }}
+              {{- end }}
+            {{- end }}
             # ---- PDF-Core (C2PA PDF compiler/verifier) --------------------------
             - name: PDF_CORE_URL
               value: {{ include "digital-contracting-service.pdfCoreURL" . | quote }}
