@@ -3,6 +3,7 @@
     "urn:dcs:poa:v1",
     "urn:eudi:pid:de:1"
   ],
+  "peer_dynamic": true,
   "issuers": {
     "did:web:dev.example:issuer:poa": {
       "purposes": [
