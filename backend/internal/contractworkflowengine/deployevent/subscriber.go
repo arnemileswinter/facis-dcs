@@ -15,6 +15,7 @@ import (
 
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/command"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 )
 
@@ -22,6 +23,7 @@ import (
 // automatic deployment for the signed contract.
 type Subscriber struct {
 	Deployer *command.Deployer
+	Gate     *workflowgate.Coordinator
 }
 
 // Start registers the event handler with the NATS sub-client and begins
@@ -59,6 +61,15 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	}
 	if envelope.DID == "" {
 		return nil
+	}
+	if _, _, err := s.Gate.Execute(ctx, workflowgate.Input{
+		Gate: "deployment", ContractDID: envelope.DID,
+		Requester: "system:auto-deploy", Roles: []string{"Process Orchestrator"},
+		Continuation: map[string]any{
+			"requested_by": "system:auto-deploy",
+		},
+	}); err != nil {
+		return err
 	}
 
 	_, err := s.Deployer.Handle(ctx, command.DeployCmd{

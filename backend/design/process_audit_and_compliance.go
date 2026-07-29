@@ -138,6 +138,40 @@ var PACCheckpointProof = Type("PACCheckpointProof", func() {
 	Required("entry_cid", "leaf_hash", "leaf_index", "siblings", "head")
 })
 
+var PACWorkflowGateReview = Type("PACWorkflowGateReview", func() {
+	Attribute("status", String, "PENDING or DECIDED")
+	Attribute("decision", String, "approve or reject")
+	Attribute("justification", String, "Compliance Officer justification")
+	Attribute("decided_by", String, "Participant DID of the Compliance Officer")
+	Attribute("decided_at", String, "Decision timestamp (RFC3339)")
+	Required("status")
+})
+
+var PACWorkflowGateRun = Type("PACWorkflowGateRun", func() {
+	Description("Immutable execution evidence for one contract snapshot and workflow gate")
+	Attribute("run_id", String)
+	Attribute("correlation_id", String)
+	Attribute("snapshot_id", String)
+	Attribute("contract_did", String)
+	Attribute("contract_version", Int)
+	Attribute("gate", String)
+	Attribute("status", String, "DISPATCHING, SUCCESS, REVIEW, or BLOCKED")
+	Attribute("content_hash", String)
+	Attribute("effective_shapes", ArrayOf(String))
+	Attribute("profile_version", Int)
+	Attribute("review", PACWorkflowGateReview)
+	Required("run_id", "correlation_id", "snapshot_id", "contract_did", "contract_version", "gate", "status", "content_hash", "effective_shapes", "profile_version")
+})
+
+var PACWorkflowGateReviewDecision = Type("PACWorkflowGateReviewDecision", func() {
+	Attribute("run_id", String)
+	Attribute("decision", String)
+	Attribute("justification", String)
+	Attribute("decided_by", String)
+	Attribute("decided_at", String)
+	Required("run_id", "decision", "justification", "decided_by", "decided_at")
+})
+
 // Process Audit & Compliance Management Service  (/pac/...)
 var _ = Service("ProcessAuditAndCompliance", func() {
 	Description("Process Audit & Compliance Management APIs (/pac/...)")
@@ -288,6 +322,32 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 	})
 
+	Method("checkpoint_by_sequence", func() {
+		Description("retrieve one public audit-trail checkpoint projection by sequence for strictly ordered external publication")
+		Meta("dcs:requirements", "DCS-FR-PACM-02")
+		Security(JWTAuth, func() {
+			Scope("Auditor")
+			Scope("Archive Manager")
+			Scope("Sys. Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("seq", Int64, "Checkpoint sequence number", func() { Minimum(1) })
+			Required("seq")
+		})
+		Result(PACCheckpointHead)
+		Error("not_found", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/pac/audit/checkpoint/{seq}")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("checkpoint_proof", func() {
 		Description("retrieve the inclusion proof tying one anchored audit entry to a timestamped checkpoint root (ADR-16). The entry bytes themselves are NOT part of this response; a verifier hashes the entry it already holds, nonce included, walks the siblings and compares against a root obtained from the external anchor.")
 		Meta("dcs:requirements", "DCS-IR-PACM-01")
@@ -314,6 +374,50 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response(StatusOK)
 			Response("not_found", StatusNotFound)
 			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("workflow_gate_run", func() {
+		Description("read a persisted workflow-gate run and its manual-review state")
+		Meta("dcs:requirements", "DCS-FR-PACM-03")
+		Security(JWTAuth, func() { Scope("Compliance Officer") })
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("run_id", String)
+			Required("run_id")
+		})
+		Result(PACWorkflowGateRun)
+		Error("not_found", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/pac/workflow-gates/{run_id}")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("workflow_gate_review", func() {
+		Description("record a Compliance Officer decision for a REVIEW workflow-gate run")
+		Meta("dcs:requirements", "DCS-FR-PACM-03")
+		Security(JWTAuth, func() { Scope("Compliance Officer") })
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("run_id", String)
+			Attribute("decision", String, func() { Enum("approve", "reject") })
+			Attribute("justification", String, func() { MinLength(1) })
+			Required("run_id", "decision", "justification")
+		})
+		Result(PACWorkflowGateReviewDecision)
+		Error("bad_request", ErrorResult)
+		Error("not_found", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			POST("/pac/workflow-gates/review")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

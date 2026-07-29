@@ -22,6 +22,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	templatedb "digital-contracting-service/internal/templaterepository/db"
 
 	"github.com/google/uuid"
@@ -36,6 +37,7 @@ type processAuditAndCompliancesrvc struct {
 	CRepo                cwedb.ContractRepo
 	ATRepo               cwedb.ApprovalTaskRepo
 	AuditExecutor        auditexecutor.Client
+	WorkflowGate         *workflowgate.Coordinator
 	auditRunReader       func(context.Context, string, string) ([]byte, error)
 	reportEventPersister func(context.Context, auditReport, string, string, string, string) error
 	auth.JWTAuthenticator
@@ -59,8 +61,8 @@ type auditScopeConfig struct {
 	includeArchiveTrail            bool
 }
 
-func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, executor auditexecutor.Client) processauditandcompliance.Service {
-	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, AuditExecutor: executor}
+func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, executor auditexecutor.Client, gate *workflowgate.Coordinator) processauditandcompliance.Service {
+	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, AuditExecutor: executor, WorkflowGate: gate}
 }
 
 func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processauditandcompliance.PACAuditRequest) (*processauditandcompliance.PACExternalAuditResponse, error) {
@@ -655,6 +657,20 @@ func (s *processAuditAndCompliancesrvc) CheckpointHead(ctx context.Context, p *p
 	}
 	if head == nil {
 		return nil, processauditandcompliance.MakeNotFound(errors.New("no audit checkpoint has been anchored yet"))
+	}
+	return toCheckpointHead(*head), nil
+}
+
+func (s *processAuditAndCompliancesrvc) CheckpointBySequence(ctx context.Context, p *processauditandcompliance.CheckpointBySequencePayload) (*processauditandcompliance.PACCheckpointHead, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	handler := qry2.CheckpointAuditor{DB: s.DB, ARepo: s.ATrailReader.ARepo}
+	head, err := handler.BySequence(ctx, p.Seq)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	if head == nil {
+		return nil, processauditandcompliance.MakeNotFound(fmt.Errorf("checkpoint %d not found", p.Seq))
 	}
 	return toCheckpointHead(*head), nil
 }

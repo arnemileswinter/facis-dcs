@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 
@@ -25,6 +27,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
@@ -87,6 +90,7 @@ type signatureManagementsrvc struct {
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
+	WorkflowGate  *workflowgate.Coordinator
 	// RequestSigner signs the pending-ceremony PID/PoA presentation request
 	// object (JAR) — the SAME HSM JAR signer + Hydra client_id the auth
 	// service's login flow uses (jwk header, no x509_san_dns claim).
@@ -125,12 +129,12 @@ type signatureManagementsrvc struct {
 func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, ceremonyRepo db.CeremonyRepo,
 	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string,
 	artifacts *artifactstore.Store, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
-	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
+	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, workflowGate *workflowgate.Coordinator,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
 	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
 
-	return &signatureManagementsrvc{
+	service := &signatureManagementsrvc{
 		JWTAuthenticator:     jwtAuth,
 		DB:                   db,
 		CRepo:                cRepo,
@@ -144,6 +148,7 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		ArchiveRepo:          archiveRepo,
 		ArchiveNotary:        archiveNotary,
 		ArchiveTSA:           archiveTSA,
+		WorkflowGate:         workflowGate,
 		RequestSigner:        requestSigner,
 		OID4VPClientID:       oid4vpClientID,
 		PublicAPIBase:        publicAPIBase,
@@ -153,6 +158,39 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		DCQLQuery:            dcqlQuery,
 		Trust:                trust,
 	}
+	if workflowGate != nil {
+		workflowGate.SetReviewContinuation("signature", service.resumeReviewedSignatureGate)
+	}
+	return service
+}
+
+func (s *signatureManagementsrvc) resumeReviewedSignatureGate(ctx context.Context, run workflowgate.Run) error {
+	stringValue := func(name string) string {
+		value, _ := run.Continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	if values, ok := run.Continuation["user_roles"].([]any); ok {
+		for _, value := range values {
+			if role, ok := value.(string); ok {
+				roles = append(roles, userrole.UserRole(role))
+			}
+		}
+	}
+	signedPDF, err := base64.StdEncoding.DecodeString(stringValue("signed_pdf"))
+	if err != nil {
+		return fmt.Errorf("decode reviewed signed PDF: %w", err)
+	}
+	applier := s.newApplier()
+	return applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
+		ApplyCmd: command.ApplyCmd{
+			DID: stringValue("did"), SignerDID: stringValue("signer_did"),
+			FieldName: stringValue("field_name"), CeremonyID: stringValue("ceremony_id"),
+			CredentialType: stringValue("credential_type"), AppliedBy: stringValue("requested_by"),
+			HolderDID: stringValue("holder_did"), UserRoles: roles,
+		},
+		SignedPDF: signedPDF, JAdESSignature: stringValue("jades_signature"),
+	})
 }
 
 func (s *signatureManagementsrvc) Retrieve(ctx context.Context, req *signaturemanagement.SMContractRetrieveRequest) (res *signaturemanagement.SMContractRetrieveResponse, err error) {
@@ -375,7 +413,6 @@ func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *sig
 	if req.CeremonyID != nil {
 		ceremonyID = *req.CeremonyID
 	}
-
 	handler := s.newApplier()
 	document, err := handler.Prepare(ctx, command.ApplyCmd{
 		DID:            req.Did,
@@ -416,6 +453,21 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 	ceremonyID := ""
 	if req.CeremonyID != nil {
 		ceremonyID = *req.CeremonyID
+	}
+	if _, _, err := s.WorkflowGate.Execute(ctx, workflowgate.Input{
+		Gate: "signature", ContractDID: req.Did,
+		Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
+		Continuation: map[string]any{
+			"did": req.Did, "signer_did": req.SignerDid, "field_name": fieldName,
+			"ceremony_id": ceremonyID, "credential_type": credentialType,
+			"requested_by":    middleware.GetParticipantID(ctx),
+			"holder_did":      middleware.GetHolderDID(ctx),
+			"user_roles":      workflowRoles(ctx),
+			"signed_pdf":      req.SignedPdf,
+			"jades_signature": jadesSignature,
+		},
+	}); err != nil {
+		return nil, err
 	}
 
 	handler := s.newApplier()

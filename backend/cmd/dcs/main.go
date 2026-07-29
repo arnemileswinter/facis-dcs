@@ -60,6 +60,7 @@ import (
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/service"
 	smrepo "digital-contracting-service/internal/signingmanagement/db/pg"
@@ -699,6 +700,7 @@ func main() {
 		c2paSvc                         c2paservice.Service
 		semanticHubSvc                  semantichubgen.Service
 		keyInventorySvc                 keyinventory.Service
+		workflowGateCoordinator         *workflowgate.Coordinator
 	)
 	{
 		auditExecutorTimeout := 10 * time.Second
@@ -717,6 +719,23 @@ func main() {
 		if clientErr != nil {
 			log.Fatalf(ctx, clientErr, "audit executor configuration is invalid")
 		}
+		workflowGateTimeout := 10 * time.Second
+		if configured := strings.TrimSpace(os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT")); configured != "" {
+			parsed, parseErr := time.ParseDuration(configured)
+			if parseErr != nil || parsed <= 0 {
+				log.Fatalf(ctx, parseErr, "invalid PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT %q", configured)
+			}
+			workflowGateTimeout = parsed
+		}
+		workflowGateClient, clientErr := workflowgate.NewHTTPClient(
+			os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_URL"),
+			os.Getenv("PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"),
+			workflowGateTimeout,
+		)
+		if clientErr != nil {
+			log.Fatalf(ctx, clientErr, "workflow-gate executor configuration is invalid")
+		}
+		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
 		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
 		if err != nil {
@@ -725,12 +744,12 @@ func main() {
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
-			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
+			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, shredder)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
-		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, auditExecutorClient)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, auditExecutorClient, workflowGateCoordinator)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService
@@ -784,6 +803,7 @@ func main() {
 		}
 	}(deploySubClient)
 	deploySub := &deployevent.Subscriber{
+		Gate: workflowGateCoordinator,
 		Deployer: &cwecommand.Deployer{
 			DB:             db,
 			CRepo:          &cweRepo,
