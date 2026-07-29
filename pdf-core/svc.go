@@ -796,7 +796,7 @@ func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, err
 		}
 		name := part.FormName()
 		var limit int64 = 8 << 20
-		if name == "pdf" {
+		if name == "pdf" || name == "reference" {
 			limit = 32 << 20
 		}
 		data, err := io.ReadAll(io.LimitReader(part, limit))

@@ -176,3 +176,39 @@ func TestClientHTTPErrorPropagated(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
 }
+
+// TestClientMatchContent verifies MatchContent posts BOTH documents to
+// /verify/content-match as the "pdf" and "reference" multipart fields, and
+// returns the match verdict with its diagnostic.
+func TestClientMatchContent(t *testing.T) {
+	submitted := []byte("%PDF-1.7 submitted")
+	reference := []byte("%PDF-1.7 prepared")
+	srv := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/verify/content-match", r.URL.Path)
+		require.NoError(t, r.ParseMultipartForm(8<<20))
+		assert.Equal(t, string(submitted), r.FormValue("pdf"))
+		assert.Equal(t, string(reference), r.FormValue("reference"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"match":false,"mismatch":"page 1 content does not match"}`)
+	})
+
+	c := newClient(srv.URL)
+	match, mismatch, err := c.MatchContent(context.Background(), submitted, reference)
+	require.NoError(t, err)
+	assert.False(t, match)
+	assert.Equal(t, "page 1 content does not match", mismatch)
+}
+
+// TestClientMatchContentErrorPropagated proves an unreachable or failing
+// content-match is an error, never a silent pass: the caller refuses the
+// signature rather than accepting it unchecked.
+func TestClientMatchContentErrorPropagated(t *testing.T) {
+	srv := stubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"name":"internal_error","message":"boom"}`, http.StatusInternalServerError)
+	})
+
+	c := newClient(srv.URL)
+	match, _, err := c.MatchContent(context.Background(), []byte("a"), []byte("b"))
+	require.Error(t, err)
+	assert.False(t, match)
+}
