@@ -293,7 +293,13 @@ def step_given_peer_identity(context):
     3a) and the PDP (layer 3b), each exercised by its own dedicated Given
     step (this file's "...publishes no agreement credential..." below;
     steps/peer_trust/dcs_trust_pdp_steps.py's PDP-stub Givens)."""
-    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context)
+    # The orce route rather than a case-varied copy of this instance's own DID:
+    # a variant that differs only in spelling names the SAME host, which the
+    # same-peer guard now recognises and refuses ("shipping a contract PDF to the
+    # same peer is not allowed") before any trust layer runs. The orce
+    # synthetic-peer Service is a genuinely different authority that mirrors this
+    # instance's did.json, so the challenge-response stays honestly valid.
+    synthetic_did, secret_value, secret_hash = _orce_synthetic_peer_credentials(context)
     context.peer_from_did = synthetic_did
     context.peer_secret_value = secret_value
     context.peer_secret_hash = secret_hash
