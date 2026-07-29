@@ -1,7 +1,8 @@
 {
   "vcts": [
     "urn:dcs:poa:v1",
-    "urn:eudi:pid:de:1"
+    "urn:eudi:pid:de:1",
+    "urn:dcs:pid:demo:v1"
   ],
   "peer_dynamic": true,
   "issuers": {
