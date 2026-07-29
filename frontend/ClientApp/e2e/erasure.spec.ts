@@ -6,6 +6,7 @@ import {
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
+  counterOffer,
   createContractViaUi,
   fillContractAmountOn,
   type Instance,
@@ -128,21 +129,28 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await offerToCounterparty(a, contractDid)
     await assertReceivedInState(b, contractDid, 'OFFERED')
 
-    // While the contract is OFFERED the turn belongs to the counterparty, so A
-    // has no Submit to press. B responds, A accepts the record B authored
-    // (FR-CWE-07 refuses an accept by its own author), and only then can either
-    // side consolidate — settling is mutual, as in full-vertical-2dcs.
-    //
-    // The redline value must differ from the amount A filled: an unchanged
-    // field leaves the editor undirty, so "Save draft" stays disabled and the
-    // staged-draft PUT never fires.
-    const aChain = await assertManifestChainGrew(a, contractDid, 0)
+    // A full negotiation round, as in full-vertical-2dcs: settling is mutual,
+    // so neither side can consolidate straight from OFFERED. Each redline value
+    // must differ from the last, or the editor stays undirty and the staged
+    // draft never saves. Each redline also ships a new PDF, so the chain-growth
+    // polls double as the replication barrier between the two sides.
+    let aChain = await assertManifestChainGrew(a, contractDid, 0)
+    let bChain = await assertManifestChainGrew(b, contractDid, 0)
+
     await stagedCounterOffer(b, contractDid, { value: '10000' })
-    // B's redline reaches A over the PDF exchange asynchronously. Act on A only
-    // once its chain has grown, otherwise its negotiate view still shows the
-    // pre-counter round and offers neither the decision nor Submit.
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+
+    // A answers with its own redline rather than accepting B's: Submit renders
+    // for a party that has acted in the round, not for one that has only
+    // received a proposal.
+    await counterOffer(a, contractDid, { value: '15000' })
     await assertManifestChainGrew(a, contractDid, aChain)
-    await acceptOpenDecisionsOn(a, contractDid)
+    await assertManifestChainGrew(b, contractDid, bChain)
+
+    // A moved last, so the outstanding decision is B's to settle (FR-CWE-07
+    // refuses an accept by the record's own author).
+    await acceptOpenDecisionsOn(b, contractDid)
 
     await settleToApprovedOn(a, contractDid)
     await settleToApprovedOn(b, contractDid)
