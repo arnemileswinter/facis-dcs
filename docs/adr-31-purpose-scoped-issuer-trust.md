@@ -21,12 +21,14 @@ A's party inside B**, and the two parties the federation exists to distinguish
 collapsed into one.
 
 ADR-29 made each demo issuer stamp its own host as the organization, and a
-subsequent fix required a login credential's organization to equal the
-instance's own participant DID. That closes the observed hole but leaves the
-underlying weakness: nothing binds an *issuer* to the organizations it may
-speak for. Any trusted issuer can assert any organization, so the login check
-depends on every trusted issuer being well-behaved rather than on a constraint
-the verifier enforces.
+first attempt at a fix required a login credential's organization to equal the
+instance's own participant DID. That was the wrong invariant: it encodes "one
+instance, one organization", which the BDD suite disproves immediately — its
+identities belong to Acme Corp, TechVendor Inc and a per-scenario organization,
+all on the same deployment. It also left the underlying weakness untouched:
+nothing bound an *issuer* to the organizations it may speak for, so any trusted
+issuer could assert any party and the check depended on every issuer being
+well-behaved.
 
 Two further requirements land on the same structure:
 
@@ -95,14 +97,24 @@ each instance grants `peer` to its counterparty's issuer *and* to its own.
 ### Organization binding
 
 An issuer may only attest organizations listed in its own entry. A credential
-whose `organization` is absent from the issuing entry's `organizations` is
-refused regardless of purpose. This is what makes the login rule enforceable
-rather than conventional: instance B does not merely check that a login
-credential names B's organization, it checks that the issuer was entitled to
-say so. An issuer with no `organizations` may attest none — the empty case
-fails closed.
+whose `organization` is absent from that list is refused regardless of purpose,
+so a trusted issuer cannot speak for a party nobody granted it.
 
-`pid` issuers are exempt: a PID attests a natural person, not an organization.
+**An instance hosts many organizations.** The organization claim is a party
+identifier, not the deployment's identity — a single instance legitimately
+serves Acme and TechVendor at once. So the rule is about which issuer may name
+which party; it is *not* "the organization must be this instance". That
+formulation only looks right when a deployment happens to host one party, and it
+breaks every multi-tenant one.
+
+Where the issuer *is* the tenant registry for its deployment, enumerating its
+organizations in trust configuration would mean editing that file on every
+onboarding. Such an issuer declares the explicit wildcard `"*"`. It must be
+written out: treating an absent list as "any" is how an issuer silently gains
+the right to speak for a party nobody granted it.
+
+`pid` issuers are exempt from the requirement entirely: a PID attests a natural
+person, not an organization.
 
 ### Revocation
 

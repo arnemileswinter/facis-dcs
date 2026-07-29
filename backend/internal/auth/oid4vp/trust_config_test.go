@@ -144,6 +144,32 @@ func TestPIDIssuerNeedsNoOrganizations(t *testing.T) {
 	}
 }
 
+// The wildcard must be written out; it is not what an absent list means.
+func TestOrganizationsWildcard(t *testing.T) {
+	path := writeTrust(t, `{
+      "vcts": ["urn:dcs:poa:v1"],
+      "issuers": {
+        "https://tenants.example/issuer": {
+          "purposes": ["login"],
+          "organizations": ["*"],
+          "mechanism": "jwks",
+          "jwks": `+jwksBlock+`
+        }
+      }
+    }`)
+
+	cfg, err := LoadTrustConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.IssuerMayAttest("https://tenants.example/issuer", "Acme Corp") {
+		t.Error("a wildcard issuer must attest any organization it names")
+	}
+	if cfg.IssuerMayAttest("https://tenants.example/issuer", "") {
+		t.Error("even a wildcard issuer must not attest an empty organization")
+	}
+}
+
 func TestDevTrustConfigLoads(t *testing.T) {
 	cfg, err := LoadTrustConfig("../../../config/oid4vp/trust.dev.json")
 	if err != nil {

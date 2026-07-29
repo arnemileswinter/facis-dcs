@@ -99,6 +99,16 @@ func (t TrustedIssuer) Allows(p Purpose) bool {
 	return false
 }
 
+// OrganizationsAny is the explicit wildcard: this issuer is authoritative for
+// whichever organization it names. It suits an issuer that IS the tenant
+// registry for its deployment — it knows its organizations, the verifier does
+// not, and enumerating them in trust configuration would mean editing that file
+// whenever a tenant is onboarded.
+//
+// It has to be written out. Treating an absent list as "any" is how an issuer
+// silently gains the right to speak for a party nobody granted it.
+const OrganizationsAny = "*"
+
 // MayAttest reports whether this issuer was entitled to name the organization.
 // An issuer with no organizations may attest none: the empty case fails closed.
 func (t TrustedIssuer) MayAttest(org string) bool {
@@ -107,7 +117,8 @@ func (t TrustedIssuer) MayAttest(org string) bool {
 		return false
 	}
 	for _, allowed := range t.Organizations {
-		if strings.TrimSpace(allowed) == org {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == OrganizationsAny || allowed == org {
 			return true
 		}
 	}

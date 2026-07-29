@@ -248,23 +248,6 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		return nil, goa.PermanentError("unauthorized", "vp verification failed: %v", err)
 	}
 
-	// An instance grants access to itself: the credential attests authority for
-	// one organization, and that organization has to be this one. Trusting the
-	// issuing organization's issuer says the credential is authentic, not that
-	// its holder may act here — without this, a PoA from the counterparty logs
-	// in and every action it takes is attributed to the counterparty's party.
-	if verified.ParticipantDID != s.participantDID {
-		msg := fmt.Sprintf("credential attests organization %q, which is not this instance (%s)",
-			verified.ParticipantDID, s.participantDID)
-		_ = s.presentations.MarkFailed(ctx, attempt.PresentationState, msg)
-		oid4vp.RecordPresentationAudit(ctx, oid4vp.PresentationAuditEvent{
-			PresentationState: attempt.PresentationState,
-			Success:           false,
-			ErrorMessage:      msg,
-		})
-		return nil, goa.PermanentError("unauthorized", "%s", msg)
-	}
-
 	grantedRoles := verified.GrantedRoles
 
 	redirectTo, err := s.hydra.AcceptLoginAndConsent(
