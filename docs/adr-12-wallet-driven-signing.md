@@ -70,9 +70,13 @@ creation application (SCA). The signatory's key lives in their wallet/QTSP.
    JSON-LD payload. No signature is applied. (Embed-then-sign, ADR-3, is
    preserved: the wallet's signature covers the already-embedded evidence.)
 2. **Publish.** The DCS publishes a **standard OID4VP Document-Retrieval
-   request object** (signed JAR, `client_id_scheme=x509_san_dns`) carrying
+   request object** (signed JAR, `client_id=x509_san_dns:<dns-name>`) carrying
    `document_digests`, `document_locations`, `response_uri`, and `nonce`, as a
-   QR / deep link. `document_digests` is an array: the PDF **and** the JSON-LD
+   QR / deep link. The client identifier carries its scheme as a **prefix** —
+   OpenID4VP 1.0 / HAIP, the encoding the ARF profiles (SRS line 727) — and no
+   separate `client_id_scheme` parameter accompanies it; the deep link and both
+   of a ceremony's request objects name that one identifier.
+   `document_digests` is an array: the PDF **and** the JSON-LD
    are offered together, so one ceremony yields both a PAdES and a JAdES over
    the **same content hash** (SM-02, SM-11).
 3. **Wallet signs (out of scope).** The wallet fetches the documents, presents
@@ -100,7 +104,7 @@ The boundary between the DCS (our product) and the wallet/QTSP (ecosystem) is
    place AcroForm field, embed PoA + summary VC    │
                                                     │
    publish OID4VP request object (signed JAR, QR) ──┼──▶ wallet fetches & parses the request
-        client_id_scheme=x509_san_dns              │
+        client_id=x509_san_dns:<dns-name>          │
         document_digests[] (pdf, json)             │
         document_locations[]  ◀────────────────────┼─── wallet GETs the to-be-signed documents
         response_uri, nonce, state                 │

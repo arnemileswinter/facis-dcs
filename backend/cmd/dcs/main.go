@@ -305,15 +305,14 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
-	requestHostname, err := requestSigner.ClientID()
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
-	}
 	// The wallet is handed an OpenID4VP client identifier — prefix and value —
 	// not the Hydra OAuth client id: an unprefixed value means the
 	// "pre-registered" prefix, which a wallet outside a pre-agreed federation
 	// refuses before it looks at any credential.
-	oid4vpClientID := oid4vprequest.X509SANDNSClientID(requestHostname)
+	oid4vpClientID, err := requestSigner.ClientID()
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
+	}
 
 	authCfg.RequestSigner = requestSigner
 	authCfg.OID4VPClientID = oid4vpClientID
@@ -728,7 +727,7 @@ func main() {
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, requestHostname, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService

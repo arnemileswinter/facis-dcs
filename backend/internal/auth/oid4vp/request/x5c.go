@@ -41,11 +41,13 @@ func NewX5CSigner(did *identity.DIDDocument) (*X5CSigner, error) {
 	return &X5CSigner{did: did}, nil
 }
 
-// ClientID returns the DNS hostname the signer's own certificate identifies
-// (VerifyEIDASCertificate already asserts the leaf matches it) — the
-// client_id an x509_san_dns request object must declare. The deployment's
-// hostname may carry a port; a dNSName SAN never does, so it is dropped here
-// rather than leaving every caller to remember.
+// ClientID returns the complete OpenID4VP client identifier every request
+// object this signer signs must declare — prefix and the DNS hostname the
+// signer's own certificate identifies (VerifyEIDASCertificate already asserts
+// the leaf matches it). It is the sole source of that identifier, so the deep
+// link, the identity request object, the Document-Retrieval request object and
+// the audience a presentation is checked against cannot name the verifier
+// differently.
 func (s *X5CSigner) ClientID() (string, error) {
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
@@ -54,11 +56,11 @@ func (s *X5CSigner) ClientID() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dnsName := dnsNameOf(hostname)
-	if dnsName == "" {
+	clientID := X509SANDNSClientID(hostname)
+	if clientID == "" {
 		return "", fmt.Errorf("did document hostname %q carries no dns name", hostname)
 	}
-	return dnsName, nil
+	return clientID, nil
 }
 
 // SignAuthorizationRequestJWT returns a compact oauth-authz-req+jwt signed by

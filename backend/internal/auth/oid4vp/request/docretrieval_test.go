@@ -10,8 +10,9 @@ import (
 // EUDI wallet can consume what the DCS publishes.
 func TestBuildDocumentRetrievalJWTMatchesEUDIShape(t *testing.T) {
 	signer := &captureSigner{}
+	clientID := X509SANDNSClientID("dcs.example.org")
 	_, err := BuildDocumentRetrievalJWT(signer, DocRetrievalParams{
-		ClientID:           "dcs-rp",
+		ClientID:           clientID,
 		ResponseURI:        "https://rp.example/cb",
 		Nonce:              "nonce-1",
 		ExpiresAt:          time.Now().UTC().Add(time.Minute),
@@ -27,8 +28,17 @@ func TestBuildDocumentRetrievalJWTMatchesEUDIShape(t *testing.T) {
 	if c["response_type"] != "sign_response" {
 		t.Fatalf("response_type must be sign_response, got %v", c["response_type"])
 	}
-	if c["client_id_scheme"] != "x509_san_dns" {
-		t.Fatalf("client_id_scheme must be x509_san_dns, got %v", c["client_id_scheme"])
+	// ARF profiles OpenID4VP 1.0 / HAIP (SRS line 727): the scheme is a prefix on
+	// the identifier, and a bare client_id alongside a client_id_scheme claim is
+	// the superseded pre-1.0 draft encoding an ARF wallet may reject.
+	if c["client_id"] != clientID {
+		t.Fatalf("client_id must carry its x509_san_dns prefix, got %v", c["client_id"])
+	}
+	if _, present := c["client_id_scheme"]; present {
+		t.Fatal("client_id_scheme must not accompany a prefixed client_id")
+	}
+	if c["iss"] != clientID {
+		t.Fatalf("iss must name the verifier that signed the request: %v", c["iss"])
 	}
 	if c["response_mode"] != "direct_post" {
 		t.Fatalf("response_mode must be direct_post, got %v", c["response_mode"])
@@ -69,7 +79,7 @@ func TestBuildDocumentRetrievalJWTMatchesEUDIShape(t *testing.T) {
 // wallet cannot tell this response from a replayed one.
 func TestBuildDocumentRetrievalJWTEchoesWalletNonce(t *testing.T) {
 	params := DocRetrievalParams{
-		ClientID:           "dcs-rp",
+		ClientID:           X509SANDNSClientID("dcs.example.org"),
 		ResponseURI:        "https://rp.example/cb",
 		Nonce:              "nonce-1",
 		ExpiresAt:          time.Now().UTC().Add(time.Minute),
@@ -102,7 +112,7 @@ func TestBuildDocumentRetrievalJWTEchoesWalletNonce(t *testing.T) {
 func TestBuildDocumentRetrievalJWTRejectsMismatchedDigestsAndLocations(t *testing.T) {
 	signer := &captureSigner{}
 	_, err := BuildDocumentRetrievalJWT(signer, DocRetrievalParams{
-		ClientID:           "dcs-rp",
+		ClientID:           X509SANDNSClientID("dcs.example.org"),
 		ResponseURI:        "https://rp.example/cb",
 		Nonce:              "nonce-1",
 		ExpiresAt:          time.Now().UTC().Add(time.Minute),

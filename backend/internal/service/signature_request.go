@@ -55,7 +55,7 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	if s.RequestSigner == nil || strings.TrimSpace(s.DocRetrievalClientID) == "" {
+	if s.RequestSigner == nil || strings.TrimSpace(s.OID4VPClientID) == "" {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("OID4VP document-retrieval request signer is not configured"))
 	}
 	if strings.TrimSpace(s.PublicAPIBase) == "" {
@@ -150,9 +150,9 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	requestURI := s.signatureRequestURL(ceremony.ID, "object")
 	return &signaturemanagement.SMSignatureRequestPublishResponse{
 		CeremonyID: ceremony.ID,
-		ClientID:   s.DocRetrievalClientID,
+		ClientID:   s.OID4VPClientID,
 		RequestURI: requestURI,
-		WalletURI:  buildOpenID4VPPresentationURI(s.DocRetrievalClientID, requestURI),
+		WalletURI:  buildOpenID4VPPresentationURI(s.OID4VPClientID, requestURI),
 		Nonce:      &nonce,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
 	}, nil
@@ -244,7 +244,7 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 	}
 
 	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.RequestSigner, oid4vprequest.DocRetrievalParams{
-		ClientID:           s.DocRetrievalClientID,
+		ClientID:           s.OID4VPClientID,
 		ResponseURI:        s.signatureRequestURL(ceremony.ID, "callback"),
 		Nonce:              *ceremony.RequestNonce,
 		ExpiresAt:          *ceremony.RequestExpiresAt,

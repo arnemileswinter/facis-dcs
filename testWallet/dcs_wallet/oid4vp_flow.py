@@ -157,18 +157,60 @@ def presentation_context_from_link(link: PresentationLink) -> PresentationContex
     return PresentationContext(link=link, finish_dcs_session=finish_dcs, api_base=api_base)
 
 
+X509_SAN_DNS_PREFIX = "x509_san_dns:"
+
+
+def _leaf_certificate(header: dict[str, Any]) -> x509.Certificate | None:
+    x5c = header.get("x5c")
+    if isinstance(x5c, list) and x5c:
+        return x509.load_der_x509_certificate(base64.b64decode(str(x5c[0])))
+    return None
+
+
 def _authorization_request_verification_key(header: dict[str, Any]) -> Any:
     jwk_header = header.get("jwk")
     if isinstance(jwk_header, dict):
         return ECAlgorithm.from_jwk(json.dumps(jwk_header))
 
-    x5c = header.get("x5c")
-    if isinstance(x5c, list) and x5c:
-        cert_der = base64.b64decode(str(x5c[0]))
-        cert = x509.load_der_x509_certificate(cert_der)
-        return cert.public_key()
+    leaf = _leaf_certificate(header)
+    if leaf is not None:
+        return leaf.public_key()
 
     raise ValueError("authorization request JWT header missing jwk or x5c")
+
+
+def _assert_x509_san_dns_client_id(header: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Resolve an x509_san_dns client identifier the way a wallet does: the
+    identifier carries its scheme as a prefix (OpenID4VP 1.0 / HAIP, the ARF
+    profile) and claims a DNS name, which the certificate that signed the request
+    object must carry as a SAN — otherwise the verifier is naming a host it cannot
+    prove. Requests naming themselves by any other prefix are left to whatever
+    that prefix's own rules are."""
+    client_id = str(payload.get("client_id") or "")
+    if not client_id.startswith(X509_SAN_DNS_PREFIX):
+        return
+
+    issuer = payload.get("iss")
+    if issuer is not None and str(issuer) != client_id:
+        raise ValueError(f"authorization request iss {issuer!r} does not match client_id {client_id!r}")
+
+    leaf = _leaf_certificate(header)
+    if leaf is None:
+        raise ValueError("x509_san_dns client_id requires an x5c chain in the request object header")
+
+    try:
+        sans = leaf.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName
+        ).value.get_values_for_type(x509.DNSName)
+    except x509.ExtensionNotFound:
+        sans = []
+
+    dns_name = client_id[len(X509_SAN_DNS_PREFIX):]
+    if dns_name not in sans:
+        raise ValueError(
+            f"client_id claims DNS name {dns_name!r} but the request object's signing "
+            f"certificate carries SAN dNSNames {sans}"
+        )
 
 
 def verify_authorization_request_jwt(
@@ -188,6 +230,8 @@ def verify_authorization_request_jwt(
         algorithms=["ES256"],
         options={"verify_aud": False, "require": ["exp"]},
     )
+
+    _assert_x509_san_dns_client_id(header, payload)
 
     if expected_wallet_nonce is not None:
         echoed = payload.get("wallet_nonce")

@@ -99,15 +99,12 @@ type signatureManagementsrvc struct {
 	// signer the login flow uses. A wallet verifies either against the SAN the
 	// client identifier names.
 	RequestSigner oid4vprequest.Signer
-	// OID4VPClientID is the x509_san_dns client identifier the pending-ceremony
-	// (PID/PoA presentation) request object declares, and therefore the
-	// audience the presented KB-JWTs must be bound to.
+	// OID4VPClientID is the prefixed x509_san_dns client identifier BOTH request
+	// objects a ceremony publishes declare — the pending PID/PoA presentation
+	// request and the Document-Retrieval request — and therefore the audience the
+	// presented KB-JWTs must be bound to. One ceremony is reached through one
+	// request_uri, so it must name one verifier.
 	OID4VPClientID string
-	// DocRetrievalClientID is the bare DNS hostname the Document-Retrieval
-	// request object declares. That request carries the scheme in its own
-	// client_id_scheme claim (the EUDI walletdriven-signer encoding), so the
-	// identifier is the DNS name alone — equal to the signing certificate's SAN.
-	DocRetrievalClientID string
 	// PublicAPIBase is the externally-resolvable API base the request object's
 	// request_uri, document_locations, and response_uri are built from.
 	PublicAPIBase string
@@ -135,7 +132,6 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	artifacts *artifactstore.Store, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
-	docRetrievalClientID string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig,
 	credentials *provenance.CredentialVerifier) signaturemanagement.Service {
 
@@ -145,27 +141,26 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		panic("CredentialVerifier is required to verify embedded signing evidence")
 	}
 	return &signatureManagementsrvc{
-		JWTAuthenticator:     jwtAuth,
-		DB:                   db,
-		CRepo:                cRepo,
-		CeremonyRepo:         ceremonyRepo,
-		PDFCore:              pdfCore,
-		ATrailReader:         auditTrailReader,
-		VCSigner:             vcSigner,
-		VCIssuer:             vcIssuer,
-		IssuerDID:            issuerDID,
-		Artifacts:            artifacts,
-		ArchiveRepo:          archiveRepo,
-		ArchiveNotary:        archiveNotary,
-		ArchiveTSA:           archiveTSA,
-		RequestSigner:        requestSigner,
-		OID4VPClientID:       oid4vpClientID,
-		PublicAPIBase:        publicAPIBase,
-		DocRetrievalClientID: docRetrievalClientID,
-		PIDDCQLQuery:         pidDCQLQuery,
-		DCQLQuery:            dcqlQuery,
-		Trust:                trust,
-		Credentials:          credentials,
+		JWTAuthenticator: jwtAuth,
+		DB:               db,
+		CRepo:            cRepo,
+		CeremonyRepo:     ceremonyRepo,
+		PDFCore:          pdfCore,
+		ATrailReader:     auditTrailReader,
+		VCSigner:         vcSigner,
+		VCIssuer:         vcIssuer,
+		IssuerDID:        issuerDID,
+		Artifacts:        artifacts,
+		ArchiveRepo:      archiveRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
+		RequestSigner:    requestSigner,
+		OID4VPClientID:   oid4vpClientID,
+		PublicAPIBase:    publicAPIBase,
+		PIDDCQLQuery:     pidDCQLQuery,
+		DCQLQuery:        dcqlQuery,
+		Trust:            trust,
+		Credentials:      credentials,
 	}
 }
 

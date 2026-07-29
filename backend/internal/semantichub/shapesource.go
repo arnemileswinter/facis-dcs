@@ -67,7 +67,11 @@ func (h HubShapeSource) ShapesAt(ctx context.Context, name string, version int) 
 
 func (h HubShapeSource) shapesEntry(ctx context.Context, name string, version int) (string, int, error) {
 	if version <= 0 {
-		return h.active(ctx, name, "shapes")
+		content, active, err := h.active(ctx, name, "shapes")
+		if err != nil {
+			return "", 0, fmt.Errorf("semantic hub: shapes %s: %w", name, err)
+		}
+		return content, active, nil
 	}
 	content, err := h.versionContent(ctx, name, "shapes", version)
 	if err != nil {
