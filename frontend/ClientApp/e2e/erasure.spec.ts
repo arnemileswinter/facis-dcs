@@ -2,6 +2,7 @@ import { expect, test } from './dcs-test'
 import {
   acceptOpenDecisionsOn,
   apiAuthHeaders,
+  assertManifestChainGrew,
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
@@ -100,11 +101,7 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string): P
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
-  // Higher than the other two-instance specs: this one drives the full
-  // template + contract lifecycle on BOTH instances (the counterparty's turn
-  // and each side's own submit -> review -> approve) before it can even begin
-  // testing erasure.
-  test.setTimeout(1_500_000)
+  test.setTimeout(750_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
@@ -135,10 +132,16 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     // has no Submit to press. B responds, A accepts the record B authored
     // (FR-CWE-07 refuses an accept by its own author), and only then can either
     // side consolidate — settling is mutual, as in full-vertical-2dcs.
-    // Must differ from the amount A filled: an unchanged field leaves the
-    // editor undirty, so "Save draft" stays disabled and the staged-draft PUT
-    // this helper waits for never fires.
+    //
+    // The redline value must differ from the amount A filled: an unchanged
+    // field leaves the editor undirty, so "Save draft" stays disabled and the
+    // staged-draft PUT never fires.
+    const aChain = await assertManifestChainGrew(a, contractDid, 0)
     await stagedCounterOffer(b, contractDid, { value: '10000' })
+    // B's redline reaches A over the PDF exchange asynchronously. Act on A only
+    // once its chain has grown, otherwise its negotiate view still shows the
+    // pre-counter round and offers neither the decision nor Submit.
+    await assertManifestChainGrew(a, contractDid, aChain)
     await acceptOpenDecisionsOn(a, contractDid)
 
     await settleToApprovedOn(a, contractDid)
