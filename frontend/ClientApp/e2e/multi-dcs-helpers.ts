@@ -598,14 +598,12 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
   const verified = inst.page.waitForResponse(
     (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
   )
-  await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await verified
-  await inst.page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await confirmModalOn(inst, 'Submit')
+  await verified
+  await inst.page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
   await forwarded
 
   await inst.gotoAs('Template Approver', `/ui/templates/approve/${did}`)

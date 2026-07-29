@@ -73,9 +73,7 @@ watch(
 )
 
 const isSubmitting = ref(false)
-const comment = ref<string>('')
-
-const forwardToApproval = async () => {
+const forwardToApproval = async (comment: string) => {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
@@ -83,21 +81,12 @@ const forwardToApproval = async () => {
     return
   }
   try {
-    const commentResult = await commentDialog.value?.reveal({
-      message: 'Add comment?',
-      editor: { requiredText: false },
-    })
-    if (commentResult?.isCanceled) {
-      return
-    } else if (commentResult?.data) {
-      comment.value = commentResult.data
-    }
     isSubmitting.value = true
 
     await contractTemplateService.submit({
       did,
       updated_at: updatedAt,
-      comments: comment.value ? [comment.value] : [],
+      comments: comment ? [comment] : [],
       forward_to: 'APPROVAL',
       approver: '',
       reviewers: [],
@@ -118,6 +107,7 @@ const returnToDraft = async () => {
     return
   }
   try {
+    let comment = ''
     const commentResult = await commentDialog.value?.reveal({
       message: 'Add comment?',
       editor: { requiredText: false },
@@ -125,13 +115,13 @@ const returnToDraft = async () => {
     if (commentResult?.isCanceled) {
       return
     } else if (commentResult?.data) {
-      comment.value = commentResult.data
+      comment = commentResult.data
     }
     isSubmitting.value = true
     await contractTemplateService.submit({
       did,
       updated_at: updatedAt,
-      comments: comment.value ? [comment.value] : [],
+      comments: comment ? [comment] : [],
       forward_to: 'DRAFT',
       approver: '',
       reviewers: [],
@@ -176,11 +166,7 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
-        <!-- Verify / Return to draft / request changes -->
-        <VerificationFindingsDialog
-          class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
-        />
+        <!-- Return to draft / request changes -->
         <button
           class="btn flex-1 btn-primary"
           :disabled="(!isReviewer && !isManager) || isSubmitting"
@@ -190,14 +176,11 @@ const exportPDF = async () => {
           Reject
         </button>
         <!-- Complete review (verify then forward to approval) -->
-        <button
+        <VerificationFindingsDialog
           class="btn flex-1 btn-primary"
           :disabled="(!isReviewer && !isManager) || isSubmitting"
-          @click="forwardToApproval"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Approve
-        </button>
+          @confirm="forwardToApproval"
+        />
         <TemplateManagerActions
           v-if="contractTemplate && isManager"
           :template="contractTemplate"

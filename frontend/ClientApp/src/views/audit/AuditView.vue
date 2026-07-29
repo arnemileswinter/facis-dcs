@@ -538,8 +538,8 @@ function formatDateTime(value?: string): string {
   </div>
 
   <section class="space-y-4 px-4">
-    <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <div class="stats stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal">
+    <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
+      <div class="stats max-w-full stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal">
         <div class="stat">
           <div class="stat-title flex items-center gap-2 text-base-content/70">
             <span class="size-2 rounded-full bg-error/50"></span>
@@ -563,7 +563,7 @@ function formatDateTime(value?: string): string {
         </div>
       </div>
 
-      <div class="flex flex-col gap-3 sm:flex-row">
+      <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap">
         <label class="form-control w-full sm:w-48">
           <span class="label-text mb-1">Scope</span>
           <select
@@ -608,9 +608,9 @@ function formatDateTime(value?: string): string {
           <span v-else>Execute Audit</span>
         </button>
 
-        <div class="flex flex-wrap gap-2 sm:self-end">
+        <div class="flex flex-nowrap gap-2 sm:self-end">
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('json')"
           >
@@ -621,7 +621,7 @@ function formatDateTime(value?: string): string {
             <span v-else>JSON</span>
           </button>
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('csv')"
           >
@@ -632,7 +632,7 @@ function formatDateTime(value?: string): string {
             <span v-else>CSV</span>
           </button>
           <button
-            class="btn rounded-box btn-outline"
+            class="btn rounded-box whitespace-nowrap btn-outline"
             :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
             @click="generateReport('pdf')"
           >
@@ -718,8 +718,8 @@ function formatDateTime(value?: string): string {
       </details>
     </section>
 
-    <div v-if="!selectedAuditLoading && !error" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div class="overflow-x-auto rounded-box border border-base-content/10">
+    <div v-if="!selectedAuditLoading && !error" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0 overflow-x-auto rounded-box border border-base-content/10">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
           <div role="tablist" class="tabs-box tabs">
             <button

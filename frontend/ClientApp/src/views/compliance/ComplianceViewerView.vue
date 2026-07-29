@@ -339,9 +339,9 @@ function exportPdf() {
   <div class="p-4">
     <div v-if="error" class="mb-4 alert alert-error">{{ error }}</div>
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
       <!-- Contract list: filter/search signed contracts by compliance status -->
-      <div class="lg:col-span-1">
+      <div class="min-w-0 lg:col-span-1">
         <div class="mb-2 flex flex-col gap-2">
           <input
             :id="searchId"
@@ -364,18 +364,18 @@ function exportPdf() {
 
         <div v-if="loadingContracts" class="text-base-content/70">Loading contracts…</div>
         <div v-else-if="filteredContracts.length === 0" class="text-base-content/70">No contracts match.</div>
-        <ul v-else class="menu w-full rounded-box bg-base-200 p-1">
-          <li v-for="contract in filteredContracts" :key="contract.did">
+        <ul v-else class="menu w-full min-w-0 overflow-x-hidden rounded-box bg-base-200 p-1">
+          <li v-for="contract in filteredContracts" :key="contract.did" class="max-w-full min-w-0 overflow-hidden">
             <button
               type="button"
               :class="{ active: selected?.did === contract.did }"
-              class="flex flex-col items-start gap-0"
+              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden"
               @click="selectContract(contract)"
             >
-              <span class="font-medium">{{ contract.name ?? contract.did }}</span>
-              <span class="flex items-center gap-2">
-                <span class="badge badge-ghost badge-xs">{{ contract.state }}</span>
-                <span class="truncate font-mono text-[10px] opacity-70">{{ contract.did }}</span>
+              <span class="max-w-full truncate font-medium">{{ contract.name ?? contract.did }}</span>
+              <span class="flex w-full min-w-0 items-center gap-2 overflow-hidden">
+                <span class="badge shrink-0 badge-ghost badge-xs">{{ contract.state }}</span>
+                <span class="w-0 flex-1 truncate font-mono text-[10px] opacity-70">{{ contract.did }}</span>
               </span>
             </button>
           </li>
@@ -383,7 +383,7 @@ function exportPdf() {
       </div>
 
       <!-- Tabbed dashboard for the selected contract -->
-      <div class="lg:col-span-2">
+      <div class="min-w-0 lg:col-span-2">
         <div v-if="!selected" class="text-base-content/70">Select a contract to inspect its signatures.</div>
         <div v-else>
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -421,9 +421,9 @@ function exportPdf() {
                 Audit Reports
               </button>
             </div>
-            <div class="flex gap-2">
-              <button class="btn btn-outline btn-sm" @click="exportJson">Export JSON</button>
-              <button class="btn btn-outline btn-sm" @click="exportPdf">Export PDF</button>
+            <div class="flex shrink-0 flex-nowrap gap-2">
+              <button class="btn whitespace-nowrap btn-outline btn-sm" @click="exportJson">Export JSON</button>
+              <button class="btn whitespace-nowrap btn-outline btn-sm" @click="exportPdf">Export PDF</button>
             </div>
           </div>
 
