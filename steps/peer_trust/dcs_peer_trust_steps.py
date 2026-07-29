@@ -51,10 +51,12 @@ they denote (`identity.SameDIDWeb`), so inbound this identity is exactly what
 that guard exists to refuse — "shipping a contract PDF to the same peer is not
 allowed", before any trust layer runs. It is used where the ship goes the other
 way (`step_given_local_contract_offered_to_peer`), which applies no such guard.
-Inbound scenarios take the orce route instead (`_orce_synthetic_peer_credentials`),
-which is genuinely another authority; its agreement credential deliberately
-404s, so an inbound scenario that needs layer 3a to PASS has no scaffolding
-today — see the open point at the AC7/AC9 scenarios.
+Inbound scenarios take an orce route instead, which is genuinely another
+authority: the one in this module (`_orce_synthetic_peer_credentials`) 404s its
+agreement credential and so exercises a layer-3a REFUSAL, and the one in
+steps/peer_trust/synthetic_trusted_peer.py publishes a credential that verifies
+against the running build's rules hash and so leaves the PDP (layer 3b) as the
+only gate an inbound scenario still has to pass.
 
 Consequence: this identity is CONSTANT per instance rather than unique per
 scenario (uniqueness would require a distinguishing path segment, which is
@@ -64,11 +66,13 @@ peer — every assertion is scoped by the scenario's own contract DID, and
 direction), whose contract-DID component is already per-scenario unique.
 
 A peer with a MISSING credential (layer 3a fails) is simulated separately via
-the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), and one
-with a valid-but-wrong-hash credential via a second orce route
-(`_orce_mismatch_peer_credentials`) — this instance cannot be made to publish
-a broken credential about itself. A "signature-invalid" credential remains
-uncovered and is flagged as an open point at its scenario rather than faked.
+the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), one with a
+valid-but-wrong-hash credential via a second orce route
+(`_orce_mismatch_peer_credentials`), and one whose credential actually verifies
+via a third (`synthetic_trusted_peer.publish_trusted_peer`) — this instance
+cannot be made to publish a broken credential about itself. A
+"signature-invalid" credential remains uncovered and is flagged as an open
+point at its scenario rather than faked.
 
 This technique is the natural single-instance extension of the self-peer
 simulation used by the contract-state-machine pack (see
@@ -89,6 +93,7 @@ from datetime import datetime, timezone
 import requests as _requests
 from behave import given, then, when
 
+from steps.peer_trust.synthetic_trusted_peer import publish_trusted_peer
 from steps.support.api_client import (
     contract_create_url,
     contract_offer_url,
@@ -311,6 +316,20 @@ def step_given_peer_identity(context):
     context.peer_secret_hash = secret_hash
 
 
+@given("a cryptographically valid peer whose agreement credential this instance accepts")
+def step_given_peer_identity_with_accepted_credential(context):
+    """The only synthetic peer that gets PAST layer 3a (see
+    steps/peer_trust/synthetic_trusted_peer.py): its agreement credential is
+    issued by its own DID, signed with the VC key its own did.json publishes,
+    and names the federation rules hash the instance under test currently
+    publishes. Every scenario using this Given is therefore testing what its AC
+    names — the policy endpoint — and not the credential check in front of it."""
+    peer_did, secret_value, secret_hash = publish_trusted_peer(context)
+    context.peer_from_did = peer_did
+    context.peer_secret_value = secret_value
+    context.peer_secret_hash = secret_hash
+
+
 @given("that peer publishes no agreement credential")
 def step_given_peer_no_agreement_credential(context):
     """Uses the orce trust-PDP flow's synthetic-peer route (see
@@ -346,6 +365,10 @@ def _post_pdf_payload(context, name: str) -> dict:
     backend/internal/service/dcs_to_dcs.go) shipped by the synthetic peer
     identity set up by a prior Given step."""
     did, _ = ContractService._contract_data(context, name)
+    # The interaction the PDP assertions are scoped to: the trust gate names
+    # this contract in its consult, so "was the policy endpoint consulted"
+    # can be answered for THIS ship rather than for any earlier one.
+    context.pdp_interaction_contract_did = did
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     export = PDFService.export_contract_pdf(context, did, headers=manager_h)
     assert export.status_code == 200, (
@@ -438,6 +461,7 @@ def step_when_ship_towards_peer(context, name):
     event -> DCSToDCSSynchronizer.shipContractPDF). This step just gives that
     asynchronous path time to run before Then-steps inspect its side effects
     (sync_fails row, PAC audit trail, PDP stub)."""
+    context.pdp_interaction_contract_did, _ = ContractService._contract_data(context, name)
     time.sleep(5)
 
 

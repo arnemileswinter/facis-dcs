@@ -14,16 +14,18 @@
 # CheckForUntrustedPeers), so every ADR-19 scenario below is expected to fail
 # red; that is the point of writing them ahead of the implementation.
 #
-# The untrusted-peer single-instance-testable scenarios use a syntactically
-# distinct did:web identity that resolves, hostname-wise, to THIS SAME
-# instance's own dev key and (per ADR-19) its own
-# /.well-known/dcs-agreement-credential.json — see
-# steps/peer_trust/dcs_peer_trust_steps.py for why this is honest evidence
-# specifically for the agreement-credential/PDP gate, not just "any"
-# rejection, and for which sub-cases (missing credential; PDP unreachable)
-# are honestly simulatable this way versus which are not (signature-invalid
-# or hash-mismatched credentials — flagged as open points at their own
-# scenarios below).
+# The single-instance-testable scenarios ship as synthetic did:web peers the
+# orce Node-RED fixture serves — one publishing no agreement credential at all
+# (AC4), one whose credential names a deliberately wrong rules hash (AC5), and
+# one whose credential verifies against this build's rules hash so only the PDP
+# is left to decide (AC7 inbound, AC8, AC9) — plus, on the OUTBOUND path only,
+# a case-varied spelling of this instance's own DID, which resolves to this
+# instance's own key and credential. See
+# steps/peer_trust/dcs_peer_trust_steps.py and
+# steps/peer_trust/synthetic_trusted_peer.py for why each is honest evidence
+# for the gate its own scenario names rather than for "any" rejection, and for
+# the one sub-case still not simulatable (a present-but-signature-invalid
+# credential — flagged as an open point at AC4).
 #
 # The @two-instance scenarios need a second real DCS process and
 # BDD_DCS_BASE_URL_A/_B rather than the single-instance BDD_DCS_BASE_URL
@@ -191,24 +193,27 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # in- and outbound; a 2xx response lets it proceed. Single-instance, orce
   # trust-PDP flow in "allow" mode.
   #
-  # OPEN POINT (inbound scenarios below: AC7 inbound, AC8, AC9): the inbound
-  # synthetic peer is the orce route, whose agreement credential deliberately
-  # 404s, so layer 3a refuses these ships before the PDP is consulted at all —
-  # the assertions still hold (a denial is recorded, and "the policy endpoint
-  # was consulted" reads the orce control surface's LAST request globally,
-  # which an earlier outbound consult satisfies), but not for the reason the
-  # AC names. An inbound peer that passes layer 3a needs an identity that is
-  # neither this instance (PostPdf's same-peer guard, identity.SameDIDWeb) nor
-  # the credential-less orce route: a third static orce identity publishing a
-  # correctly-hashed agreement credential, or instance B's own signing key
-  # exposed to the harness the way BDD_HSMSIGN_EXEC exposes A's. Flagged for
-  # the implementer rather than papered over.
+  # The inbound scenarios (AC7 inbound, AC8, AC9) ship as the THIRD orce
+  # synthetic peer, did:web:dcs-orce-trusted%3A1880: a separate authority whose
+  # agreement credential verifies against the running build's federation rules
+  # hash, so layer 3a passes and the PDP is the only gate left to decide the
+  # interaction. It is neither this instance (which PostPdf's same-peer guard,
+  # identity.SameDIDWeb, refuses before any trust layer runs) nor the
+  # credential-less route AC4 uses. Its key material and credential are minted
+  # per run by the harness and published through the orce flow's control
+  # surface (steps/peer_trust/synthetic_trusted_peer.py) rather than checked in,
+  # because a static credential's rules hash stops matching the build the day
+  # the rules document changes.
+  #
+  # "The policy endpoint was consulted" is likewise read per contract
+  # (GET /trust-pdp/last?contractDID=...), not as the control surface's global
+  # last request — which any earlier consult in the run already satisfied.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC7
   Scenario: An inbound PostPdf interaction consults the local policy endpoint before proceeding
     Given the local policy endpoint (PDP) is running and allows every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC7 Inbound PDP Consult" exists locally, created by this instance
     When that peer ships contract "AC7 Inbound PDP Consult"'s PDF to this instance's PostPdf endpoint
     Then the policy endpoint was consulted for this interaction
@@ -226,29 +231,35 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # incident count is scoped to THIS scenario's own contract DID — an
   # unscoped global count is unreliable in a shared long-lived environment
   # where earlier/orphaned denials can already have raised unrelated
-  # incidents.
+  # incidents. Both the rejection and the incident must name the policy
+  # endpoint: the peer's credential verifies, so a denial attributed to the
+  # credential check would be this scenario passing for the wrong reason.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC8
   Scenario: A denying policy endpoint rejects the interaction with exactly one incident and no retry
     Given the local policy endpoint (PDP) is running and denies every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC8 PDP Deny" exists locally, created by this instance
     When that peer ships contract "AC8 PDP Deny"'s PDF to this instance's PostPdf endpoint
     Then the interaction is denied and exactly one incident is recorded in the audit trail for contract "AC8 PDP Deny"
     And no sync_fails retry entry exists for contract "AC8 PDP Deny"
 
   # ---------------------------------------------------------------------
-  # AC9: the PDP request body carries the documented fields. (Checked via
-  # the orce control flow's GET /trust-pdp/last, which reports the most
-  # recently received request — not an exact request COUNT, unlike the
-  # retired local-stub version of this pack.)
+  # AC9: the PDP request body carries the documented fields. Checked via the
+  # orce control flow's GET /trust-pdp/last?contractDID=..., which reports the
+  # request recorded for THIS scenario's contract — not an exact request COUNT,
+  # unlike the retired local-stub version of this pack, and not the run's
+  # global last request, which said nothing about this interaction. The peer
+  # and contract it names are asserted against what the scenario shipped, and
+  # agreementCredential is non-empty only because layer 3a accepted this peer's
+  # credential first.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC7 @REQ-fed-agreement-AC9
   Scenario: The policy endpoint receives peerDID, agreementCredential, direction, contractDID, and targetState
     Given the local policy endpoint (PDP) is running and allows every request
-    And a cryptographically valid peer identity
+    And a cryptographically valid peer whose agreement credential this instance accepts
     And contract "AC9 PDP Body Shape" exists locally, created by this instance
     When that peer ships contract "AC9 PDP Body Shape"'s PDF to this instance's PostPdf endpoint
     Then the policy endpoint recorded a request naming the peer, the agreement credential, the direction, the contract, and the target state

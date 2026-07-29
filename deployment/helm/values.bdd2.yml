@@ -50,7 +50,7 @@ extraEnv:
   # http under non-loopback Service names, which the resolver permits only for
   # hosts a deployment names.
   - name: DCS_DIDWEB_INSECURE_HOSTS
-    value: "dcs-orce:1880,dcs-orce-mismatch:1880"
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut): fast in
   # BDD/e2e so a deferred/failed peer PDF ship is re-attempted and delivered
   # within the scenarios' replication wait (see values.bdd.yml for the rationale).

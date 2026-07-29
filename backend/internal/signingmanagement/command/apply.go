@@ -90,6 +90,16 @@ var ErrDocumentMismatch = errors.New("submitted document does not match the docu
 // the signature validates over the modified document.
 var ErrContentMismatch = errors.New("submitted document's visible content is not the content prepared for signing")
 
+// ErrPayloadMismatch rejects a submitted PDF whose embedded machine-readable
+// JSON-LD contract is no longer the payload attached to the document pinned at
+// prepare. It is deliberately distinct from ErrContentMismatch: the visible
+// pages and the embedded payload are two independent representations of the
+// same contract, and an incremental update can supersede the embedded-file
+// object alone — leaving every rendered page identical while replacing the
+// document that drives policy evaluation, catalogue publication and the peer's
+// copy of the contract.
+var ErrPayloadMismatch = errors.New("submitted document's machine-readable contract is not the payload prepared for signing")
+
 // ErrNonceMismatch rejects a submitted signature that does not echo the
 // ceremony's request nonce, cryptographically bound inside the JAdES
 // signature's covered content (ADR-20 nonce binding).
@@ -165,6 +175,52 @@ func assertPreparedContent(ctx context.Context, matcher ContentMatcher, submitte
 	}
 	if !match {
 		return fmt.Errorf("%w: field %q: %s", ErrContentMismatch, fieldName, mismatch)
+	}
+	return nil
+}
+
+// PayloadExtractor returns the machine-readable JSON-LD contract attached to a
+// PDF, resolving the LAST definition of the embedded-file object as a reader
+// would (pdfcore.Client satisfies it). Like the content matcher it re-renders
+// nothing: both documents it is asked about are documents the caller holds.
+type PayloadExtractor interface {
+	ExtractPayload(ctx context.Context, pdf []byte) ([]byte, error)
+}
+
+// assertPreparedPayload refuses a submission whose embedded machine-readable
+// contract is no longer the one attached to the pinned prepared document.
+//
+// The reference is the PINNED PDF's OWN attachment, not the ceremony's pinned
+// JAdES payload. Those two are different documents by construction: the pinned
+// payload is a JCS-canonicalized envelope built from the contract data as it
+// stands at prepare, while the attachment is the raw JSON-LD the renderer
+// embedded verbatim — and the two legitimately diverge whenever prepare does
+// not re-amend the PDF (every signature after the first, and any contract whose
+// base PDF already carries a peer's PAdES signature). Comparing against the
+// pinned payload would refuse those valid submissions; comparing the two
+// documents' attachments asks exactly the question this gate exists for — did
+// the signatory return the machine-readable contract they were handed.
+//
+// The comparison is over SHA-256 of the extracted attachments rather than the
+// bytes themselves so the refusal can name both digests without echoing an
+// attacker-supplied document into the error and the audit log.
+func assertPreparedPayload(ctx context.Context, extractor PayloadExtractor, submitted, prepared []byte, fieldName string) error {
+	submittedPayload, err := extractor.ExtractPayload(ctx, submitted)
+	if err != nil {
+		return fmt.Errorf("could not read the machine-readable contract embedded in the document submitted for %q: %w", fieldName, err)
+	}
+	preparedPayload, err := extractor.ExtractPayload(ctx, prepared)
+	if err != nil {
+		return fmt.Errorf("could not read the machine-readable contract embedded in the document prepared for %q: %w", fieldName, err)
+	}
+	if len(submittedPayload) == 0 || len(preparedPayload) == 0 {
+		return fmt.Errorf("%w: field %q: the documents carry no machine-readable contract to compare", ErrPayloadMismatch, fieldName)
+	}
+	submittedSum := sha256.Sum256(submittedPayload)
+	preparedSum := sha256.Sum256(preparedPayload)
+	if submittedSum != preparedSum {
+		return fmt.Errorf("%w: field %q: submitted payload sha256 %s, prepared payload sha256 %s",
+			ErrPayloadMismatch, fieldName, hex.EncodeToString(submittedSum[:]), hex.EncodeToString(preparedSum[:]))
 	}
 	return nil
 }
@@ -368,6 +424,18 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// prepare committed to, so this carries none of the render-determinism
 	// fragility a fresh compile would (ADR-13).
 	if err := assertPreparedContent(ctx, h.PDFCore, cmd.SignedPDF, ceremony.PreparedPDF, ceremony.FieldName); err != nil {
+		return err
+	}
+
+	// Payload pinning, the machine-readable half of the same guarantee. The two
+	// checks above say nothing about the embedded JSON-LD: a revision that
+	// supersedes ONLY the embedded-file object leaves every rendered page
+	// byte-identical, so the content match passes, while the document that
+	// actually drives policy evaluation, catalogue publication and the peer's
+	// copy of the contract has been swapped under a signature covering the whole
+	// file. Compare the attachment a reader resolves in the submission against
+	// the attachment of the pinned prepared bytes — again re-rendering nothing.
+	if err := assertPreparedPayload(ctx, h.PDFCore, cmd.SignedPDF, ceremony.PreparedPDF, ceremony.FieldName); err != nil {
 		return err
 	}
 

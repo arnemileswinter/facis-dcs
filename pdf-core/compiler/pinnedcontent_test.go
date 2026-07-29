@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sort"
@@ -194,6 +196,119 @@ func TestMatchPageContentAcceptsEveryLegitimatelyAppendedLayer(t *testing.T) {
 	}
 	if err := MatchPageContent(submitted, prepared); err != nil {
 		t.Fatalf("legitimately appended layers must not diverge from the pinned content: %v", err)
+	}
+}
+
+// embeddedPayloadObjID returns the object id of the embedded contract.jsonld
+// stream, read from the filespec exactly as the extractor reads it.
+func embeddedPayloadObjID(t *testing.T, pdf []byte) int {
+	t.Helper()
+	specPos := bytes.Index(pdf, []byte("/F (contract.jsonld)"))
+	if specPos < 0 {
+		t.Fatal("no contract.jsonld filespec")
+	}
+	efPos := bytes.Index(pdf[specPos:], []byte("/EF << /F "))
+	if efPos < 0 {
+		t.Fatal("filespec carries no /EF reference")
+	}
+	efPos += specPos + len("/EF << /F ")
+	refEnd := bytes.Index(pdf[efPos:], []byte(" 0 R"))
+	if refEnd < 0 {
+		t.Fatal("malformed /EF reference")
+	}
+	var id int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(pdf[efPos:efPos+refEnd])), "%d", &id); err != nil {
+		t.Fatalf("embedded payload object id: %v", err)
+	}
+	return id
+}
+
+// appendPayloadRevision appends the attack: an incremental update that
+// supersedes ONLY the embedded-file object, replacing the machine-readable
+// contract while every page object — and therefore every rendered byte the
+// signatory read — stays exactly as prepared.
+func appendPayloadRevision(t *testing.T, pdf []byte, payload []byte) []byte {
+	t.Helper()
+	sum := sha256.Sum256(payload)
+	body := fmt.Sprintf(
+		"<< /Type /EmbeddedFile /Subtype /application#2Fld+json /Length %d /Params << /Size %d /CheckSum <%s> >> >>\nstream\n%s\nendstream",
+		len(payload), len(payload), hex.EncodeToString(sum[:])[:32], payload,
+	)
+	return appendRevision(t, pdf, map[int]string{embeddedPayloadObjID(t, pdf): body})
+}
+
+// The machine-readable half of the pinned-content guarantee: the payload gate
+// compares the attachment a reader resolves in the submission against the
+// attachment of the pinned document, so every layer a legitimate signer, a
+// re-anchor, an LTV store or a countersignature appends must leave that
+// attachment byte-identical. A PAdES revision supersedes the catalog, the page
+// and the signature objects; a re-anchor rewrites the embedded payload with the
+// SAME bytes it extracted. None of them is a payload change.
+func TestEmbeddedPayloadSurvivesEveryLegitimatelyAppendedLayer(t *testing.T) {
+	prepared := preparedContractPDF(t)
+
+	submitted := appendPAdESRevision(t, prepared, "Signature1")
+	reanchored, err := ReanchorProvenance(testSigningContext(), submitted, "", time.Now())
+	if err != nil {
+		t.Fatalf("ReanchorProvenance: %v", err)
+	}
+	submitted = appendDSSRevision(t, reanchored)
+	submitted = appendPAdESRevision(t, submitted, "Signature2")
+
+	preparedPayload, err := ExtractLatestEmbeddedJSONLD(prepared)
+	if err != nil {
+		t.Fatalf("extract prepared payload: %v", err)
+	}
+	submittedPayload, err := ExtractLatestEmbeddedJSONLD(submitted)
+	if err != nil {
+		t.Fatalf("extract submitted payload: %v", err)
+	}
+	if !bytes.Equal(submittedPayload, preparedPayload) {
+		t.Fatalf("legitimately appended layers must not change the embedded payload:\nprepared:  %s\nsubmitted: %s",
+			preparedPayload, submittedPayload)
+	}
+}
+
+// The hole the payload gate closes, and the reason it cannot be folded into the
+// content gate: a revision superseding only the embedded-file object leaves the
+// page content streams untouched, so MatchPageContent — the visible-content
+// check — accepts it, while the machine-readable contract that drives policy
+// evaluation, catalogue publication and the peer's copy has been swapped, under
+// a signature whose /ByteRange covers the whole file.
+func TestARevisionSupersedingTheEmbeddedPayloadEscapesTheContentMatch(t *testing.T) {
+	prepared := preparedContractPDF(t)
+	signed := appendPAdESRevision(t, prepared, "Signature1")
+
+	// A machine-only term: nothing in documentStructure changes, so not one
+	// rendered byte differs — only what a policy engine reads.
+	tampered := strings.Replace(claimBase, `"@type": "ContractTemplate",`,
+		`"@type": "ContractTemplate",
+  "odrl:permission": [{"@type": "odrl:Permission", "odrl:action": "odrl:distribute"}],`, 1)
+	if tampered == claimBase {
+		t.Fatal("test setup: payload anchor not found")
+	}
+	submitted := appendPayloadRevision(t, signed, []byte(tampered))
+
+	if !bytes.HasPrefix(submitted, prepared) {
+		t.Fatal("the attack is append-only: the append-only check alone cannot see it")
+	}
+	if err := MatchPageContent(submitted, prepared); err != nil {
+		t.Fatalf("the visible-content check is blind to this by construction, but reported: %v", err)
+	}
+
+	preparedPayload, err := ExtractLatestEmbeddedJSONLD(prepared)
+	if err != nil {
+		t.Fatalf("extract prepared payload: %v", err)
+	}
+	submittedPayload, err := ExtractLatestEmbeddedJSONLD(submitted)
+	if err != nil {
+		t.Fatalf("extract submitted payload: %v", err)
+	}
+	if bytes.Equal(submittedPayload, preparedPayload) {
+		t.Fatal("the substituted attachment must be what a reader resolves, or the gate has nothing to catch")
+	}
+	if !bytes.Contains(submittedPayload, []byte("odrl:distribute")) {
+		t.Fatalf("the resolved attachment must be the superseding one, got: %s", submittedPayload)
 	}
 }
 

@@ -49,11 +49,13 @@ func mapSignatureCommandError(err error) error {
 	// a shared signature_invalid — the frontend's validation-failure view
 	// (item 11) distinguishes these by CODE, never by matching error text.
 	switch {
-	// Both halves of "the submission is the document we prepared" report the
-	// same client-facing code: ErrDocumentMismatch is the append-only half,
-	// ErrContentMismatch the content-preserving half, and the message carries
-	// which one fired and, for the latter, the page that diverged.
-	case errors.Is(err, command.ErrDocumentMismatch), errors.Is(err, command.ErrContentMismatch):
+	// All three halves of "the submission is the document we prepared" report
+	// the same client-facing code: ErrDocumentMismatch is the append-only half,
+	// ErrContentMismatch the visible-content half, ErrPayloadMismatch the
+	// machine-readable half, and the message carries which one fired and — for
+	// the latter two — the page that diverged or the two payload digests.
+	case errors.Is(err, command.ErrDocumentMismatch), errors.Is(err, command.ErrContentMismatch),
+		errors.Is(err, command.ErrPayloadMismatch):
 		return signaturemanagement.MakeDocumentMismatch(err)
 	case errors.Is(err, command.ErrNonceMismatch):
 		return signaturemanagement.MakeNonceMismatch(err)

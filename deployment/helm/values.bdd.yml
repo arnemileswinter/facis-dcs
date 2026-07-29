@@ -56,7 +56,7 @@ extraEnv:
   # rather than reinstating a silent http fallback that would also apply on the
   # internet. See identity.DIDWebSchemes.
   - name: DCS_DIDWEB_INSECURE_HOSTS
-    value: "dcs-orce:1880,dcs-orce-mismatch:1880"
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut). The prod
   # default is minutes; BDD/e2e run it fast so a peer PDF ship that fires before
   # the async regenerator stored the CID (or that transiently failed) is
@@ -375,9 +375,9 @@ systemClients:
 
 orce:
   enabled: true
-  # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
-  # did:web against the same ORCE pod; off by default in the chart because it is
-  # a test fixture.
+  # The ADR-19 mismatched-federation-rules (AC5) and trusted-peer (AC7/AC8/AC9)
+  # scenarios resolve their did:web identities against the same ORCE pod; off by
+  # default in the chart because they are test fixtures.
   syntheticPeer:
     enabled: true
   persistence:
