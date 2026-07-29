@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 WALLET_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = WALLET_ROOT.parent
 sys.path.insert(0, str(WALLET_ROOT))
 
 from dcs_wallet.issuer import DEFAULT_ISSUER_DID, POA_VCT, TRUSTED_ISSUER_DIDS
@@ -103,7 +104,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate testWallet keys and trust.dev.json")
     parser.add_argument("--issuer-did", default=DEFAULT_ISSUER_DID)
     parser.add_argument("--keys-dir", type=Path, default=WALLET_ROOT / "keys")
-    parser.add_argument("--trust-path", type=Path, default=WALLET_ROOT / "trust.dev.json")
+    parser.add_argument(
+        "--trust-path",
+        type=Path,
+        # The file the backend actually loads and the image bakes in
+        # (deployment/docker/Dockerfile, values.yaml oid4vp.trust.dataPath).
+        # Writing beside the wallet instead left the shipped fixture stale.
+        default=REPO_ROOT / "backend/config/oid4vp/trust.dev.json",
+    )
     parser.add_argument("--regenerate", action="store_true", help="replace issuer and wallet private keys")
     parser.add_argument("--yes", action="store_true", help="skip confirmation")
     args = parser.parse_args()

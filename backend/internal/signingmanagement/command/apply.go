@@ -1217,9 +1217,12 @@ func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, sig
 	//
 	// Auto-seeded signature fields are named for the signing instance's DID, so
 	// the field name IS the party. An authored multi-signatory contract names
-	// its fields freely (seedSignatureFields leaves those untouched), and such a
-	// name identifies no party — there the accepting counterparty is the only
-	// party this can be attributed to, which is what it resolved to before.
+	// its fields freely and such a name identifies no party node; the fallback
+	// then attributes the signature to the accepting counterparty, which is
+	// where it landed before. That is not right — it is the same misattribution
+	// this fixes for the two-instance case, and compliance.go raises a finding
+	// off it — but naming the signing party for a freely-named field needs the
+	// field-to-party mapping the document does not carry.
 	if node := signingPartyNode(doc, responsible, signerDID, signingParty); node != nil {
 		node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
 		// The organization the signatory presented a Power of Attorney for at

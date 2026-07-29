@@ -140,10 +140,9 @@ func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []S
 		// while an authored multi-signatory contract names its fields freely and
 		// the two differ.
 		organization := strings.TrimSpace(poa.Party)
-		party, node, found := partyAuthorizedBy(parties, organization)
-		if !found {
-			return deny(fmt.Errorf(
-				"counterparty Power of Attorney: the shipped contract records no signed party authorized by %q", organization))
+		party, node, err := partyAuthorizedBy(parties, organization)
+		if err != nil {
+			return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
 		}
 		// A peer ships the evidence behind the signatures IT applied. Evidence
 		// for anyone else is a credential obtained in some other exchange being
@@ -158,51 +157,53 @@ func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []S
 			return deny(fmt.Errorf("counterparty Power of Attorney: peer %q shipped evidence for %q, which is not its own",
 				peerDID, organization))
 		}
-		_, err := g.verify()(poa.Presentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
+		if _, err := g.verify()(poa.Presentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
 			Organization: organization,
 			SignatoryDID: node.Signatory,
-		})
-		if err != nil {
+		}); err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney for party %q: %w", party, err))
 		}
 		verified[party] = true
 	}
 
-	// Shipping evidence for one signature and omitting it for another would let
-	// a peer choose per signature which of them gets verified. Absence is
-	// tolerated wholesale, not selectively.
-	for party, node := range parties {
-		if node.PoAOrganization == "" || verified[party] {
-			continue
-		}
-		return deny(fmt.Errorf(
-			"counterparty Power of Attorney: the shipped contract records party %q as authorized by %q, but the ship carries evidence only for %v",
-			party, node.PoAOrganization, keysOf(verified)))
-	}
+	// Deliberately NOT required: evidence for every party the contract records as
+	// authorized. A contract signed on both instances carries two such parties,
+	// each authorized by a different peer, and neither peer holds the other's
+	// presentation — the receive path verifies inbound evidence without retaining
+	// it. Demanding all of it makes the return leg of every two-instance signing
+	// unshippable, while a peer that wants nothing checked still just sends an
+	// empty list. It would only ever fire against an honest peer.
 	return nil
 }
 
 // partyAuthorizedBy finds the signed party the contract records as authorized by
 // this organization.
-func partyAuthorizedBy(parties map[string]signedParty, organization string) (string, signedParty, bool) {
+//
+// Two parties authorized by the same organization make the credential ambiguous
+// — each records its own signatory, and the holder binding would be checked
+// against whichever the map happened to yield first. Refusing is the only answer
+// that is the same on every run.
+func partyAuthorizedBy(parties map[string]signedParty, organization string) (string, signedParty, error) {
 	if organization == "" {
-		return "", signedParty{}, false
+		return "", signedParty{}, fmt.Errorf("evidence names no organization")
 	}
+	matches := make([]string, 0, 1)
 	for party, node := range parties {
 		if node.PoAOrganization == organization {
-			return party, node, true
+			matches = append(matches, party)
 		}
 	}
-	return "", signedParty{}, false
-}
-
-func keysOf(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for key := range set {
-		out = append(out, key)
+	sort.Strings(matches)
+	switch len(matches) {
+	case 0:
+		return "", signedParty{}, fmt.Errorf("the shipped contract records no signed party authorized by %q", organization)
+	case 1:
+		return matches[0], parties[matches[0]], nil
+	default:
+		return "", signedParty{}, fmt.Errorf(
+			"the shipped contract records %v as all authorized by %q, so the credential does not identify which signature it stands behind",
+			matches, organization)
 	}
-	sort.Strings(out)
-	return out
 }
 
 // signedParty is a party node of a shipped contract that carries a signature.

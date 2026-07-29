@@ -26,12 +26,6 @@
         ]
       }
     },
-    "did:web:dev.example:issuer:pid-x5c": {
-      "purposes": [
-        "pid"
-      ],
-      "mechanism": "x5c"
-    },
     "did:web:dev2.example:issuer:poa": {
       "purposes": [
         "login",
@@ -52,6 +46,12 @@
           }
         ]
       }
+    },
+    "did:web:dev.example:issuer:pid-x5c": {
+      "purposes": [
+        "pid"
+      ],
+      "mechanism": "x5c"
     }
   }
 }

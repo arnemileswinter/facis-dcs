@@ -421,6 +421,13 @@ instead, where the message can say what to set.
 {{- $devAllowed = true -}}
 {{- end -}}
 {{- end -}}
+{{/* A release supplying env from a ConfigMap or Secret may set the flag there,
+     which is not readable at render time. Refusing then would report a
+     misconfiguration the operator has already corrected, so the check defers to
+     the backend's own content-based guard, which is the real enforcement. */}}
+{{- if .Values.extraEnvFrom -}}
+{{- $devAllowed = true -}}
+{{- end -}}
 {{- if and $devFixture (not $devAllowed) -}}
 {{- fail "oid4vp.trust: this release would run on the dev trust fixture baked into the image, whose issuer keys are committed to the repository. Set oid4vp.trust.existingConfigMap to a ConfigMap holding this deployment's trust document (see tmp/redeploy/build-trust.py), or, for a dev or CI stack only, add DCS_ALLOW_DEV_TRUST=true to extraEnv." -}}
 {{- end -}}

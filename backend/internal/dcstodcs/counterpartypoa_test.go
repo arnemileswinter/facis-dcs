@@ -143,29 +143,63 @@ func TestCounterpartyPoAGate_EvidenceForAnotherPartyIsRefused(t *testing.T) {
 	assert.Empty(t, seen, "a credential for another party must be refused before it is verified")
 }
 
-// Shipping evidence for one signature and omitting it for another would let a
-// peer choose per signature which of them is checked.
-func TestCounterpartyPoAGate_PartialEvidenceIsRefused(t *testing.T) {
+// The return leg of a two-instance signing: A signs and ships, B signs on top
+// and ships the double-signed contract back. It records BOTH parties as
+// authorized, but B holds only its own presentation — the receive path verifies
+// inbound evidence without retaining it — so B can only ever ship one.
+//
+// Requiring evidence for every authorized party made this ship impossible while
+// leaving a peer that wants nothing verified free to send an empty list, so the
+// requirement only ever refused honest peers.
+func TestCounterpartyPoAGate_DoubleSignedReturnLegIsAccepted(t *testing.T) {
+	var seen []oid4vp.CounterpartyPoAExpectation
+	gate := acceptingGate(&seen)
+
+	doubleSigned := []byte(`{
+	  "dcs:parties": [
+	    {"@id": "did:web:a.example",
+	     "dcs:hasSignatory": {"@id": "did:jwk:aUser"},
+	     "dcs:hasPowerOfAttorney": {"@id": "did:web:a.example"}},
+	    {"@id": "` + testSignedParty + `",
+	     "dcs:hasSignatory": {"@id": "` + testSignedSignatory + `"},
+	     "dcs:hasPowerOfAttorney": {"@id": "` + testSignedParty + `"}}
+	  ]
+	}`)
+
+	require.NoError(t, gate.Check(testSignedParty, doubleSigned, []SignatoryPoA{
+		{Party: testSignedParty, Presentation: "b-genuine-presentation"},
+	}))
+
+	require.Len(t, seen, 1, "the shipper's own evidence is still verified")
+	assert.Equal(t, testSignedParty, seen[0].Organization)
+	assert.Equal(t, testSignedSignatory, seen[0].SignatoryDID)
+}
+
+// Two parties recorded as authorized by one organization make the credential
+// ambiguous: each records its own signatory, and the holder binding would be
+// checked against whichever the map yielded first.
+func TestCounterpartyPoAGate_AmbiguousAuthorizationIsRefused(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
 	payload := []byte(`{
 	  "dcs:parties": [
-	    {"@id": "` + testSignedParty + `",
-	     "dcs:hasSignatory": {"@id": "` + testSignedSignatory + `"},
-	     "dcs:hasPowerOfAttorney": {"@id": "` + testSignedParty + `"}},
-	    {"@id": "did:web:second.example",
-	     "dcs:hasSignatory": {"@id": "did:jwk:second"},
-	     "dcs:hasPowerOfAttorney": {"@id": "did:web:second.example"}}
+	    {"@id": "urn:contract:1#first",
+	     "dcs:hasSignatory": {"@id": "did:jwk:one"},
+	     "dcs:hasPowerOfAttorney": {"@id": "Acme Corp"}},
+	    {"@id": "urn:contract:1#second",
+	     "dcs:hasSignatory": {"@id": "did:jwk:two"},
+	     "dcs:hasPowerOfAttorney": {"@id": "Acme Corp"}}
 	  ]
 	}`)
 
 	err := gate.Check(testSignedParty, payload, []SignatoryPoA{
-		{Party: testSignedParty, Presentation: "a-genuine-presentation"},
+		{Party: "Acme Corp", Presentation: "a-genuine-presentation"},
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, gateError(t, err).Error(), "carries evidence only for")
+	assert.Contains(t, gateError(t, err).Error(), "does not identify which signature it stands behind")
+	assert.Empty(t, seen, "an ambiguous credential must be refused before it is verified")
 }
 
 // An authored multi-signatory contract names its signature fields freely, so

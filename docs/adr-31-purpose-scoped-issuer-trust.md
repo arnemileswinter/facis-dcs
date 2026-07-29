@@ -123,8 +123,14 @@ from being one that can be pointed anywhere:
   `did:web` organization can be held against the peer's identity; an authored
   contract may name its parties anything, and there the issuer's entitlement to
   attest that organization is the only bound.
-- Evidence is **all or nothing**. Shipping it for one signature and omitting it
-  for another would let a peer choose per signature which of them is checked.
+A peer is deliberately **not** required to ship evidence for every party the
+contract records as authorized. That rule was tried and removed: a contract
+signed on both instances records two such parties, each authorized by a
+different peer, and neither peer holds the other's presentation — the receive
+path verifies inbound evidence without retaining it. Requiring all of it made
+the return leg of every two-instance signing unshippable, while a peer that
+wants nothing checked still just sends an empty list. It could only ever refuse
+an honest peer.
 
 What still cannot be established is freshness or contract-binding: the same
 presentation replayed on another contract between the same two parties verifies

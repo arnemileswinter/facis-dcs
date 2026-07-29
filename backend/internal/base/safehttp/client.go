@@ -42,7 +42,12 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 		}
 	}
 
-	dialer := &net.Dialer{Timeout: timeout}
+	// No per-dial timeout: it would equal the whole client budget, so the first
+	// address that blackholes would consume it and the remaining ones below
+	// would never be tried. The context carries the deadline, and an address
+	// that refuses outright fails immediately, which is the case failover is
+	// for.
+	dialer := &net.Dialer{}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
