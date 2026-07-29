@@ -223,6 +223,8 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
 
   await test.step('the contract list still serves the metadata (erasure ≠ row deletion)', async () => {
     await a.gotoAs('Contract Manager', '/ui/contracts')
-    await expect(a.page.getByText(contractDid).first()).toBeVisible({ timeout: 30_000 })
+    // The list keys rows by DID but renders a Name column, so the name is the
+    // surviving metadata that is actually on screen.
+    await expect(a.page.getByText(templateName).first()).toBeVisible({ timeout: 30_000 })
   })
 })
