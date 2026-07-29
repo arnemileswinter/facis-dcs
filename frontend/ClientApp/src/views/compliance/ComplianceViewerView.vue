@@ -200,7 +200,9 @@ function statusIndicator(status: string): Indicator {
 // ACHIEVED — recorded from what DSS validated at submit (ADR-20), never
 // re-derived here.
 function signatureLevel(sig: SignatureViewItem): string {
-  return (sig.credential_type || 'AES').toUpperCase()
+  // An absent level means the system does not know it, which is not the same
+  // as it being AES.
+  return (sig.credential_type || 'not established').toUpperCase()
 }
 
 function requiredLevel(sig: SignatureViewItem): string {

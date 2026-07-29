@@ -161,12 +161,27 @@ func (h *Validator) validateWithDSS(ctx context.Context, tx *sqlx.Tx, did string
 		}
 		return report, []string{finding}, nil
 	}
-	return report, []string{ValidAESFinding}, nil
+	finding := ValidAESFinding
+	if report != nil && strings.TrimSpace(report.Indication) != "" {
+		finding += fmt.Sprintf(" (indication=%s", report.Indication)
+		if strings.TrimSpace(report.SubIndication) != "" {
+			finding += fmt.Sprintf(", subIndication=%s", report.SubIndication)
+		}
+		finding += ")"
+	}
+	return report, []string{finding}, nil
 }
 
-// ValidAESFinding is the passing confirmation recorded when the EU DSS leg
-// accepts the signature as a valid Advanced Electronic Signature.
-const ValidAESFinding = "EU DSS validation confirms a valid Advanced Electronic Signature"
+// ValidAESFinding records what DSS actually reported.
+//
+// It used to read "EU DSS validation confirms a valid Advanced Electronic
+// Signature", which was returned even for INDETERMINATE — DSS declining to
+// determine, most often NO_CERTIFICATE_CHAIN_FOUND. Attributing an affirmative
+// conclusion to an external validator that withheld one is putting words in its
+// mouth, and this string is shown to users and exported into compliance PDFs.
+// The AES judgement is this system's to make and to label as its own; the
+// indication is appended so a reader can see the basis for it.
+const ValidAESFinding = "EU DSS reports no integrity or cryptographic failure"
 
 // collectSigningEvidence extracts the ContractSigningSummaryCredential(s)
 // embedded in the stored signed PDF and distills each to the compliance

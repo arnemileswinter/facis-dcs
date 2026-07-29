@@ -787,10 +787,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			}
 			credentialType := cmd.CredentialType
 			if f != ceremony.FieldName {
-				// This is a placeholder, not the other signatory's actual
-				// level: their real credential_type is recorded when THEY
-				// apply their own ceremony, overwriting this entry.
-				credentialType = "AES"
+				// This field belongs to a signatory who has not signed yet, so
+				// this instance knows nothing about the level they will reach.
+				// Writing a placeholder here put an eIDAS level into an
+				// ISSUER-SIGNED credential, sealed inside a PAdES byte range
+				// that can never be corrected, attesting a signature that does
+				// not exist. An absent claim is honest; a guess is a false
+				// attestation.
+				credentialType = ""
 			}
 			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
 				ContractID:           cmd.DID,
