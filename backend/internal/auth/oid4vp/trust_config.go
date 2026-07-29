@@ -128,7 +128,12 @@ type TrustedIssuer struct {
 	JWKS          json.RawMessage `json:"jwks"`
 }
 
-// Allows reports whether this issuer was granted the purpose.
+// Allows reports whether this entry lists the purpose.
+//
+// Load-time schema validation only — it answers "is this document well-formed",
+// not "is this issuer authorized", which is policy/trust.rego's question. Do not
+// reach for it to make a trust decision: a second copy of that rule is a second
+// thing to keep in step with the policy.
 func (t TrustedIssuer) Allows(p Purpose) bool {
 	for _, granted := range t.Purposes {
 		if granted == p {
@@ -147,22 +152,6 @@ func (t TrustedIssuer) Allows(p Purpose) bool {
 // It has to be written out. Treating an absent list as "any" is how an issuer
 // silently gains the right to speak for a party nobody granted it.
 const OrganizationsAny = "*"
-
-// MayAttest reports whether this issuer was entitled to name the organization.
-// An issuer with no organizations may attest none: the empty case fails closed.
-func (t TrustedIssuer) MayAttest(org string) bool {
-	org = strings.TrimSpace(org)
-	if org == "" {
-		return false
-	}
-	for _, allowed := range t.Organizations {
-		allowed = strings.TrimSpace(allowed)
-		if allowed == OrganizationsAny || allowed == org {
-			return true
-		}
-	}
-	return false
-}
 
 // devIssuerKeySources are the x-coordinates of every private key committed to
 // this repository, and the file each one lives in. Anyone with a clone holds
@@ -424,25 +413,6 @@ func (v *PurposeView) IssuerUsesX5C(iss string) (bool, error) {
 	return v.cfg.issuerUsesX5C(iss)
 }
 
-// dynamicPeerIssuer reports whether an unlisted issuer may be verified for
-// peering. Only did:web qualifies: the identifier has to resolve to a document
-// this instance can fetch, or there is nothing to verify against.
-func (c *TrustConfig) dynamicPeerIssuer(purpose Purpose, iss string) bool {
-	return purpose == PurposePeer && c.PeerDynamic && strings.HasPrefix(iss, "did:web:")
-}
-
-// peerAuthority is the did:web authority an issuer belongs to:
-// did:web:example.com:issuer -> did:web:example.com. A peer's issuer speaks for
-// its own party and no other, which bounds a dynamically trusted issuer without
-// anyone having to enumerate it.
-func peerAuthority(iss string) string {
-	rest := strings.TrimPrefix(iss, "did:web:")
-	if rest == "" || rest == iss {
-		return ""
-	}
-	return "did:web:" + strings.Split(rest, ":")[0]
-}
-
 func (v *PurposeView) VCTAllowed(vct string) bool { return v.cfg.VCTAllowed(vct) }
 
 func (v *PurposeView) IssuerJWKS(iss string) (json.RawMessage, error) {
@@ -562,15 +532,19 @@ func (v *PurposeView) X5CTrustRoots() *x509.CertPool { return v.cfg.X5CTrustRoot
 
 // IssuerMayAttest reports whether the issuer was entitled to name this
 // organization.
-// The entitlement rule lives in policy/trust.rego. The purpose is not part of
-// this question — an issuer's entitlement to speak for an organization is the
-// same whichever purpose the credential is being used for — so any purpose
-// evaluates it identically.
-func (c *TrustConfig) IssuerMayAttest(iss, org string) bool {
-	if c == nil {
+// IssuerMayAttest reports whether the issuer was entitled to name this
+// organization, for the purpose the credential is being used for.
+//
+// The rule lives in policy/trust.rego. The purpose is passed rather than fixed
+// so a deployment can make entitlement depend on it — separating "may authorize
+// a signature here" from "may attest a peer's authority" is a policy edit, which
+// is the point of the rules being data. Pinning it here would have made that
+// impossible from the Go side regardless of what the policy said.
+func (v *PurposeView) IssuerMayAttest(iss, org string) bool {
+	if v == nil || v.cfg == nil {
 		return false
 	}
-	return c.evaluateBool(queryMayAttest, PurposePeer, iss, org)
+	return v.cfg.evaluateBool(queryMayAttest, v.purpose, iss, org)
 }
 
 func (c *TrustConfig) IssuerTrusted(iss string) bool {

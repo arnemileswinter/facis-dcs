@@ -77,8 +77,10 @@ func (c *TrustConfig) resolveIssuerKeys(iss string) (json.RawMessage, error) {
 	entry, ok := c.Issuers[iss]
 	if !ok {
 		// A peer trusted dynamically has no entry by design; its key comes from
-		// its own DID document, which is the source of truth for it.
-		if c.dynamicPeerIssuer(PurposePeer, iss) {
+		// its own DID document, which is the source of truth for it. Whether it
+		// IS trusted is the policy's answer, asked here rather than re-derived —
+		// a second copy of the rule is a second thing to keep in step.
+		if c.For(PurposePeer).IssuerTrusted(iss) {
 			return c.jwksFromDIDWeb(iss)
 		}
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
@@ -258,7 +260,7 @@ func (c *TrustConfig) issuerUsesX5C(iss string) (bool, error) {
 	iss = strings.TrimSpace(iss)
 	entry, ok := c.Issuers[iss]
 	if !ok {
-		if c.dynamicPeerIssuer(PurposePeer, iss) {
+		if c.For(PurposePeer).IssuerTrusted(iss) {
 			return false, nil
 		}
 		return false, fmt.Errorf("issuer %q is not trusted", iss)

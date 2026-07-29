@@ -212,7 +212,7 @@ func verifyCredentialDocument(issuerJWT string, disclosures []string, trust *Tru
 	// well-behaved: a counterparty's issuer could assert this instance's
 	// organization and any organization check downstream would pass.
 	issuerID, _ := issuerClaims["iss"].(string)
-	if !trust.IssuerMayAttest(issuerID, organization) {
+	if !trust.For(purpose).IssuerMayAttest(issuerID, organization) {
 		return nil, fmt.Errorf("issuer %q is not entitled to attest organization %q", issuerID, organization)
 	}
 

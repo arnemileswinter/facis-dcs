@@ -106,16 +106,16 @@ func TestIssuerMayAttestOnlyListedOrganizations(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if !cfg.IssuerMayAttest("https://peer.example/issuer", "did:web:peer.example") {
+	if !cfg.For(PurposePeer).IssuerMayAttest("https://peer.example/issuer", "did:web:peer.example") {
 		t.Error("issuer must attest its own organization")
 	}
-	if cfg.IssuerMayAttest("https://peer.example/issuer", "did:web:own.example") {
+	if cfg.For(PurposePeer).IssuerMayAttest("https://peer.example/issuer", "did:web:own.example") {
 		t.Error("issuer must NOT attest an organization it does not hold")
 	}
-	if cfg.IssuerMayAttest("https://peer.example/issuer", "") {
+	if cfg.For(PurposePeer).IssuerMayAttest("https://peer.example/issuer", "") {
 		t.Error("an empty organization must fail closed")
 	}
-	if cfg.IssuerMayAttest("https://unknown.example/issuer", "did:web:peer.example") {
+	if cfg.For(PurposePeer).IssuerMayAttest("https://unknown.example/issuer", "did:web:peer.example") {
 		t.Error("an unknown issuer must attest nothing")
 	}
 }
@@ -160,7 +160,7 @@ func TestPIDIssuerNeedsNoOrganizations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a pid issuer without organizations must load: %v", err)
 	}
-	if cfg.IssuerMayAttest("https://pid.example/issuer", "did:web:a.example") {
+	if cfg.For(PurposePeer).IssuerMayAttest("https://pid.example/issuer", "did:web:a.example") {
 		t.Error("a pid issuer must not attest an organization")
 	}
 	if cfg.For(PurposeLogin).IssuerTrusted("https://pid.example/issuer") {
@@ -186,10 +186,10 @@ func TestOrganizationsWildcard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !cfg.IssuerMayAttest("https://tenants.example/issuer", "Acme Corp") {
+	if !cfg.For(PurposePeer).IssuerMayAttest("https://tenants.example/issuer", "Acme Corp") {
 		t.Error("a wildcard issuer must attest any organization it names")
 	}
-	if cfg.IssuerMayAttest("https://tenants.example/issuer", "") {
+	if cfg.For(PurposePeer).IssuerMayAttest("https://tenants.example/issuer", "") {
 		t.Error("even a wildcard issuer must not attest an empty organization")
 	}
 }
@@ -363,10 +363,10 @@ func TestDynamicPeerTrust(t *testing.T) {
 		t.Error("a dynamic peer issuer must NOT serve as a PID issuer")
 	}
 	// It speaks for its own party and no other.
-	if !cfg.IssuerMayAttest(unlisted, "did:web:newpeer.example") {
+	if !cfg.For(PurposePeer).IssuerMayAttest(unlisted, "did:web:newpeer.example") {
 		t.Error("a peer issuer must attest its own authority")
 	}
-	if cfg.IssuerMayAttest(unlisted, "did:web:own.example") {
+	if cfg.For(PurposePeer).IssuerMayAttest(unlisted, "did:web:own.example") {
 		t.Error("a peer issuer must not attest another party")
 	}
 
@@ -377,17 +377,30 @@ func TestDynamicPeerTrust(t *testing.T) {
 	}
 }
 
-func TestPeerAuthority(t *testing.T) {
+// A dynamically trusted issuer speaks for its own authority and no other. The
+// bound used to be derived by a Go helper that duplicated the policy's
+// peer_authority rule; it is asserted here through the decision it governs, so
+// there is one statement of it rather than two that can drift.
+func TestDynamicPeerAttestsOnlyItsOwnAuthority(t *testing.T) {
+	cfg := &TrustConfig{PeerDynamic: true}
+
 	cases := map[string]string{
 		"did:web:example.com:issuer":             "did:web:example.com",
 		"did:web:example.com":                    "did:web:example.com",
 		"did:web:dcs-b.localhost%3A18080:issuer": "did:web:dcs-b.localhost%3A18080",
-		"https://example.com/issuer":             "",
 	}
-	for iss, want := range cases {
-		if got := peerAuthority(iss); got != want {
-			t.Errorf("%s → %q, want %q", iss, got, want)
+	for iss, authority := range cases {
+		if !cfg.For(PurposePeer).IssuerMayAttest(iss, authority) {
+			t.Errorf("%s may not attest its own authority %q", iss, authority)
 		}
+		if cfg.For(PurposePeer).IssuerMayAttest(iss, "did:web:somewhere-else.example") {
+			t.Errorf("%s attested an authority that is not its own", iss)
+		}
+	}
+
+	// Only did:web qualifies: an https issuer has no authority to derive.
+	if cfg.For(PurposePeer).IssuerMayAttest("https://example.com/issuer", "https://example.com") {
+		t.Error("a non-did:web issuer was dynamically entitled to an organization")
 	}
 }
 
