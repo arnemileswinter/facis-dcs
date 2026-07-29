@@ -97,12 +97,21 @@ test('signer dashboard shows pending, signed, and revoked status with credential
       { timeout: 60_000 },
     )
     await row.getByTestId('signing-details-toggle').click()
-    await viewLoaded
+    const view = await (await viewLoaded).json()
 
     const details = page.getByTestId('signing-signatures')
     const entry = details.getByTestId('signature-entry').first()
     await expect(entry).toBeVisible()
-    await expect(entry.getByTestId('signature-credential')).toHaveText('AES')
+    // The credential badge must show the level the ceremony actually
+    // established, and say so plainly when none was — asserting a fixed 'AES'
+    // passed just as well when the UI defaulted an absent level to AES, which
+    // is the false attestation the backend stopped writing.
+    const credentialType: string = view.signatures?.[0]?.credential_type ?? ''
+    await expect(entry.getByTestId('signature-credential')).toHaveText(
+      credentialType ? credentialType.toUpperCase() : 'NOT ESTABLISHED',
+    )
+    // This ceremony completed with a wallet AES, so that is what it must read.
+    expect(credentialType.toUpperCase()).toBe('AES')
     await expect(entry.getByTestId('signature-status')).toHaveText('SIGNED')
     await expect(entry.getByTestId('signature-signer')).not.toBeEmpty()
     // The signing timestamp renders as the recorded RFC 3339 instant.
