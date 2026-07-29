@@ -122,8 +122,15 @@ func (c *TrustConfig) jwksFromDIDWeb(iss string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("resolve %s: %w", iss, err)
 	}
 
+	// assertionMethod says which keys may make assertions. A DID document
+	// publishes that separation deliberately — our own gendid puts the ECDH
+	// key-agreement key in the same document — so a resolver that collects every
+	// verification method lets a key meant for encryption verify signatures.
 	var doc struct {
+		ID                 string `json:"id"`
+		AssertionMethod    []any  `json:"assertionMethod"`
 		VerificationMethod []struct {
+			ID           string    `json:"id"`
 			PublicKeyJWK sdjwt.JWK `json:"publicKeyJwk"`
 		} `json:"verificationMethod"`
 	}
@@ -133,15 +140,42 @@ func (c *TrustConfig) jwksFromDIDWeb(iss string) (json.RawMessage, error) {
 	if len(doc.VerificationMethod) == 0 {
 		return nil, fmt.Errorf("did document for %s carries no verification method", iss)
 	}
+	// A document that identifies itself as somebody else says nothing about the
+	// issuer we asked about, however it was reached.
+	if strings.TrimSpace(doc.ID) != iss {
+		return nil, fmt.Errorf("did document at %s identifies itself as %q, not %q", url, doc.ID, iss)
+	}
+
+	assertion := map[string]bool{}
+	for _, entry := range doc.AssertionMethod {
+		switch v := entry.(type) {
+		case string:
+			assertion[v] = true
+		case map[string]any:
+			if id, ok := v["id"].(string); ok {
+				assertion[id] = true
+			}
+		}
+	}
+	if len(assertion) == 0 {
+		return nil, fmt.Errorf("did document for %s lists no assertionMethod, so none of its keys may make assertions", iss)
+	}
 
 	keys := make([]sdjwt.JWK, 0, len(doc.VerificationMethod))
 	for _, vm := range doc.VerificationMethod {
-		if vm.PublicKeyJWK.X != "" {
-			keys = append(keys, vm.PublicKeyJWK)
+		if vm.PublicKeyJWK.X == "" || !assertion[vm.ID] {
+			continue
 		}
+		key := vm.PublicKeyJWK
+		// The credential names the verification method in its kid, so carry the
+		// id across or nothing matches it.
+		if key.Kid == "" {
+			key.Kid = vm.ID
+		}
+		keys = append(keys, key)
 	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("did document for %s carries no usable public key", iss)
+		return nil, fmt.Errorf("did document for %s has no assertionMethod key usable for verification", iss)
 	}
 	return marshalJWKS(keys...)
 }

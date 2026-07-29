@@ -231,7 +231,17 @@ func TestDIDWebURLMapping(t *testing.T) {
 }
 
 func TestResolveKeysByMechanism(t *testing.T) {
-	didDoc := []byte(`{"verificationMethod":[{"publicKeyJwk":{"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}]}`)
+	// A realistic document: it names itself, and separates the key that may make
+	// assertions from a key-agreement key that may not.
+	didDoc := []byte(`{
+      "id": "did:web:example.com:issuer",
+      "verificationMethod": [
+        {"id": "did:web:example.com:issuer#key-1", "publicKeyJwk": {"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}},
+        {"id": "did:web:example.com:issuer#dcs-ecdh", "publicKeyJwk": {"kty":"EC","crv":"P-256","x":"s7UdtIM60zJuEbVASvQJC0utyyDxbe1EdmMBlN2MRUc","y":"d3pwxBZeRjZ5MePGlBiXRdK-Cb-u2H0t8HFhP26JVik"}}
+      ],
+      "assertionMethod": ["did:web:example.com:issuer#key-1"],
+      "keyAgreement": ["did:web:example.com:issuer#dcs-ecdh"]
+    }`)
 	cfg := &TrustConfig{
 		VCTs: []string{"urn:dcs:poa:v1"},
 		Issuers: map[string]TrustedIssuer{
@@ -249,7 +259,13 @@ func TestResolveKeysByMechanism(t *testing.T) {
 		t.Fatalf("did:web resolve: %v", err)
 	}
 	if !strings.Contains(string(keys), "VlBNhqQn6gLy") {
-		t.Errorf("did:web keys not returned: %s", keys)
+		t.Errorf("did:web assertionMethod key not returned: %s", keys)
+	}
+	// The key-agreement key is published in the same document and must NOT be
+	// usable to verify signatures: a DID document states that separation and a
+	// resolver that ignores it reuses an encryption key for assertions.
+	if strings.Contains(string(keys), "s7UdtIM60zJu") {
+		t.Error("the keyAgreement key must not enter the issuer JWKS")
 	}
 
 	// An x5c issuer resolves to no JWKS: its key arrives in the chain.
@@ -290,7 +306,11 @@ func TestDynamicPeerTrust(t *testing.T) {
 	// resolution rejected the same issuer, so no dynamic peer could ever be
 	// verified.
 	cfg.SetKeyFetcher(stubFetcher{docs: map[string][]byte{
-		"https://newpeer.example/issuer/did.json": []byte(`{"verificationMethod":[{"publicKeyJwk":{"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}]}`),
+		"https://newpeer.example/issuer/did.json": []byte(`{
+          "id": "did:web:newpeer.example:issuer",
+          "verificationMethod": [{"id": "did:web:newpeer.example:issuer#key-1", "publicKeyJwk": {"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}],
+          "assertionMethod": ["did:web:newpeer.example:issuer#key-1"]
+        }`),
 	}})
 	keys, err := cfg.For(PurposePeer).IssuerJWKS(unlisted)
 	if err != nil || !strings.Contains(string(keys), "VlBNhqQn6gLy") {

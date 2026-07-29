@@ -89,7 +89,7 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		if !ok {
 			return nil, fmt.Errorf("issuer %q publishes its key through a certificate chain, but the credential carries no x5c header", iss)
 		}
-		return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
+		return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots(), iss)
 	}
 
 	if _, ok := token.Header["x5c"]; ok {
@@ -124,7 +124,7 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 // nothing about WHO the leaf belongs to without a trust anchor to verify
 // against; trusting an unverified chain would let anyone mint their own
 // key+cert and self-certify as any issuer.
-func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
+func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
 	if roots == nil {
 		return nil, fmt.Errorf("no x5c trust anchors are configured")
 	}
@@ -163,6 +163,14 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	}); err != nil {
 		return nil, fmt.Errorf("x5c certificate chain does not verify against configured trust anchors: %w", err)
+	}
+
+	// A chain proves the anchor vouched for this certificate. It does NOT say
+	// the certificate belongs to the issuer the credential names — without this
+	// check any certificate under any configured anchor, including a TLS server
+	// certificate, signs credentials asserting any issuer identity.
+	if err := leafIdentifiesIssuer(leaf, iss); err != nil {
+		return nil, err
 	}
 
 	switch pk := leaf.PublicKey.(type) {
@@ -411,4 +419,49 @@ func decodeCoordinate(value string) (*big.Int, error) {
 	}
 
 	return new(big.Int).SetBytes(raw), nil
+}
+
+// leafIdentifiesIssuer requires the certificate to carry the issuer identity it
+// is being used to speak for, as a SAN URI, a SAN DNS name matching the
+// identifier's authority, or failing both an exactly matching subject CN.
+func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) error {
+	iss = strings.TrimSpace(iss)
+	if iss == "" {
+		return fmt.Errorf("x5c leaf cannot be bound to an empty issuer")
+	}
+
+	for _, uri := range leaf.URIs {
+		if uri.String() == iss {
+			return nil
+		}
+	}
+
+	authority := issuerAuthority(iss)
+	if authority != "" {
+		for _, name := range leaf.DNSNames {
+			if strings.EqualFold(name, authority) {
+				return nil
+			}
+		}
+	}
+
+	if leaf.Subject.CommonName == iss {
+		return nil
+	}
+
+	return fmt.Errorf("x5c leaf certificate (subject %q, dns %v, uris %v) does not identify issuer %q",
+		leaf.Subject.CommonName, leaf.DNSNames, leaf.URIs, iss)
+}
+
+// issuerAuthority is the host an issuer identifier belongs to, for both the
+// https:// and did:web forms a deployment may use.
+func issuerAuthority(iss string) string {
+	if rest, ok := strings.CutPrefix(iss, "did:web:"); ok {
+		authority := strings.Split(rest, ":")[0]
+		return strings.ReplaceAll(authority, "%3A", ":")
+	}
+	if rest, ok := strings.CutPrefix(iss, "https://"); ok {
+		return strings.Split(rest, "/")[0]
+	}
+	return ""
 }
