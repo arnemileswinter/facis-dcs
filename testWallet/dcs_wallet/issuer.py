@@ -86,9 +86,10 @@ def sign_credential_sd_jwt_x5c(
 ) -> str:
     """Same as sign_credential_sd_jwt, but the issuer JWT header carries the
     issuer's own x5c certificate chain instead of a bare jwk+kid — what a
-    real EUDI wallet's issued PID actually looks like (ResolveIssuerVerification
-    KeyForPID, backend/internal/auth/oid4vp/sdjwt/keys.go), as opposed to this
+    real EUDI wallet's issued PID actually looks like, as opposed to this
     project's default JWKS-trust-listed dev issuer path (DEFAULT_ISSUER_DID).
+    The issuer's trust entry has to declare mechanism x5c for this to be
+    resolved (backend/internal/auth/oid4vp/sdjwt/keys.go).
     """
     disclosures: list[str] = []
     sd_digests: list[str] = []

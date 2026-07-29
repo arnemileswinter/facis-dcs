@@ -190,7 +190,7 @@ For the demo this is approximated honestly rather than faked: a PID issuer that
 is a separate release with its **own** key and its **own** DID
 (`did:web:<host>:pid-issuer`), serving both instances the way a national or QTSP
 issuer would, and trusted by each for `pid` and nothing else. It issues
-`urn:eudi:pid:de:1` describing a person — given name, family name, date of birth
+`urn:dcs:pid:demo:v1` describing a person — given name, family name, date of birth
 — and carries neither roles nor an organization, because authority to act for a
 party is what a PoA is for and an identity document must not grant permissions.
 
@@ -202,9 +202,21 @@ than decorative: it had been provisioned and published all along while nothing
 verified against it, because the credential asserted identity through `did:web`
 instead.
 
+A valid chain to a configured anchor is necessary but not sufficient. The leaf
+must also identify the issuer it speaks for — by a SAN URI equal to the issuer
+identifier, a SAN DNS name equal to its authority, or an exact CN — and must not
+be a certificate issued for another purpose: a leaf asserting `serverAuth` or
+`clientAuth` is refused, because an ordinary TLS certificate for the issuer's own
+host would otherwise satisfy the DNS branch and sign credentials under the same
+anchor.
+
 That makes this a stepping stone rather than a mock to be thrown away: a genuine
 national or QTSP issuer differs by an anchor and a trust entry, not by code, and
-the demo already exercises the chain-validation path a real PID depends on.
+the chain-validation path a real PID depends on is exercised by the suite.
+
+It is *not* yet wired in the two demo deployments: they neither mount the root CA
+at `OID4VP_X5C_TRUST_ANCHORS_PATH` nor set `OID4VP_PID_DCQL_QUERY`, so the PID
+path there is configured but unexercised until both land.
 
 What it is not: a real identity proofing process. Nobody checks that the person
 is who the form says. The demo shows the *shape* — a third party attests, the

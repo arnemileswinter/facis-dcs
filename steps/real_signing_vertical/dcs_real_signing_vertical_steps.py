@@ -224,11 +224,12 @@ def _build_pid_presentation(*, given_name: str, family_name: str, aud: str, nonc
 
 def _build_pid_presentation_x5c(*, given_name: str, family_name: str, aud: str, nonce: str, trusted: bool = True):
     """Same as _build_pid_presentation, but the issuer credential JWT carries
-    an x5c certificate chain in its header instead of a bare jwk+kid trusted
-    via DID allow-list — what a real EUDI wallet's issued PID actually looks
-    like (ResolveIssuerVerificationKeyForPID). trusted=False signs with an
-    UNRELATED self-signed cert never configured as an OID4VP_X5C_TRUST_
-    ANCHORS_PATH root, for the negative "untrusted issuer is refused" case.
+    an x5c certificate chain in its header instead of a bare jwk+kid — what a
+    real EUDI wallet's issued PID actually looks like. The dev issuer's cert
+    names its DID in a SAN URI, because the chain is only accepted for an
+    issuer the leaf identifies. trusted=False signs with an UNRELATED
+    self-signed cert never configured as an OID4VP_X5C_TRUST_ANCHORS_PATH
+    root, for the negative "untrusted issuer is refused" case.
     """
     AuthService._ensure_dcs_wallet_importable()
     from cryptography import x509  # noqa: PLC0415
@@ -653,9 +654,9 @@ def step_when_presentation_wrong_nonce(context, name):
 
 def _present_pid_x5c(context, name, field_name, *, trusted):
     """Start a fresh ceremony and present a PID whose issuer credential is
-    x5c-signed instead of DID/JWKS-trusted — what a real EUDI wallet's PID
-    actually looks like (ResolveIssuerVerificationKeyForPID). trusted=False
-    signs with an unrelated cert never configured as a trust anchor."""
+    x5c-signed instead of JWKS-trusted — what a real EUDI wallet's PID
+    actually looks like. trusted=False signs with an unrelated cert never
+    configured as a trust anchor."""
     signer_h = AuthService.get_headers_for_roles(["Contract Signer"])
     start_resp = _start_ceremony(context, name, field_name, signer_h)
     assert start_resp.status_code == 200, (

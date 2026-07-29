@@ -165,6 +165,10 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, err
 		return nil, fmt.Errorf("x5c certificate chain does not verify against configured trust anchors: %w", err)
 	}
 
+	if err := leafMayAttest(leaf); err != nil {
+		return nil, err
+	}
+
 	// A chain proves the anchor vouched for this certificate. It does NOT say
 	// the certificate belongs to the issuer the credential names — without this
 	// check any certificate under any configured anchor, including a TLS server
@@ -451,6 +455,32 @@ func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) error {
 
 	return fmt.Errorf("x5c leaf certificate (subject %q, dns %v, uris %v) does not identify issuer %q",
 		leaf.Subject.CommonName, leaf.DNSNames, leaf.URIs, iss)
+}
+
+// leafMayAttest refuses a certificate whose own extensions say it was issued
+// for something other than signing. The chain is verified with
+// ExtKeyUsageAny, so nothing else looks at usage: an anchor that also issues
+// TLS certificates would otherwise let a server certificate — whose DNS SAN
+// names the issuer's own host, and so satisfies leafIdentifiesIssuer — sign
+// credentials in that issuer's name.
+func leafMayAttest(leaf *x509.Certificate) error {
+	if leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return fmt.Errorf("x5c leaf certificate does not permit digital signatures")
+	}
+
+	for _, usage := range leaf.ExtKeyUsage {
+		if usage == x509.ExtKeyUsageAny {
+			return nil
+		}
+	}
+
+	for _, usage := range leaf.ExtKeyUsage {
+		if usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageClientAuth {
+			return fmt.Errorf("x5c leaf certificate is a TLS certificate (extended key usage %v), which was not issued to attest credentials", leaf.ExtKeyUsage)
+		}
+	}
+
+	return nil
 }
 
 // issuerAuthority is the host an issuer identifier belongs to, for both the
