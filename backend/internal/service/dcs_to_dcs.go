@@ -22,6 +22,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/command"
 
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
@@ -179,7 +180,17 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	// any other trust-gate denial; absent evidence does not, so a peer that
 	// retains none still federates and the compliance viewer keeps reporting a
 	// party that signed without one.
-	if err := s.PoAGate.Check(req.FromPeerDid, payload, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+	signingEvidence, _, evidenceErr := s.PDFCore.ExtractEvidence(ctx, req.Pdf)
+	if evidenceErr != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: could not read the signing evidence embedded in the received PDF: %w", evidenceErr))
+	}
+	peerVCKey := remoteDIDDocument.PublicKey()
+	shipped := trustgate.ShippedSignatures{
+		Evidence: signingEvidence,
+		VerifyVC: func(vc json.RawMessage) error { return provenance.VerifyDataIntegrityProof(vc, peerVCKey) },
+	}
+	if err := s.PoAGate.Check(req.FromPeerDid, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
 		var gateErr *trustgate.GateError
 		if errors.As(err, &gateErr) {
 			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {

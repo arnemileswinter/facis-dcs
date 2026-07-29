@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -109,11 +110,26 @@ func (g *CounterpartyPoAGate) verify() func(string, *oid4vp.TrustConfig, oid4vp.
 	return oid4vp.VerifyCounterpartyPoA
 }
 
-// Check verifies each shipped credential against the contract the same ship
-// carried. Nothing the peer asserts alongside the credential is believed: the
-// party's signatory and its claimed Power of Attorney are read from the
-// payload, which the content gate has already tied to the PDF's visible text.
-func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []SignatoryPoA) error {
+// ShippedSignatures is what the peer's own signing evidence says about the
+// signatures on the contract it shipped: the ContractSigningSummaryCredential(s)
+// embedded in the PDF (DCS-FR-SM-08), and the means to verify them against the
+// peer's key.
+type ShippedSignatures struct {
+	Evidence []byte
+	VerifyVC func(vc json.RawMessage) error
+}
+
+// Check verifies each shipped Power of Attorney against the peer's own signing
+// evidence.
+//
+// The attribution is read from the signing summary VC, not from dcs:parties in
+// the contract payload. The payload embedded in a signed PDF is pinned before
+// the wallet signs it, so the signatory and the authority — recorded when the
+// signature is applied — are not in it and cannot be: writing them there would
+// change the bytes the signature covers. DCS-FR-SM-08 already requires the
+// summary as a VC embedded in the PDF/A-3, which is issuer-signed by the
+// shipping instance rather than being a bare assertion beside the credential.
+func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, evidence []SignatoryPoA) error {
 	if len(evidence) == 0 {
 		return nil
 	}
@@ -126,7 +142,7 @@ func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []S
 		return deny(fmt.Errorf("counterparty Power of Attorney: no issuer trust is configured, so nothing shipped can be verified"))
 	}
 
-	parties, err := signedPartiesOf(payload)
+	parties, err := signedPartiesOf(signed)
 	if err != nil {
 		return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
 	}
@@ -213,46 +229,53 @@ type signedParty struct {
 	PoAOrganization string
 }
 
-// signedPartiesOf reads the contract's signed parties out of the machine-
-// readable payload embedded in the shipped PDF, keyed by party IRI.
-func signedPartiesOf(payload []byte) (map[string]signedParty, error) {
-	var doc map[string]any
-	if err := json.Unmarshal(payload, &doc); err != nil {
-		return nil, fmt.Errorf("decode contract payload: %w", err)
+// signedPartiesOf reads what the peer's signing evidence attests, keyed by the
+// organization each signature was made for.
+//
+// A ceremony refuses unless the Power of Attorney authorizes exactly the party
+// the signature field names (signingmanagement/command/ceremony.go), so the
+// summary's field_name IS the organization its Power of Attorney must authorize,
+// and credentialSubject.id is the signatory it must be held by.
+func signedPartiesOf(signed ShippedSignatures) (map[string]signedParty, error) {
+	if len(signed.Evidence) == 0 {
+		return nil, fmt.Errorf("the shipped PDF carries no signing evidence, so nothing attests which signature this credential stands behind")
 	}
-	nodes, _ := doc["dcs:parties"].([]any)
-	parties := make(map[string]signedParty, len(nodes))
-	for _, rawNode := range nodes {
-		node, ok := rawNode.(map[string]any)
-		if !ok {
+
+	var summaries []json.RawMessage
+	if err := json.Unmarshal(signed.Evidence, &summaries); err != nil {
+		// A single-signature contract embeds one credential rather than a bundle.
+		summaries = []json.RawMessage{signed.Evidence}
+	}
+
+	parties := make(map[string]signedParty, len(summaries))
+	for _, raw := range summaries {
+		var vc struct {
+			Type              []string `json:"type"`
+			CredentialSubject struct {
+				ID        string `json:"id"`
+				FieldName string `json:"field_name"`
+			} `json:"credentialSubject"`
+		}
+		if err := json.Unmarshal(raw, &vc); err != nil {
+			return nil, fmt.Errorf("decode signing evidence: %w", err)
+		}
+		if !slices.Contains(vc.Type, "ContractSigningSummaryCredential") {
 			continue
 		}
-		signatory := jsonLDIRI(node["dcs:hasSignatory"])
-		if signatory == "" {
+		organization := strings.TrimSpace(vc.CredentialSubject.FieldName)
+		signatory := strings.TrimSpace(vc.CredentialSubject.ID)
+		if organization == "" || signatory == "" {
 			continue
 		}
-		id, _ := node["@id"].(string)
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
+		// Verified against the peer's own key before anything it says is used:
+		// unverified, this is the peer telling us who signed, which is what the
+		// contract payload already was.
+		if signed.VerifyVC != nil {
+			if err := signed.VerifyVC(raw); err != nil {
+				return nil, fmt.Errorf("signing evidence for %q does not verify against the peer's key: %w", organization, err)
+			}
 		}
-		parties[id] = signedParty{
-			Signatory:       signatory,
-			PoAOrganization: jsonLDIRI(node["dcs:hasPowerOfAttorney"]),
-		}
+		parties[organization] = signedParty{Signatory: signatory, PoAOrganization: organization}
 	}
 	return parties, nil
-}
-
-// jsonLDIRI reads an IRI from a value that is either {"@id": iri} or a bare
-// string.
-func jsonLDIRI(value any) string {
-	switch typed := value.(type) {
-	case map[string]any:
-		id, _ := typed["@id"].(string)
-		return strings.TrimSpace(id)
-	case string:
-		return strings.TrimSpace(typed)
-	}
-	return ""
 }
