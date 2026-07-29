@@ -103,6 +103,7 @@ from steps.support.api_client import (
     contract_retrieve_by_id_url,
     did_document_url,
     get_with_headers,
+    hub_shapes_anchors,
     origin_url,
     post_json,
     signature_request_url,
@@ -1302,9 +1303,13 @@ def step_then_schema_ref_resolves_against_a(context):
         timeout=context.http_timeout_seconds,
     )
     assert retrieve.status_code == 200, retrieve.text
-    shapes_ref = (retrieve.json().get("contract_data") or {}).get("sh:shapesGraph") or {}
-    anchor = shapes_ref.get("@id") if isinstance(shapes_ref, dict) else shapes_ref
-    assert anchor, f"Expected the contract stored on instance B to carry a sh:shapesGraph anchor, got: {shapes_ref}"
+    contract_data = retrieve.json().get("contract_data") or {}
+    anchors = hub_shapes_anchors(contract_data)
+    assert anchors, (
+        "Expected the contract stored on instance B to carry a sh:shapesGraph anchor, "
+        f"got: {contract_data.get('sh:shapesGraph')}"
+    )
+    anchor = anchors[0]
 
     url = anchor if anchor.startswith("http") else f"{origin_url(context.base_url_a)}{anchor}"
     resp = _requests.get(url, timeout=context.http_timeout_seconds)

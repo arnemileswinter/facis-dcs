@@ -47,6 +47,13 @@ type DocRetrievalParams struct {
 	SignatureQualifier string
 	DocumentDigests    []DocumentDigest
 	DocumentLocations  []DocumentLocation
+	// WalletNonce is the nonce a wallet supplied when it fetched this request
+	// object by POST, echoed back so the wallet can tell the response apart
+	// from a replayed one. The ceremony's deep link asks for
+	// request_uri_method=post, so a wallet that takes that replay protection
+	// refuses a request object that drops its nonce. Empty when the wallet
+	// fetched by GET or sent none.
+	WalletNonce string
 }
 
 // BuildDocumentRetrievalJWT creates the signed request object (JAR) a wallet
@@ -116,6 +123,10 @@ func BuildDocumentRetrievalJWT(signer Signer, params DocRetrievalParams) (string
 		"hashAlgorithmOID":   SHA256OID,
 		"iat":                now.Unix(),
 		"exp":                exp.Unix(),
+	}
+
+	if walletNonce := strings.TrimSpace(params.WalletNonce); walletNonce != "" {
+		claims["wallet_nonce"] = walletNonce
 	}
 
 	return signer.SignAuthorizationRequestJWT(claims)

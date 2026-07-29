@@ -256,8 +256,8 @@ export const contractWorkflowService: ContractWorkflowService = {
     base_pdf_hash: string
     stored_base_pdf_hash: string
     c2pa_manifest_found?: boolean
-    c2pa_signature_valid?: boolean
-    vc_proof_valid?: boolean
+    c2pa_signature_status?: string
+    vc_proof_status?: string
     status_list_uri?: string
     lifecycle_status?: string
     status_list_status?: string

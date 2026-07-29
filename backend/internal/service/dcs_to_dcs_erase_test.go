@@ -31,6 +31,10 @@ func eraseTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: host},
@@ -43,9 +47,21 @@ func eraseTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A conformant shape this deployment does not itself emit: the identity key
+	// is NOT the first verification method, and the authentication relationship
+	// names it with a relative DID URL.
 	didJSON := map[string]any{
 		"id": "did:web:" + host,
 		"verificationMethod": []map[string]any{
+			{
+				"id": "did:web:" + host + "#unrelated-encryption-key",
+				"publicKeyJwk": map[string]any{
+					"kty": "EC",
+					"crv": "P-256",
+					"x":   base64.RawURLEncoding.EncodeToString(otherKey.X.FillBytes(make([]byte, 32))),
+					"y":   base64.RawURLEncoding.EncodeToString(otherKey.Y.FillBytes(make([]byte, 32))),
+				},
+			},
 			{
 				"id": "did:web:" + host + "#key-1",
 				"publicKeyJwk": map[string]any{
@@ -57,6 +73,8 @@ func eraseTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 				},
 			},
 		},
+		"authentication": []string{"#key-1"},
+		"keyAgreement":   []string{"#unrelated-encryption-key"},
 	}
 	raw, err := json.Marshal(didJSON)
 	if err != nil {

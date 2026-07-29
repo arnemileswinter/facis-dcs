@@ -41,6 +41,11 @@ const listSize = 131072
 // defaultListID is the list used for contract revocation (1-indexed).
 const defaultListID = 1
 
+// statusListEntryType is the credentialStatus.type a contract VC advertises: a
+// token status list, which is what the XFSC statuslist-service serves (see
+// QueryStatusListStatus for the format and its LSB-first bit order).
+const statusListEntryType = "TokenStatusList"
+
 // OCMWStatusListPublisher is a client for the XFSC statuslist-service.
 // It calls POST /v1/tenants/{tenantID}/status/revoke/{listID}/{index} to revoke entries.
 // The status list VC is available at GET /v1/tenants/{tenantID}/status/{listID}.
@@ -280,31 +285,45 @@ func (p *OCMWStatusListPublisher) RevokeStatus(ctx context.Context, contractID s
 	return p.statusListURI(), nil
 }
 
-// ExtractCredentialStatusFields parses statusListCredential and statusListIndex
-// from the credentialStatus object embedded in vcBytes.
-func ExtractCredentialStatusFields(vcBytes []byte) (statusListCredential string, index uint32, ok bool) {
+// CredentialStatusRef locates one credential's entry in a status list.
+type CredentialStatusRef struct {
+	StatusListCredential string
+	Index                uint32
+}
+
+// ExtractCredentialStatus reads the revocation entry a VC advertises.
+//
+// Three outcomes, and the difference between the last two is the whole point of
+// the signature: a VC carrying no credentialStatus has nothing to check
+// (present=false); a VC that advertises one this build cannot read is a VC whose
+// revocation state is UNKNOWN (err), which the caller must report as a finding.
+// One "not ok" for both made an unreadable entry indistinguishable from an
+// absent one, so a caller skipped the revocation check silently — a fail-open on
+// a malformed or unsupported entry, which is exactly the entry an attacker
+// controls.
+func ExtractCredentialStatus(vcBytes []byte) (ref CredentialStatusRef, present bool, err error) {
 	var vcObj map[string]interface{}
 	if err := json.Unmarshal(vcBytes, &vcObj); err != nil {
-		return "", 0, false
+		return CredentialStatusRef{}, true, fmt.Errorf("credential is not readable JSON: %w", err)
 	}
 	csRaw, exists := vcObj["credentialStatus"]
-	if !exists {
-		return "", 0, false
+	if !exists || csRaw == nil {
+		return CredentialStatusRef{}, false, nil
 	}
 	cs, ok := csRaw.(map[string]interface{})
 	if !ok {
-		return "", 0, false
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus is not an object")
 	}
 	cred, _ := cs["statusListCredential"].(string)
 	indexStr, _ := cs["statusListIndex"].(string)
-	if cred == "" || indexStr == "" {
-		return "", 0, false
+	if strings.TrimSpace(cred) == "" || strings.TrimSpace(indexStr) == "" {
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus names no statusListCredential and statusListIndex")
 	}
-	idx, err := strconv.ParseUint(indexStr, 10, 32)
-	if err != nil {
-		return "", 0, false
+	idx, parseErr := strconv.ParseUint(strings.TrimSpace(indexStr), 10, 32)
+	if parseErr != nil {
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus statusListIndex %q is not an index", indexStr)
 	}
-	return cred, uint32(idx), true
+	return CredentialStatusRef{StatusListCredential: cred, Index: uint32(idx)}, true, nil
 }
 
 // ExtractStatusListURI extracts the credentialStatus.id from the VC JSON.

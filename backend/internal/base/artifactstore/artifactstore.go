@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"digital-contracting-service/internal/base/envelope"
@@ -99,21 +100,27 @@ type Store struct {
 	keys      CEKRepository
 	agreement envelope.KeyAgreement
 	ownDID    string
-	ownPub    *ecdsa.PublicKey
+	// The verification method this instance's own did.json publishes the
+	// key-agreement key under, and that key. A wrapped CEK arriving from a peer
+	// must name this method: it is the one whose private key the agreement above
+	// can derive with.
+	ownMethodID string
+	ownPub      *ecdsa.PublicKey
 
 	mu    sync.Mutex
 	cache map[Scope][]byte
 	order []Scope
 }
 
-func New(objects ObjectStore, keys CEKRepository, agreement envelope.KeyAgreement, ownDID string, ownPub *ecdsa.PublicKey) *Store {
+func New(objects ObjectStore, keys CEKRepository, agreement envelope.KeyAgreement, ownDID, ownMethodID string, ownPub *ecdsa.PublicKey) *Store {
 	return &Store{
-		objects:   objects,
-		keys:      keys,
-		agreement: agreement,
-		ownDID:    ownDID,
-		ownPub:    ownPub,
-		cache:     make(map[Scope][]byte),
+		objects:     objects,
+		keys:        keys,
+		agreement:   agreement,
+		ownDID:      ownDID,
+		ownMethodID: ownMethodID,
+		ownPub:      ownPub,
+		cache:       make(map[Scope][]byte),
 	}
 }
 
@@ -233,7 +240,7 @@ func (s *Store) createCEK(ctx context.Context, scope Scope) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	wrapped, err := envelope.Wrap(cek, s.ownPub)
+	wrapped, err := envelope.Wrap(cek, s.ownMethodID, s.ownPub)
 	if err != nil {
 		return nil, fmt.Errorf("wrap cek for %s %s: %w", scope.Kind, scope.ID, err)
 	}
@@ -252,16 +259,38 @@ func (s *Store) createCEK(ctx context.Context, scope Scope) ([]byte, error) {
 	return cek, nil
 }
 
+// ownRecipient checks that a wrapped CEK was addressed to the key-agreement
+// method this store can unwrap with. The id is resolved first: a bare fragment
+// names a method of the recipient's own document, which is this instance.
+func (s *Store) ownRecipient(wrapped *envelope.WrappedCEK) error {
+	if wrapped == nil {
+		return errors.New("wrapped cek is nil")
+	}
+	kid := strings.TrimSpace(wrapped.KID)
+	if kid == "" {
+		return errors.New("wrapped cek names no recipient key-agreement method")
+	}
+	if strings.HasPrefix(kid, "#") {
+		kid = s.ownDID + kid
+	}
+	if kid != s.ownMethodID {
+		return fmt.Errorf("wrapped cek was addressed to %q, but this instance holds the private key of %q",
+			wrapped.KID, s.ownMethodID)
+	}
+	return nil
+}
+
 // WrapForPeer wraps the scope's CEK to a counterparty instance's keyAgreement
-// public key and records the peer as a recipient of the scope. The returned
-// record travels in the peer ship payload; the local recipient row documents
-// which foreign instances hold the CEK.
-func (s *Store) WrapForPeer(ctx context.Context, scope Scope, peerDID string, peerPub *ecdsa.PublicKey) (*envelope.WrappedCEK, error) {
+// public key, named by the verification method the peer publishes it under, and
+// records the peer as a recipient of the scope. The returned record travels in
+// the peer ship payload; the local recipient row documents which foreign
+// instances hold the CEK.
+func (s *Store) WrapForPeer(ctx context.Context, scope Scope, peerDID, peerMethodID string, peerPub *ecdsa.PublicKey) (*envelope.WrappedCEK, error) {
 	cek, err := s.cek(ctx, scope, false)
 	if err != nil {
 		return nil, err
 	}
-	wrapped, err := envelope.Wrap(cek, peerPub)
+	wrapped, err := envelope.Wrap(cek, peerMethodID, peerPub)
 	if err != nil {
 		return nil, fmt.Errorf("wrap cek of %s %s for peer %s: %w", scope.Kind, scope.ID, peerDID, err)
 	}
@@ -280,7 +309,17 @@ func (s *Store) WrapForPeer(ctx context.Context, scope Scope, peerDID string, pe
 // re-wraps it to the own keyAgreement key and persists it as the scope's CEK.
 // A live own record already in place wins (repeat ships are idempotent); a
 // shredded scope is never resurrected.
+//
+// The wrap names the key it was made for; that name must resolve to the
+// key-agreement method this store holds the private key for. A wrap addressed to
+// any other key — another instance's, or one of this instance's keys published
+// for something other than key agreement — is refused rather than handed to a
+// derive that would fail obscurely.
 func (s *Store) AdoptPeerCEK(ctx context.Context, scope Scope, wrapped *envelope.WrappedCEK) error {
+	if err := s.ownRecipient(wrapped); err != nil {
+		return err
+	}
+
 	record, err := s.keys.Fetch(ctx, scope, s.ownDID)
 	if err != nil {
 		return fmt.Errorf("read wrapped cek for %s %s: %w", scope.Kind, scope.ID, err)
@@ -296,7 +335,7 @@ func (s *Store) AdoptPeerCEK(ctx context.Context, scope Scope, wrapped *envelope
 	if err != nil {
 		return fmt.Errorf("unwrap peer cek for %s %s: %w", scope.Kind, scope.ID, err)
 	}
-	rewrapped, err := envelope.Wrap(cek, s.ownPub)
+	rewrapped, err := envelope.Wrap(cek, s.ownMethodID, s.ownPub)
 	if err != nil {
 		return fmt.Errorf("re-wrap peer cek for %s %s: %w", scope.Kind, scope.ID, err)
 	}

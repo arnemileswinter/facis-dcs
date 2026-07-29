@@ -24,9 +24,17 @@ const FAILURE_KEYWORDS =
 // unreachable)"); rendering that as a pass reinstates the failure-open verdict
 // in the UI, and rendering it as a failure asserts a defect nobody observed.
 // Only findings the failure set does not already claim are examined here.
-const INDETERMINATE_KEYWORDS = /(unknown|unreachable|indeterminate|not established|not determined|not available)/i
+const INDETERMINATE_KEYWORDS = /(unknown|unreachable|not established|not determined|not available)/i
+
+// A finding that names its own verdict is taken at its word. The backend labels a
+// withheld verdict "indeterminate" explicitly and appends the reason it could not
+// conclude, and that reason routinely contains a failure keyword ("could not
+// resolve", "fetching did.json failed") — inferring 'fail' from the explanation
+// asserts a defect nobody observed.
+const DECLARED_INDETERMINATE = /\bindeterminate\b/i
 
 export function findingVerdict(finding: string): FindingVerdict {
+  if (DECLARED_INDETERMINATE.test(finding)) return 'indeterminate'
   if (FAILURE_KEYWORDS.test(finding)) return 'fail'
   return INDETERMINATE_KEYWORDS.test(finding) ? 'indeterminate' : 'pass'
 }

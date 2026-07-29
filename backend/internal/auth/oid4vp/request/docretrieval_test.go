@@ -63,6 +63,42 @@ func TestBuildDocumentRetrievalJWTMatchesEUDIShape(t *testing.T) {
 	}
 }
 
+// TestBuildDocumentRetrievalJWTEchoesWalletNonce covers the replay protection a
+// wallet gets for POSTing the request_uri (the method the ceremony's deep link
+// asks for): its own nonce comes back inside the signed request object, or the
+// wallet cannot tell this response from a replayed one.
+func TestBuildDocumentRetrievalJWTEchoesWalletNonce(t *testing.T) {
+	params := DocRetrievalParams{
+		ClientID:           "dcs-rp",
+		ResponseURI:        "https://rp.example/cb",
+		Nonce:              "nonce-1",
+		ExpiresAt:          time.Now().UTC().Add(time.Minute),
+		SignatureQualifier: "eu_eidas_aes",
+		DocumentDigests:    []DocumentDigest{{Hash: "abc==", Label: "SignerOne"}},
+		DocumentLocations:  []DocumentLocation{{URI: "https://rp.example/doc", Method: DocumentLocationMethod{Type: "public"}}},
+		WalletNonce:        "wallet-1",
+	}
+
+	signer := &captureSigner{}
+	if _, err := BuildDocumentRetrievalJWT(signer, params); err != nil {
+		t.Fatalf("BuildDocumentRetrievalJWT returned error: %v", err)
+	}
+	if got := signer.claims["wallet_nonce"]; got != "wallet-1" {
+		t.Fatalf("wallet_nonce echo mismatch: got %v", got)
+	}
+
+	// A GET fetch sends no wallet nonce, and an empty claim would be a value the
+	// wallet never chose.
+	params.WalletNonce = ""
+	getSigner := &captureSigner{}
+	if _, err := BuildDocumentRetrievalJWT(getSigner, params); err != nil {
+		t.Fatalf("BuildDocumentRetrievalJWT returned error: %v", err)
+	}
+	if _, present := getSigner.claims["wallet_nonce"]; present {
+		t.Fatalf("wallet_nonce must be absent when the wallet sent none: %v", getSigner.claims["wallet_nonce"])
+	}
+}
+
 func TestBuildDocumentRetrievalJWTRejectsMismatchedDigestsAndLocations(t *testing.T) {
 	signer := &captureSigner{}
 	_, err := BuildDocumentRetrievalJWT(signer, DocRetrievalParams{

@@ -33,7 +33,7 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // (pdf-core's /verify treats the signed span as an opaque suffix), and the
 // verifier must never falsely report a passed PDF signature check it did not
 // actually perform.
-const pdfSignatureNotAvailable = "not_available"
+const pdfSignatureNotAvailable = provenance.CheckNotAvailable
 
 // Failure classes reported in PDFVerifyResult.Discrepancy.
 const (
@@ -145,24 +145,24 @@ func appendAndCache(
 // content to hash.
 func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 	return &pdfgen.PDFVerifyResult{
-		Match:              false,
-		C2paManifestFound:  false,
-		C2paSignatureValid: false,
-		VcProofValid:       false,
-		LifecycleStatus:    ptrToString(lifecycleStatus),
-		PdfSignatureStatus: pdfSignatureNotAvailable,
-		Discrepancy:        ptrToString(discrepancyNotAuthentic),
+		Match:               false,
+		C2paManifestFound:   false,
+		C2paSignatureStatus: provenance.CheckInvalid,
+		VcProofStatus:       provenance.CheckInvalid,
+		LifecycleStatus:     ptrToString(lifecycleStatus),
+		PdfSignatureStatus:  pdfSignatureNotAvailable,
+		Discrepancy:         ptrToString(discrepancyNotAuthentic),
 	}
 }
 
-func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
+	credentials *provenance.CredentialVerifier, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
 	if verifyErr != nil {
 		c2paManifestFound = strings.Contains(verifyErr.Error(), "status 409")
 	}
-	c2paSignatureValid := verifyErr == nil
 
 	// pdf-core answers 409 specifically for "manifest present, content hash
 	// comparison failed" — the genuine MR/HR discrepancy — which is a different
@@ -176,31 +176,58 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		discrepancy = discrepancyFailed
 	}
 
-	// An unreachable status service means the revocation state is UNKNOWN. Left
-	// empty it reads as "nothing to report", so a revoked contract verified
-	// clean for the duration of an outage.
+	// A /verify that never returned a body carries no claim-signature verdict:
+	// pdf-core reports one only for a PDF it accepted, so there is nothing to
+	// report rather than a failure to report.
+	c2paSignatureStatus := provenance.CheckNotAvailable
+	switch {
+	case verifyErr != nil:
+	case result.C2PASignatureValid:
+		c2paSignatureStatus = provenance.CheckValid
+	default:
+		c2paSignatureStatus = provenance.CheckInvalid
+	}
+
+	vcProofStatus := provenance.CheckNotAvailable
+	if result.VCPresent && len(result.VCBytes) > 0 {
+		vcProofStatus = provenance.CredentialCheck(credentials.Verify(result.VCBytes))
+	}
+
+	// The revocation lookup follows the credential's OWN credentialStatus, so it
+	// runs only once the credential is known to be the issuer's: an unverified
+	// credential points the check wherever its author chose. Without a verdict on
+	// the credential the revocation state is unknown, which is said rather than
+	// left empty — empty reads as "nothing to report", and that is how a revoked
+	// contract came back clean.
 	statusListURI := ""
 	statusListStatus := ""
-	if result.VCProofValid && len(result.VCBytes) > 0 {
+	switch {
+	case vcProofStatus == provenance.CheckValid:
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
-		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
+		ref, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
+		switch {
+		case err != nil:
+			statusListStatus = fmt.Sprintf("UNKNOWN (%v)", err)
+		case present:
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
-			if err != nil {
+			status, queryErr := provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
+			if queryErr != nil {
 				status = "UNKNOWN (status service unreachable)"
 			}
 			statusListStatus = status
 		}
+	case vcProofStatus != provenance.CheckNotAvailable:
+		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
 	return &pdfgen.PDFVerifyResult{
-		Match:              match,
-		C2paManifestFound:  c2paManifestFound,
-		C2paSignatureValid: c2paSignatureValid,
-		VcProofValid:       result.VCProofValid,
-		StatusListURI:      ptrToString(statusListURI),
-		StatusListStatus:   ptrToString(statusListStatus),
-		LifecycleStatus:    ptrToString(lifecycleStatus),
+		Match:               match,
+		C2paManifestFound:   c2paManifestFound,
+		C2paSignatureStatus: c2paSignatureStatus,
+		VcProofStatus:       vcProofStatus,
+		StatusListURI:       ptrToString(statusListURI),
+		StatusListStatus:    ptrToString(statusListStatus),
+		LifecycleStatus:     ptrToString(lifecycleStatus),
 		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
 		// check, distinct from the C2PA COSE signature check. This path performs
 		// no cryptographic PAdES re-verification, so it honestly reports

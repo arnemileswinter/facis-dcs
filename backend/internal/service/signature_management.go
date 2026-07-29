@@ -123,6 +123,10 @@ type signatureManagementsrvc struct {
 	// presentations at the ceremony callback. Same trust anchors the auth login
 	// and PID-verify flows use.
 	Trust *oid4vp.TrustConfig
+	// Credentials verifies a credential read out of a stored PDF — a signing
+	// summary, a lifecycle credential — against the key its issuer publishes for
+	// assertions, before anything it claims is used.
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
@@ -132,8 +136,14 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
 	docRetrievalClientID string,
-	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
+	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig,
+	credentials *provenance.CredentialVerifier) signaturemanagement.Service {
 
+	// Without it every embedded signing summary would be unverifiable, and the
+	// compliance viewer would have nothing it is allowed to report.
+	if credentials == nil {
+		panic("CredentialVerifier is required to verify embedded signing evidence")
+	}
 	return &signatureManagementsrvc{
 		JWTAuthenticator:     jwtAuth,
 		DB:                   db,
@@ -155,6 +165,7 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		PIDDCQLQuery:         pidDCQLQuery,
 		DCQLQuery:            dcqlQuery,
 		Trust:                trust,
+		Credentials:          credentials,
 	}
 }
 
@@ -301,9 +312,10 @@ func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemana
 		UserRoles:  middleware.GetUserRoles(ctx),
 	}
 	handler := query.SignatureVerifier{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 	_, err = handler.Handle(ctx, qry)
 	if err != nil {
@@ -476,9 +488,10 @@ func (s *signatureManagementsrvc) Validate(ctx context.Context, req *signaturema
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 	queryHandler := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)
@@ -609,9 +622,10 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	defer cancel()
 
 	validator := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 	validation, err := validator.Handle(ctx, query.ValidateQry{
 		DID:         req.Did,

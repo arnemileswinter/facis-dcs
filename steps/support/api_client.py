@@ -406,3 +406,19 @@ def contract_export_url(context, did: str) -> str:
 
 def template_export_url(context, did: str) -> str:
     return f"{context.base_url}/template/export/{did}"
+
+
+# sh:shapesGraph is SHACL's multi-valued data-graph -> shapes-graph link
+# (ADR-8): a document declares the canonical hub shapes first and, when its
+# data objects are modelled against registered SHACL libraries (ADR-23), one
+# further anchor per library. Steps asserting the pin read the canonical one.
+
+def hub_shapes_anchors(document: dict) -> list:
+    declared = document.get("sh:shapesGraph")
+    entries = declared if isinstance(declared, list) else [declared]
+    anchors = []
+    for entry in entries:
+        anchor = entry.get("@id") if isinstance(entry, dict) else entry
+        if isinstance(anchor, str) and "/semantic/shapes/" in anchor:
+            anchors.append(anchor)
+    return anchors

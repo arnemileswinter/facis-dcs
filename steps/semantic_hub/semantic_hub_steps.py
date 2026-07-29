@@ -13,6 +13,7 @@ from behave import given, then, when
 from steps.support.api_client import (
     contract_retrieve_by_id_url,
     get_with_headers,
+    hub_shapes_anchors,
     post_json,
     template_create_url,
 )
@@ -253,10 +254,9 @@ def step_then_contract_anchored(context, name):
         f"Expected @context to carry a hub-served versioned context URL, got: {raw_context}"
     )
     # The shapes pin rides on sh:shapesGraph (ADR-8).
-    shapes_ref = contract_data.get("sh:shapesGraph") or {}
-    shapes_anchor = shapes_ref.get("@id") if isinstance(shapes_ref, dict) else shapes_ref
-    assert shapes_anchor and "/semantic/shapes/" in shapes_anchor, (
-        f"Expected a hub-served sh:shapesGraph anchor, got: {shapes_ref}"
+    shapes_anchors = hub_shapes_anchors(contract_data)
+    assert shapes_anchors, (
+        f"Expected a hub-served sh:shapesGraph anchor, got: {contract_data.get('sh:shapesGraph')}"
     )
     context.hub_anchor_url = anchor
 

@@ -31,11 +31,12 @@ func NewX5CSigner(did *identity.DIDDocument) (*X5CSigner, error) {
 	if did == nil {
 		return nil, fmt.Errorf("did document is required for x5c JAR signing")
 	}
-	if len(did.VerificationMethod) == 0 {
-		return nil, fmt.Errorf("did document has no verification method")
+	method := did.SigningMethod()
+	if method == nil {
+		return nil, fmt.Errorf("did document is not bound to a signer")
 	}
-	if len(did.VerificationMethod[0].PublicKeyJWK.X5C) == 0 {
-		return nil, fmt.Errorf("did document carries no x5c certificate chain")
+	if len(method.PublicKeyJWK.X5C) == 0 {
+		return nil, fmt.Errorf("verification method %q carries no x5c certificate chain", method.ID)
 	}
 	return &X5CSigner{did: did}, nil
 }
@@ -67,9 +68,14 @@ func (s *X5CSigner) SignAuthorizationRequestJWT(claims jwt.MapClaims) (string, e
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
 	}
-	kid := s.did.VerificationMethod[0].ID
-	x5c := []string(s.did.VerificationMethod[0].PublicKeyJWK.X5C)
-	extraHeaders := map[string]any{"x5c": x5c}
+	// kid and chain both describe the key that actually signs below: the method
+	// the document publishes this instance's signer as.
+	method := s.did.SigningMethod()
+	if method == nil {
+		return "", fmt.Errorf("did document is not bound to a signer")
+	}
+	kid := method.ID
+	extraHeaders := map[string]any{"x5c": []string(method.PublicKeyJWK.X5C)}
 
 	return signES256JWT(kid, claims, extraHeaders, func(signingInput string) ([]byte, error) {
 		der, err := s.did.Sign([]byte(signingInput))

@@ -6,11 +6,12 @@ import base64
 import json
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import jwt
 from cryptography import x509
@@ -303,14 +304,28 @@ def resolve_credential_name(
     vct_values: list[str],
     log: LogFn = default_log,
 ) -> str | None:
-    if credential_name:
-        if vct_values:
-            claims = load_credential_claims(credential_name)
-            vct = str(claims.get("vct") or "")
-            if vct not in vct_values:
-                log("wallet", f"FAILED credential {credential_name} vct {vct!r} not in {vct_values}")
-                return None
-        return credential_name
+    """Pick the credential to answer ONE dcql credential query with.
+
+    credential_name may name several credentials, comma-separated: a request
+    object can carry more than one credential query (the signing ceremony asks
+    for a PID and a Power of Attorney in the same request), and a wallet answers
+    each from the credential whose vct the query accepts. Naming one credential
+    for a two-query request would fail whichever query it does not match.
+    """
+    candidates = [name.strip() for name in str(credential_name or "").split(",") if name.strip()]
+    if candidates:
+        if not vct_values:
+            return candidates[0]
+        for name in candidates:
+            try:
+                claims = load_credential_claims(name)
+            except (FileNotFoundError, ValueError) as exc:
+                log("wallet", f"skipping credential {name}: {exc}")
+                continue
+            if str(claims.get("vct") or "") in vct_values:
+                return name
+        log("wallet", f"FAILED no credential of {candidates} carries a vct in {vct_values}")
+        return None
 
     stems = list_credential_stems(include_pid=bool(vct_values))
     entries: list[tuple[str, dict[str, Any]]] = []
@@ -366,6 +381,46 @@ def resolve_credential_name(
         if 1 <= choice <= len(entries):
             return entries[choice - 1][0]
         print(f"Invalid choice — enter a number from 1 to {len(entries)}.")
+
+
+def extract_login_challenge(session: Any, authorize_url: str, *, log: LogFn = default_log) -> str:
+    """Walk Hydra's authorize redirect chain to the login UI and read the
+    login_challenge it carries. This is the hop a browser makes; a headless
+    wallet has to make it too, because the DCS binds the challenge to the
+    pending presentation and refuses the callback without one."""
+    url = authorize_url
+    for _ in range(8):
+        r = session.get(url, allow_redirects=False, timeout=30)
+        if r.status_code not in (301, 302, 303, 307, 308):
+            raise RuntimeError(f"authorize_url did not redirect to the login UI ({r.status_code})")
+        location = str(r.headers.get("location") or "").strip()
+        if not location:
+            raise RuntimeError("authorize redirect is missing its Location header")
+        challenges = parse_qs(urlparse(location).query).get("login_challenge") or []
+        if challenges and challenges[0].strip():
+            log("login-challenge", "resolved from authorize redirect")
+            return challenges[0].strip()
+        url = location
+    raise RuntimeError("login_challenge not found in the Hydra authorize redirect chain")
+
+
+def bind_hydra_login_challenge(
+    session: Any,
+    api_base: str,
+    *,
+    state: str,
+    authorize_url: str,
+    log: LogFn = default_log,
+) -> None:
+    challenge = extract_login_challenge(session, authorize_url, log=log)
+    r = session.post(
+        f"{api_base.rstrip('/')}/auth/login/challenge",
+        json_body={"state": state, "login_challenge": challenge},
+        timeout=30,
+    )
+    if r.status_code not in (200, 204):
+        raise RuntimeError(f"/auth/login/challenge failed ({r.status_code}): {r.text[:200]}")
+    log("login-challenge-ok", "bound to the pending presentation")
 
 
 def fetch_authorization_request(
@@ -499,6 +554,86 @@ def submit_presentation(
     raise ValueError(f"unsupported response_mode: {response_mode!r}")
 
 
+def await_login_redirect_uri(
+    session: Any,
+    api_base: str,
+    *,
+    state: str,
+    log: LogFn = default_log,
+    timeout_sec: float = 60.0,
+) -> str:
+    """Poll GET /auth/login/status until the DCS has accepted the login with
+    Hydra and recorded where the browser should go next."""
+    if not state:
+        raise RuntimeError("login status polling requires the request object's state")
+
+    status_url = f"{api_base.rstrip('/')}/auth/login/status?state={quote(state)}"
+    deadline = time.monotonic() + timeout_sec
+    body: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        r = session.get(status_url, timeout=30)
+        if not _http_success(r.status_code):
+            raise RuntimeError(f"/auth/login/status failed ({r.status_code}): {r.text[:200]}")
+        parsed = r.json()
+        body = parsed if isinstance(parsed, dict) else {}
+        status = str(body.get("status") or "")
+        if status == "complete":
+            redirect_uri = str(body.get("redirect_uri") or "")
+            if not redirect_uri:
+                raise RuntimeError(f"login status is complete but carries no redirect_uri: {body}")
+            log("login-status-ok", "login accepted", status=status)
+            return redirect_uri
+        if status in ("failed", "expired"):
+            raise RuntimeError(f"login status is {status!r}: {body}")
+        time.sleep(0.2)
+
+    raise RuntimeError(f"login status did not complete within {timeout_sec:.0f}s: {body}")
+
+
+def _to_api_origin(url: str, api_base: str) -> str:
+    """Point a browser-facing URL (the Vite dev server) at the API origin the
+    wallet actually reached, so a headless run can follow the same chain."""
+    target, api = urlparse(url), urlparse(api_base)
+    if target.netloc == api.netloc:
+        return url
+    return url.replace(f"{target.scheme}://{target.netloc}", f"{api.scheme}://{api.netloc}", 1)
+
+
+def resolve_oauth_callback_url(session: Any, redirect_uri: str, api_base: str) -> str:
+    """Follow the Hydra redirect chain after the VP is accepted until it reaches
+    the API's /auth/callback carrying an authorization code. Hydra bounces
+    through a consent step, which the DCS auto-accepts at /auth/consent."""
+    url = redirect_uri
+    for _ in range(12):
+        parsed = urlparse(url)
+        consent_challenge = (parse_qs(parsed.query).get("consent_challenge") or [""])[0]
+        if consent_challenge:
+            r = session.get(
+                f"{api_base.rstrip('/')}/auth/consent?consent_challenge={quote(consent_challenge)}",
+                allow_redirects=False,
+                timeout=30,
+            )
+            if r.status_code not in (301, 302, 303, 307, 308):
+                raise RuntimeError(f"/auth/consent failed ({r.status_code}): {r.text[:200]}")
+            url = str(r.headers.get("location") or "")
+            continue
+
+        url = _to_api_origin(url, api_base)
+        parsed = urlparse(url)
+        if parsed.path.endswith("/auth/callback") and parse_qs(parsed.query).get("code"):
+            return url
+
+        r = session.get(url, allow_redirects=False, timeout=30)
+        if r.status_code not in (301, 302, 303, 307, 308):
+            raise RuntimeError(f"oauth redirect chain stopped ({r.status_code}) at {url[:160]}")
+        location = str(r.headers.get("location") or "").strip()
+        if not location:
+            raise RuntimeError(f"oauth redirect is missing its Location header at {url[:160]}")
+        url = location
+
+    raise RuntimeError("oauth redirect chain did not reach /auth/callback?code=")
+
+
 def log_vp_token(vp_token: str, *, query_id: str, credential: str, aud: str, nonce: str) -> None:
     issuer_jwt, disclosures, kb_jwt = split_sd_jwt(vp_token)
     issuer_claims = decode_jwt_payload(issuer_jwt)
@@ -620,17 +755,25 @@ def run_presentation_flow(
         log("wallet", "DONE — VP posted; browser tab should redirect via polling")
         return 0
 
+    api = ctx.api_base
+
+    # The direct_post handler only acknowledges receipt: the DCS accepts the
+    # login with Hydra afterwards and records the redirect target against the
+    # presentation state, so the redirect_uri is read from the login status
+    # rather than the callback's own response body.
     if not redirect_uri:
-        log("present", "FAILED", error="DCS session finish requires redirect_uri in direct_post response")
+        try:
+            redirect_uri = await_login_redirect_uri(session, api, state=state, log=log)
+        except RuntimeError as exc:
+            log("login-status", "FAILED", error=str(exc))
+            return 1
+
+    try:
+        callback_url = resolve_oauth_callback_url(session, redirect_uri, api)
+    except RuntimeError as exc:
+        log("oauth-callback", "FAILED", error=str(exc))
         return 1
 
-    api = ctx.api_base
-    target = urlparse(redirect_uri)
-    callback_url = redirect_uri.replace(
-        f"{target.scheme}://{target.netloc}",
-        f"{urlparse(api).scheme}://{urlparse(api).netloc}",
-        1,
-    )
     log("oauth-callback", "GET /auth/callback", callback_prefix=callback_url[:100])
     r = session.get(callback_url, allow_redirects=False, timeout=30)
     if r.status_code != 302:

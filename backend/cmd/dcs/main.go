@@ -405,19 +405,23 @@ func main() {
 	// The dcs-ecdh key is a required dependency: a startup wrap/unwrap self-test
 	// proves the served did.json keyAgreement key and the HSM key agree.
 	ecdhLabel := hsm.KeyLabelECDH()
-	keyAgreementPub, err := didDocument.KeyAgreementPublicKey(ecdhLabel)
+	keyAgreementMethod, err := didDocument.OwnKeyAgreementMethod(ecdhLabel)
 	if err != nil {
 		log.Fatalf(ctx, err, "did.json carries no usable keyAgreement method for %s", ecdhLabel)
+	}
+	keyAgreementPub, err := keyAgreementMethod.ECPublicKey()
+	if err != nil {
+		log.Fatalf(ctx, err, "did.json keyAgreement method %s carries no usable P-256 key", keyAgreementMethod.ID)
 	}
 	hsmAgreement := envelope.HSMKeyAgreement(ecdhLabel)
 	if testCEK, err := envelope.NewCEK(); err != nil {
 		log.Fatalf(ctx, err, "could not draw CEK for the key-agreement self-test")
-	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementPub); err != nil {
+	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementMethod.ID, keyAgreementPub); err != nil {
 		log.Fatalf(ctx, err, "could not wrap the self-test CEK to the %s key", ecdhLabel)
 	} else if unwrapped, err := envelope.Unwrap(wrapped, hsmAgreement); err != nil || !bytes.Equal(unwrapped, testCEK) {
 		log.Fatalf(ctx, err, "HSM key %s cannot unwrap what did.json's keyAgreement key wraps — key mismatch or missing derive capability", ecdhLabel)
 	}
-	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementPub)
+	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementMethod.ID, keyAgreementPub)
 
 	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
 	// security-critical mounted config files, enforce any operator pins, and
@@ -669,12 +673,18 @@ func main() {
 		PDFCore:   pdfCoreClient,
 	}
 
-	// Build and sign this instance's federation agreement credential once at
-	// startup (ADR-19): issuer = this instance's own DID, termsOfUse names the
-	// embedded federation rules document by its public policy URL and hash.
+	// This instance's federation agreement credential (ADR-19): issuer = this
+	// instance's own DID, termsOfUse names the embedded federation rules document
+	// by its public policy URL and hash. Minted on first fetch and re-minted
+	// before its bounded validUntil lapses, so a long-running process never
+	// publishes an expired one.
 	rulesPolicyURL := federation.RulesPolicyURL(os.Getenv("DCS_PUBLIC_URL"))
-	agreementCredential, err := federation.BuildAgreementCredential(ctx, vcSigner, issuerDID, rulesPolicyURL)
-	if err != nil {
+	agreementCredential := &federation.CredentialIssuer{
+		Signer:    vcSigner,
+		IssuerDID: issuerDID,
+		RulesURL:  rulesPolicyURL,
+	}
+	if _, err := agreementCredential.Current(ctx); err != nil {
 		log.Fatalf(ctx, err, "failed to build federation agreement credential")
 	}
 
@@ -710,10 +720,15 @@ func main() {
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
+		// The credentials this instance issued verify against its own published
+		// document without a round trip; a peer's lifecycle or signing-summary
+		// credential — carried inside a verbatim-stored inbound PDF — resolves to
+		// the peer's did:web.
+		credentialVerifier := &provenance.CredentialVerifier{Own: didDocument}
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, requestHostname, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, requestHostname, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService

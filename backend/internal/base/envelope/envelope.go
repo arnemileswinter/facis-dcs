@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"digital-contracting-service/internal/base/hsm"
 )
@@ -61,8 +62,13 @@ type EphemeralPublicKey struct {
 
 // WrappedCEK is one wrapped-CEK record: the recipient unwraps it with the
 // static private key matching the keyAgreement public key it was wrapped to.
+//
+// KID names that key — the recipient's verification method as its own DID
+// document publishes it (RFC 7516 §4.1.6). Without it a recipient can only
+// guess which of its keys was used, which is why the wrap says so.
 type WrappedCEK struct {
 	Alg     string             `json:"alg"`
+	KID     string             `json:"kid"`
 	EPK     EphemeralPublicKey `json:"epk"`
 	Wrapped []byte             `json:"wrapped"`
 }
@@ -77,11 +83,15 @@ func NewCEK() ([]byte, error) {
 }
 
 // Wrap wraps a CEK to the recipient's P-256 keyAgreement public key
-// (ECDH-ES+A256KW with an ephemeral sender keypair). Pure Go: only the
+// (ECDH-ES+A256KW with an ephemeral sender keypair), naming that key by the
+// verification method id the recipient publishes it under. Pure Go: only the
 // recipient's public key is needed.
-func Wrap(cek []byte, recipient *ecdsa.PublicKey) (*WrappedCEK, error) {
+func Wrap(cek []byte, recipientMethodID string, recipient *ecdsa.PublicKey) (*WrappedCEK, error) {
 	if len(cek) != cekLen {
 		return nil, fmt.Errorf("cek must be %d bytes, got %d", cekLen, len(cek))
+	}
+	if strings.TrimSpace(recipientMethodID) == "" {
+		return nil, errors.New("the recipient's key-agreement verification method must be named")
 	}
 	if recipient == nil || recipient.Curve != elliptic.P256() {
 		return nil, errors.New("recipient public key must be ECDSA P-256")
@@ -109,6 +119,7 @@ func Wrap(cek []byte, recipient *ecdsa.PublicKey) (*WrappedCEK, error) {
 	point := eph.PublicKey().Bytes()
 	return &WrappedCEK{
 		Alg: Alg,
+		KID: recipientMethodID,
 		EPK: EphemeralPublicKey{
 			Kty: "EC",
 			Crv: "P-256",

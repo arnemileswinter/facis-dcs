@@ -107,12 +107,15 @@ func extractJSONLDStream(pdf []byte, lastOccurrence bool) ([]byte, error) {
 		return nil, fmt.Errorf("embedded JSON-LD object id invalid: %w", err)
 	}
 
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
+	// Anchored on a line start for the same reason as extractStreamContentByObjID:
+	// "19 0 obj" matches inside "100019 0 obj", so a decoy object holding the
+	// original attachment defeated an unanchored search while the current
+	// definition said something else.
 	var objPos int
 	if lastOccurrence {
-		objPos = bytes.LastIndex(pdf, objMarker)
+		objPos = findLastObjectHeaderOffset(pdf, objID)
 	} else {
-		objPos = bytes.Index(pdf, objMarker)
+		objPos = findFirstObjectHeaderOffset(pdf, objID)
 	}
 	if objPos < 0 {
 		return nil, fmt.Errorf("embedded JSON-LD object not found")

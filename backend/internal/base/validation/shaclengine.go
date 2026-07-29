@@ -35,7 +35,11 @@ func parsedShapesGraph(shapesTTL string, shapesVersion int) (*shacl.Graph, error
 	if err != nil {
 		return nil, fmt.Errorf("parse SHACL shapes (hub version %d): %w", shapesVersion, err)
 	}
-	graph.Triples() // builds the read indexes while still single-threaded
+	// goRDFlib builds its read indexes lazily on the first pattern lookup and
+	// does not guard that build; one lookup here, under the cache mutex,
+	// keeps concurrent validations off an unsynchronized map write.
+	rdfType := shacl.IRI(shacl.RDFType)
+	graph.All(nil, &rdfType, nil)
 	// Version churn is rare; a handful of entries covers active + pinned
 	// shapes without growing unbounded.
 	if len(shapesGraphCache) >= 8 {
@@ -46,9 +50,9 @@ func parsedShapesGraph(shapesTTL string, shapesVersion int) (*shacl.Graph, error
 }
 
 // validateAgainstHubShapes checks a decoded JSON-LD document against the
-// Semantic Hub's SHACL shapes: the version pinned by the document's
-// sh:shapesGraph anchor when present, otherwise the currently-active one.
-// Returns the findings and the shapes version they were produced against.
+// Semantic Hub shapes graphs the document itself declares in sh:shapesGraph,
+// at the versions it pins. Returns the findings and the shapes version they
+// were produced against.
 func validateAgainstHubShapes(ctx context.Context, contract map[string]any) ([]PolicyFinding, int, error) {
 	source, err := requireShapeSource()
 	if err != nil {
@@ -63,17 +67,9 @@ func validateAgainstHubShapes(ctx context.Context, contract map[string]any) ([]P
 // so a one-off remote-hub validation never mutates shared process state
 // under concurrent request handling.
 func validateAgainstShapeSource(ctx context.Context, contract map[string]any, source ShapeSource) ([]PolicyFinding, int, error) {
-	var err error
-	var shapesTTL string
-	var shapesVersion int
-	if pinned := pinnedHubShapesVersion(contract); pinned > 0 {
-		shapesTTL, err = source.ShapesAt(ctx, pinned)
-		shapesVersion = pinned
-	} else {
-		shapesTTL, shapesVersion, err = source.ActiveShapes(ctx)
-	}
+	shapesTTL, shapesVersion, err := declaredShapes(ctx, contract, source)
 	if err != nil {
-		return nil, 0, fmt.Errorf("load SHACL shapes: %w", err)
+		return nil, 0, err
 	}
 
 	var contextContent string
@@ -112,6 +108,44 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 
 	report := shacl.Validate(dataGraph, shapesGraph)
 	return mapShaclReport(report, shapesVersion), shapesVersion, nil
+}
+
+// declaredShapes resolves the shapes graphs a document declares into one
+// Turtle document, and the version of the first declared graph — the
+// canonical DCS shapes for every document this system produces, and so the
+// version findings and SHACL evidence are reported against.
+//
+// A document is never validated against a shapes graph it does not name: an
+// undeclared library registered in the hub cannot change the verdict, which
+// is what makes the same document validate identically on every deployment
+// and years later. A graph the source cannot resolve is a hard failure, and
+// a document that declares nothing (an unanchored fixture, a hand-written
+// document) gets the canonical shapes at their active version — never a
+// registered library.
+func declaredShapes(ctx context.Context, contract map[string]any, source ShapeSource) (string, int, error) {
+	anchors := declaredShapesGraphs(contract)
+	if len(anchors) == 0 {
+		shapesTTL, version, err := source.ActiveShapes(ctx)
+		if err != nil {
+			return "", 0, fmt.Errorf("load active SHACL shapes: %w", err)
+		}
+		return shapesTTL, version, nil
+	}
+	// Each declared document carries its own @prefix headers, so the
+	// concatenation parses as one Turtle graph.
+	parts := make([]string, 0, len(anchors))
+	version := 0
+	for i, anchor := range anchors {
+		content, resolved, err := source.ShapesAt(ctx, anchor.Name, anchor.Version)
+		if err != nil {
+			return "", 0, fmt.Errorf("load declared shapes graph %q (version %d): %w", anchor.Name, anchor.Version, err)
+		}
+		if i == 0 {
+			version = resolved
+		}
+		parts = append(parts, content)
+	}
+	return strings.Join(parts, "\n\n"), version, nil
 }
 
 // mapShaclReport translates a goRDFlib sh:ValidationReport into the

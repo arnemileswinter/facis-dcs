@@ -30,7 +30,25 @@ var (
 	// canonicalOntologyIRIs is the active hub context's prefix -> IRI map;
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
+	// shapeLibraryAnchors maps a class targeted by an ACTIVE registered hub
+	// shapes library to that library's anchor (SetShapeLibraryAnchors).
+	shapeLibraryAnchors map[string]ShapeLibraryAnchor
 )
+
+// ShapeLibraryAnchor is a registered hub SHACL library's name and the
+// versioned anchor URL a document declaring it carries.
+type ShapeLibraryAnchor struct {
+	Name string
+	URL  string
+}
+
+// SetShapeLibraryAnchors installs the class -> registered-library index used
+// to declare, in a produced document's sh:shapesGraph, the shape libraries
+// its own data objects are governed by (ADR-23). Re-installed on every hub
+// activation alongside SetSchemaAnchorRefs.
+func SetShapeLibraryAnchors(byTargetClass map[string]ShapeLibraryAnchor) {
+	shapeLibraryAnchors = byTargetClass
+}
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
 // the Semantic Hub's served URLs.
@@ -391,6 +409,7 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 	if _, exists := data["sh:shapesGraph"]; !exists {
 		data["sh:shapesGraph"] = map[string]any{"@id": schemaRefSHACLShapes}
 	}
+	declareShapeLibraries(data)
 	if _, ok := topLevelValue(data, "contractData").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "contractData"); !exists {
 			setTopLevelValue(data, "dcs:contractData", []any{})
@@ -407,6 +426,84 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 		}
 	}
 	typeLayoutNodes(data)
+}
+
+// declareShapeLibraries adds to the document's own sh:shapesGraph the
+// versioned anchor of every registered hub shapes library that governs a
+// class the document's data uses. Validation loads exactly the declared
+// graphs, so this declaration is what keeps a data object modelled against a
+// registered library under that library's constraints (ADR-23) — and what
+// keeps every other registered library out of the verdict.
+//
+// A library the document already declares keeps the version it was authored
+// under: anchors are added, never rewritten (ADR-8).
+func declareShapeLibraries(data documentData) {
+	if len(shapeLibraryAnchors) == 0 {
+		return
+	}
+	declared := map[string]bool{}
+	for _, anchor := range declaredShapesGraphs(data) {
+		declared[anchor.Name] = true
+	}
+	var added []any
+	for _, class := range assertedTypeIRIs(data) {
+		anchor, governed := shapeLibraryAnchors[class]
+		if !governed || declared[anchor.Name] {
+			continue
+		}
+		declared[anchor.Name] = true
+		added = append(added, map[string]any{"@id": anchor.URL})
+	}
+	if len(added) == 0 {
+		return
+	}
+	existing, isList := data["sh:shapesGraph"].([]any)
+	if !isList {
+		existing = []any{data["sh:shapesGraph"]}
+	}
+	data["sh:shapesGraph"] = append(existing, added...)
+}
+
+// assertedTypeIRIs collects every @type the document asserts anywhere in its
+// graph, sorted — the anchor list a document ends up with must not depend on
+// map iteration order.
+func assertedTypeIRIs(data documentData) []string {
+	seen := map[string]bool{}
+	var types []string
+	collect := func(value any) {
+		iri, ok := value.(string)
+		if !ok || seen[iri] {
+			return
+		}
+		seen[iri] = true
+		types = append(types, iri)
+	}
+	var walk func(node any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			switch asserted := typed["@type"].(type) {
+			case string:
+				collect(asserted)
+			case []any:
+				for _, entry := range asserted {
+					collect(entry)
+				}
+			}
+			for key, value := range typed {
+				if key != "@type" {
+					walk(value)
+				}
+			}
+		case []any:
+			for _, entry := range typed {
+				walk(entry)
+			}
+		}
+	}
+	walk(map[string]any(data))
+	slices.Sort(types)
+	return types
 }
 
 // typeLayoutNodes asserts rdf:type on the document's layout nodes — the

@@ -53,7 +53,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   @REQ-fed-agreement-AC2 @DCS-IR-SI-12
   Scenario: The agreement credential's signature verifies against the instance's own published VC key
     Given I fetch this instance's own agreement credential
-    Then the credential's proof verifies against the second verificationMethod key published in this instance's own did.json
+    Then the credential's proof verifies against the key it names, which this instance publishes for assertions and not for authentication
 
   # ---------------------------------------------------------------------
   # AC3: both instances of the same build agree — same rules hash, and an

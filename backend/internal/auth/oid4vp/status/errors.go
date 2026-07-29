@@ -16,4 +16,8 @@ var (
 	ErrWrongStatusListType      = errors.New("wrong status list type")
 	ErrUnsupportedMediaType     = errors.New("unsupported status list media type")
 	ErrStatusURIMismatch        = errors.New("status list subject does not match reference uri")
+	// ErrStatusListIssuerMismatch is a status list whose signature verifies
+	// against a trusted issuer that is not the one the list itself names as its
+	// issuer — any trusted issuer signing for any other one.
+	ErrStatusListIssuerMismatch = errors.New("status list is signed by an issuer other than the one it names")
 )

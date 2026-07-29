@@ -85,8 +85,9 @@ func TestIssueLifecycleVC_CredentialStatusIncludedWhenStatusListURISet(t *testin
 
 	cs, ok := doc["credentialStatus"].(map[string]interface{})
 	require.True(t, ok, "credentialStatus must be present in unsigned VC")
-	// W3C VC DM 2.0: type must be BitstringStatusListEntry (DCS-OR-C2PA-005).
-	assert.Equal(t, "BitstringStatusListEntry", cs["type"])
+	// The advertised type must be the format the URI actually serves — the XFSC
+	// token status list, not a W3C BitstringStatusListCredential (DCS-OR-C2PA-005).
+	assert.Equal(t, "TokenStatusList", cs["type"])
 	assert.Equal(t, "revocation", cs["statusPurpose"])
 
 	expectedIndex := StatusListIndex(contractID)

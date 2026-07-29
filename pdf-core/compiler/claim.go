@@ -159,8 +159,13 @@ func extractPageContentStreams(pdf []byte) ([][]byte, error) {
 // extractStreamContentByObjID returns the raw bytes between stream\n and
 // \nendstream for the latest definition of the given object.
 func extractStreamContentByObjID(pdf []byte, objID int) ([]byte, error) {
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
-	objPos := bytes.LastIndex(pdf, objMarker)
+	// Anchored on a line start: an unanchored search for "19 0 obj" also matches
+	// inside "100019 0 obj", so an appended revision could supersede this object
+	// with tampered content and carry a decoy whose id merely ENDS in these
+	// digits holding the original. The checker read the decoy while a conforming
+	// reader followed the xref to the tampered object — the gate reported a match
+	// on a document whose page had been replaced.
+	objPos := findLastObjectHeaderOffset(pdf, objID)
 	if objPos < 0 {
 		return nil, fmt.Errorf("object %d not found", objID)
 	}

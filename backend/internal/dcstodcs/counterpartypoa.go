@@ -300,9 +300,12 @@ func verifySummary(signed ShippedSignatures, raw json.RawMessage, organization s
 		return fmt.Errorf("signing evidence for %q: %w", organization, err)
 	}
 	// A credential is an assertion; a proof made for any other purpose does not
-	// establish one (W3C VC Data Integrity).
-	if purpose := envelope.Proof.ProofPurpose; purpose != "" && purpose != "assertionMethod" {
-		return fmt.Errorf("signing evidence for %q carries a proof for %q, not assertionMethod", organization, purpose)
+	// establish one, and proofPurpose is mandatory (W3C VC Data Integrity §2.1),
+	// so an omitted one is a malformed proof rather than a permissive default —
+	// which is what it was, and it let a proof made to authenticate or to agree a
+	// key pass as an assertion by simply leaving the field out.
+	if purpose := strings.TrimSpace(envelope.Proof.ProofPurpose); purpose != string(identity.PurposeAssertion) {
+		return fmt.Errorf("signing evidence for %q carries a proof for %q, not %s", organization, purpose, identity.PurposeAssertion)
 	}
 	if err := signed.VerifyVC(raw, key); err != nil {
 		return fmt.Errorf("signing evidence for %q does not verify against the peer's key: %w", organization, err)

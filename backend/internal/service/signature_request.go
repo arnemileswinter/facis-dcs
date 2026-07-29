@@ -188,22 +188,22 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s not found", p.CeremonyID))
 	}
 
+	walletNonce := ""
+	if p.WalletNonce != nil {
+		walletNonce = strings.TrimSpace(*p.WalletNonce)
+	}
+
 	if ceremony.PreparedPDFSHA256 != nil && ceremony.RequestNonce != nil && ceremony.RequestExpiresAt != nil && ceremony.SignerDID != nil {
 		published, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
 		if err != nil {
 			return nil, err
 		}
-		return s.buildDocumentRetrievalJAR(published)
+		return s.buildDocumentRetrievalJAR(published, walletNonce)
 	}
 
 	pending, err := s.loadPendingCeremony(ctx, p.CeremonyID)
 	if err != nil {
 		return nil, err
-	}
-
-	walletNonce := ""
-	if p.WalletNonce != nil {
-		walletNonce = strings.TrimSpace(*p.WalletNonce)
 	}
 
 	return s.buildIdentityPresentationJAR(ctx, pending, walletNonce)
@@ -215,7 +215,7 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 // together, so one ceremony yields both a PAdES and a JAdES over the same
 // content hash"). The payload's digest doubles as the nonce-binding and
 // byte-pin anchor the callback checks the returned JAdES against (ADR-20).
-func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony) (io.ReadCloser, error) {
+func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony, walletNonce string) (io.ReadCloser, error) {
 	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
@@ -251,6 +251,7 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 		SignatureQualifier: signatureQualifierFor(credentialType),
 		DocumentDigests:    digests,
 		DocumentLocations:  locations,
+		WalletNonce:        walletNonce,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("build signing request object: %w", err))

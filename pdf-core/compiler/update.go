@@ -130,11 +130,21 @@ func findTrailerMaxObjID(pdf []byte) (int, error) {
 	return size - 1, nil
 }
 
-// parseCurrentPagesKids returns the page object IDs from the most recent Pages object (obj 2).
+// parseCurrentPagesKids returns the page object IDs of the page tree the
+// document's current Catalog points at.
+//
+// The tree is FOUND, not assumed to be object 2: an appended revision may
+// supersede the Catalog to name a different /Pages while leaving object 2
+// untouched, and a checker reading object 2 then compares pages a reader never
+// renders.
 func parseCurrentPagesKids(pdf []byte) ([]int, error) {
-	pos := findLastObjectHeaderOffset(pdf, 2)
+	pagesID, err := currentPagesObjID(pdf)
+	if err != nil {
+		return nil, err
+	}
+	pos := findLastObjectHeaderOffset(pdf, pagesID)
 	if pos < 0 {
-		return nil, fmt.Errorf("Pages object (2 0 obj) not found")
+		return nil, fmt.Errorf("Pages object (%d 0 obj) not found", pagesID)
 	}
 	end := bytes.Index(pdf[pos:], []byte("endobj"))
 	if end < 0 {
@@ -916,4 +926,27 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) error {
 		boundary = hopEnd
 	}
 	return nil
+}
+
+// pdfPagesRefRE matches a Catalog's /Pages reference.
+var pdfPagesRefRE = regexp.MustCompile(`/Pages\s+(\d+)\s+0\s+R`)
+
+// currentPagesObjID resolves the page tree through the document's current
+// Catalog, falling back to the conventional object 2 only when no Catalog
+// declares one.
+func currentPagesObjID(pdf []byte) (int, error) {
+	catalogID, ok := currentRootObjID(pdf)
+	if ok {
+		if pos := findLastObjectHeaderOffset(pdf, catalogID); pos >= 0 {
+			if end := bytes.Index(pdf[pos:], []byte("endobj")); end > 0 {
+				if m := pdfPagesRefRE.FindSubmatch(pdf[pos : pos+end]); m != nil {
+					id, convErr := strconv.Atoi(string(m[1]))
+					if convErr == nil {
+						return id, nil
+					}
+				}
+			}
+		}
+	}
+	return 2, nil
 }

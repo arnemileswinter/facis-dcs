@@ -37,7 +37,12 @@ enforced — the hub was a write-only ledger.
   - `"sh:shapesGraph"` (`http://www.w3.org/ns/shacl#shapesGraph` — SHACL's
     own data-graph→shapes-graph link) carries the versioned shapes URL
     (`/semantic/shapes/{name}?version=N`) and is the **pin carrier** for
-    revalidation.
+    revalidation. It is multi-valued, as in SHACL: the canonical shapes
+    first, then one anchor per registered SHACL library the document's own
+    data objects are modelled against (ADR-23). A document is validated
+    against exactly the named entries — resolved by name *and* version, not
+    version alone — so an unrelated library someone registered and left
+    active cannot change a verdict.
   - `"dcterms:conformsTo"` (Dublin Core, as used by DCAT/PROF) names the
     versioned validation profile URL
     (`/semantic/profile/{name}?version=N`).
@@ -49,10 +54,11 @@ enforced — the hub was a write-only ledger.
 - **Version pinning**: a document is validated against the hub SHACL shapes
   version that was **active at the document's own creation time**. Anchors
   are written once, at production time, never re-normalized — this ADR
-  makes it load-bearing: `AuditContractContent` parses the pinned version
-  out of the document's own `sh:shapesGraph` anchor
-  (`pinnedHubShapesVersion`) and, when present, revalidates against that
-  exact version via `ShapeSource.ShapesAt`, not whatever is active now.
+  makes it load-bearing: `AuditContractContent` parses the declared entries
+  out of the document's own `sh:shapesGraph` anchors
+  (`declaredShapesGraphs`) and revalidates against exactly those
+  (name, version) hub entries via `ShapeSource.ShapesAt`, not whatever is
+  active now.
   JSON-LD expansion during validation likewise resolves the context version
   pinned in the document's own `@context` URL (`ShapeSource.ContextAt`),
   hermetically (no network fetch). New documents (no existing pin) validate

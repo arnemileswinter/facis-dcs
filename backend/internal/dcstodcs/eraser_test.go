@@ -5,9 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,8 +30,22 @@ func eraserTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The x5c the counterparty validates the authenticating key's chain against.
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: host},
+		DNSNames:     []string{host},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	didJSON := map[string]any{
-		"id": "did:web:" + host,
+		"id":             "did:web:" + host,
+		"authentication": []any{"#key-1"},
 		"verificationMethod": []map[string]any{
 			{
 				"id": "did:web:" + host + "#key-1",
@@ -37,6 +54,7 @@ func eraserTestDIDDocument(t *testing.T, host string) *identity.DIDDocument {
 					"crv": "P-256",
 					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
 					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x5c": []string{base64.StdEncoding.EncodeToString(certDER)},
 				},
 			},
 		},
@@ -176,8 +194,9 @@ func TestEraseContractShredsLocallyAndConfirmsPeer(t *testing.T) {
 	if req.FromPeerDid != "did:web:local.example" || req.ContractIri != eraserTestIRI {
 		t.Fatalf("unexpected erase request: %+v", req)
 	}
-	// The challenge is signed with the local DID key.
-	if err := eraser.DIDDocument.Verify([]byte(req.SecretValue), req.SecretHash); err != nil {
+	// The challenge is signed with the key this instance publishes for
+	// authenticating itself — exactly what the receiving peer checks.
+	if err := eraser.DIDDocument.VerifyPeerChallenge(nil, []byte(req.SecretValue), req.SecretHash); err != nil {
 		t.Fatalf("erase request challenge does not verify: %v", err)
 	}
 	row := repo.rows[repo.key(eraserTestIRI, "did:web:peer.example")]

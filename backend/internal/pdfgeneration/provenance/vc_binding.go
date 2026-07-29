@@ -95,16 +95,24 @@ func IssueLifecycleVC(ctx context.Context, signer VCSigner, issuerDID, statusLis
 	return signed, vcID, nil
 }
 
-// buildCredentialStatus constructs the W3C StatusList2021 credentialStatus
-// object that links this VC to the XFSC bitstring status list (DCS-OR-C2PA-005).
-// Returns nil when statusListURI is empty so the field is omitted from the VC.
+// buildCredentialStatus constructs the credentialStatus object that links this
+// VC to its entry in the XFSC status list (DCS-OR-C2PA-005). Returns nil when
+// statusListURI is empty so the field is omitted from the VC.
+//
+// The type names a token status list because that is what the URI serves: the
+// XFSC statuslist-service answers {tenantId, listId, list} with an LSB-first
+// gzip bitstring (QueryStatusListStatus). Declaring the W3C
+// BitstringStatusListEntry told a verifier to expect a
+// BitstringStatusListCredential with credentialSubject.encodedList and MSB-first
+// bits — a document that is not there, and a bit order that reads a different
+// contract's entry where it is.
 func buildCredentialStatus(statusListURI, contractID string) map[string]interface{} {
 	if statusListURI == "" {
 		return nil
 	}
 	return map[string]interface{}{
 		"id":                   fmt.Sprintf("%s#%d", statusListURI, StatusListIndex(contractID)),
-		"type":                 "BitstringStatusListEntry",
+		"type":                 statusListEntryType,
 		"statusPurpose":        "revocation",
 		"statusListIndex":      fmt.Sprintf("%d", StatusListIndex(contractID)),
 		"statusListCredential": statusListURI,
