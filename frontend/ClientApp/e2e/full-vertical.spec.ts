@@ -328,7 +328,10 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
     await assertPdfExport(page, 'contract', contractDid, 'contract REVIEWED')
   })
