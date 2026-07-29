@@ -233,7 +233,7 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 		return nil, goa.PermanentError("bad_request", "invalid vp_token: %v", err)
 	}
 
-	verified, err := oid4vp.NewVerifier(s.trust, oid4vp.PurposeLogin).Verify(presentation, oid4vp.PresentationContext{
+	verified, err := oid4vp.NewVerifier(s.trust).Verify(presentation, oid4vp.PresentationContext{
 		Nonce:    attempt.Nonce,
 		ClientID: s.oid4vpClientID,
 	})

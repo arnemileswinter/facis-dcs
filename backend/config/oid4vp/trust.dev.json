@@ -3,18 +3,8 @@
     "urn:dcs:poa:v1",
     "urn:eudi:pid:de:1"
   ],
-  "peer_dynamic": true,
   "issuers": {
     "did:web:dev.example:issuer:poa": {
-      "purposes": [
-        "login",
-        "peer",
-        "pid"
-      ],
-      "organizations": [
-        "*"
-      ],
-      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {
@@ -27,15 +17,6 @@
       }
     },
     "did:web:dev2.example:issuer:poa": {
-      "purposes": [
-        "login",
-        "peer",
-        "pid"
-      ],
-      "organizations": [
-        "*"
-      ],
-      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {

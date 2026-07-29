@@ -411,9 +411,6 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "could not read DID")
 	}
-	// A login credential attests authority for one organization; this instance
-	// only grants access to itself.
-	authCfg.ParticipantDID = did
 
 	// Encrypting artifact store (DCS-NFR-SEC-14): every IPFS artifact is
 	// encrypted per scope; CEKs are wrapped to the instance's keyAgreement key.
