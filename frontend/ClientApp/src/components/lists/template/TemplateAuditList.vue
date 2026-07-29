@@ -68,11 +68,11 @@ const policyBadgeClass = (audit: TemplateAuditItem) => {
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
           <div>
             Transition:
-            <span class="badge badge-soft badge-xs badge-secondary">
+            <span class="badge badge-soft badge-xs badge-secondary" aria-label="From state">
               {{ toProperCase(audit.event_data.previous_state) }}
             </span>
-            →
-            <span class="badge badge-soft badge-xs badge-secondary">
+            <span aria-hidden="true">→</span>
+            <span class="badge badge-soft badge-xs badge-secondary" aria-label="To state">
               {{ toProperCase(audit.event_data.new_state) }}
             </span>
           </div>

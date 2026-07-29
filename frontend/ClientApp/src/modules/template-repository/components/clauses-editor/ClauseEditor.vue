@@ -202,14 +202,14 @@ function save() {
 
     <div class="space-y-2 rounded bg-base-200/50 p-2">
       <div class="flex flex-wrap items-center gap-2">
-        <label :for="objectToAddId" class="text-xs text-base-content/60">Objects (Semantic Hub):</label>
+        <label :for="objectToAddId" class="text-xs text-base-content/80">Objects (Semantic Hub):</label>
         <select :id="objectToAddId" v-model="objectToAdd" class="select-bordered select select-xs" @change="addObject">
           <option value="">+ add object…</option>
           <optgroup v-for="group in objectGroups" :key="group.name" :label="group.name">
             <option v-for="o in group.entries" :key="o.value" :value="o.value">{{ o.label }}</option>
           </optgroup>
         </select>
-        <span class="text-[10px] text-base-content/40">▣ = asset (carries a shape)</span>
+        <span class="text-[10px] text-base-content/70">▣ = asset (carries a shape)</span>
       </div>
 
       <!-- One row per declared asset instance: its accent color marks the
@@ -224,6 +224,7 @@ function save() {
         <span class="badge gap-1 badge-sm badge-primary" :title="ca.asset.label">
           ▣
           <input
+            id="instance-name"
             v-model="ca.name"
             class="w-28 bg-transparent outline-none placeholder:text-primary-content/50"
             :placeholder="ca.asset.label"
@@ -251,7 +252,7 @@ function save() {
 
     <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
       <div class="rounded border border-base-300 p-3">
-        <h5 :id="contentId" class="mb-2 text-xs font-semibold text-base-content/70">Human prose</h5>
+        <h3 :id="contentId" class="mb-2 text-xs font-semibold text-base-content/70">Human prose</h3>
         <ClauseTextEditor
           :text-id="contentId"
           :model-value="content"
@@ -260,7 +261,7 @@ function save() {
         />
       </div>
       <div class="rounded border border-base-300 p-3">
-        <h5 class="mb-2 text-xs font-semibold text-base-content/70">Machine-readable meaning (ODRL)</h5>
+        <h3 class="mb-2 text-xs font-semibold text-base-content/70">Machine-readable meaning (ODRL)</h3>
         <OdrlRuleBuilder
           v-model="rule"
           :fields="fieldAnchors"
