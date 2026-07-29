@@ -60,6 +60,13 @@ jobResources: {}
 # a release serves one set, not both.
 flowsDir: flows
 
+# The issuer admin tab (credential revoke / unrevoke) carries no authorization
+# of its own, and an issuer is published so wallets can reach /offer — which
+# would put an unauthenticated un-revoke endpoint on the public internet next to
+# it. Off unless a deployment asks, and even then it wants an auth proxy.
+adminFlows:
+  enabled: false
+
 # Mount the chart's merged <flowsDir>/*.json as Node-RED's startup flows file —
 # deterministic, rollout-race-free. When enabled, the flowImport hook job is
 # skipped for chart flows (flows.json is a read-only mount; runtime /flows
