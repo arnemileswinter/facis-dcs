@@ -194,7 +194,10 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
   await test.step('A: erasure panel reports Keys destroyed with the peer confirmed', async () => {
     await expectErasureBadge(a, contractDid, 'Keys destroyed')
     await expect(async () => {
-      await a.page.reload()
+      await a.gotoAs('Archive Manager', `/ui/audit?scope=archive&did=${encodeURIComponent(contractDid)}`)
+      // The peer table sits inside the collapsed "Erasure details" disclosure:
+      // its rows are in the DOM but hidden until the summary is opened.
+      await a.page.getByText('Erasure details', { exact: true }).click()
       const peerRow = a.page.getByTestId(`erasure-peer-${bDidWeb}`)
       await expect(peerRow).toBeVisible({ timeout: 5_000 })
       await expect(peerRow).toContainText('confirmed', { timeout: 5_000 })
