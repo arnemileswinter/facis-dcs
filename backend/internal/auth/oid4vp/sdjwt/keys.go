@@ -34,6 +34,12 @@ type TrustConfig interface {
 	IssuerTrusted(iss string) bool
 	VCTAllowed(vct string) bool
 	IssuerJWKS(iss string) (json.RawMessage, error)
+	// IssuerUsesX5C reports whether this issuer publishes its key through a
+	// certificate chain. It decides which resolution branch may run, so the
+	// CONFIGURATION picks the path and not the credential: a credential that
+	// arrives with an x5c header for an issuer configured to publish a JWKS is
+	// presenting a key from somewhere the operator never trusted.
+	IssuerUsesX5C(iss string) (bool, error)
 	// X5CTrustRoots returns the trust anchors an x5c-bearing credential's
 	// certificate chain must verify against, or nil if none are configured —
 	// in which case an x5c-bearing credential must be refused outright.
@@ -47,9 +53,14 @@ type TrustConfig interface {
 // Trust and key material are resolved inside the JWT keyfunc so verification never proceeds
 // with an untrusted or unknown issuer key. Resolution order:
 //
-//  1. header.jwk — embedded JWK matched against the issuer entry in trust configuration.
-//  2. header.x5c — rejected until chain validation lands with the trust migration.
-//  3. header.kid — lookup in the issuer JWKS bundled in trust configuration.
+// The issuer's CONFIGURED mechanism selects the branch. Letting the credential
+// choose — x5c header present, therefore validate a chain — would mean an
+// attacker holding any certificate under any configured anchor could present it
+// for an issuer whose keys are published as a JWKS, and be believed.
+//
+//  1. issuer publishes via x5c — the chain in the header, verified to the anchors.
+//  2. otherwise — header.jwk matched against the issuer's resolved JWKS, or
+//     header.kid looked up in it.
 func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("trust config is not configured")
@@ -68,6 +79,23 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
 
+	usesX5C, err := cfg.IssuerUsesX5C(iss)
+	if err != nil {
+		return nil, err
+	}
+
+	if usesX5C {
+		rawX5C, ok := token.Header["x5c"]
+		if !ok {
+			return nil, fmt.Errorf("issuer %q publishes its key through a certificate chain, but the credential carries no x5c header", iss)
+		}
+		return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
+	}
+
+	if _, ok := token.Header["x5c"]; ok {
+		return nil, fmt.Errorf("credential for issuer %q carries an x5c header, but that issuer publishes its key another way; the chain proves nothing about it", iss)
+	}
+
 	jwksRaw, err := cfg.IssuerJWKS(iss)
 	if err != nil {
 		return nil, err
@@ -77,26 +105,17 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		return verificationKeyFromHeaderJWK(jwksRaw, rawJWK)
 	}
 
-	if _, ok := token.Header["x5c"]; ok {
-		return verificationKeyFromX5C(token.Header["x5c"], cfg.X5CTrustRoots())
-	}
-
 	return verificationKeyFromTrustedJWKS(jwksRaw, token)
 }
 
-// ResolveIssuerVerificationKeyForPID resolves the issuer key for PID credentials signed with x5c.
-func ResolveIssuerVerificationKeyForPID(cfg TrustConfig, token *jwt.Token) (any, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("trust config is not configured")
-	}
-
-	rawX5C, ok := token.Header["x5c"]
-	if !ok {
-		return nil, fmt.Errorf("pid credential jwt requires x5c")
-	}
-
-	return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
-}
+// ResolveIssuerVerificationKeyForPID resolved a PID issuer's key from the
+// credential's own certificate chain without ever asking whether that issuer was
+// trusted — no iss, no trust lookup, no purpose. Any certificate under any
+// configured anchor could therefore sign a PID for any issuer, which is the
+// relying-party-attests-to-itself hazard the purpose split exists to prevent.
+//
+// PID now resolves through ResolveIssuerVerificationKey like everything else, so
+// it inherits the trust and purpose checks instead of bypassing them.
 
 // verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
 // §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's

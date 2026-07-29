@@ -51,8 +51,14 @@ func DefaultKeyFetcher() KeyFetcher {
 // jwk header then finds nothing to match and is refused, which is correct — an
 // issuer that publishes via certificates has not published a bare key.
 func (c *TrustConfig) resolveIssuerKeys(iss string) (json.RawMessage, error) {
-	entry, ok := c.Issuers[strings.TrimSpace(iss)]
+	iss = strings.TrimSpace(iss)
+	entry, ok := c.Issuers[iss]
 	if !ok {
+		// A peer trusted dynamically has no entry by design; its key comes from
+		// its own DID document, which is the source of truth for it.
+		if c.dynamicPeerIssuer(PurposePeer, iss) {
+			return c.jwksFromDIDWeb(iss)
+		}
 		return nil, fmt.Errorf("issuer %q is not trusted", iss)
 	}
 
@@ -188,3 +194,18 @@ func (c *TrustConfig) fetcher() KeyFetcher {
 // SetKeyFetcher installs the transport used by the did:web and orce
 // mechanisms.
 func (c *TrustConfig) SetKeyFetcher(f KeyFetcher) { c.keyFetcher = f }
+
+// issuerUsesX5C reports whether the issuer publishes its key through a
+// certificate chain. A dynamically trusted peer does not: it publishes a DID
+// document, which is what makes it resolvable without an entry.
+func (c *TrustConfig) issuerUsesX5C(iss string) (bool, error) {
+	iss = strings.TrimSpace(iss)
+	entry, ok := c.Issuers[iss]
+	if !ok {
+		if c.dynamicPeerIssuer(PurposePeer, iss) {
+			return false, nil
+		}
+		return false, fmt.Errorf("issuer %q is not trusted", iss)
+	}
+	return entry.Mechanism == MechanismX5C, nil
+}

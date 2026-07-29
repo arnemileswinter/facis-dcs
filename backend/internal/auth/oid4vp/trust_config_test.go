@@ -285,6 +285,20 @@ func TestDynamicPeerTrust(t *testing.T) {
 	if !cfg.For(PurposePeer).IssuerTrusted(unlisted) {
 		t.Error("an unlisted did:web peer issuer must be verifiable for peering")
 	}
+	// Trusting it is worthless if no key can be resolved for it. Asserting only
+	// the gate let this ship as dead code: IssuerTrusted said yes while
+	// resolution rejected the same issuer, so no dynamic peer could ever be
+	// verified.
+	cfg.SetKeyFetcher(stubFetcher{docs: map[string][]byte{
+		"https://newpeer.example/issuer/did.json": []byte(`{"verificationMethod":[{"publicKeyJwk":{"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}]}`),
+	}})
+	keys, err := cfg.For(PurposePeer).IssuerJWKS(unlisted)
+	if err != nil || !strings.Contains(string(keys), "VlBNhqQn6gLy") {
+		t.Fatalf("a dynamic peer's key must resolve from its own DID document: keys=%q err=%v", keys, err)
+	}
+	if usesX5C, err := cfg.For(PurposePeer).IssuerUsesX5C(unlisted); err != nil || usesX5C {
+		t.Errorf("a dynamic peer publishes a DID document, not a chain: %v %v", usesX5C, err)
+	}
 	// Access to this deployment stays the operator's explicit decision.
 	if cfg.For(PurposeLogin).IssuerTrusted(unlisted) {
 		t.Error("a dynamic peer issuer must NOT grant login")
@@ -318,5 +332,58 @@ func TestPeerAuthority(t *testing.T) {
 		if got := peerAuthority(iss); got != want {
 			t.Errorf("%s → %q, want %q", iss, got, want)
 		}
+	}
+}
+
+// The configuration decides how an issuer's key is resolved. If the credential
+// decided, anyone holding a certificate under any configured anchor could
+// present it for an issuer that publishes a JWKS and be believed.
+func TestMechanismIsAuthoritativeNotTheCredential(t *testing.T) {
+	path := writeTrust(t, `{
+      "vcts": ["urn:dcs:poa:v1"],
+      "issuers": {
+        "https://jwks.example/issuer": {
+          "purposes": ["login"], "organizations": ["did:web:jwks.example"],
+          "mechanism": "jwks", "jwks": `+jwksBlock+`
+        },
+        "https://chain.example/issuer": {
+          "purposes": ["pid"], "mechanism": "x5c"
+        }
+      }
+    }`)
+	cfg, err := LoadTrustConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	usesX5C, err := cfg.For(PurposeLogin).IssuerUsesX5C("https://jwks.example/issuer")
+	if err != nil || usesX5C {
+		t.Errorf("a jwks issuer must not be resolvable through a chain: %v %v", usesX5C, err)
+	}
+	usesX5C, err = cfg.For(PurposePID).IssuerUsesX5C("https://chain.example/issuer")
+	if err != nil || !usesX5C {
+		t.Errorf("an x5c issuer must resolve through its chain: %v %v", usesX5C, err)
+	}
+	// Out of purpose, the question is not answerable at all.
+	if _, err := cfg.For(PurposeLogin).IssuerUsesX5C("https://chain.example/issuer"); err == nil {
+		t.Error("mechanism must not be resolvable for an issuer outside its purpose")
+	}
+}
+
+// An explicit entry is the operator's complete answer: withholding a purpose
+// denies it, rather than falling through to the dynamic peer path.
+func TestExplicitEntryDeniesRatherThanFallingThrough(t *testing.T) {
+	cfg := &TrustConfig{
+		VCTs:        []string{"urn:dcs:poa:v1"},
+		PeerDynamic: true,
+		Issuers: map[string]TrustedIssuer{
+			"did:web:listed.example:issuer": {
+				Purposes: []Purpose{PurposeLogin}, Organizations: []string{"did:web:listed.example"},
+				Mechanism: MechanismJWKS, JWKS: json.RawMessage(jwksBlock),
+			},
+		},
+	}
+	if cfg.For(PurposePeer).IssuerTrusted("did:web:listed.example:issuer") {
+		t.Error("an entry granting only login must not also grant peer via the dynamic path")
 	}
 }

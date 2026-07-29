@@ -63,8 +63,10 @@ func VerifyCredential(token string, disclosures []string, cfg TrustConfig) (jwt.
 	return MergeDisclosedClaims(issuerClaims, disclosures)
 }
 
-// VerifyCredentialForPID validates PID issuer JWTs. The issuer key is taken from
-// header x5c when present, otherwise from the trust-listed issuer JWKS.
+// VerifyCredentialForPID validates PID issuer JWTs. The issuer key is resolved
+// exactly as for any other credential: through the trust configuration, so the
+// issuer must be trusted FOR the pid purpose and must publish its key the way
+// its entry says it does.
 func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig) (jwt.MapClaims, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("issuer trust is not configured")
@@ -78,9 +80,6 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 		jwt.WithIssuedAt(),
 		jwt.WithValidMethods([]string{"ES256"}),
 	).Parse(token, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Header["x5c"]; ok {
-			return ResolveIssuerVerificationKeyForPID(cfg, t)
-		}
 		return ResolveIssuerVerificationKey(cfg, t)
 	})
 

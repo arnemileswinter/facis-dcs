@@ -231,10 +231,24 @@ func (v *PurposeView) IssuerTrusted(iss string) bool {
 		return false
 	}
 	iss = strings.TrimSpace(iss)
-	if entry, ok := v.cfg.Issuers[iss]; ok && entry.Allows(v.purpose) {
-		return true
+	// An explicit entry is the operator's complete answer for this issuer. If it
+	// withholds the purpose that is a denial, not an invitation to fall through
+	// to the dynamic path — otherwise `purposes: ["login"]` would silently also
+	// grant peer, and no did:web issuer could ever be denied it.
+	if entry, ok := v.cfg.Issuers[iss]; ok {
+		return entry.Allows(v.purpose)
 	}
 	return v.cfg.dynamicPeerIssuer(v.purpose, iss)
+}
+
+// IssuerUsesX5C reports whether the issuer publishes its key through a
+// certificate chain, so the configuration decides which resolution branch runs
+// rather than the credential.
+func (v *PurposeView) IssuerUsesX5C(iss string) (bool, error) {
+	if !v.IssuerTrusted(iss) {
+		return false, fmt.Errorf("issuer %q is not trusted for %s", iss, v.purpose)
+	}
+	return v.cfg.issuerUsesX5C(iss)
 }
 
 // dynamicPeerIssuer reports whether an unlisted issuer may be verified for
