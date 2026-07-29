@@ -106,7 +106,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if req.FromPeerDid == localPeer {
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("shipping a contract PDF to the same peer is not allowed"))
 	}
 
@@ -273,7 +273,7 @@ func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContract
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if req.FromPeerDid == localPeer {
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("requesting a contract erasure from the same peer is not allowed"))
 	}
 

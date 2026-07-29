@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/auth/oid4vp"
+	"digital-contracting-service/internal/base/identity"
 	smdb "digital-contracting-service/internal/signingmanagement/db"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -153,7 +154,7 @@ func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []S
 		// Only a did:web organization can be held against the peer's identity. An
 		// authored contract may name its parties anything, and there the issuer's
 		// entitlement to attest that organization is the only bound there is.
-		if strings.HasPrefix(organization, "did:web:") && organization != strings.TrimSpace(peerDID) {
+		if strings.HasPrefix(organization, "did:web:") && !identity.SameDIDWeb(organization, strings.TrimSpace(peerDID)) {
 			return deny(fmt.Errorf("counterparty Power of Attorney: peer %q shipped evidence for %q, which is not its own",
 				peerDID, organization))
 		}

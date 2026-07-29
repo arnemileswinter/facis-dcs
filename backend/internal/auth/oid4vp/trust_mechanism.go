@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/safehttp"
 )
 
@@ -120,20 +121,20 @@ func jwksFromDIDJWK(iss string) (json.RawMessage, error) {
 	return marshalJWKS(key)
 }
 
-// didWebURL maps did:web:host:a:b to https://host/a/b/did.json, per the did:web
-// method (a port arrives percent-encoded in the identifier).
+// didWebURL maps a did:web identifier to the URL its document is served at.
+//
+// It defers to the identity package's parser rather than splitting the
+// identifier again here. A second parser is a second set of rules: this one
+// decoded any percent-escape into the authority and validated nothing, so an
+// identifier that the peer-facing resolver refused as malformed was still
+// turned into a URL and fetched on this path.
 func didWebURL(iss string) (string, error) {
-	rest := strings.TrimPrefix(iss, "did:web:")
-	if rest == "" || rest == iss {
-		return "", fmt.Errorf("issuer %q is not a did:web identifier", iss)
+	host, segments, err := identity.DIDWebPath(iss)
+	if err != nil {
+		return "", fmt.Errorf("issuer %q is not a resolvable did:web identifier: %w", iss, err)
 	}
-	segments := strings.Split(rest, ":")
-	authority := strings.ReplaceAll(segments[0], "%3A", ":")
-	path := strings.Join(segments[1:], "/")
-	if path == "" {
-		return "https://" + authority + "/.well-known/did.json", nil
-	}
-	return "https://" + authority + "/" + path + "/did.json", nil
+	// https only: an issuer key fetched over http is one an observer can replace.
+	return identity.DIDWebBaseURL("https", host, nil) + identity.DIDWebDocumentPath(segments), nil
 }
 
 func (c *TrustConfig) jwksFromDIDWeb(iss string) (json.RawMessage, error) {
