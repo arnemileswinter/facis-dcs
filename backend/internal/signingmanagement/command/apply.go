@@ -628,9 +628,13 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				}
 				fieldCeremonies[f] = c
 			}
-			if _, ok := fieldCeremonies[ceremony.FieldName]; !ok {
-				fieldCeremonies[ceremony.FieldName] = ceremony
-			}
+			// The ceremony being consumed wins for its own field, unconditionally.
+			// The loop above resolves each field by FindVerifiedCeremonyByField,
+			// which returns the most recently verified ceremony — so when a field
+			// has been verified twice it overwrote the pinned one, and the summary
+			// was then retained against a ceremony that never signed. Its own row
+			// kept none, and the peer refused every ship of that contract.
+			fieldCeremonies[ceremony.FieldName] = ceremony
 			if len(missing) > 0 {
 				return nil, fmt.Errorf("%w: missing ceremonies for %v", ErrCeremoniesIncomplete, missing)
 			}
