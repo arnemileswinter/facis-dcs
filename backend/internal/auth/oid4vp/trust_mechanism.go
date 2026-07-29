@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // KeyFetcher retrieves a document over HTTP. Injected so did:web and the ORCE
@@ -37,8 +39,28 @@ func (f httpFetcher) Fetch(url string) ([]byte, error) {
 }
 
 // DefaultKeyFetcher is the transport used when a deployment configures no other.
+//
+// The URL these fetches reach is derived from an identifier that arrives with a
+// credential, so it is bounded rather than free: no redirects, and no dialling
+// the addresses that answer only because the request originates here. Set
+// OID4VP_RESOLVER_ALLOWED_HOSTS to reduce it further to a named set.
 func DefaultKeyFetcher() KeyFetcher {
-	return httpFetcher{client: &http.Client{Timeout: 10 * time.Second}}
+	return httpFetcher{client: safehttp.Client(10*time.Second, resolverPolicy())}
+}
+
+func resolverPolicy() safehttp.Policy {
+	var hosts []string
+	for _, h := range strings.Split(os.Getenv("OID4VP_RESOLVER_ALLOWED_HOSTS"), ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return safehttp.Policy{
+		AllowedHosts: hosts,
+		// Dev and CI stacks publish issuers and peers on localhost ports; a
+		// deployment that does is pointing the resolver at its own admin surface.
+		AllowLoopback: os.Getenv("OID4VP_RESOLVER_ALLOW_LOOPBACK") == "true",
+	}
 }
 
 // resolveIssuerKeys produces the JWKS an issuer's signature is verified

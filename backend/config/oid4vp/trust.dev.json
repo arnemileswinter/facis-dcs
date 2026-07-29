@@ -3,7 +3,7 @@
     "urn:dcs:poa:v1",
     "urn:dcs:pid:demo:v1"
   ],
-  "peer_dynamic": true,
+  "peer_dynamic": false,
   "issuers": {
     "did:web:dev.example:issuer:poa": {
       "purposes": [

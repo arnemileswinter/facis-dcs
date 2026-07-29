@@ -99,24 +99,34 @@ credentials could satisfy the ceremony here. Until a counterparty-PoA path
 exists, `peer` should be granted to the issuers whose PoAs may authorize a
 signature **on this instance** — in the demonstration, its own.
 
-**Peers are not enumerated.** Listing every counterparty issuer here would mean
-editing this file on every instance whenever a federation member is onboarded —
-an allowlist wearing federation's clothes. Whether this instance deals with a
-peer at all is already decided dynamically and fail-closed by the ADR-19 trust
-gate: the peer's self-signed agreement credential must verify against its own
-`did.json` and carry this instance's federation rules hash, and the local policy
-endpoint (`DCS_TRUST_PDP_URL`) must approve the interaction. Duplicating that
-decision as static configuration would give it two sources of truth that drift.
+**Peers are not enumerated, and `peer_dynamic` ships off.** `peer_dynamic` lets
+a did:web-resolvable issuer be verified without an entry, with its key taken from
+its own DID document, bounded by the identifier: an issuer at `did:web:X:issuer`
+may attest `did:web:X` and nothing else. It was added because listing every
+counterparty issuer is an allowlist wearing federation's clothes — whether this
+instance deals with a peer at all is already decided fail-closed by the ADR-19
+trust gate (the peer's self-signed agreement credential must verify against its
+own `did.json` and carry this instance's federation rules hash) and by the local
+policy endpoint (`DCS_TRUST_PDP_URL`).
 
-So `peer_dynamic` lets a did:web-resolvable issuer be verified for peering
-without an entry, with its key taken from its own DID document. The bound comes
-from the identifier rather than a list: an issuer at `did:web:X:issuer` may
-attest `did:web:X` and nothing else. Authorization stays with the gate and the
-PDP; the verifier only establishes that the credential is authentic and that the
-issuer spoke for its own party.
+That reasoning is about *membership*, and it does not transfer to `peer`. Given
+what `peer` gates today, trusting an unlisted issuer there does not admit a
+counterparty — it lets a party authorize a signature on this instance off a
+document it publishes about itself, which is self-attestation with extra steps.
+The two questions are separate: the gate decides who we deal with, the trust
+entry decides whose attestation may authorize a signature here. So the default is
+`false`, and it stays false until a counterparty-PoA path exists to give the
+setting a meaning that matches its name.
 
-`login` is deliberately **not** dynamic. Who may obtain a session on this
-deployment is local policy, and an operator states it explicitly.
+The flag also turns a credential's `iss` into a server-side fetch. Resolution
+therefore refuses redirects and will not dial loopback, link-local or multicast
+addresses — the cloud metadata endpoint is not a DID registry —, and
+`OID4VP_RESOLVER_ALLOWED_HOSTS` narrows it to a named set where a deployment
+wants that. Private ranges stay reachable because an in-cluster peer or ORCE
+resolver genuinely lives there.
+
+`login` is likewise deliberately **not** dynamic. Who may obtain a session on
+this deployment is local policy, and an operator states it explicitly.
 
 ### Organization binding
 
