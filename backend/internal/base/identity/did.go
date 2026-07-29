@@ -108,10 +108,14 @@ type VerificationMethod struct {
 
 type DIDDocument struct {
 	VerificationMethod []VerificationMethod `json:"verificationMethod"`
-	KeyAgreement       []string             `json:"keyAgreement"`
-	didContent         map[string]interface{}
-	signer             crypto.Signer
-	publicKey          *ecdsa.PublicKey
+	// AssertionMethod names which of those methods may make assertions. DID Core
+	// entries are either a reference (the method's id) or the method embedded
+	// inline, so both shapes are read.
+	AssertionMethod []any    `json:"assertionMethod"`
+	KeyAgreement    []string `json:"keyAgreement"`
+	didContent      map[string]interface{}
+	signer          crypto.Signer
+	publicKey       *ecdsa.PublicKey
 }
 
 // NewDIDDocument loads a DID document from disk and binds it to the given HSM

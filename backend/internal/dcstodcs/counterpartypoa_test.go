@@ -1,6 +1,7 @@
 package dcstodcs
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -49,9 +50,9 @@ func shippedEvidence(organizations ...string) ShippedSignatures {
 		vcs = append(vcs, summaryVC(org, signatory))
 	}
 	return ShippedSignatures{
-		Evidence:           []byte("[" + strings.Join(vcs, ",") + "]"),
-		VerificationMethod: testSignedParty + "#dcs-vc",
-		VerifyVC:           func(json.RawMessage) error { return nil },
+		Evidence:   []byte("[" + strings.Join(vcs, ",") + "]"),
+		ResolveKey: func(string) (*ecdsa.PublicKey, error) { return nil, nil },
+		VerifyVC:   func(json.RawMessage, *ecdsa.PublicKey) error { return nil },
 	}
 }
 
@@ -107,7 +108,7 @@ func TestCounterpartyPoAGate_ContractRecordsADifferentAuthorizationIsRefused(t *
 
 func TestCounterpartyPoAGate_UnreadableSigningEvidenceIsRefused(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
-	err := gate.Check(testSignedParty, ShippedSignatures{Evidence: []byte("not json"), VerifyVC: func(json.RawMessage) error { return nil }}, []SignatoryPoA{
+	err := gate.Check(testSignedParty, ShippedSignatures{Evidence: []byte("not json"), ResolveKey: func(string) (*ecdsa.PublicKey, error) { return nil, nil }, VerifyVC: func(json.RawMessage, *ecdsa.PublicKey) error { return nil }}, []SignatoryPoA{
 		{Party: testSignedParty, Presentation: "irrelevant"},
 	})
 	assert.Contains(t, gateError(t, err).Error(), "decode signing evidence")

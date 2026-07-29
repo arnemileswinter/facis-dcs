@@ -2,6 +2,7 @@ package dcstodcs
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -121,11 +122,10 @@ type ShippedSignatures struct {
 	// contract payload already was. Absent, the gate denies rather than
 	// accepting unverified claims — the same way a missing trust configuration
 	// denies rather than waving credentials through.
-	VerifyVC func(vc json.RawMessage) error
-	// VerificationMethod is the id the peer's proofs must name, so a summary
-	// signed with some other key the peer publishes is refused rather than
-	// verified against a key it does not claim.
-	VerificationMethod string
+	VerifyVC func(vc json.RawMessage, key *ecdsa.PublicKey) error
+	// ResolveKey turns the verification method a proof names into the key to
+	// check it with, refusing one the peer does not publish for assertions.
+	ResolveKey func(verificationMethodID string) (*ecdsa.PublicKey, error)
 }
 
 // Check verifies each shipped Power of Attorney against the peer's own signing
@@ -246,7 +246,7 @@ type signedParty struct {
 // summary's field_name IS the organization its Power of Attorney must authorize,
 // and credentialSubject.id is the signatory it must be held by.
 func signedPartiesOf(signed ShippedSignatures) (map[string]signedParty, error) {
-	if signed.VerifyVC == nil {
+	if signed.VerifyVC == nil || signed.ResolveKey == nil {
 		return nil, fmt.Errorf("no means to verify the peer's signing evidence, so nothing it claims can be believed")
 	}
 	if len(signed.Evidence) == 0 {
@@ -306,16 +306,20 @@ func verifySummary(signed ShippedSignatures, raw json.RawMessage, organization s
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return fmt.Errorf("decode signing evidence proof for %q: %w", organization, err)
 	}
-	if signed.VerificationMethod != "" && envelope.Proof.VerificationMethod != signed.VerificationMethod {
-		return fmt.Errorf("signing evidence for %q names verification method %q, not the peer's %q",
-			organization, envelope.Proof.VerificationMethod, signed.VerificationMethod)
+	// The proof says which key made it; the peer's document says whether that key
+	// may make assertions. Guessing the id from our own key label instead worked
+	// only while every peer ran this software — DID Core puts no meaning in the
+	// fragment, so an interoperable peer names its keys whatever it likes.
+	key, err := signed.ResolveKey(envelope.Proof.VerificationMethod)
+	if err != nil {
+		return fmt.Errorf("signing evidence for %q: %w", organization, err)
 	}
 	// A credential is an assertion; a proof made for any other purpose does not
 	// establish one (W3C VC Data Integrity).
 	if purpose := envelope.Proof.ProofPurpose; purpose != "" && purpose != "assertionMethod" {
 		return fmt.Errorf("signing evidence for %q carries a proof for %q, not assertionMethod", organization, purpose)
 	}
-	if err := signed.VerifyVC(raw); err != nil {
+	if err := signed.VerifyVC(raw, key); err != nil {
 		return fmt.Errorf("signing evidence for %q does not verify against the peer's key: %w", organization, err)
 	}
 	return nil

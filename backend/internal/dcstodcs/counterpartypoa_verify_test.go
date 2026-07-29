@@ -1,6 +1,7 @@
 package dcstodcs
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,9 +20,9 @@ func signedEvidence(t *testing.T, proofMethod, proofPurpose string) ShippedSigna
 	  "proof": {"type": "DataIntegrityProof", "verificationMethod": "` + proofMethod + `", "proofPurpose": "` + proofPurpose + `"}
 	}`
 	return ShippedSignatures{
-		Evidence:           []byte("[" + vc + "]"),
-		VerificationMethod: testSignedParty + "#dcs-vc",
-		VerifyVC:           func(json.RawMessage) error { return nil },
+		Evidence:   []byte("[" + vc + "]"),
+		ResolveKey: func(string) (*ecdsa.PublicKey, error) { return nil, nil },
+		VerifyVC:   func(json.RawMessage, *ecdsa.PublicKey) error { return nil },
 	}
 }
 
@@ -36,17 +37,27 @@ func TestSigningEvidenceMustBeVerifiable(t *testing.T) {
 	assert.Contains(t, gateError(t, err).Error(), "no means to verify")
 }
 
-// A proof made with some other key the peer publishes must not be checked
-// against the one we resolved for credential signing.
-func TestSigningEvidenceMustNameThePeersCredentialKey(t *testing.T) {
+// The key is resolved from the method the PROOF names, and a peer that does not
+// publish that method as one which may make assertions is refused. Deriving the
+// id from our own key label instead only worked while every peer ran this
+// software: DID Core puts no meaning in the fragment.
+func TestSigningEvidenceKeyComesFromTheProofAndMustBeAuthorized(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check(testSignedParty, signedEvidence(t, testSignedParty+"#dev-key-1", "assertionMethod"),
-		[]SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
+	shipped := signedEvidence(t, testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")
+	var asked string
+	shipped.ResolveKey = func(id string) (*ecdsa.PublicKey, error) {
+		asked = id
+		return nil, assertErr("not listed as an assertionMethod")
+	}
+
+	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
 
 	require.Error(t, err)
-	assert.Contains(t, gateError(t, err).Error(), "names verification method")
+	assert.Equal(t, testSignedParty+"#whatever-this-peer-calls-it", asked,
+		"the method to resolve must come from the proof, not from our own key label")
+	assert.Contains(t, gateError(t, err).Error(), "not listed as an assertionMethod")
 	assert.Empty(t, seen)
 }
 
@@ -71,7 +82,7 @@ func TestUnverifiableSigningEvidenceIsRefusedBeforeItsClaimsAreUsed(t *testing.T
 	gate := acceptingGate(&seen)
 
 	shipped := signedEvidence(t, testSignedParty+"#dcs-vc", "assertionMethod")
-	shipped.VerifyVC = func(json.RawMessage) error { return assertErr("bad signature") }
+	shipped.VerifyVC = func(json.RawMessage, *ecdsa.PublicKey) error { return assertErr("bad signature") }
 
 	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
 
