@@ -113,7 +113,7 @@ func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *
 		return nil, err
 	}
 
-	issuerClaims, err := sdjwt.VerifyCredentialForPID(presentation.IssuerJWT, presentation.Disclosures, trust)
+	issuerClaims, err := sdjwt.VerifyCredentialForPID(presentation.IssuerJWT, presentation.Disclosures, trust.For(purpose))
 	if err != nil {
 		return nil, err
 	}

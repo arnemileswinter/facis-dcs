@@ -152,16 +152,22 @@ the identity credential it later accepts as proof of who signed; that is the
 relying party attesting to itself, and no signature over it means anything
 about the signatory.
 
-For the demo this is approximated honestly rather than faked: a PID issuer
-distinct from either DCS issuer, with its **own** trust anchor, trusted only
-for `pid`, and presenting its credentials with an `x5c` chain the way a real
-EUDI PID does. That exercises the real code path — chain validation against
-configured roots — instead of the bare-JWK shortcut, so swapping in a genuine
-national or QTSP issuer is a configuration change.
+For the demo this is approximated honestly rather than faked: a PID issuer that
+is a separate release with its **own** key and its **own** DID
+(`did:web:<host>:pid-issuer`), serving both instances the way a national or QTSP
+issuer would, and trusted by each for `pid` and nothing else. It issues
+`urn:eudi:pid:de:1` describing a person — given name, family name, date of birth
+— and carries neither roles nor an organization, because authority to act for a
+party is what a PoA is for and an identity document must not grant permissions.
 
-Until such an issuer is deployed, `pid` has no trusted entry and the ceremony
-refuses. That is the correct behaviour: a QES claim with no third-party
-identity attestation is not a QES claim.
+Because mechanism is configuration, the demo issuer and a real one differ only
+in a trust entry: the demo publishes through `did:web`, a genuine EUDI PID
+arrives with an `x5c` chain, and the same verification path serves both. That is
+what makes this a stepping stone rather than a mock to be thrown away.
+
+What it is not: a real identity proofing process. Nobody checks that the person
+is who the form says. The demo shows the *shape* — a third party attests, the
+relying party verifies — and the substance arrives with a real issuer.
 
 ## Consequences
 
