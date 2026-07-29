@@ -45,6 +45,10 @@ type DCSToDCSSynchronizer struct {
 	Artifacts   *artifactstore.Store
 	DIDDocument identity.DIDDocument
 	TrustGate   TrustGate
+	// PoAs supplies the Power of Attorney behind each signature this instance
+	// applied, shipped so the counterparty can verify the authority to sign
+	// rather than read an unbacked claim off the contract (ADR-31).
+	PoAs SignatoryPoAs
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
@@ -221,7 +225,12 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return err
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, recipients)
+	signatoryPoAs, err := s.poaEvidenceForSignedContract(ctx, state, did)
+	if err != nil {
+		return err
+	}
+
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -290,7 +299,24 @@ func (s *DCSToDCSSynchronizer) jadesForSignedContract(state string, contractData
 	return signature, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, recipients []string) error {
+// poaEvidenceForSignedContract returns the Power of Attorney behind every
+// signature this instance applied, for the ships where a signature exists at
+// all (ADR-31). A proposal carries none because nothing has been signed yet.
+func (s *DCSToDCSSynchronizer) poaEvidenceForSignedContract(ctx context.Context, state, did string) ([]SignatoryPoA, error) {
+	if s.PoAs == nil {
+		return nil, nil
+	}
+	if state != contractstate.Signed.String() && state != contractstate.Revoked.String() {
+		return nil, nil
+	}
+	evidence, err := s.PoAs.ForContract(ctx, did)
+	if err != nil {
+		return nil, fmt.Errorf("read power-of-attorney evidence for %s: %w", did, err)
+	}
+	return evidence, nil
+}
+
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, recipients []string) error {
 	for _, peer := range recipients {
 		if peer == localPeer {
 			continue
@@ -341,6 +367,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			JadesSignature: &jadesSignature,
 			ContractState:  &state,
 			WrappedCek:     WireWrappedCEK(wrappedCEK),
+			SignatoryPoas:  WireSignatoryPoAs(signatoryPoAs),
 		}); err != nil {
 			return err
 		}

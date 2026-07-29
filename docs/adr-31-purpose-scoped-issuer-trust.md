@@ -67,7 +67,7 @@ Two further requirements land on the same structure:
 | purpose | meaning |
 |---|---|
 | `login` | may grant a session on **this** instance |
-| `peer` | its credentials may be verified in a signing ceremony |
+| `peer` | its credentials may be verified in a signing ceremony, and its attestation of a counterparty's authority to sign is believed |
 | `pid` | may attest the identity of a natural person (signing ceremonies, QES) |
 
 Purposes are configuration, not policy baked into the code. **An operator
@@ -88,16 +88,63 @@ A credential from issuer B is refused at A's login because A's operator granted
 it nothing — not because the code says so. A different deployment granting
 `login` to five issuers is equally valid and needs no code change.
 
-**What `peer` actually gates today.** It is the purpose used when a signing
-ceremony verifies the Power of Attorney presented at it. That is the *local*
-signatory's PoA: no code path verifies a counterparty's PoA, so the mutual
-binding this ADR was written to describe does not exist yet.
+### The mutual binding
 
-Saying otherwise is not harmless. If an operator followed an instruction to
-grant `peer` to a counterparty's issuer, a holder of that counterparty's
-credentials could satisfy the ceremony here. Until a counterparty-PoA path
-exists, `peer` should be granted to the issuers whose PoAs may authorize a
-signature **on this instance** — in the demonstration, its own.
+A signature is applied on one instance and read on the other. Until now only its
+*claim* crossed: sealing an agreement stamps `dcs:hasPowerOfAttorney` onto the
+signing party's node, and the receiving instance could read that IRI but had
+nothing to check it against — a peer asserting its own authority.
+
+**The credential now travels with the signature.** The ceremony retains the
+Power of Attorney the signatory presented, next to the PID presentation it
+already stored, and the synchronizer ships it with the contract once that
+contract carries signatures (`signatory_poas` on the PDF ship). The receiver
+verifies it before it persists anything of the ship:
+
+- the issuer is trusted for `peer` and entitled to attest that organization,
+- the credential's `vct`, signature and validity window hold,
+- its **status list** says it is not revoked,
+- the credential authorizes exactly the party that signed, and is held by
+  exactly the signatory that party's node records.
+
+The one part that cannot travel is the key-binding JWT. It proves a holder
+answered a *specific* request, with a nonce and an audience issued by the
+verifier that asked; the receiving instance never asked, so it re-derives
+nothing from that segment. The holder binding it does check is the credential's
+own (`sub` against `cnf.jwk`) plus the requirement that this holder is the
+recorded signatory.
+
+**What that establishes, precisely: an attestation of authority.** An issuer
+this instance trusts, entitled to speak for that organization, says the holder
+may act for it, and has not revoked it. It does **not** establish who the human
+is — no identity proofing crosses the boundary, and the PID that identified the
+signatory was verified on the instance where the ceremony ran, against that
+instance's trust anchors. A counterparty's DCS is still trusted to have run its
+own ceremony honestly; what it can no longer do is assert an authority nobody
+issued.
+
+**Failure is asymmetric, deliberately.** Evidence that is present and does not
+verify refuses the exchange and raises a trust-gate denial incident, like any
+other denial (ADR-19). Evidence that is **absent** does not: a peer that retains
+none must still federate, and a party that signed without a Power of Attorney is
+what the Signature Compliance Viewer has always reported from the contract
+itself. Turning absence into a hard failure would convert a finding into an
+outage.
+
+**What `peer` gates, and why it is now overloaded.** The purpose is used in two
+places: a signing ceremony verifying the Power of Attorney presented at it, and
+the receiving instance verifying a counterparty's. Those are different
+questions — "whose attestation may authorize a signature **here**" and "whose
+attestation of a **peer's** authority do we believe" — and federation now
+requires the second: instance A must grant B's issuer `peer` for B's signatures
+to be accepted at all.
+
+Granting it also lets a holder of a B-issued credential satisfy a signing
+ceremony on A, which is the hazard the earlier revision of this ADR warned
+about. One purpose cannot honestly serve both, and the split is an **open
+point**: `peer` should mean the counterparty attestation only, with the local
+ceremony moved to a purpose of its own. Until that lands, an operator granting
+`peer` to a counterparty's issuer is accepting that second meaning too.
 
 **Peers are not enumerated, and `peer_dynamic` ships off.** `peer_dynamic` lets
 a did:web-resolvable issuer be verified without an entry, with its key taken from
@@ -109,14 +156,13 @@ trust gate (the peer's self-signed agreement credential must verify against its
 own `did.json` and carry this instance's federation rules hash) and by the local
 policy endpoint (`DCS_TRUST_PDP_URL`).
 
-That reasoning is about *membership*, and it does not transfer to `peer`. Given
-what `peer` gates today, trusting an unlisted issuer there does not admit a
-counterparty — it lets a party authorize a signature on this instance off a
-document it publishes about itself, which is self-attestation with extra steps.
-The two questions are separate: the gate decides who we deal with, the trust
-entry decides whose attestation may authorize a signature here. So the default is
-`false`, and it stays false until a counterparty-PoA path exists to give the
-setting a meaning that matches its name.
+That membership argument now genuinely applies to one half of `peer` — the
+counterparty attestation the path above verifies. It does not apply to the
+other half, and while a single purpose carries both, enabling the flag would
+let a party authorize a signature **on this instance** off a document it
+publishes about itself, which is self-attestation with extra steps. So the
+default stays `false`, and what unblocks it is the purpose split, not this
+verification path on its own.
 
 The flag also turns a credential's `iss` into a server-side fetch. Resolution
 therefore refuses redirects and will not dial loopback, link-local or multicast
@@ -236,11 +282,22 @@ relying party verifies — and the substance arrives with a real issuer.
 - The demo can state a defensible trust story: each instance grants access only
   on its own issuer's word, and treats identity as something a third party
   attests.
-- Mutual Power-of-Attorney binding across instances is **not** implemented. The
-  purpose that would carry it exists; the verification path does not. Naming
-  that here is the point — the earlier version of this ADR described the
-  binding as though it were built, which would have led an operator to grant a
-  counterparty's issuer the purpose that authorizes a signature locally.
+- Mutual Power-of-Attorney binding across instances is implemented, and it
+  changes what an operator must configure: a counterparty's signatures are only
+  accepted where that counterparty's issuer is trusted for `peer` and entitled
+  to its organization. A federation member added without that entry has its
+  signed ships refused, with an incident naming why.
+- `peer` carries two meanings until it is split, and granting it to a
+  counterparty's issuer grants both. That is the one thing this ADR still asks
+  an operator to accept knowingly.
+- Retained evidence is a holder-bound token at rest. It lives on the signing
+  ceremony, next to the PID presentation already stored there, so it inherits
+  that record's lifetime — including the fact that a contract erasure shreds
+  content-encryption keys and does not reach ceremony rows.
+- A credential is verified as received, not as of the moment it was used. A
+  Power of Attorney that expires or is revoked after the signature makes later
+  ships of that same contract fail closed. That is the correct reading of
+  revocation, and it means a PoA's lifetime has to outlive the exchange.
 - QES remains blocked on identity proofing. There is now a third-party PID
   issuer and the chain-validation path it exercises is the real one, but nobody
   verifies that the person is who the form says. The architecture no longer

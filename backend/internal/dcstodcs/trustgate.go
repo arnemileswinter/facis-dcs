@@ -38,6 +38,10 @@ type GateFailureKind int
 const (
 	AgreementFailure GateFailureKind = iota
 	PolicyFailure
+	// PoAFailure is a counterparty whose shipped Power-of-Attorney evidence
+	// does not verify (ADR-31). Inbound only, and terminal: the peer must ship
+	// evidence that verifies, which no retry of the same ship will produce.
+	PoAFailure
 )
 
 // GateError is returned by TrustGate.Check on any rejection, naming which of

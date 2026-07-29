@@ -25,6 +25,15 @@ var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
 	Required("alg", "epk", "wrapped")
 })
 
+var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {
+	Description("The Power of Attorney a signatory presented at the ceremony on the shipping instance, carried so the receiver can verify a counterparty's authority to sign instead of taking the contract's dcs:hasPowerOfAttorney claim on trust (ADR-31, UC-14). The receiver re-derives the party and its signatory from the shipped contract itself, so these fields are checked against it rather than believed.")
+
+	Attribute("party", String, "The party (organization) the credential authorizes, matching a dcs:parties node of the shipped contract")
+	Attribute("presentation", String, "The dc+sd-jwt Power of Attorney exactly as the signatory's wallet delivered it at the ceremony")
+
+	Required("party", "presentation")
+})
+
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Description("A contract PDF shipped to the counterparty (ADR-13). The PDF is the wire format: it carries the machine-readable JSON-LD, the C2PA provenance chain, and any signatures. A bare PDF is a proposal (offer or negotiation counter); a PDF accompanied by a JAdES is a signature (acceptance).")
 
@@ -37,6 +46,7 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
+	Attribute("signatory_poas", ArrayOf(DCSToDCSSignatoryPoA), "The Power of Attorney behind each signature the shipping instance applied, sent once the contract carries signatures. Present-but-unverifiable evidence is refused (ADR-31); absent evidence is accepted and left to the compliance viewer, so a peer that retains none can still federate")
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })

@@ -119,6 +119,10 @@ type PresentationCmd struct {
 	PidClaims       any
 	PoAOrganization string
 	PoARoles        any
+	// PoAVpToken is the Power-of-Attorney presentation as the wallet delivered
+	// it, retained so the counterparty can verify this signature's authority
+	// for itself rather than reading an unbacked claim (ADR-31).
+	PoAVpToken string
 }
 
 // PresentationHandler records a verified PID+PoA presentation and marks the
@@ -185,7 +189,16 @@ func (h *PresentationHandler) CompletePresentation(ctx context.Context, cmd Pres
 		}
 	}
 
-	if err := h.CeremonyRepo.MarkCeremonyVerified(ctx, tx, cmd.CeremonyID, signerDID, cmd.VpToken, pidBytes, sdHash, poaOrganization, poaRoles); err != nil {
+	if err := h.CeremonyRepo.MarkCeremonyVerified(ctx, tx, db.VerifiedPresentation{
+		CeremonyID:      cmd.CeremonyID,
+		SignerDID:       signerDID,
+		VpToken:         cmd.VpToken,
+		PidClaims:       pidBytes,
+		KbSdHash:        sdHash,
+		PoAOrganization: poaOrganization,
+		PoARoles:        poaRoles,
+		PoAVpToken:      strings.TrimSpace(cmd.PoAVpToken),
+	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

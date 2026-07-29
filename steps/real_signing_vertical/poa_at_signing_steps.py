@@ -18,6 +18,7 @@ import json
 from behave import given, then, when
 
 from steps.support.api_client import (
+    contract_peer_pdf_url,
     post_json,
     signature_compliance_url,
     signature_request_url,
@@ -125,6 +126,120 @@ def step_when_tamper_counterparty_poa(context, name):
     })
     cursor.execute("UPDATE contracts SET contract_data = %s WHERE did = %s", (json.dumps(doc), did))
     context.db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Mutual Power-of-Attorney binding across instances (ADR-31): the shipping
+# instance carries the credential behind each signature it applied, and the
+# receiver verifies it instead of reading the contract's dcs:hasPowerOfAttorney
+# claim as though a peer's own assertion were evidence.
+# ---------------------------------------------------------------------------
+
+
+def _poa_presentation_from_untrusted_issuer(organization: str) -> str:
+    """A structurally genuine Power of Attorney authorizing organization, issued
+    by an issuer no instance configures — the honest "present but does not
+    verify" case, and the one an operator most plausibly meets: a counterparty
+    whose issuer was never granted the `peer` purpose here."""
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
+    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
+
+    import os  # noqa: PLC0415
+
+    keys = AuthService.load_wallet_keys()
+    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
+    return issue_access_credential(
+        organization=organization,
+        roles=["Contract Signer"],
+        issuer_private=keys.issuer_private,
+        wallet_private=keys.wallet_private,
+        issuer_did="did:web:untrusted-poa-issuer.example:issuer:poa",
+        statuslist_service_base=status_base,
+        statuslist_tenant=BDD_CREDENTIAL_TENANT,
+        aud="https://the-counterparty.example",
+        nonce="a-nonce-this-instance-never-issued",
+    )
+
+
+@when('that peer ships contract "{name}"\'s PDF with a Power of Attorney that does not verify')
+def step_when_peer_ships_pdf_with_bad_poa(context, name):
+    """The synthetic peer ships this instance's own signed PDF back, claiming
+    the signature it carries was authorized by a credential this instance
+    cannot verify (see dcs_peer_trust_steps.py for the peer identity)."""
+    from steps.peer_trust.dcs_peer_trust_steps import _post_pdf_payload  # noqa: PLC0415
+
+    party_did = ContractService._local_peer_did(context)
+    payload = _post_pdf_payload(context, name)
+    payload["signatory_poas"] = [
+        {"party": party_did, "presentation": _poa_presentation_from_untrusted_issuer(party_did)}
+    ]
+    context.requests_response = post_json(context, contract_peer_pdf_url(context), payload, headers={})
+
+
+@then("the PDF is rejected because the counterparty's Power of Attorney does not verify")
+def step_then_pdf_rejected_counterparty_poa(context):
+    resp = context.requests_response
+    assert resp.status_code != 200, (
+        f"Expected the ship to be refused: a Power of Attorney that is shipped and does not verify "
+        f"fails closed (ADR-31), got 200: {resp.text}"
+    )
+    body = resp.text.lower()
+    assert "power of attorney" in body, (
+        f"Expected the rejection to name the Power of Attorney specifically, not some other "
+        f"non-200 outcome, got {resp.status_code}: {resp.text}"
+    )
+
+
+@then("instance B holds instance A's signature with its Power of Attorney verified")
+def step_then_counterparty_poa_verified_on_b(context):
+    """Instance B accepted a signature ship that carried A's Power of Attorney.
+    B verifies that credential before it persists anything of the ship, so the
+    stored provenance and the absence of a denial incident together say the
+    verification passed — a credential that did not verify would have refused
+    the exchange and raised one instead."""
+    import time  # noqa: PLC0415
+
+    import requests as _requests  # noqa: PLC0415
+
+    from steps.peer_trust.dcs_trust_pdp_steps import _count_trust_gate_incidents  # noqa: PLC0415
+
+    c_did = context.cross_instance_contract_did
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_b)
+
+    party = None
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        resp = _requests.get(
+            f"{context.base_url_b}/contract/retrieve/{c_did}",
+            headers=manager_h,
+            timeout=context.http_timeout_seconds,
+        )
+        if resp.status_code == 200:
+            nodes = (resp.json().get("contract_data") or {}).get("dcs:parties") or []
+            for node in nodes:
+                if isinstance(node, dict) and node.get("@id") == context.peer_did_a and node.get("dcs:hasSignatory"):
+                    party = node
+                    break
+        if party:
+            break
+        time.sleep(2)
+
+    assert party, (
+        f"Expected instance B to hold instance A ({context.peer_did_a}) as a signed party of {c_did}; "
+        "a refused Power of Attorney would have blocked the whole ship"
+    )
+    authorized_by = party.get("dcs:hasPowerOfAttorney")
+    if isinstance(authorized_by, dict):
+        authorized_by = authorized_by.get("@id")
+    assert authorized_by == context.peer_did_a, (
+        f"Expected the signed party to be authorized for itself, got: {authorized_by}"
+    )
+
+    denials = _count_trust_gate_incidents(context, contract_did=c_did, api_base=context.base_url_b)
+    assert not denials, (
+        f"Expected instance B to record no trust-gate denial for {c_did}, got: {denials}"
+    )
 
 
 @then('an audit event records the Power of Attorney finding for contract "{name}"')

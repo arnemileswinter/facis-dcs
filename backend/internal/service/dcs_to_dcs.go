@@ -48,6 +48,7 @@ type dcsToDcssrvc struct {
 	Artifacts   *artifactstore.Store
 	PDFCore     *pdfcore.Client
 	TrustGate   trustgate.TrustGate
+	PoAGate     trustgate.CounterpartyPoAGate
 	Shredder    trustgate.ScopeShredder
 	Parties     trustgate.ContractParties
 	auth.JWTAuthenticator
@@ -58,7 +59,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, syncRepo db2.SyncRepository,
 	trustPool *identity.EUTrustPool,
 	didDocument identity.DIDDocument, artifacts *artifactstore.Store, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate,
-	shredder trustgate.ScopeShredder) dcstodcs.Service {
+	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder) dcstodcs.Service {
 
 	return &dcsToDcssrvc{
 		JWTAuthenticator: jwtAuth,
@@ -75,6 +76,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		Artifacts:        artifacts,
 		PDFCore:          pdfCore,
 		TrustGate:        trustGate,
+		PoAGate:          poaGate,
 		Shredder:         shredder,
 		Parties:          &trustgate.DBContractParties{DB: db, CRepo: cRepo},
 	}
@@ -167,6 +169,25 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
 		}
 		syncSignature = verified
+	}
+
+	// Counterparty Power of Attorney (ADR-31, UC-14): the peer ships the
+	// credential behind each signature it applied, and this instance verifies it
+	// against the contract the same ship carried — issuer trusted for `peer` and
+	// entitled to the organization, not revoked, held by the signatory recorded
+	// for that party. Present-but-unverifiable evidence refuses the exchange like
+	// any other trust-gate denial; absent evidence does not, so a peer that
+	// retains none still federates and the compliance viewer keeps reporting a
+	// party that signed without one.
+	if err := s.PoAGate.Check(req.FromPeerDid, payload, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+		var gateErr *trustgate.GateError
+		if errors.As(err, &gateErr) {
+			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
+				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
+			}
+		}
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
 	}
 
 	// The sender's declared contract state is informational except for

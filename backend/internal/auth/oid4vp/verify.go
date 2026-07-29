@@ -150,19 +150,31 @@ func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *
 	}, nil
 }
 
-func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustConfig, purpose Purpose) (*VerifiedLoginClaims, error) {
+// verifiedDocument is a dc+sd-jwt credential verified as a DOCUMENT: issuer
+// signature, issuer trust for the purpose at hand, vct, validity window,
+// disclosure integrity, the holder binding between sub and cnf.jwk, and the
+// issuer's entitlement to name the organization it names.
+//
+// What it deliberately does not cover is the KB-JWT, the only part of a
+// presentation that says its holder is here NOW, answering THIS request: that
+// binds to a nonce and an audience only the verifier that issued them can
+// check.
+type verifiedDocument struct {
+	IssuerID     string
+	SubjectDID   string
+	Organization string
+	Roles        []string
+	CNFJWK       sdjwt.JWK
+	RawClaims    json.RawMessage
+}
+
+func verifyCredentialDocument(issuerJWT string, disclosures []string, trust *TrustConfig, purpose Purpose) (*verifiedDocument, error) {
 	if trust == nil {
 		return nil, fmt.Errorf("trust config is not configured")
 	}
 
-	// Parse SD-JWT~disclosures~KB-JWT presentation.
-	presentation, err := sdjwt.ParsePresentation(vpToken)
-	if err != nil {
-		return nil, err
-	}
-
 	// Verify issuer signature, header.jwk trust, vct/exp/iat, merge disclosures.
-	issuerClaims, err := sdjwt.VerifyCredential(presentation.IssuerJWT, presentation.Disclosures, trust.For(purpose))
+	issuerClaims, err := sdjwt.VerifyCredential(issuerJWT, disclosures, trust.For(purpose))
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +193,6 @@ func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustC
 	}
 
 	err = sdjwt.HolderSubjectMatches(sub, cnfJWK)
-	if err != nil {
-		return nil, err
-	}
-
-	// KB-JWT: signature via cnf.jwk; payload aud, nonce, sd_hash.
-	err = sdjwt.VerifyKB(presentation.KBJWT, presentation.SDHash, cnfJWK, sub, ctx.Nonce, ctx.ClientID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,12 +221,44 @@ func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustC
 		return nil, err
 	}
 
+	return &verifiedDocument{
+		IssuerID:     issuerID,
+		SubjectDID:   sub,
+		Organization: organization,
+		Roles:        roles,
+		CNFJWK:       cnfJWK,
+		RawClaims:    raw,
+	}, nil
+}
+
+func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustConfig, purpose Purpose) (*VerifiedLoginClaims, error) {
+	if trust == nil {
+		return nil, fmt.Errorf("trust config is not configured")
+	}
+
+	// Parse SD-JWT~disclosures~KB-JWT presentation.
+	presentation, err := sdjwt.ParsePresentation(vpToken)
+	if err != nil {
+		return nil, err
+	}
+
+	document, err := verifyCredentialDocument(presentation.IssuerJWT, presentation.Disclosures, trust, purpose)
+	if err != nil {
+		return nil, err
+	}
+
+	// KB-JWT: signature via cnf.jwk; payload aud, nonce, sd_hash.
+	err = sdjwt.VerifyKB(presentation.KBJWT, presentation.SDHash, document.CNFJWK, document.SubjectDID, ctx.Nonce, ctx.ClientID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &VerifiedLoginClaims{
-		IssuerID:       issuerID,
-		SubjectDID:     sub,
-		ParticipantDID: organization,
-		Roles:          roles,
-		RawClaims:      raw,
+		IssuerID:       document.IssuerID,
+		SubjectDID:     document.SubjectDID,
+		ParticipantDID: document.Organization,
+		Roles:          document.Roles,
+		RawClaims:      document.RawClaims,
 	}, nil
 }
 

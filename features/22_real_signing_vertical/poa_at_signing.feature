@@ -42,3 +42,39 @@ Feature: Power of Attorney at signing
     When the counterparty Power of Attorney on contract "PoA Counterparty Contract" is tampered to authorize a different organization
     Then the signature compliance for contract "PoA Counterparty Contract" raises a Power of Attorney finding
     And an audit event records the Power of Attorney finding for contract "PoA Counterparty Contract"
+
+  # ---------------------------------------------------------------------
+  # Mutual binding across instances (ADR-31). The scenarios above check what
+  # a contract SAYS about a counterparty's authority; these two check the
+  # evidence behind it. The shipping instance carries the Power of Attorney
+  # its signatory presented at the ceremony, and the receiver verifies it:
+  # issuer trusted for `peer` and entitled to that organization, credential
+  # not revoked, held by the signatory the contract records.
+  #
+  # Failing closed applies to evidence that is present and does not verify.
+  # Evidence that is ABSENT is accepted — a peer that retains none must still
+  # federate — and a party that signed without a Power of Attorney keeps being
+  # raised by the compliance viewer, as the scenario above requires.
+  # ---------------------------------------------------------------------
+
+  @DCS-FR-SM-04 @UC-14 @ADR-31 @two-instance
+  Scenario: A counterparty's Power of Attorney travels with its signature and is verified on the receiving instance
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance B holds instance A's signature with its Power of Attorney verified
+
+  @DCS-FR-SM-04 @UC-14 @ADR-31
+  Scenario: A ship whose Power of Attorney does not verify is refused and raises an incident
+    Given the local policy endpoint (PDP) is running and allows every request
+    And a cryptographically valid peer identity
+    And contract "PoA Evidence Contract" is APPROVED and has completed a signing ceremony for signatory "SignerPoaEvidence"
+    When the signer publishes the OID4VP signing request for contract "PoA Evidence Contract"
+    Then get http 200:Success code
+    When the wallet signs contract "PoA Evidence Contract" by consuming the OID4VP signing request as "SignerPoaEvidence"
+    Then the contract "PoA Evidence Contract" has completed signing
+    When that peer ships contract "PoA Evidence Contract"'s PDF with a Power of Attorney that does not verify
+    Then the PDF is rejected because the counterparty's Power of Attorney does not verify
+    And the interaction is denied and exactly one incident is recorded in the audit trail for contract "PoA Evidence Contract"

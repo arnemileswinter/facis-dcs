@@ -475,6 +475,11 @@ func main() {
 	// local policy endpoint, consulted on both the outbound (shipContractPDF,
 	// here) and inbound (PostPdf, service.NewDcsToDcs below) paths.
 	trustGate := dcstodcs2.TrustGate{PDPURL: os.Getenv("DCS_TRUST_PDP_URL")}
+	// Mutual Power-of-Attorney binding (ADR-31): the synchronizer ships the
+	// credential behind each signature this instance applied, and the gate
+	// verifies the credential a counterparty ships back.
+	ceremonyPoAs := &dcstodcs2.CeremonyPoAs{DB: db, CeremonyRepo: &smrepo.PostgresCeremonyRepo{}}
+	counterpartyPoAGate := dcstodcs2.CounterpartyPoAGate{Trust: authCfg.Trust}
 	dcsToDcsSynchronizer := dcstodcs2.DCSToDCSSynchronizer{
 		DB:          db,
 		CRepo:       &cweRepo,
@@ -482,6 +487,7 @@ func main() {
 		Artifacts:   artifactStore,
 		DIDDocument: *didDocument,
 		TrustGate:   trustGate,
+		PoAs:        ceremonyPoAs,
 	}
 	dcsToDcsSynchronizer.StartSynchronizerJob(ctx, cepSubClient)
 
@@ -712,7 +718,7 @@ func main() {
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, shredder)
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)

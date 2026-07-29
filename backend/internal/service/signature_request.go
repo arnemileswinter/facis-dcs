@@ -513,6 +513,7 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		PidClaims:       pidClaims,
 		PoAOrganization: strings.TrimSpace(verifiedPoA.ParticipantDID),
 		PoARoles:        verifiedPoA.Roles,
+		PoAVpToken:      poaPresentation,
 	})
 
 	if err != nil {
