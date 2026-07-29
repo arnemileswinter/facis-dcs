@@ -255,13 +255,14 @@ const exportBundle = async () => {
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
-                    <div>
+                    <div data-testid="contract-readonly-preview">
                       <TemplatePreview
                         :layout="dcsDraftStore.layout"
                         :blocks="dcsDraftStore.blocks"
                         :semantic-conditions="dcsDraftStore.semanticConditions"
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
+                        disabled
                       />
                     </div>
 

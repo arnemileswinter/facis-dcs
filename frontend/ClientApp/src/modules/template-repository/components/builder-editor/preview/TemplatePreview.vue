@@ -22,8 +22,15 @@ const props = withDefaults(
     semanticConditionValues?: SemanticConditionValue[]
     verificationResult?: VerificationResult | null
     setSemanticConditionValue?: SemanticConditionValueSetter
+    disabled?: boolean
   }>(),
-  { sectionLevel: 1, semanticConditionValues: () => [], verificationResult: null, setSemanticConditionValue: null },
+  {
+    sectionLevel: 1,
+    semanticConditionValues: () => [],
+    verificationResult: null,
+    setSemanticConditionValue: null,
+    disabled: false,
+  },
 )
 
 const hasBlockId = computed(() => props.blockId != null)
@@ -85,6 +92,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
         :semantic-condition-values="semanticConditionValues"
         :verification-result="verificationResult"
         :set-semantic-condition-value="setSemanticConditionValue"
+        :disabled="disabled"
       />
     </template>
   </template>
@@ -108,6 +116,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
             :semantic-condition-values="semanticConditionValues"
             :verification-result="verificationResult"
             :set-semantic-condition-value="setSemanticConditionValue"
+            :disabled="disabled"
           />
         </template>
       </PreviewSectionBlock>
@@ -123,6 +132,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
       :semantic-condition-values="semanticConditionValues"
       :verification-result="verificationResult"
       :set-semantic-condition-value="setSemanticConditionValue"
+      :disabled="disabled"
     />
   </template>
 </template>

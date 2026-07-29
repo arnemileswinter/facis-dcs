@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/identity"
@@ -63,6 +64,13 @@ type semanticBundleRefs struct {
 	CanonicalShapes string
 	Shapes          []string
 	Profile         string
+}
+
+func withCreationTimestamp(data db.Contract, evt contractevents.CreateEvent) (db.Contract, contractevents.CreateEvent) {
+	occurredAt := time.Now().UTC()
+	data.CreatedAt = occurredAt
+	evt.OccurredAt = occurredAt
+	return data, evt
 }
 
 func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs, error) {
@@ -227,7 +235,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		normalizedContractData = &seeded
 	}
 
-	data := db.Contract{
+	data, evt := withCreationTimestamp(db.Contract{
 		DID:             cmd.DID,
 		Origin:          localPeer,
 		CreatedBy:       cmd.CreatedBy,
@@ -238,7 +246,17 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		Name:            contractTemplate.Name,
 		Description:     contractTemplate.Description,
 		Responsible:     &resp,
-	}
+	}, contractevents.CreateEvent{
+		DID:          cmd.DID,
+		TemplateDID:  cmd.TemplateDID,
+		CreatedBy:    cmd.CreatedBy,
+		Name:         contractTemplate.Name,
+		Description:  contractTemplate.Description,
+		ContractData: normalizedContractData,
+		HolderDID:    cmd.HolderDID,
+		UserRoles:    cmd.UserRoles,
+		Responsible:  &resp,
+	})
 	err = h.CRepo.Create(ctx, tx, data)
 	if err != nil {
 		return fmt.Errorf("could not create contract: %w", err)
@@ -249,18 +267,6 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		return err
 	}
 
-	evt := contractevents.CreateEvent{
-		DID:          cmd.DID,
-		TemplateDID:  cmd.TemplateDID,
-		CreatedBy:    cmd.CreatedBy,
-		Name:         contractTemplate.Name,
-		Description:  contractTemplate.Description,
-		ContractData: normalizedContractData,
-		OccurredAt:   data.CreatedAt,
-		HolderDID:    cmd.HolderDID,
-		UserRoles:    cmd.UserRoles,
-		Responsible:  &resp,
-	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)

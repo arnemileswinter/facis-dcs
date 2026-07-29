@@ -122,7 +122,7 @@ const remove = async (identity: MachineIdentity) => {
 </script>
 
 <template>
-  <div data-testid="machine-identity-admin" class="flex flex-col gap-6 p-6">
+  <div data-testid="machine-identity-admin" class="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6 p-4 sm:p-6">
     <div>
       <h1 class="text-2xl font-semibold">System Users</h1>
       <p class="mt-1 opacity-70">
@@ -133,9 +133,14 @@ const remove = async (identity: MachineIdentity) => {
 
     <div v-if="error" data-testid="machine-identity-error" class="alert rounded-box alert-error">{{ error }}</div>
 
-    <section class="card bg-base-200">
-      <form class="card-body grid gap-3 md:grid-cols-2" @submit.prevent="save">
-        <h2 class="card-title md:col-span-2">{{ isEditing ? 'Change system user' : 'Register a system user' }}</h2>
+    <section class="card bg-base-200" aria-labelledby="system-user-configuration-heading">
+      <form class="card-body grid min-w-0 gap-3 md:grid-cols-2" @submit.prevent="save">
+        <h2 id="system-user-configuration-heading" class="card-title md:col-span-2">System user configuration</h2>
+        <p class="text-sm opacity-70 md:col-span-2">
+          {{
+            isEditing ? 'Change the selected API identity.' : 'Register a new API identity and issue its credential.'
+          }}
+        </p>
 
         <label class="form-control">
           <span class="label-text">Name</span>
@@ -183,7 +188,7 @@ const remove = async (identity: MachineIdentity) => {
           <span class="label-text">May call this deployment</span>
         </label>
 
-        <div class="flex gap-2 md:col-span-2">
+        <div class="flex flex-wrap gap-2 md:col-span-2">
           <button type="submit" data-testid="identity-save" :disabled="saving" class="btn btn-primary">
             {{ saving ? 'Saving…' : isEditing ? 'Save changes' : 'Register and issue credential' }}
           </button>
@@ -194,13 +199,14 @@ const remove = async (identity: MachineIdentity) => {
       </form>
     </section>
 
-    <section>
+    <section class="min-w-0" aria-labelledby="registered-system-users-heading">
+      <h2 id="registered-system-users-heading" class="mb-3 text-lg font-semibold">Registered system users</h2>
       <div v-if="loading" class="opacity-70">Loading…</div>
       <div v-else-if="identities.length === 0" data-testid="identity-empty-state" class="alert rounded-box alert-info">
         No system user is registered yet.
       </div>
-      <div v-else class="overflow-x-auto">
-        <table class="table">
+      <div v-else class="max-w-full overflow-x-auto rounded-box border border-base-300">
+        <table class="table min-w-240">
           <thead>
             <tr>
               <th>Name</th>
@@ -221,14 +227,20 @@ const remove = async (identity: MachineIdentity) => {
                 <span v-if="identity.enabled" class="badge badge-sm badge-success">enabled</span>
                 <span v-else data-testid="identity-row-disabled" class="badge badge-sm badge-warning">disabled</span>
               </td>
-              <td class="flex gap-2">
-                <button class="btn btn-ghost btn-xs" data-testid="identity-edit" @click="edit(identity)">Edit</button>
-                <button class="btn btn-ghost btn-xs" data-testid="identity-rotate" @click="rotate(identity)">
-                  New secret
-                </button>
-                <button class="btn text-error btn-ghost btn-xs" data-testid="identity-delete" @click="remove(identity)">
-                  Remove
-                </button>
+              <td>
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn btn-ghost btn-xs" data-testid="identity-edit" @click="edit(identity)">Edit</button>
+                  <button class="btn btn-ghost btn-xs" data-testid="identity-rotate" @click="rotate(identity)">
+                    New secret
+                  </button>
+                  <button
+                    class="btn text-error btn-ghost btn-xs"
+                    data-testid="identity-delete"
+                    @click="remove(identity)"
+                  >
+                    Remove
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>

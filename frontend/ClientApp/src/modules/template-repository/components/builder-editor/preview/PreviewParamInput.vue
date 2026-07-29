@@ -11,6 +11,7 @@ const props = defineProps<{
   valueConstraint?: SemanticValueConstraint
   isInvalid?: boolean
   invalidTip?: string
+  disabled?: boolean
 }>()
 const emit = defineEmits<(e: 'update:value', value: string | number | boolean) => void>()
 
@@ -135,6 +136,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
       v-model="stringValue"
       :class="selectClass"
       :aria-label="label"
+      :disabled="disabled"
       @change="emitStringValue"
     >
       <option value=""></option>
@@ -148,6 +150,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
       type="text"
       :class="inputClass"
       :aria-label="label"
+      :disabled="disabled"
       @input="emitStringValue"
     />
     <input
@@ -157,6 +160,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
       inputmode="numeric"
       :class="inputClass"
       :aria-label="label"
+      :disabled="disabled"
       @keydown="onIntegerKeyDown"
       @input="emitIntegerValue"
     />
@@ -167,6 +171,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
       inputmode="decimal"
       :class="inputClass"
       :aria-label="label"
+      :disabled="disabled"
       @input="emitDecimalValue"
     />
     <input
@@ -175,6 +180,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
       type="date"
       :class="inputClass"
       :aria-label="label"
+      :disabled="disabled"
       @input="emitDateValue"
     />
   </span>

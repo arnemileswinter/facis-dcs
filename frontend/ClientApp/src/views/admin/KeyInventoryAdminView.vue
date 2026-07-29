@@ -34,7 +34,7 @@ function formatTimestamp(value?: string): string {
 </script>
 
 <template>
-  <div data-testid="key-inventory" class="flex flex-col gap-6 p-6">
+  <div data-testid="key-inventory" class="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6 p-4 sm:p-6">
     <div>
       <h1 class="text-2xl font-semibold">Key Inventory</h1>
       <p class="mt-1 opacity-70">
@@ -45,10 +45,14 @@ function formatTimestamp(value?: string): string {
 
     <div v-if="error" data-testid="key-inventory-error" class="alert rounded-box alert-error">{{ error }}</div>
 
-    <section>
+    <section class="min-w-0" aria-labelledby="active-key-inventory-heading">
+      <div class="mb-3">
+        <h2 id="active-key-inventory-heading" class="text-lg font-semibold">Active key versions</h2>
+        <p class="mt-1 text-sm opacity-70">Read-only inventory; key lifecycle actions are performed operationally.</p>
+      </div>
       <div v-if="loading" class="opacity-70">Loading…</div>
-      <div v-else class="overflow-x-auto">
-        <table class="table">
+      <div v-else class="max-w-full overflow-x-auto rounded-box border border-base-300">
+        <table class="table min-w-160">
           <thead>
             <tr>
               <th>Label</th>

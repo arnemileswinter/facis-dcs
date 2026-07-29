@@ -107,7 +107,7 @@ const remove = async (target: ContractTarget) => {
 </script>
 
 <template>
-  <div data-testid="target-admin" class="flex flex-col gap-6 p-6">
+  <div data-testid="target-admin" class="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6 p-4 sm:p-6">
     <div>
       <h1 class="text-2xl font-semibold">Target Systems</h1>
       <p class="mt-1 opacity-70">
@@ -118,9 +118,12 @@ const remove = async (target: ContractTarget) => {
 
     <div v-if="error" data-testid="target-admin-error" class="alert rounded-box alert-error">{{ error }}</div>
 
-    <section class="card bg-base-200">
-      <form class="card-body grid gap-3 md:grid-cols-2" @submit.prevent="save">
-        <h2 class="card-title md:col-span-2">{{ isEditing ? 'Change target system' : 'Register a target system' }}</h2>
+    <section class="card bg-base-200" aria-labelledby="target-configuration-heading">
+      <form class="card-body grid min-w-0 gap-3 md:grid-cols-2" @submit.prevent="save">
+        <h2 id="target-configuration-heading" class="card-title md:col-span-2">Target system configuration</h2>
+        <p class="text-sm opacity-70 md:col-span-2">
+          {{ isEditing ? 'Change the selected deployment destination.' : 'Register a new deployment destination.' }}
+        </p>
 
         <label class="form-control">
           <span class="label-text">Name</span>
@@ -142,7 +145,7 @@ const remove = async (target: ContractTarget) => {
           <span class="label-text">Accepts deployments</span>
         </label>
 
-        <div class="flex gap-2 md:col-span-2">
+        <div class="flex flex-wrap gap-2 md:col-span-2">
           <button type="submit" data-testid="target-save" :disabled="saving" class="btn btn-primary">
             {{ saving ? 'Saving…' : isEditing ? 'Save changes' : 'Register' }}
           </button>
@@ -153,13 +156,14 @@ const remove = async (target: ContractTarget) => {
       </form>
     </section>
 
-    <section>
+    <section class="min-w-0" aria-labelledby="registered-targets-heading">
+      <h2 id="registered-targets-heading" class="mb-3 text-lg font-semibold">Registered target systems</h2>
       <div v-if="loading" class="opacity-70">Loading…</div>
       <div v-else-if="targets.length === 0" data-testid="target-empty-state" class="alert rounded-box alert-info">
         No target system is registered yet. A contract cannot be deployed until one exists and it names it.
       </div>
-      <div v-else class="overflow-x-auto">
-        <table class="table">
+      <div v-else class="max-w-full overflow-x-auto rounded-box border border-base-300">
+        <table class="table min-w-240">
           <thead>
             <tr>
               <th>Name</th>
@@ -189,18 +193,20 @@ const remove = async (target: ContractTarget) => {
                 </span>
                 <span v-else data-testid="target-row-no-credential" class="badge badge-ghost badge-sm">none</span>
               </td>
-              <td class="flex gap-2">
-                <button class="btn btn-ghost btn-xs" data-testid="target-edit" @click="edit(target)">Edit</button>
-                <button
-                  class="btn btn-ghost btn-xs"
-                  data-testid="target-issue-credential"
-                  @click="issueCredential(target)"
-                >
-                  {{ target.oauth_client_id ? 'New secret' : 'Issue credential' }}
-                </button>
-                <button class="btn text-error btn-ghost btn-xs" data-testid="target-delete" @click="remove(target)">
-                  Remove
-                </button>
+              <td>
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn btn-ghost btn-xs" data-testid="target-edit" @click="edit(target)">Edit</button>
+                  <button
+                    class="btn btn-ghost btn-xs"
+                    data-testid="target-issue-credential"
+                    @click="issueCredential(target)"
+                  >
+                    {{ target.oauth_client_id ? 'New secret' : 'Issue credential' }}
+                  </button>
+                  <button class="btn text-error btn-ghost btn-xs" data-testid="target-delete" @click="remove(target)">
+                    Remove
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
