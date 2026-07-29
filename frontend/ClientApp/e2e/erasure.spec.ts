@@ -98,7 +98,9 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string): P
   await exportAnswered
   await expect(inst.page.getByText('Content erased — encryption keys destroyed')).toBeVisible({ timeout: 30_000 })
   // The view survives the refusal: the contract's metadata keeps rendering.
-  await expect(inst.page.getByText(contractDid).first()).toBeVisible()
+  // The DID also appears in collapsed panels, so filter to the rendered one
+  // rather than taking whichever match happens to come first in the DOM.
+  await expect(inst.page.getByText(contractDid).filter({ visible: true }).first()).toBeVisible()
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
