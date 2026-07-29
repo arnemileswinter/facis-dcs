@@ -45,27 +45,44 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
+			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, fmt.Errorf("dial %s: %w", addr, err)
 			}
 			if len(allowed) > 0 && !allowed[strings.ToLower(host)] {
 				return nil, fmt.Errorf("dial %s: host is not in the resolver allow-list", host)
 			}
-			// Resolution happens here rather than being left to the dialer so the
-			// address that gets connected to is the address that was checked. A
-			// name checked and then re-resolved by the dialer can answer
-			// differently the second time.
+			// The connection is made to the address that was checked, not to the
+			// name. Checking a name and then handing the name to the dialer
+			// leaves it to resolve a second time, and a record with a short TTL
+			// can answer differently on that second lookup — the check passes on
+			// a public address and the connection lands on a private one.
+			//
+			// Dialling an IP does not weaken TLS: http.Transport takes the
+			// ServerName for the handshake from the request URL, not from the
+			// address this returns.
 			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 			if err != nil {
 				return nil, fmt.Errorf("resolve %s: %w", host, err)
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("resolve %s: no addresses", host)
 			}
 			for _, ip := range ips {
 				if err := permitted(ip.IP, p.AllowLoopback); err != nil {
 					return nil, fmt.Errorf("dial %s: %w", host, err)
 				}
 			}
-			return dialer.DialContext(ctx, network, addr)
+
+			var lastErr error
+			for _, ip := range ips {
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			return nil, lastErr
 		},
 	}
 
@@ -85,6 +102,13 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 // permitted rejects addresses that no legitimate issuer or peer is published on
 // and that a request forgery aims at.
 func permitted(ip net.IP, allowLoopback bool) error {
+	// Go's own predicates read the IPv4-mapped form (::ffff:127.0.0.1) but not
+	// the deprecated IPv4-compatible one (::127.0.0.1), which would otherwise
+	// reach this check as an ordinary IPv6 address and pass every test below.
+	if v4 := ipv4Compatible(ip); v4 != nil {
+		ip = v4
+	}
+
 	switch {
 	case ip.IsUnspecified():
 		return fmt.Errorf("address %s is unspecified", ip)
@@ -93,6 +117,12 @@ func permitted(ip net.IP, allowLoopback bool) error {
 			return nil
 		}
 		return fmt.Errorf("address %s is loopback", ip)
+	// 0.0.0.0/8 is "this network": Linux routes the whole block locally, so
+	// 0.0.0.1 reaches this host while IsUnspecified only catches 0.0.0.0.
+	case ip.To4() != nil && ip.To4()[0] == 0:
+		return fmt.Errorf("address %s is in the local 0.0.0.0/8 block", ip)
+	case ip.Equal(net.IPv4bcast):
+		return fmt.Errorf("address %s is broadcast", ip)
 	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
 		// 169.254.169.254 and fe80:: neighbours: the cloud instance metadata
 		// service and anything else that answers only because the request comes
@@ -104,4 +134,24 @@ func permitted(ip net.IP, allowLoopback bool) error {
 		return fmt.Errorf("address %s is interface-local", ip)
 	}
 	return nil
+}
+
+// ipv4Compatible returns the embedded IPv4 address of an ::a.b.c.d address, or
+// nil. The all-zero prefix would otherwise make ::127.0.0.1 look like an
+// ordinary global IPv6 address to every predicate in permitted.
+func ipv4Compatible(ip net.IP) net.IP {
+	if len(ip) != net.IPv6len || ip.To4() != nil {
+		return nil
+	}
+	for _, b := range ip[:12] {
+		if b != 0 {
+			return nil
+		}
+	}
+	// ::0.0.0.x below 256 is the unspecified address and ::1, which the
+	// IsUnspecified and IsLoopback cases already name correctly.
+	if ip[12] == 0 && ip[13] == 0 && ip[14] == 0 {
+		return nil
+	}
+	return net.IPv4(ip[12], ip[13], ip[14], ip[15])
 }

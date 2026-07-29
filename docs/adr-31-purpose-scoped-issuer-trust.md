@@ -114,6 +114,32 @@ nothing from that segment. The holder binding it does check is the credential's
 own (`sub` against `cnf.jwk`) plus the requirement that this holder is the
 recorded signatory.
 
+**A presentation is therefore a bearer credential here**, and two rules keep it
+from being one that can be pointed anywhere:
+
+- A peer may only ship evidence for **its own** party. Without that, a
+  credential a holder presented in some unrelated exchange verifies on its own
+  merits and vouches for a party the shipper has nothing to do with. Only a
+  `did:web` organization can be held against the peer's identity; an authored
+  contract may name its parties anything, and there the issuer's entitlement to
+  attest that organization is the only bound.
+- Evidence is **all or nothing**. Shipping it for one signature and omitting it
+  for another would let a peer choose per signature which of them is checked.
+
+What still cannot be established is freshness or contract-binding: the same
+presentation replayed on another contract between the same two parties verifies
+identically, until it expires or is revoked.
+
+**What the payload is and is not.** The party, its signatory and its claimed
+authorization are read from the contract the same ship carried rather than from
+fields beside the credential. That is worth doing, but it is a narrower
+guarantee than it first looks: the content gate establishes that the PDF's
+visible text is the deterministic re-render of its own embedded payload —
+self-consistency, not authenticity. The payload is still the peer's assertion.
+The residual requirement on an attacker is to hold a non-revoked credential from
+an issuer this instance trusts for `peer` and that is entitled to the named
+organization, and then to write the contract around it.
+
 **What that establishes, precisely: an attestation of authority.** An issuer
 this instance trusts, entitled to speak for that organization, says the holder
 may act for it, and has not revoked it. It does **not** establish who the human
@@ -130,6 +156,28 @@ none must still federate, and a party that signed without a Power of Attorney is
 what the Signature Compliance Viewer has always reported from the contract
 itself. Turning absence into a hard failure would convert a finding into an
 outage.
+
+Note what that asymmetry costs: omitting the field is a free opt-out, available
+to exactly the adversary the gate exists for. The gate therefore raises the
+floor — a peer that ships evidence cannot ship *false* evidence — rather than
+compelling anyone to prove authority.
+
+**The signatory is recorded on the party that signed.** It used to be stamped on
+the node the open party placeholder resolved to, which is the accepting
+counterparty. Those coincide only when the counterparty signs first; when the
+originator does — which every two-instance flow drives — the originator's
+signatory and Power of Attorney were recorded against the *other* party. Nothing
+read those fields closely enough to notice until a peer began verifying them.
+
+**Retention.** The presentation is stored on the signing ceremony
+(`poa_vp_token`), alongside the PID presentation already held there, and is
+**not** covered by contract erasure: `AuditedShredder` destroys wrapped CEKs, and
+nothing clears the ceremony's token columns. That matches how `vp_token` and
+`pid_claims` are already treated, so it is not new, but it widens what survives
+an erasure — a holder-bound credential with disclosed `organization`, `roles`
+and a `sub` naming the signatory's key. Either those columns get shredded with
+the CEK, or the retention is justified as signing evidence; that decision is
+open.
 
 **What `peer` gates, and why it is now overloaded.** The purpose is used in two
 places: a signing ceremony verifying the Power of Attorney presented at it, and

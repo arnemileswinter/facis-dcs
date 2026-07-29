@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -92,6 +93,19 @@ func ReceivedSignatoryPoAs(wire []*dcstodcs.DCSToDCSSignatoryPoA) []SignatoryPoA
 // always come from.
 type CounterpartyPoAGate struct {
 	Trust *oid4vp.TrustConfig
+	// Verify is the credential check, defaulting to oid4vp.VerifyCounterpartyPoA.
+	// Held as a field so the party-matching rules below can be exercised for
+	// what they accept as well as what they refuse: with the real verifier they
+	// are only reachable by minting a genuine credential, and the acceptance
+	// path went untested long enough to ship a join that never matched.
+	Verify func(presentation string, trust *oid4vp.TrustConfig, expected oid4vp.CounterpartyPoAExpectation) (*oid4vp.CounterpartyPoA, error)
+}
+
+func (g *CounterpartyPoAGate) verify() func(string, *oid4vp.TrustConfig, oid4vp.CounterpartyPoAExpectation) (*oid4vp.CounterpartyPoA, error) {
+	if g.Verify != nil {
+		return g.Verify
+	}
+	return oid4vp.VerifyCounterpartyPoA
 }
 
 // Check verifies each shipped credential against the contract the same ship
@@ -116,25 +130,79 @@ func (g *CounterpartyPoAGate) Check(peerDID string, payload []byte, evidence []S
 		return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
 	}
 
+	verified := make(map[string]bool, len(evidence))
 	for _, poa := range evidence {
-		party := strings.TrimSpace(poa.Party)
-		node, signed := parties[party]
-		if !signed {
-			return deny(fmt.Errorf("counterparty Power of Attorney: party %q is not a signed party of the shipped contract", party))
+		// The credential authorizes an organization, and the contract records
+		// which party that organization authorized. Joining on that recorded
+		// authorization rather than on the party's own IRI is what makes this
+		// work for both contract shapes: an auto-seeded signature field is named
+		// for the signing instance's DID, so organization and party IRI coincide,
+		// while an authored multi-signatory contract names its fields freely and
+		// the two differ.
+		organization := strings.TrimSpace(poa.Party)
+		party, node, found := partyAuthorizedBy(parties, organization)
+		if !found {
+			return deny(fmt.Errorf(
+				"counterparty Power of Attorney: the shipped contract records no signed party authorized by %q", organization))
 		}
-		if node.PoAOrganization != party {
-			return deny(fmt.Errorf("counterparty Power of Attorney: the shipped contract records party %q as authorized by %q",
-				party, node.PoAOrganization))
+		// A peer ships the evidence behind the signatures IT applied. Evidence
+		// for anyone else is a credential obtained in some other exchange being
+		// replayed here: the presentation carries no audience or nonce this
+		// instance could check, so without this it would verify on its own merits
+		// and vouch for a party the shipper has nothing to do with.
+		//
+		// Only a did:web organization can be held against the peer's identity. An
+		// authored contract may name its parties anything, and there the issuer's
+		// entitlement to attest that organization is the only bound there is.
+		if strings.HasPrefix(organization, "did:web:") && organization != strings.TrimSpace(peerDID) {
+			return deny(fmt.Errorf("counterparty Power of Attorney: peer %q shipped evidence for %q, which is not its own",
+				peerDID, organization))
 		}
-		_, err := oid4vp.VerifyCounterpartyPoA(poa.Presentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
-			Organization: party,
+		_, err := g.verify()(poa.Presentation, g.Trust, oid4vp.CounterpartyPoAExpectation{
+			Organization: organization,
 			SignatoryDID: node.Signatory,
 		})
 		if err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney for party %q: %w", party, err))
 		}
+		verified[party] = true
+	}
+
+	// Shipping evidence for one signature and omitting it for another would let
+	// a peer choose per signature which of them gets verified. Absence is
+	// tolerated wholesale, not selectively.
+	for party, node := range parties {
+		if node.PoAOrganization == "" || verified[party] {
+			continue
+		}
+		return deny(fmt.Errorf(
+			"counterparty Power of Attorney: the shipped contract records party %q as authorized by %q, but the ship carries evidence only for %v",
+			party, node.PoAOrganization, keysOf(verified)))
 	}
 	return nil
+}
+
+// partyAuthorizedBy finds the signed party the contract records as authorized by
+// this organization.
+func partyAuthorizedBy(parties map[string]signedParty, organization string) (string, signedParty, bool) {
+	if organization == "" {
+		return "", signedParty{}, false
+	}
+	for party, node := range parties {
+		if node.PoAOrganization == organization {
+			return party, node, true
+		}
+	}
+	return "", signedParty{}, false
+}
+
+func keysOf(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // signedParty is a party node of a shipped contract that carries a signature.

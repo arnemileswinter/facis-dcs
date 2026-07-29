@@ -646,7 +646,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if ceremony.PoAOrganization != nil {
 			poaOrganization = *ceremony.PoAOrganization
 		}
-		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization)
+		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization, ceremony.FieldName)
 		if err != nil {
 			return nil, fmt.Errorf("seal agreement for signing: %w", err)
 		}
@@ -1180,7 +1180,7 @@ func stampLifecycleForSigning(
 // verified DID — with the signing identity recorded as dcs:hasSignatory.
 // Binding only happens while exactly one placeholder remains open, so an
 // undeclared originator role never gets mislabeled as the counterparty.
-func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization string) (datatype.JSON, error) {
+func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization, signingParty string) (datatype.JSON, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("decode contract data: %w", err)
@@ -1203,18 +1203,43 @@ func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, sig
 		counterparty := counterpartyIdentity(responsible, signerDID)
 		replaceNodeIRI(doc, placeholder, counterparty)
 		if node := partyNodeByID(doc, counterparty); node != nil {
-			node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
 			node["odrl:function"] = map[string]any{"@id": "odrl:contractedParty"}
-			// The organization the signatory presented a Power of Attorney for at
-			// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
-			// counterparty's authorization is auditable on every instance.
-			if poaOrganization != "" {
-				node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
-			}
+		}
+	}
+
+	// The signatory belongs on the node of the party that SIGNED. Stamping it on
+	// the counterparty's node coincides with the signer only when the accepting
+	// counterparty signs first; when the originator does — which every
+	// two-instance flow drives — it records the originator's signatory against
+	// the OTHER party, and the Power of Attorney with it. A peer verifying the
+	// evidence behind that signature then looks up the party the credential
+	// authorizes and finds a node carrying neither.
+	//
+	// Auto-seeded signature fields are named for the signing instance's DID, so
+	// the field name IS the party. An authored multi-signatory contract names
+	// its fields freely (seedSignatureFields leaves those untouched), and such a
+	// name identifies no party — there the accepting counterparty is the only
+	// party this can be attributed to, which is what it resolved to before.
+	if node := signingPartyNode(doc, responsible, signerDID, signingParty); node != nil {
+		node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
+		// The organization the signatory presented a Power of Attorney for at
+		// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
+		// counterparty's authorization is auditable on every instance.
+		if poaOrganization != "" {
+			node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
 		}
 	}
 
 	return datatype.NewJSON(doc)
+}
+
+func signingPartyNode(doc map[string]any, responsible *db.Responsible, signerDID, signingParty string) map[string]any {
+	if party := strings.TrimSpace(signingParty); party != "" {
+		if node := partyNodeByID(doc, party); node != nil {
+			return node
+		}
+	}
+	return partyNodeByID(doc, counterpartyIdentity(responsible, signerDID))
 }
 
 // counterpartyIdentity resolves who accepted the offer: the contract's
