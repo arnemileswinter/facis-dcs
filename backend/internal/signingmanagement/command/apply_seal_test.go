@@ -25,7 +25,9 @@ func TestSealAgreementStampsPartyFunctions(t *testing.T) {
 	raw, err := datatype.NewJSON(doc)
 	require.NoError(t, err)
 
-	sealed, err := sealAgreementForSigning(raw, &db.Responsible{Creator: "did:web:origin"}, "did:web:signer", "did:web:signer", "did:web:signer")
+	sealed, err := sealAgreementForSigning(raw, &db.Responsible{Creator: "did:web:origin"}, "did:web:signer")
+	require.NoError(t, err)
+	sealed, err = recordSignatory(sealed, &db.Responsible{Creator: "did:web:origin"}, "did:web:signer", "did:web:signer", "did:web:signer")
 	require.NoError(t, err)
 
 	var out map[string]any
@@ -68,13 +70,10 @@ func TestSealAgreementStampsTheSignatoryOnThePartyThatSigned(t *testing.T) {
 	require.NoError(t, err)
 
 	// A's own user signs A's field, while B is the contract's counterparty.
-	sealed, err := sealAgreementForSigning(
-		raw,
-		&db.Responsible{Creator: "did:web:a", Counterparty: "did:web:b"},
-		"did:jwk:aUser",
-		"did:web:a",
-		"did:web:a",
-	)
+	responsible := &db.Responsible{Creator: "did:web:a", Counterparty: "did:web:b"}
+	sealed, err := sealAgreementForSigning(raw, responsible, "did:jwk:aUser")
+	require.NoError(t, err)
+	sealed, err = recordSignatory(sealed, responsible, "did:jwk:aUser", "did:web:a", "did:web:a")
 	require.NoError(t, err)
 
 	var out map[string]any
@@ -98,4 +97,50 @@ func TestSealAgreementStampsTheSignatoryOnThePartyThatSigned(t *testing.T) {
 		"the counterparty has not signed and must not be recorded as having a signatory")
 	require.NotContains(t, nodes["did:web:b"], "dcs:hasPowerOfAttorney",
 		"the counterparty's node must not carry the signer's Power of Attorney")
+}
+
+// Sealing is the acceptance act and happens once; attribution happens per
+// signature. Recording the signatory only at the seal left every LATER
+// signature's party carrying no authorization — while the credential behind it
+// still shipped to the counterparty, which found nothing in the contract to
+// check it against and refused the whole exchange.
+func TestEverySignatureRecordsItsOwnAuthority(t *testing.T) {
+	doc := map[string]any{
+		"@id":          "urn:contract:1",
+		"dcs:policies": map[string]any{"@type": "odrl:Offer"},
+		"dcs:parties": []any{
+			map[string]any{"@id": "did:web:a", "@type": "dcs:CompanyParty", "dcs:role": "assigner"},
+			map[string]any{"@id": "urn:contract:1#party-assignee", "@type": "dcs:CompanyParty"},
+		},
+	}
+	raw, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+
+	responsible := &db.Responsible{Creator: "did:web:a", Counterparty: "did:web:b"}
+
+	// First signature: A signs A's field, and the agreement is sealed.
+	sealed, err := sealAgreementForSigning(raw, responsible, "did:jwk:aUser")
+	require.NoError(t, err)
+	first, err := recordSignatory(sealed, responsible, "did:jwk:aUser", "did:web:a", "did:web:a")
+	require.NoError(t, err)
+
+	// Second signature: B countersigns its own field. No seal runs this time.
+	second, err := recordSignatory(first, responsible, "did:jwk:bUser", "did:web:b", "did:web:b")
+	require.NoError(t, err)
+
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(second, &out))
+
+	nodes := map[string]map[string]any{}
+	for _, rawNode := range out["dcs:parties"].([]any) {
+		node := rawNode.(map[string]any)
+		nodes[node["@id"].(string)] = node
+	}
+
+	for party, signatory := range map[string]string{"did:web:a": "did:jwk:aUser", "did:web:b": "did:jwk:bUser"} {
+		require.Equal(t, map[string]any{"@id": signatory}, nodes[party]["dcs:hasSignatory"],
+			"party %s must record the signatory that signed for it", party)
+		require.Equal(t, map[string]any{"@id": party}, nodes[party]["dcs:hasPowerOfAttorney"],
+			"party %s must record the authority its signature was made under", party)
+	}
 }

@@ -642,11 +642,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// contract document BEFORE the content hash and PDF are computed so the
 	// signed artefact and the machine-readable document are the same bytes.
 	if signedCount == 0 {
-		poaOrganization := ""
-		if ceremony.PoAOrganization != nil {
-			poaOrganization = *ceremony.PoAOrganization
-		}
-		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization, ceremony.FieldName)
+		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID)
 		if err != nil {
 			return nil, fmt.Errorf("seal agreement for signing: %w", err)
 		}
@@ -655,6 +651,25 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		}
 		data.ContractData = &sealed
 	}
+
+	// EVERY signature records who signed for which party and under what
+	// authority — not only the first. Sealing is the acceptance act and happens
+	// once; attribution is per signature. Recording it only at the seal left
+	// every later signature's party carrying no authorization, while the
+	// credential behind it still shipped to the counterparty, which then found
+	// nothing in the contract to check it against and refused the exchange.
+	poaOrganization := ""
+	if ceremony.PoAOrganization != nil {
+		poaOrganization = *ceremony.PoAOrganization
+	}
+	attributed, err := recordSignatory(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization, ceremony.FieldName)
+	if err != nil {
+		return nil, fmt.Errorf("record signatory: %w", err)
+	}
+	if err := h.CRepo.UpdateContractData(ctx, tx, cmd.DID, attributed); err != nil {
+		return nil, fmt.Errorf("persist signatory attribution: %w", err)
+	}
+	data.ContractData = &attributed
 
 	if err := validation.ValidateContractPolicySatisfaction(
 		*data.ContractData,
@@ -1180,7 +1195,7 @@ func stampLifecycleForSigning(
 // verified DID — with the signing identity recorded as dcs:hasSignatory.
 // Binding only happens while exactly one placeholder remains open, so an
 // undeclared originator role never gets mislabeled as the counterparty.
-func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization, signingParty string) (datatype.JSON, error) {
+func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID string) (datatype.JSON, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("decode contract data: %w", err)
@@ -1207,30 +1222,44 @@ func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, sig
 		}
 	}
 
-	// The signatory belongs on the node of the party that SIGNED. Stamping it on
-	// the counterparty's node coincides with the signer only when the accepting
-	// counterparty signs first; when the originator does — which every
-	// two-instance flow drives — it records the originator's signatory against
-	// the OTHER party, and the Power of Attorney with it. A peer verifying the
-	// evidence behind that signature then looks up the party the credential
-	// authorizes and finds a node carrying neither.
-	//
-	// Auto-seeded signature fields are named for the signing instance's DID, so
-	// the field name IS the party. An authored multi-signatory contract names
-	// its fields freely and such a name identifies no party node; the fallback
-	// then attributes the signature to the accepting counterparty, which is
-	// where it landed before. That is not right — it is the same misattribution
-	// this fixes for the two-instance case, and compliance.go raises a finding
-	// off it — but naming the signing party for a freely-named field needs the
-	// field-to-party mapping the document does not carry.
-	if node := signingPartyNode(doc, responsible, signerDID, signingParty); node != nil {
-		node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
-		// The organization the signatory presented a Power of Attorney for at
-		// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
-		// counterparty's authorization is auditable on every instance.
-		if poaOrganization != "" {
-			node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
-		}
+	return datatype.NewJSON(doc)
+}
+
+// recordSignatory attributes one applied signature: who signed, for which
+// party, and under what authority. It runs for every signature, where sealing
+// runs once.
+//
+// The signatory belongs on the node of the party that SIGNED. Stamping it on
+// the counterparty's node coincides with the signer only when the accepting
+// counterparty signs first; when the originator does — which every two-instance
+// flow drives — it records the originator's signatory against the OTHER party,
+// and the Power of Attorney with it. A peer verifying the evidence behind that
+// signature then looks up the party the credential authorizes and finds a node
+// carrying neither.
+//
+// Auto-seeded signature fields are named for the signing instance's DID, so the
+// field name IS the party. An authored multi-signatory contract names its fields
+// freely and such a name identifies no party node; the fallback then attributes
+// the signature to the accepting counterparty, which is where it landed before.
+// That is not right — it is the same misattribution this fixes for the
+// two-instance case — but naming the signing party for a freely-named field
+// needs the field-to-party mapping the document does not carry.
+func recordSignatory(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization, signingParty string) (datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("decode contract data: %w", err)
+	}
+
+	node := signingPartyNode(doc, responsible, signerDID, signingParty)
+	if node == nil {
+		return raw, nil
+	}
+	node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
+	// The organization the signatory presented a Power of Attorney for at
+	// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
+	// counterparty's authorization is auditable on every instance.
+	if poaOrganization != "" {
+		node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
 	}
 
 	return datatype.NewJSON(doc)
