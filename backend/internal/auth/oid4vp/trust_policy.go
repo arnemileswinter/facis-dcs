@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/open-policy-agent/opa/v1/rego"
+
+	"digital-contracting-service/internal/base/identity"
 )
 
 // trustPolicySource is the default authorization policy. It is the rules that
@@ -101,6 +103,7 @@ func PrepareTrustPolicy() error {
 func (c *TrustConfig) policyDocument() map[string]any {
 	issuers := make(map[string]any, len(c.Issuers))
 	for iss, entry := range c.Issuers {
+		iss = canonicalIssuerKey(iss)
 		purposes := make([]any, 0, len(entry.Purposes))
 		for _, p := range entry.Purposes {
 			purposes = append(purposes, string(p))
@@ -121,10 +124,26 @@ func (c *TrustConfig) policyDocument() map[string]any {
 func (c *TrustConfig) evalInput(purpose Purpose, iss, org string) map[string]any {
 	return map[string]any{
 		"purpose":      string(purpose),
-		"issuer":       strings.TrimSpace(iss),
+		"issuer":       canonicalIssuerKey(iss),
 		"organization": strings.TrimSpace(org),
 		"trust":        c.policyDocument(),
 	}
+}
+
+// canonicalIssuerKey is the form an issuer identifier is looked up under.
+//
+// The policy matches an entry by exact key, so a did:web issuer re-spelled in
+// another case would miss its own entry and fall through to the dynamic-peer
+// rule — turning purposes:["login"] into peer, which the entry was written to
+// withhold. Both sides of the lookup are canonicalised so that cannot happen,
+// and so it cannot start happening the day some other did:web comparison is
+// made case-insensitive.
+func canonicalIssuerKey(iss string) string {
+	iss = strings.TrimSpace(iss)
+	if strings.HasPrefix(iss, "did:web:") {
+		return identity.NormalizeDIDWeb(iss)
+	}
+	return iss
 }
 
 // evaluateBool answers one yes/no question.

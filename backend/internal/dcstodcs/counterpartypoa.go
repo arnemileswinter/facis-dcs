@@ -116,7 +116,16 @@ func (g *CounterpartyPoAGate) verify() func(string, *oid4vp.TrustConfig, oid4vp.
 // peer's key.
 type ShippedSignatures struct {
 	Evidence []byte
+	// VerifyVC checks one summary against the peer's VC key. Required: without
+	// it the summary is the peer telling us who signed, which is what the
+	// contract payload already was. Absent, the gate denies rather than
+	// accepting unverified claims — the same way a missing trust configuration
+	// denies rather than waving credentials through.
 	VerifyVC func(vc json.RawMessage) error
+	// VerificationMethod is the id the peer's proofs must name, so a summary
+	// signed with some other key the peer publishes is refused rather than
+	// verified against a key it does not claim.
+	VerificationMethod string
 }
 
 // Check verifies each shipped Power of Attorney against the peer's own signing
@@ -237,6 +246,9 @@ type signedParty struct {
 // summary's field_name IS the organization its Power of Attorney must authorize,
 // and credentialSubject.id is the signatory it must be held by.
 func signedPartiesOf(signed ShippedSignatures) (map[string]signedParty, error) {
+	if signed.VerifyVC == nil {
+		return nil, fmt.Errorf("no means to verify the peer's signing evidence, so nothing it claims can be believed")
+	}
 	if len(signed.Evidence) == 0 {
 		return nil, fmt.Errorf("the shipped PDF carries no signing evidence, so nothing attests which signature this credential stands behind")
 	}
@@ -270,12 +282,41 @@ func signedPartiesOf(signed ShippedSignatures) (map[string]signedParty, error) {
 		// Verified against the peer's own key before anything it says is used:
 		// unverified, this is the peer telling us who signed, which is what the
 		// contract payload already was.
-		if signed.VerifyVC != nil {
-			if err := signed.VerifyVC(raw); err != nil {
-				return nil, fmt.Errorf("signing evidence for %q does not verify against the peer's key: %w", organization, err)
-			}
+		if err := verifySummary(signed, raw, organization); err != nil {
+			return nil, err
 		}
 		parties[organization] = signedParty{Signatory: signatory, PoAOrganization: organization}
 	}
 	return parties, nil
+}
+
+// verifySummary checks one summary credential before anything it says is used.
+//
+// The proof must name the verification method this peer publishes for VC
+// signing. Verifying against a key without checking which key the proof claims
+// lets a peer present a proof made with another of its published keys and have
+// it checked against the one we happened to resolve.
+func verifySummary(signed ShippedSignatures, raw json.RawMessage, organization string) error {
+	var envelope struct {
+		Proof struct {
+			VerificationMethod string `json:"verificationMethod"`
+			ProofPurpose       string `json:"proofPurpose"`
+		} `json:"proof"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return fmt.Errorf("decode signing evidence proof for %q: %w", organization, err)
+	}
+	if signed.VerificationMethod != "" && envelope.Proof.VerificationMethod != signed.VerificationMethod {
+		return fmt.Errorf("signing evidence for %q names verification method %q, not the peer's %q",
+			organization, envelope.Proof.VerificationMethod, signed.VerificationMethod)
+	}
+	// A credential is an assertion; a proof made for any other purpose does not
+	// establish one (W3C VC Data Integrity).
+	if purpose := envelope.Proof.ProofPurpose; purpose != "" && purpose != "assertionMethod" {
+		return fmt.Errorf("signing evidence for %q carries a proof for %q, not assertionMethod", organization, purpose)
+	}
+	if err := signed.VerifyVC(raw); err != nil {
+		return fmt.Errorf("signing evidence for %q does not verify against the peer's key: %w", organization, err)
+	}
+	return nil
 }

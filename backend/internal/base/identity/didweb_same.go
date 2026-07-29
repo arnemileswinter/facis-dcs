@@ -39,15 +39,19 @@ func SameDIDWeb(a, b string) bool {
 // NormalizeDIDWeb returns the canonical spelling of a did:web identifier, or the
 // input unchanged when it is not one this resolver can parse.
 func NormalizeDIDWeb(did string) string {
-	host, segments, err := DIDWebPath(did)
-	if err != nil {
+	if _, _, err := DIDWebPath(did); err != nil {
 		return did
 	}
-	// The port is re-encoded: a bare colon in the authority is a path segment
-	// separator in did:web, so emitting it raw turns one identifier into another.
-	authority := strings.Replace(host, ":", "%3A", 1)
-	if len(segments) == 0 {
-		return "did:web:" + authority
-	}
-	return "did:web:" + authority + ":" + strings.Join(segments, ":")
+	// Only the authority is rewritten, and the path segments are carried across
+	// EXACTLY as written. DIDWebPath decodes segments, so re-emitting the decoded
+	// forms would merge two distinct identifiers whenever a segment contained an
+	// escape — did:web:h%3A1:x%3Ay and did:web:h%3A1:x:y are different peers and
+	// must stay different strings.
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(did), "did:web:"), ":")
+	// The port keeps its %3A: a bare colon in the authority is a segment
+	// separator, so emitting it raw turns one identifier into another.
+	// Lowercasing the authority also lowercases the port escape; %3A is the
+	// canonical spelling, and both are accepted on the way in.
+	parts[0] = strings.ReplaceAll(strings.ToLower(parts[0]), "%3a", "%3A")
+	return "did:web:" + strings.Join(parts, ":")
 }

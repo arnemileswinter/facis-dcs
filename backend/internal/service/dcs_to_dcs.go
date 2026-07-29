@@ -185,10 +185,15 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_pdf rejected: could not read the signing evidence embedded in the received PDF: %w", evidenceErr))
 	}
-	peerVCKey := remoteDIDDocument.PublicKey()
+	peerVCKey, peerVCMethod, keyErr := trustgate.PeerVCPublicKey(remoteDIDDocument)
+	if keyErr != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: cannot resolve peer %s's credential-signing key: %w", req.FromPeerDid, keyErr))
+	}
 	shipped := trustgate.ShippedSignatures{
-		Evidence: signingEvidence,
-		VerifyVC: func(vc json.RawMessage) error { return provenance.VerifyDataIntegrityProof(vc, peerVCKey) },
+		Evidence:           signingEvidence,
+		VerificationMethod: peerVCMethod,
+		VerifyVC:           func(vc json.RawMessage) error { return provenance.VerifyDataIntegrityProof(vc, peerVCKey) },
 	}
 	if err := s.PoAGate.Check(req.FromPeerDid, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
 		var gateErr *trustgate.GateError

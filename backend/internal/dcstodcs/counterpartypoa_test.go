@@ -1,6 +1,7 @@
 package dcstodcs
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -28,6 +29,11 @@ func summaryVC(organization, signatory string) string {
 	    "id": "` + signatory + `",
 	    "field_name": "` + organization + `",
 	    "contract_id": "urn:contract:1"
+	  },
+	  "proof": {
+	    "type": "DataIntegrityProof",
+	    "verificationMethod": "` + testSignedParty + `#dcs-vc",
+	    "proofPurpose": "assertionMethod"
 	  }
 	}`
 }
@@ -42,7 +48,11 @@ func shippedEvidence(organizations ...string) ShippedSignatures {
 		}
 		vcs = append(vcs, summaryVC(org, signatory))
 	}
-	return ShippedSignatures{Evidence: []byte("[" + strings.Join(vcs, ",") + "]")}
+	return ShippedSignatures{
+		Evidence:           []byte("[" + strings.Join(vcs, ",") + "]"),
+		VerificationMethod: testSignedParty + "#dcs-vc",
+		VerifyVC:           func(json.RawMessage) error { return nil },
+	}
 }
 
 func gateError(t *testing.T, err error) *GateError {
@@ -97,7 +107,7 @@ func TestCounterpartyPoAGate_ContractRecordsADifferentAuthorizationIsRefused(t *
 
 func TestCounterpartyPoAGate_UnreadableSigningEvidenceIsRefused(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
-	err := gate.Check(testSignedParty, ShippedSignatures{Evidence: []byte("not json")}, []SignatoryPoA{
+	err := gate.Check(testSignedParty, ShippedSignatures{Evidence: []byte("not json"), VerifyVC: func(json.RawMessage) error { return nil }}, []SignatoryPoA{
 		{Party: testSignedParty, Presentation: "irrelevant"},
 	})
 	assert.Contains(t, gateError(t, err).Error(), "decode signing evidence")

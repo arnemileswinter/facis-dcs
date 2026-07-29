@@ -834,10 +834,39 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			return nil, fmt.Errorf("encode signing-summary evidence bundle: %w", err)
 		}
 	default:
-		// Later signature on a multi-signer contract: its evidence is
-		// already embedded (see above); the signed document must not be
-		// mutated beyond the incremental signature itself.
-		evidence = nil
+		// A later signature on a multi-signer contract. The bundle already
+		// embedded was issued by whoever signed FIRST, and covers only the
+		// fields that instance had ceremonies for — a peer's field was skipped
+		// because this instance knew nothing about it.
+		//
+		// So this signature issues its own summary. Without it the counterparty
+		// receives a document whose evidence attests every signature except the
+		// one the sender just made, and a peer verifying the authority behind
+		// that signature finds nothing attesting it (DCS-FR-SM-08 requires the
+		// summary for EACH signed contract, not for the first signature on it).
+		// Embedding is additive, so this joins the existing attachment rather
+		// than replacing it, and the incremental update lands outside the
+		// signed byte range.
+		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+			ContractID:           cmd.DID,
+			SignerDID:            cmd.SignerDID,
+			CeremonyID:           ceremony.ID,
+			FieldName:            ceremony.FieldName,
+			ContentHash:          contentHash,
+			PDFHash:              basePDFHash,
+			CredentialType:       cmd.CredentialType,
+			KBSDHash:             kbSDHash,
+			SignedAt:             signedAt,
+			SchemaVersion:        schemaVersion,
+			ValidationReportHash: validationReportHash,
+		})
+		if vcErr != nil {
+			return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", ceremony.FieldName, vcErr)
+		}
+		evidence, err = json.Marshal([]json.RawMessage{vc})
+		if err != nil {
+			return nil, fmt.Errorf("encode signing-summary evidence bundle: %w", err)
+		}
 	}
 
 	// The JAdES payload over the machine-readable JSON-LD, the counterpart to
