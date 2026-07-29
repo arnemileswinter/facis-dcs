@@ -55,6 +55,27 @@ denselben Lauf in einem anderen Format dar. Der exportierte Inhalt wird mit
 seiner Prüfsumme und, sofern eingerichtet, einer Archiv-Referenz im Audit Trail
 nachgewiesen.
 
+## Prüfungen bei Vertragsübergängen
+
+Beim Einreichen, Anbieten, Genehmigen, Signieren und Bereitstellen eines
+Vertrags wird automatisch der zum Vertrag gespeicherte Regelstand geprüft. Sie
+müssen dafür keinen separaten Prüflauf starten.
+
+- **Bestanden:** Der angeforderte Übergang wird fortgesetzt.
+- **Manuelle Prüfung erforderlich:** Der Vertrag bleibt im bisherigen Zustand.
+  Ein **Compliance Officer** prüft den gespeicherten Lauf und genehmigt oder
+  verwirft ihn mit einer Begründung. Nach einer Genehmigung wird genau der
+  zurückgestellte Übergang fortgesetzt; der externe Prüfdienst wird dafür nicht
+  erneut aufgerufen.
+- **Blockiert:** Der Vertrag bleibt im bisherigen Zustand. Ein neuer Versuch ist
+  erst sinnvoll, nachdem der angezeigte Regelverstoß oder technische Fehler
+  behoben wurde.
+
+Während eine manuelle Prüfung offen ist, darf der Vertragsinhalt oder
+Vertragszustand nicht geändert werden. Andernfalls wird die Fortsetzung
+abgelehnt, damit eine Entscheidung nicht auf einen inzwischen geänderten
+Vertrag angewendet wird.
+
 ## Sichtbare Fehlerfälle
 
 - **Nicht angemeldet oder nicht berechtigt:** Melden Sie sich mit der Rolle
@@ -73,3 +94,15 @@ nachgewiesen.
 - **Nicht unterstütztes Berichtsformat:** Wählen Sie JSON, CSV oder PDF.
 - **Bericht konnte nicht archiviert werden:** Der Export wird als Fehler
   gemeldet, statt einen nicht nachgewiesenen Bericht auszugeben.
+- **Regelstand nicht auflösbar:** Eine für diesen Vertrag gespeicherte Regel-
+  oder Profilversion fehlt oder ist nicht erreichbar. Der Übergang bleibt
+  blockiert; es wird nicht auf einen anderen Regelstand ausgewichen.
+- **Prüfung des Vertragsübergangs nicht erreichbar, zu langsam oder ungültig:**
+  Der Übergang bleibt nach einem Prüfauftrag blockiert. Es erfolgt kein
+  automatischer zweiter Auftrag.
+- **Vertrag während einer manuellen Prüfung geändert:** Die frühere Genehmigung
+  wird nicht auf den geänderten Vertrag angewendet. Fordern Sie den Übergang
+  für den aktuellen Vertragsstand erneut an.
+- **Fortsetzung bereits in Bearbeitung:** Eine weitere Genehmigung startet
+  keine parallele Fortsetzung. Bleibt dieser Zustand nach einem harten
+  Systemabbruch bestehen, muss der Betreiber den Vorgang prüfen.
