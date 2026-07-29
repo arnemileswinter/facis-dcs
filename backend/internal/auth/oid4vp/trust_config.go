@@ -391,19 +391,16 @@ type PurposeView struct {
 	purpose Purpose
 }
 
+// IssuerTrusted reports whether this issuer is granted this purpose.
+//
+// The rules are in policy/trust.rego, not here: which issuer may do what, on
+// whose behalf, is the part a deployment changes, and it is easier to audit as
+// data than as control flow. What stays in Go is everything cryptographic.
 func (v *PurposeView) IssuerTrusted(iss string) bool {
 	if v == nil || v.cfg == nil {
 		return false
 	}
-	iss = strings.TrimSpace(iss)
-	// An explicit entry is the operator's complete answer for this issuer. If it
-	// withholds the purpose that is a denial, not an invitation to fall through
-	// to the dynamic path — otherwise `purposes: ["login"]` would silently also
-	// grant peer, and no did:web issuer could ever be denied it.
-	if entry, ok := v.cfg.Issuers[iss]; ok {
-		return entry.Allows(v.purpose)
-	}
-	return v.cfg.dynamicPeerIssuer(v.purpose, iss)
+	return v.cfg.evaluate(v.purpose, iss, "").Trusted
 }
 
 // IssuerUsesX5C reports whether the issuer publishes its key through a
@@ -411,6 +408,9 @@ func (v *PurposeView) IssuerTrusted(iss string) bool {
 // rather than the credential.
 func (v *PurposeView) IssuerUsesX5C(iss string) (bool, error) {
 	if !v.IssuerTrusted(iss) {
+		if reasons := v.DenialReasons(iss, ""); len(reasons) > 0 {
+			return false, fmt.Errorf("issuer %q is not trusted for %s: %s", iss, v.purpose, strings.Join(reasons, "; "))
+		}
 		return false, fmt.Errorf("issuer %q is not trusted for %s", iss, v.purpose)
 	}
 	return v.cfg.issuerUsesX5C(iss)
@@ -554,22 +554,15 @@ func (v *PurposeView) X5CTrustRoots() *x509.CertPool { return v.cfg.X5CTrustRoot
 
 // IssuerMayAttest reports whether the issuer was entitled to name this
 // organization.
+// The entitlement rule lives in policy/trust.rego. The purpose is not part of
+// this question — an issuer's entitlement to speak for an organization is the
+// same whichever purpose the credential is being used for — so any purpose
+// evaluates it identically.
 func (c *TrustConfig) IssuerMayAttest(iss, org string) bool {
 	if c == nil {
 		return false
 	}
-	iss = strings.TrimSpace(iss)
-	if entry, ok := c.Issuers[iss]; ok {
-		return entry.MayAttest(org)
-	}
-	// A dynamically trusted peer issuer speaks for its own authority only, so
-	// the bound is derived from the identifier rather than configured.
-	if c.PeerDynamic {
-		if authority := peerAuthority(iss); authority != "" {
-			return strings.TrimSpace(org) == authority
-		}
-	}
-	return false
+	return c.evaluate(PurposePeer, iss, org).MayAttest
 }
 
 func (c *TrustConfig) IssuerTrusted(iss string) bool {
