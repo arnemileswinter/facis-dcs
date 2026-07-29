@@ -2,8 +2,10 @@ package oid4vp
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -186,5 +188,79 @@ func TestDevTrustConfigLoads(t *testing.T) {
 		if err := json.Unmarshal(entry.JWKS, &probe); err != nil {
 			t.Errorf("issuer %q jwks is not an object: %v", iss, err)
 		}
+	}
+}
+
+type stubFetcher struct {
+	docs map[string][]byte
+	err  error
+}
+
+func (s stubFetcher) Fetch(url string) ([]byte, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	body, ok := s.docs[url]
+	if !ok {
+		return nil, fmt.Errorf("no document at %s", url)
+	}
+	return body, nil
+}
+
+// did:web resolution must hit the identifier's own document, with the port
+// decoded back out of the percent-encoded authority.
+func TestDIDWebURLMapping(t *testing.T) {
+	cases := map[string]string{
+		"did:web:example.com":                    "https://example.com/.well-known/did.json",
+		"did:web:example.com:issuer":             "https://example.com/issuer/did.json",
+		"did:web:dcs-b.localhost%3A18080:issuer": "https://dcs-b.localhost:18080/issuer/did.json",
+	}
+	for iss, want := range cases {
+		got, err := didWebURL(iss)
+		if err != nil {
+			t.Errorf("%s: %v", iss, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s → %s, want %s", iss, got, want)
+		}
+	}
+	if _, err := didWebURL("https://example.com/issuer"); err == nil {
+		t.Error("a non did:web identifier must be refused")
+	}
+}
+
+func TestResolveKeysByMechanism(t *testing.T) {
+	didDoc := []byte(`{"verificationMethod":[{"publicKeyJwk":{"kty":"EC","crv":"P-256","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}}]}`)
+	cfg := &TrustConfig{
+		VCTs: []string{"urn:dcs:poa:v1"},
+		Issuers: map[string]TrustedIssuer{
+			"did:web:example.com:issuer":  {Purposes: []Purpose{PurposePeer}, Organizations: []string{"*"}, Mechanism: MechanismDIDWeb},
+			"https://x5c.example/issuer":  {Purposes: []Purpose{PurposePID}, Mechanism: MechanismX5C},
+			"https://orce.example/issuer": {Purposes: []Purpose{PurposePeer}, Organizations: []string{"*"}, Mechanism: MechanismORCE},
+		},
+	}
+	cfg.SetKeyFetcher(stubFetcher{docs: map[string][]byte{
+		"https://example.com/issuer/did.json": didDoc,
+	}})
+
+	keys, err := cfg.resolveIssuerKeys("did:web:example.com:issuer")
+	if err != nil {
+		t.Fatalf("did:web resolve: %v", err)
+	}
+	if !strings.Contains(string(keys), "VlBNhqQn6gLy") {
+		t.Errorf("did:web keys not returned: %s", keys)
+	}
+
+	// An x5c issuer resolves to no JWKS: its key arrives in the chain.
+	keys, err = cfg.resolveIssuerKeys("https://x5c.example/issuer")
+	if err != nil || len(keys) != 0 {
+		t.Errorf("x5c must resolve to no jwks, got %q err %v", keys, err)
+	}
+
+	// orce without a configured endpoint must say so, not fail obscurely.
+	if _, err := cfg.resolveIssuerKeys("https://orce.example/issuer"); err == nil ||
+		!strings.Contains(err.Error(), "no resolver endpoint is configured") {
+		t.Errorf("expected a clear orce configuration error, got %v", err)
 	}
 }

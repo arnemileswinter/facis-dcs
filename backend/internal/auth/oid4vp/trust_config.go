@@ -23,6 +23,12 @@ type TrustConfig struct {
 	// credential presented with no roots configured must be REFUSED, never
 	// silently trusted off its own embedded leaf cert.
 	x5cRoots *x509.CertPool
+
+	// ORCEResolverURL is the flow endpoint the orce mechanism delegates to
+	// (OID4VP_ORCE_RESOLVER_URL). Empty unless a deployment uses it.
+	ORCEResolverURL string `json:"orce_resolver_url"`
+
+	keyFetcher KeyFetcher
 }
 
 // Purpose is what an issuer's credentials may be used FOR. Trusting an issuer's
@@ -65,13 +71,19 @@ const (
 	MechanismORCE   Mechanism = "orce"    // delegated to a configured ORCE flow
 )
 
-// supportedMechanisms are the ones this build can actually resolve. A
-// deployment that names anything else is refused AT LOAD rather than at first
-// use, so an unsupported trust configuration surfaces on startup instead of
-// when a wallet arrives.
+// supportedMechanisms are the ones this build can resolve. A deployment naming
+// anything else is refused AT LOAD rather than at first use, so an unsupported
+// trust configuration surfaces on startup instead of when a wallet arrives.
+//
+// A scheme absent from this list — did:ebsi, a national registry, whatever
+// comes next — is reached through MechanismORCE without a change here: the flow
+// resolves it and answers with a JWKS.
 var supportedMechanisms = map[Mechanism]bool{
-	MechanismJWKS: true,
-	MechanismX5C:  true,
+	MechanismJWKS:   true,
+	MechanismX5C:    true,
+	MechanismDIDJWK: true,
+	MechanismDIDWeb: true,
+	MechanismORCE:   true,
 }
 
 // TrustedIssuer is one issuer entry: what it may be trusted for, which
@@ -170,6 +182,12 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		if entry.Mechanism == MechanismJWKS && len(entry.JWKS) == 0 {
 			return nil, fmt.Errorf("trust config %q: issuer %q uses mechanism jwks but bundles no keys", path, iss)
 		}
+		if entry.Mechanism == MechanismDIDJWK && !strings.HasPrefix(iss, "did:jwk:") {
+			return nil, fmt.Errorf("trust config %q: issuer %q uses mechanism did:jwk but is not a did:jwk identifier", path, iss)
+		}
+		if entry.Mechanism == MechanismDIDWeb && !strings.HasPrefix(iss, "did:web:") {
+			return nil, fmt.Errorf("trust config %q: issuer %q uses mechanism did:web but is not a did:web identifier", path, iss)
+		}
 		// A pid issuer attests a person, not a party, so it needs no
 		// organizations. Anything that can speak for a party must say which.
 		if !entry.Allows(PurposePID) && len(entry.Organizations) == 0 {
@@ -205,7 +223,7 @@ func (v *PurposeView) IssuerJWKS(iss string) (json.RawMessage, error) {
 	if !v.IssuerTrusted(iss) {
 		return nil, fmt.Errorf("issuer %q is not trusted for %s", iss, v.purpose)
 	}
-	return v.cfg.IssuerJWKS(iss)
+	return v.cfg.resolveIssuerKeys(iss)
 }
 
 func (v *PurposeView) X5CTrustRoots() *x509.CertPool { return v.cfg.X5CTrustRoots() }
