@@ -5,6 +5,16 @@
   ],
   "issuers": {
     "did:web:dev.example:issuer:poa": {
+      "purposes": [
+        "login",
+        "peer",
+        "pid"
+      ],
+      "organizations": [
+        "did:web:localhost%3A8991",
+        "did:web:localhost%3A8992"
+      ],
+      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {
@@ -17,6 +27,16 @@
       }
     },
     "did:web:dev2.example:issuer:poa": {
+      "purposes": [
+        "login",
+        "peer",
+        "pid"
+      ],
+      "organizations": [
+        "did:web:localhost%3A8991",
+        "did:web:localhost%3A8992"
+      ],
+      "mechanism": "jwks",
       "jwks": {
         "keys": [
           {

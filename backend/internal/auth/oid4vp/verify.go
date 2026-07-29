@@ -17,6 +17,7 @@ type PresentationContext struct {
 
 // VerifiedLoginClaims holds subject and roles extracted from a verified VP.
 type VerifiedLoginClaims struct {
+	IssuerID       string
 	SubjectDID     string
 	ParticipantDID string
 	Roles          []string
@@ -37,15 +38,19 @@ type Verifier interface {
 }
 
 // NewVerifier returns a VP verifier backed by the given issuer trust configuration.
-func NewVerifier(cfg *TrustConfig) Verifier {
+// NewVerifier builds a verifier restricted to one purpose. The purpose decides
+// which issuers are acceptable at all: an issuer granted `peer` verifies a
+// counterparty's PoA but cannot mint a session here (ADR-31).
+func NewVerifier(cfg *TrustConfig, purpose Purpose) Verifier {
 	if cfg == nil {
 		return unconfiguredVerifier{}
 	}
-	return verifier{trust: cfg}
+	return verifier{trust: cfg, purpose: purpose}
 }
 
 type verifier struct {
-	trust *TrustConfig
+	trust   *TrustConfig
+	purpose Purpose
 }
 
 type unconfiguredVerifier struct{}
@@ -63,7 +68,7 @@ func (v verifier) Verify(vpToken string, ctx PresentationContext) (*VerifiedLogi
 	// 1. trust list + wallet binding (parse VP, issuer sig, trust, cnf/sub, KB sig + aud/nonce/sd_hash)
 	// 2. status list
 	// 3. login roles
-	verified, err := verifyTrustAndWallet(vpToken, ctx, v.trust)
+	verified, err := verifyTrustAndWallet(vpToken, ctx, v.trust, v.purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +88,7 @@ func (v verifier) Verify(vpToken string, ctx PresentationContext) (*VerifiedLogi
 }
 
 func (v verifier) VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedPIDClaims, error) {
-	verified, err := verifyTrustAndWalletForPID(vpToken, ctx, v.trust)
+	verified, err := verifyTrustAndWalletForPID(vpToken, ctx, v.trust, v.purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +103,7 @@ func (v verifier) VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedP
 	return verified, nil
 }
 
-func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *TrustConfig) (*VerifiedPIDClaims, error) {
+func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *TrustConfig, purpose Purpose) (*VerifiedPIDClaims, error) {
 	if trust == nil {
 		return nil, fmt.Errorf("trust config is not configured")
 	}
@@ -145,7 +150,7 @@ func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *
 	}, nil
 }
 
-func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustConfig) (*VerifiedLoginClaims, error) {
+func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustConfig, purpose Purpose) (*VerifiedLoginClaims, error) {
 	if trust == nil {
 		return nil, fmt.Errorf("trust config is not configured")
 	}
@@ -157,7 +162,7 @@ func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustC
 	}
 
 	// Verify issuer signature, header.jwk trust, vct/exp/iat, merge disclosures.
-	issuerClaims, err := sdjwt.VerifyCredential(presentation.IssuerJWT, presentation.Disclosures, trust)
+	issuerClaims, err := sdjwt.VerifyCredential(presentation.IssuerJWT, presentation.Disclosures, trust.For(purpose))
 	if err != nil {
 		return nil, err
 	}
@@ -196,12 +201,22 @@ func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustC
 		return nil, err
 	}
 
+	// An issuer may only speak for the organizations its trust entry names.
+	// Without this the verifier would rely on every trusted issuer being
+	// well-behaved: a counterparty's issuer could assert this instance's
+	// organization and any organization check downstream would pass.
+	issuerID, _ := issuerClaims["iss"].(string)
+	if !trust.IssuerMayAttest(issuerID, organization) {
+		return nil, fmt.Errorf("issuer %q is not entitled to attest organization %q", issuerID, organization)
+	}
+
 	raw, err := json.Marshal(issuerClaims)
 	if err != nil {
 		return nil, err
 	}
 
 	return &VerifiedLoginClaims{
+		IssuerID:       issuerID,
 		SubjectDID:     sub,
 		ParticipantDID: organization,
 		Roles:          roles,
