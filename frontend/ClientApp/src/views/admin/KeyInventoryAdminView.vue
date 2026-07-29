@@ -66,9 +66,13 @@ function formatTimestamp(value?: string): string {
               <td class="font-mono text-sm" data-testid="key-inventory-label">{{ key.label }}</td>
               <td>{{ key.purpose }}</td>
               <td>
-                <span class="badge badge-ghost badge-sm" :data-testid="`key-version-${key.label}`">
-                  v{{ key.active_version }}
-                </span>
+                <!-- v-text, not interpolation: a text node would carry the
+                     template's surrounding indentation into the badge. -->
+                <span
+                  class="badge badge-ghost badge-sm"
+                  :data-testid="`key-version-${key.label}`"
+                  v-text="`v${key.active_version}`"
+                />
               </td>
               <td>{{ formatTimestamp(key.updated_at) }}</td>
             </tr>

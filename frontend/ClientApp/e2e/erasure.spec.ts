@@ -1,11 +1,15 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOpenDecisionsOn,
   apiAuthHeaders,
+  assertManifestChainGrew,
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
+  counterOffer,
   createContractViaUi,
   fillContractAmountOn,
+  type Instance,
   instanceA,
   offerToCounterparty,
   openInstanceB,
@@ -14,8 +18,8 @@ import {
   resolveDidWeb,
   settleToApprovedOn,
   signOnInstance,
+  stagedCounterOffer,
   submitReviewApproveTemplateOn,
-  type Instance,
 } from './multi-dcs-helpers'
 import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
 
@@ -85,7 +89,7 @@ async function expectErasureBadge(inst: Instance, contractDid: string, badge: st
 
 /** Export attempt on a shredded contract: the button must yield the defined
  *  "Content erased" message — a clean end state, not a crash. */
-async function expectErasedExportMessage(inst: Instance, contractDid: string): Promise<void> {
+async function expectErasedExportMessage(inst: Instance, contractDid: string, contractName: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const exportAnswered = inst.page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/`), {
     timeout: 120_000,
@@ -94,7 +98,10 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string): P
   await exportAnswered
   await expect(inst.page.getByText('Content erased — encryption keys destroyed')).toBeVisible({ timeout: 30_000 })
   // The view survives the refusal: the contract's metadata keeps rendering.
-  await expect(inst.page.getByText(contractDid).first()).toBeVisible()
+  // It identifies the contract by name — the only DID on this view is the
+  // template's — so the name is what proves the Postgres-side record survived
+  // the shred.
+  await expect(inst.page.getByRole('textbox', { name: 'Global Name' })).toHaveValue(contractName)
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
@@ -125,7 +132,31 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await offerToCounterparty(a, contractDid)
     await assertReceivedInState(b, contractDid, 'OFFERED')
 
+    // A full negotiation round, as in full-vertical-2dcs: settling is mutual,
+    // so neither side can consolidate straight from OFFERED. Each redline value
+    // must differ from the last, or the editor stays undirty and the staged
+    // draft never saves. Each redline also ships a new PDF, so the chain-growth
+    // polls double as the replication barrier between the two sides.
+    let aChain = await assertManifestChainGrew(a, contractDid, 0)
+    let bChain = await assertManifestChainGrew(b, contractDid, 0)
+
+    await stagedCounterOffer(b, contractDid, { value: '10000' })
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+
+    // A answers with its own redline rather than accepting B's: Submit renders
+    // for a party that has acted in the round, not for one that has only
+    // received a proposal.
+    await counterOffer(a, contractDid, { value: '15000' })
+    await assertManifestChainGrew(a, contractDid, aChain)
+    await assertManifestChainGrew(b, contractDid, bChain)
+
+    // A moved last, so the outstanding decision is B's to settle (FR-CWE-07
+    // refuses an accept by the record's own author).
+    await acceptOpenDecisionsOn(b, contractDid)
+
     await settleToApprovedOn(a, contractDid)
+    await settleToApprovedOn(b, contractDid)
     await signOnInstance(a, contractDid, 'Erasure Signatory')
     await assertReceivedInState(a, contractDid, 'SIGNED')
   })
@@ -166,7 +197,10 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
   await test.step('A: erasure panel reports Keys destroyed with the peer confirmed', async () => {
     await expectErasureBadge(a, contractDid, 'Keys destroyed')
     await expect(async () => {
-      await a.page.reload()
+      await a.gotoAs('Archive Manager', `/ui/audit?scope=archive&did=${encodeURIComponent(contractDid)}`)
+      // The peer table sits inside the collapsed "Erasure details" disclosure:
+      // its rows are in the DOM but hidden until the summary is opened.
+      await a.page.getByText('Erasure details', { exact: true }).click()
       const peerRow = a.page.getByTestId(`erasure-peer-${bDidWeb}`)
       await expect(peerRow).toBeVisible({ timeout: 5_000 })
       await expect(peerRow).toContainText('confirmed', { timeout: 5_000 })
@@ -183,12 +217,14 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
   })
 
   await test.step('export attempts surface "Content erased" on both instances — no crash', async () => {
-    await expectErasedExportMessage(a, contractDid)
-    await expectErasedExportMessage(b, contractDid)
+    await expectErasedExportMessage(a, contractDid, templateName)
+    await expectErasedExportMessage(b, contractDid, templateName)
   })
 
   await test.step('the contract list still serves the metadata (erasure ≠ row deletion)', async () => {
     await a.gotoAs('Contract Manager', '/ui/contracts')
-    await expect(a.page.getByText(contractDid).first()).toBeVisible({ timeout: 30_000 })
+    // The list keys rows by DID but renders a Name column, so the name is the
+    // surviving metadata that is actually on screen.
+    await expect(a.page.getByText(templateName).first()).toBeVisible({ timeout: 30_000 })
   })
 })

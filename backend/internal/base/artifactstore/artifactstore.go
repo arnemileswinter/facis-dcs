@@ -58,6 +58,29 @@ func IsShredded(err error) bool {
 	return errors.As(err, &shredded)
 }
 
+// TamperedError reports that a stored artifact failed authenticated
+// decryption: the bytes behind the CID are not the ciphertext this instance
+// wrote under the scope's CEK, so they were substituted or altered at rest.
+//
+// AEAD authentication failure IS integrity detection, so callsites map this to
+// a negative verification verdict, never a 500 — a caller asking "is this
+// artifact intact?" gets the answer "no", not an internal error.
+type TamperedError struct {
+	Scope Scope
+	CID   string
+}
+
+func (e *TamperedError) Error() string {
+	return fmt.Sprintf("stored %s artifact %s for %s failed authenticated decryption; it was altered or substituted at rest",
+		e.Scope.Kind, e.CID, e.Scope.ID)
+}
+
+// IsTampered reports whether err is (or wraps) a TamperedError.
+func IsTampered(err error) bool {
+	var tampered *TamperedError
+	return errors.As(err, &tampered)
+}
+
 // ObjectStore is the dumb bytes-in/bytes-out IPFS surface the store encrypts
 // over (ipfs.APIClient satisfies it).
 type ObjectStore interface {
@@ -127,7 +150,10 @@ func (s *Store) Get(ctx context.Context, scope Scope, cid string) ([]byte, error
 	}
 	plaintext, err := envelope.Decrypt(cek, res.Data, scope.AAD())
 	if err != nil {
-		return nil, fmt.Errorf("decrypt %s %s artifact %s: %w", scope.Kind, scope.ID, cid, err)
+		// The CEK came from our own repository and the AAD is derived from the
+		// scope, so a decryption failure here is never a key-management fault:
+		// the bytes behind the CID are not what this instance sealed.
+		return nil, fmt.Errorf("%w: %v", &TamperedError{Scope: scope, CID: cid}, err)
 	}
 	return plaintext, nil
 }

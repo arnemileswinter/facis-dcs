@@ -67,6 +67,9 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 		}
 
 		pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
 		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch cached template PDF %s from IPFS for verify append: %w", qry.DID, err)
 		}
@@ -97,6 +100,9 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 	}
 
 	pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), latestCID)
+	if artifactstore.IsTampered(err) {
+		return tamperedVerifyResult(currentC2PAState), nil
+	}
 	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch template PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
