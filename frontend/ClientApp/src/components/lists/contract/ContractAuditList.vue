@@ -30,7 +30,7 @@ const eventType = useContractEventType()
         </div>
         <div v-else-if="eventType.isSubmitEvent(audit)" class="flex justify-between">
           <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
-          <div>
+          <div v-if="audit.event_data.new_state">
             Transition:
             <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary" aria-label="From state">
               {{ toProperCase(audit.event_data.previous_state) }}
