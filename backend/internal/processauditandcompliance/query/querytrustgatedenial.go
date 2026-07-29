@@ -63,6 +63,8 @@ func (h *TrustGateDenialReporter) HandleTx(ctx context.Context, tx *sqlx.Tx, que
 		DID:        query.DID,
 		PeerDID:    query.PeerDID,
 		Direction:  query.Direction,
+		RuleID:     "FEDERATION_TRUST_GATE_DENIAL",
+		Severity:   "error",
 		Reason:     query.Reason,
 		OccurredAt: time.Now().UTC(),
 	}

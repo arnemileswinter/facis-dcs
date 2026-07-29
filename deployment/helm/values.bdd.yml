@@ -72,6 +72,8 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
     # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
     # issuer" scenarios) verifies against this baked-in dev cert.
@@ -267,7 +269,7 @@ pkcs11:
 # XFSC Status List Service: required (fatal on startup if STATUSLIST_SERVICE_URL unreachable).
 statuslistService:
   enabled: true
-  tenantID: c2pa
+  tenantID: default
   ingress:
     enabled: true
     className: traefik
@@ -291,6 +293,7 @@ statuslistService:
     enabled: true
     tenantIDs:
       - credential
+      - default
       - c2pa
 
 statusListLocalhostProxy:

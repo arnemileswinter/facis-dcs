@@ -135,6 +135,41 @@ func VerifyCredentialForPID(token string, disclosures []string, cfg TrustConfig)
 	return merged, nil
 }
 
+// VerifyCredentialForPoA validates the urn:dcs:poa:v1 profile and applies the
+// PoA-specific x5c one-hop rule when the issuer supplies a certificate chain.
+func VerifyCredentialForPoA(token string, disclosures []string, cfg TrustConfig) (jwt.MapClaims, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("issuer trust is not configured")
+	}
+	parsed, err := jwt.NewParser(
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithValidMethods([]string{"ES256"}),
+	).Parse(token, func(t *jwt.Token) (any, error) {
+		return ResolveIssuerVerificationKeyForPoA(cfg, t)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("credential jwt: %w", err)
+	}
+	if err := validateCredentialHeader(parsed); err != nil {
+		return nil, err
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("credential jwt claims are invalid")
+	}
+	if vct, _ := claims["vct"].(string); strings.TrimSpace(vct) != "urn:dcs:poa:v1" {
+		return nil, fmt.Errorf("PoA vct must be urn:dcs:poa:v1, got %q", vct)
+	}
+	if err := validateNotBeforeIfPresent(claims); err != nil {
+		return nil, err
+	}
+	if err := VerifyDisclosures(claims, disclosures); err != nil {
+		return nil, err
+	}
+	return MergeDisclosedClaims(claims, disclosures)
+}
+
 func validateNotBeforeIfPresent(claims jwt.MapClaims) error {
 	nbfVal, ok := claims["nbf"]
 	if !ok {

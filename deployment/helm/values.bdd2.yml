@@ -58,7 +58,20 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+
+# Instance B deliberately shares instance A's ORCE deployment. Explicit URLs
+# avoid the empty-value helper deriving unavailable dcs2-orce service names.
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
+  timeout: "2s"
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
 # database. No "fc" or "statuslist" database — B doesn't run the Federated
@@ -153,7 +166,7 @@ pkcs11:
 statuslistService:
   enabled: false
   url: "http://dcs-statuslist-service:8080"
-  tenantID: c2pa
+  tenantID: default
 
 # Same loopback proxy as instance A (values.bdd.yml): status list credential
 # IDs embedded by the shared Status List Service are public-origin URLs

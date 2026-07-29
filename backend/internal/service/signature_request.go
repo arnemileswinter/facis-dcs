@@ -479,7 +479,7 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("%w: no Power of Attorney credential was presented at signing", command.ErrPoAUnauthorized))
 	}
 
-	verifiedPoA, err := oid4vp.NewVerifier(s.Trust).Verify(poaPresentation, presCtx)
+	verifiedPoA, err := oid4vp.NewVerifier(s.Trust).VerifyPoA(poaPresentation, presCtx)
 	if err != nil {
 		log.Printf(ctx, "SignatureRequestCallback: Verify PoA failed for ceremony %s: %v", ceremonyID, err)
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("vp verification failed: PoA: %w", err))
@@ -509,7 +509,7 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 		CeremonyID:      ceremonyID,
 		SignerDID:       verifiedPID.SubjectDID,
 		SDHash:          presentation.SDHash,
-		VpToken:         pidPresentation,
+		VpToken:         vpToken,
 		PidClaims:       pidClaims,
 		PoAOrganization: strings.TrimSpace(verifiedPoA.ParticipantDID),
 		PoARoles:        verifiedPoA.Roles,

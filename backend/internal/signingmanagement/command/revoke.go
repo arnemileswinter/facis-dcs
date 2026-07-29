@@ -16,6 +16,8 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/pdfgeneration/statuspublication"
 	"digital-contracting-service/internal/signingmanagement/db"
 	signingmanagementevents "digital-contracting-service/internal/signingmanagement/event"
 )
@@ -71,17 +73,25 @@ func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
 		return fmt.Errorf("could not update contract state to revoked: %w", err)
 	}
 
+	occurredAt := time.Now().UTC()
 	evt := signingmanagementevents.RevokeEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
 		RevokedBy:       cmd.RevokedBy,
-		OccurredAt:      time.Now().UTC(),
+		OccurredAt:      occurredAt,
 		HolderDID:       cmd.HolderDID,
 		UserRoles:       cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
+	}
+	status, err := provenance.MapCWEStateToC2PA(contractstate.Revoked.String())
+	if err != nil {
+		return err
+	}
+	if err := statuspublication.EnqueueTx(ctx, tx, cmd.DID, status, "signature revoked", occurredAt); err != nil {
+		return err
 	}
 
 	return tx.Commit()

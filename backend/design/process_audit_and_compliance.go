@@ -11,6 +11,7 @@ var PACAuditRequest = Type("PACAuditRequest", func() {
 
 	Attribute("scope", String, "Scope that should be audited")
 	Attribute("did", String, "Optional resource DID filter")
+	Attribute("resource_id", String, "Optional resource DID filter alias used by audit-executor clients")
 	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
 
 	Required("scope", "justification")

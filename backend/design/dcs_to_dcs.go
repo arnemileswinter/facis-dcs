@@ -25,6 +25,20 @@ var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
 	Required("alg", "epk", "wrapped")
 })
 
+var DCSToDCSPoAEvidence = Type("DCSToDCSPoAEvidence", func() {
+	Description("Transferable urn:dcs:poa:v1 presentation and its original verified OID4VP context, bound to the signed contract, field and holder")
+	Attribute("presentation", String, "Verbatim SD-JWT+KB-JWT PoA presentation")
+	Attribute("nonce", String, "Original ceremony nonce verified by the sender")
+	Attribute("aud", String, "Original OID4VP audience verified by the sender")
+	Attribute("vct", String, "Credential type; must be urn:dcs:poa:v1")
+	Attribute("contract_id", String, "Contract IRI the evidence authorizes")
+	Attribute("field_name", String, "Signature field/represented party")
+	Attribute("holder_did", String, "Holder DID bound by sub and cnf.jwk")
+	Attribute("organization", String, "Issuer-authoritative represented organization")
+	Attribute("revalidated_at", String, "Receiver-side cryptographic revalidation timestamp; response only")
+	Required("presentation", "nonce", "aud", "vct", "contract_id", "field_name", "holder_did", "organization")
+})
+
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Description("A contract PDF shipped to the counterparty (ADR-13). The PDF is the wire format: it carries the machine-readable JSON-LD, the C2PA provenance chain, and any signatures. A bare PDF is a proposal (offer or negotiation counter); a PDF accompanied by a JAdES is a signature (acceptance).")
 
@@ -37,6 +51,7 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
+	Attribute("poa_evidence", DCSToDCSPoAEvidence, "Required for a signed acceptance: the original holder-bound PoA presentation and nonce/audience context")
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })
@@ -77,6 +92,7 @@ var DCSToDCSSyncProvenanceResponse = Type("DCSToDCSSyncProvenanceResponse", func
 	Attribute("from_peer_did", String, "The peer that signed the shipped contract")
 	Attribute("jades_signature", String, "The verified JAdES baseline-B compact JWS as received")
 	Attribute("received_at", String, "When the signed ship was accepted")
+	Attribute("poa_evidence", DCSToDCSPoAEvidence, "Receiver-revalidated PoA evidence and original OID4VP context")
 
 	Required("did", "contract_version", "from_peer_did", "jades_signature", "received_at")
 })

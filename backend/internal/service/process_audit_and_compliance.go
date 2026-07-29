@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -48,6 +49,47 @@ type auditEvidenceResource struct {
 	Component  string                                                  `json:"component"`
 	CreatedAt  string                                                  `json:"created_at"`
 	AuditTrail []*processauditandcompliance.PACResourceAuditTrailEntry `json:"audit_trail"`
+}
+
+// MarshalJSON adapts Goa's service-layer audit entry type to the
+// snake_case wire contract consumed by the external audit executor. Goa
+// result structs intentionally have no encoding/json tags because their HTTP
+// transport has generated encoders; here they are nested in an independent
+// executor envelope and therefore need an explicit adapter.
+func (r auditEvidenceResource) MarshalJSON() ([]byte, error) {
+	type wireEntry struct {
+		ID            int64   `json:"id"`
+		Component     string  `json:"component"`
+		EventType     string  `json:"event_type"`
+		EventData     any     `json:"event_data,omitempty"`
+		DID           *string `json:"did,omitempty"`
+		CreatedAt     string  `json:"created_at"`
+		ResLogPredCID *string `json:"res_log_pred_cid,omitempty"`
+		Kind          *string `json:"kind,omitempty"`
+		Result        *string `json:"result,omitempty"`
+		RuleID        *string `json:"rule_id,omitempty"`
+		Reason        *string `json:"reason,omitempty"`
+	}
+	entries := make([]wireEntry, 0, len(r.AuditTrail))
+	for _, entry := range r.AuditTrail {
+		if entry == nil {
+			continue
+		}
+		entries = append(entries, wireEntry{
+			ID: entry.ID, Component: entry.Component, EventType: entry.EventType,
+			EventData: entry.EventData, DID: entry.Did, CreatedAt: entry.CreatedAt,
+			ResLogPredCID: entry.ResLogPredCid, Kind: entry.Kind, Result: entry.Result,
+			RuleID: entry.RuleID, Reason: entry.Reason,
+		})
+	}
+	return json.Marshal(struct {
+		DID        string      `json:"did"`
+		Component  string      `json:"component"`
+		CreatedAt  string      `json:"created_at"`
+		AuditTrail []wireEntry `json:"audit_trail"`
+	}{
+		DID: r.Did, Component: r.Component, CreatedAt: r.CreatedAt, AuditTrail: entries,
+	})
 }
 
 type auditScopeConfig struct {
@@ -99,8 +141,8 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		Justification: req.Justification,
 		Evidence:      map[string]any{scopeConfig.scopeName: evidence},
 	}
-	if req.Did != nil && strings.TrimSpace(*req.Did) != "" {
-		executorRequest.Resource = &auditexecutor.Resource{DID: strings.TrimSpace(*req.Did)}
+	if did := auditRequestDID(req); did != "" {
+		executorRequest.Resource = &auditexecutor.Resource{DID: did}
 	}
 	executorResponse, rawResponse, err := s.AuditExecutor.Run(ctx, executorRequest)
 	if err != nil {
@@ -128,8 +170,15 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 		UserRoles:     middleware.GetUserRoles(ctx),
 		Justification: req.Justification,
 	}
-	if req.Did != nil {
-		qry.DID = strings.TrimSpace(*req.Did)
+	if scopeConfig.scopeName == "contracts" {
+		// Contract-scoped PAC incidents (for example a rejected federation
+		// signature) are anchored on the contract DID but owned by the PAC
+		// component. Include that related audit chain so an external audit can
+		// report the finding instead of seeing only workflow events.
+		qry.RelatedScopes = []componenttype.ComponentType{componenttype.ProcessAuditAndCompliance}
+	}
+	if did := auditRequestDID(req); did != "" {
+		qry.DID = did
 	}
 	handler := qry2.Auditor{
 		DB:           s.DB,
@@ -344,11 +393,19 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 			AuditTrail: entries,
 		})
 	}
+	if scopeConfig.scopeName == "contracts" {
+		did := auditRequestDID(req)
+		denialEvidence, err := s.collectTrustGateDenialEvidence(ctx, did)
+		if err != nil {
+			return nil, processauditandcompliance.MakeInternalError(err)
+		}
+		result = mergeAuditEvidenceResources(result, denialEvidence)
+	}
 
-	if req.Did != nil && strings.TrimSpace(*req.Did) != "" {
+	if requestedDID := auditRequestDID(req); requestedDID != "" {
 		filtered := result[:0]
 		for _, response := range result {
-			if response.Did == strings.TrimSpace(*req.Did) {
+			if response.Did == requestedDID {
 				filtered = append(filtered, response)
 			}
 		}
@@ -375,12 +432,79 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 	return result, nil
 }
 
+func auditRequestDID(req *processauditandcompliance.PACAuditRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.Did != nil && strings.TrimSpace(*req.Did) != "" {
+		return strings.TrimSpace(*req.Did)
+	}
+	if req.ResourceID != nil {
+		return strings.TrimSpace(*req.ResourceID)
+	}
+	return ""
+}
+
+// collectTrustGateDenialEvidence exposes the durable outbox record immediately,
+// including during the short interval before the asynchronous audit-chain
+// anchoring processor has published it. The external executor therefore sees
+// a deterministic CHECK finding for a rejected peer request without weakening
+// the eventual tamper-evident audit trail.
+func (s *processAuditAndCompliancesrvc) collectTrustGateDenialEvidence(ctx context.Context, did string) ([]*auditEvidenceResource, error) {
+	type denialRow struct {
+		ID        int64     `db:"id"`
+		DID       string    `db:"did"`
+		Reason    string    `db:"reason"`
+		CreatedAt time.Time `db:"created_at"`
+	}
+	query := `
+		SELECT id, did, event_data ->> 'reason' AS reason, created_at
+		FROM outbox_events
+		WHERE event_type = 'PAC_TRUST_GATE_DENIAL'
+		  AND ($1 = '' OR did = $1)
+		ORDER BY id`
+	var rows []denialRow
+	if err := s.DB.SelectContext(ctx, &rows, query, did); err != nil {
+		return nil, fmt.Errorf("read trust-gate denial evidence: %w", err)
+	}
+
+	byDID := make(map[string]*auditEvidenceResource)
+	for _, row := range rows {
+		resource := byDID[row.DID]
+		if resource == nil {
+			resource = &auditEvidenceResource{
+				Did:       row.DID,
+				Component: componenttype.ProcessAuditAndCompliance.String(),
+				CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+			}
+			byDID[row.DID] = resource
+		}
+		kind, result, ruleID, reason := "CHECK", "FAILED", "FEDERATION_TRUST_GATE_DENIAL", row.Reason
+		resource.AuditTrail = append(resource.AuditTrail, &processauditandcompliance.PACResourceAuditTrailEntry{
+			ID:        row.ID,
+			Component: componenttype.ProcessAuditAndCompliance.String(),
+			EventType: "PAC_TRUST_GATE_DENIAL",
+			Did:       stringPointer(row.DID),
+			CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+			Kind:      &kind,
+			Result:    &result,
+			RuleID:    &ruleID,
+			Reason:    &reason,
+		})
+	}
+	result := make([]*auditEvidenceResource, 0, len(byDID))
+	for _, resource := range byDID {
+		result = append(result, resource)
+	}
+	return result, nil
+}
+
 func resolveAuditScope(rawScope string) (auditScopeConfig, error) {
 	normalizedScope := strings.TrimSpace(rawScope)
 	switch strings.ToLower(normalizedScope) {
-	case "templates":
+	case "template", "templates":
 		return templateAuditScopeConfig(), nil
-	case "contracts":
+	case "contract", "contracts":
 		return contractAuditScopeConfig(), nil
 	case "archive":
 		return archiveAuditScopeConfig(), nil

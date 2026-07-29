@@ -98,6 +98,38 @@ func ResolveIssuerVerificationKeyForPID(cfg TrustConfig, token *jwt.Token) (any,
 	return verificationKeyFromX5C(rawX5C, cfg.X5CTrustRoots())
 }
 
+// ResolveIssuerVerificationKeyForPoA resolves a PoA issuer key. Existing
+// trust-registry/JWKS credentials remain supported, while an x5c-bearing PoA
+// is accepted only as the v1 one-hop profile: issuer leaf followed directly
+// by the configured self-signed CA root.
+func ResolveIssuerVerificationKeyForPoA(cfg TrustConfig, token *jwt.Token) (any, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("trust config is not configured")
+	}
+	if _, ok := token.Header["x5c"]; !ok {
+		return ResolveIssuerVerificationKey(cfg, token)
+	}
+
+	certs, err := parseX5C(token.Header["x5c"])
+	if err != nil {
+		return nil, err
+	}
+	if len(certs) != 2 {
+		return nil, fmt.Errorf("PoA x5c must contain exactly issuer leaf and root, got %d certificates", len(certs))
+	}
+	leaf, root := certs[0], certs[1]
+	if leaf.Issuer.String() != root.Subject.String() || root.Issuer.String() != root.Subject.String() {
+		return nil, fmt.Errorf("PoA x5c is not a direct issuer-leaf to self-signed root chain")
+	}
+	if !root.BasicConstraintsValid || !root.IsCA {
+		return nil, fmt.Errorf("PoA x5c root is not a certificate authority")
+	}
+	if err := root.CheckSignatureFrom(root); err != nil {
+		return nil, fmt.Errorf("PoA x5c root is not self-signed: %w", err)
+	}
+	return verificationKeyFromCertificates(certs, cfg.X5CTrustRoots())
+}
+
 // verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
 // §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's
 // public key. roots being nil (no trust anchors configured) is refused, not
@@ -110,28 +142,17 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
 		return nil, fmt.Errorf("no x5c trust anchors are configured")
 	}
 
-	certsRaw, ok := raw.([]any)
-	if !ok || len(certsRaw) == 0 {
-		return nil, fmt.Errorf("x5c header is empty")
+	certs, err := parseX5C(raw)
+	if err != nil {
+		return nil, err
 	}
+	return verificationKeyFromCertificates(certs, roots)
+}
 
-	certs := make([]*x509.Certificate, 0, len(certsRaw))
-	for i, entry := range certsRaw {
-		certB64, ok := entry.(string)
-		if !ok || strings.TrimSpace(certB64) == "" {
-			return nil, fmt.Errorf("x5c[%d] is invalid", i)
-		}
-		der, err := base64.StdEncoding.DecodeString(certB64)
-		if err != nil {
-			return nil, fmt.Errorf("decode x5c[%d]: %w", i, err)
-		}
-		cert, err := x509.ParseCertificate(der)
-		if err != nil {
-			return nil, fmt.Errorf("parse x5c[%d]: %w", i, err)
-		}
-		certs = append(certs, cert)
+func verificationKeyFromCertificates(certs []*x509.Certificate, roots *x509.CertPool) (any, error) {
+	if roots == nil {
+		return nil, fmt.Errorf("no x5c trust anchors are configured")
 	}
-
 	leaf := certs[0]
 	intermediates := x509.NewCertPool()
 	for _, cert := range certs[1:] {
@@ -155,6 +176,30 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool) (any, error) {
 	default:
 		return nil, fmt.Errorf("x5c leaf certificate public key is not ECDSA")
 	}
+}
+
+func parseX5C(raw any) ([]*x509.Certificate, error) {
+	certsRaw, ok := raw.([]any)
+	if !ok || len(certsRaw) == 0 {
+		return nil, fmt.Errorf("x5c header is empty")
+	}
+	certs := make([]*x509.Certificate, 0, len(certsRaw))
+	for i, entry := range certsRaw {
+		certB64, ok := entry.(string)
+		if !ok || strings.TrimSpace(certB64) == "" {
+			return nil, fmt.Errorf("x5c[%d] is invalid", i)
+		}
+		der, err := base64.StdEncoding.DecodeString(certB64)
+		if err != nil {
+			return nil, fmt.Errorf("decode x5c[%d]: %w", i, err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("parse x5c[%d]: %w", i, err)
+		}
+		certs = append(certs, cert)
+	}
+	return certs, nil
 }
 
 func verificationKeyFromHeaderJWK(jwksRaw json.RawMessage, rawJWK any) (any, error) {

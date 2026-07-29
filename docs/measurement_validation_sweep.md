@@ -39,6 +39,43 @@ Final Ticket-27 addendum (`2026-07-29`):
   termination is a separate future ticket. The current implementation durably refuses parallel
   continuation (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:581-599`).
 
+Final PoA/status-list baseline addendum (`2026-07-29`):
+
+- Scope: one-hop PoA trust and transferable authorization evidence, live PoA status enforcement,
+  durable contract-status publication and fail-closed PDF live-status verification. The exact SRS
+  trace is DCS-IR-CI-09 (`docs/SRS_FACIS_DCS.txt:2270-2272`), DCS-FR-SM-03/-04/-05
+  (`docs/SRS_FACIS_DCS.txt:2613-2626`), UC-14 (`docs/SRS_FACIS_DCS.txt:3867-3886`),
+  DCS-OR-C2PA-005/-006 (`docs/SRS_FACIS_DCS.txt:3972-3982`), UC-04-02
+  (`docs/SRS_FACIS_DCS.txt:4157-4162`) and UC-14-01
+  (`docs/SRS_FACIS_DCS.txt:4234-4236`), refined by ADR-5, ADR-20, ADR-24 and ADR-29.
+- Independent final verification reported all 28 scenarios and 141 steps green, the complete
+  backend suite green and AC1 through AC9 independently fulfilled. The executable specification is
+  `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:1-162`.
+- The accepted delivery depth is one issuer leaf directly below the configured root (ADR-24).
+  The project Dev Root is enabled only in BDD/BDD2 overlays; the production default contains no
+  Dev Root or development issuer registry and fails closed until an operator supplies a trust
+  profile (`deployment/helm/values.yaml:62-85`,
+  `deployment/helm/values.bdd.yml:73-80`,
+  `deployment/helm/values.bdd2.yml:59-64`). The production profile itself remains out of scope.
+- The accepted XFSC compatibility model is binary: clear means active and set means revoked.
+  Suspension sets the same blocking bit and therefore fails closed; it is not represented as a
+  third XFSC value (`backend/internal/auth/oid4vp/status/handler/xfsc.go:107-121`,
+  `backend/internal/auth/oid4vp/status/policy.go:75-99`).
+
+AC traceability for `poa-one-hop-trust-and-statuslist-baseline`:
+
+| AC | Verified behavior | Production/configuration evidence | Executable evidence |
+|---|---|---|---|
+| AC1 | Holder-bound, organization-matched active PoA with exactly one issuer leaf below the configured root is accepted | `backend/internal/auth/oid4vp/sdjwt/keys.go:101-167`; `backend/internal/auth/oid4vp/verify.go:231-274` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:12-19` |
+| AC2 | A peer receives the original PoA presentation context and revalidates it before CEK or provenance persistence; refusal creates a PAC finding | `backend/internal/dcstodcs/synchronizer.go:295-396`; `backend/internal/service/dcs_to_dcs.go:160-240`; `backend/internal/service/dcs_to_dcs.go:245-289` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:21-55` |
+| AC3 | A formally valid chain rooted outside configured trust is rejected and no authority is persisted | `backend/internal/auth/oid4vp/sdjwt/keys.go:133-167`; `deployment/helm/values.yaml:62-85` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:57-64` |
+| AC4 | A fresh ceremony rejects newly revoked or suspended PoA status within five minutes | `backend/internal/auth/oid4vp/verify.go:90-99`; `backend/internal/auth/oid4vp/statuslist_verify.go:46-88` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:66-77` |
+| AC5 | The existing signing-summary credential binds the verbatim PoA presentation and original nonce/audience without creating another credential type | `backend/internal/pdfgeneration/provenance/signing_summary.go:12-32`; `backend/internal/pdfgeneration/provenance/signing_summary.go:80-96` | Focused assertion `backend/internal/pdfgeneration/provenance/signing_summary_test.go:10-33`, included in the independently green backend suite |
+| AC6 | Signed W3C lists preserve active/revoked/suspended meaning; XFSC's binary set bit rejects both requested revocation and suspension | `backend/internal/auth/oid4vp/status/handler/w3c_bitstring.go:30-82`; `backend/internal/auth/oid4vp/status/handler/xfsc.go:107-121`; `backend/internal/auth/oid4vp/status/policy.go:75-106` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:79-98` |
+| AC7 | Missing, invalid, untrusted, unknown, malformed or unavailable PoA status evidence fails closed | `backend/internal/auth/oid4vp/status/verifier.go:34-79`; `backend/internal/auth/oid4vp/status/handler/trust_required.go:5-9` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:100-116` |
+| AC8 | Suspension/termination publication is transactional, durable, idempotent and retryable | `backend/internal/contractworkflowengine/command/terminate.go:84-107`; `backend/internal/signingmanagement/command/revoke.go:58-97`; `backend/migrations/sql/20260729a_poa_sync_and_status_publication.sql:7-26`; `backend/internal/pdfgeneration/statuspublication/queue.go:24-150` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:118-137` |
+| AC9 | PDF verification separates lifecycle from live list status; an outage yields `unavailable`, failed check, reason and `match=false` | `backend/design/pdf_generation.go:16-32`; `backend/internal/pdfgeneration/query/common.go:138-199`; `backend/internal/pdfgeneration/query/common_test.go:46-83` | `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:139-162` |
+
 Status vocabulary used in this refresh:
 
 - `partial`: implementation/test candidates exist, but required coverage or clean execution is
@@ -212,9 +249,9 @@ behavioral obligation, not a claim that a single endpoint or existing test cover
 | VAL-04 Contract assembly validation | DCS-FR-CWE-03 | Reusable clauses/templates plus contract metadata and content | Structure, required metadata and content logic pass before assembled result proceeds | Missing/duplicate/incompatible components; malformed metadata; contradictory logic | **partial + underspecified** — exact active happy-path candidate passed; the content-logic oracle and required negative matrix remain open |
 | VAL-05 Human contract review validation | DCS-FR-CWE-14, DCS-FR-CWE-25, DCS-IR-CWE-05 | Submitted negotiated contract, reviewer identity/comments | Assigned reviewer can inspect, validate, comment and produce routed status change | Unauthorized/unassigned reviewer; stale version; rejection/comments; concurrent update | **partial + underspecified** — interface/state-machine candidate exists, but no exact trace for both functional sources and no complete reviewer/concurrency oracle |
 | VAL-06 External API action validation | DCS-FR-CWE-28 | Authenticated create/update/query action | Action, role, state transition and rate limit are validated | Malformed body, forbidden action, invalid transition, replay/rate limit | **partial + underspecified** — active system-API candidates exist and the lifecycle API feature passed; action/rate-limit catalogue and boundary coverage remain absent |
-| VAL-07 Signer identity/PoA credential validity | DCS-FR-SM-03; stakeholder input 2026-07-27 | Identity VC and mandatory PoA VC whenever a natural person signs for a company | PoA is present, currently valid, issued under the applicable trust profile and authorizes the person, action and represented company | Missing/expired/revoked/malformed/untrusted/out-of-scope/wrong-company PoA | **partial** — the mandatory-PoA rule is supplied and active happy/missing/wrong-party scenarios exist; issuer-chain scenarios remain skipped, dev/demo uses the project CA, and the production trust profile still needs confirmation |
-| VAL-08 Counterparty delegation-chain verification | DCS-FR-SM-04 | Counterparty PoA chain and trust anchors | Complete, valid, traceable delegation to signer | Broken/cyclic/expired/revoked/out-of-scope delegation; untrusted anchor | **candidate_not_run** — active counterparty PoA audit scenario exists, but the trusted-root chain walk remains explicitly skipped |
-| VAL-09 W3C/eIDAS credential verification | DCS-FR-SM-05 | Presented identity/PoA credentials | Format, signature, issuer/trust and semantic profile validate | Unsupported proof/data model, signature failure, issuer/status outage | **missing_trace + underspecified** — no exact feature trace; exact credential/proof profiles remain absent |
+| VAL-07 Signer identity/PoA credential validity | DCS-FR-SM-03; ADR-20/-24/-29 | Identity VC and mandatory PoA VC whenever a natural person signs for a company | PoA is present, currently valid, holder- and organization-bound and anchored under the configured trust profile | Missing/revoked/suspended/malformed/untrusted/wrong-company PoA; unavailable or unusable status evidence | **verified for the accepted one-hop baseline** — AC1/3/4/7 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:12-19`, `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:57-77` and `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:100-116`; independent final run 28/28 scenarios and 141/141 steps green. Production trust-profile selection remains operator configuration and is not claimed |
+| VAL-08 Counterparty delegation-chain verification | DCS-FR-SM-04; ADR-20/-24/-29 | Counterparty one-hop PoA, original nonce/audience and configured trust anchor | Complete, valid and traceable authorization to signer and signing organization; receiver revalidates before CEK/provenance persistence | Missing/tampered evidence; invalid signature; wrong nonce, audience or organization; revoked/suspended status; untrusted anchor | **verified for the accepted chain length 1** — AC2 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:21-55`; receiver enforcement at `backend/internal/service/dcs_to_dcs.go:160-289`. Longer delegation chains are outside the accepted delivery scope, not an open implementation claim |
+| VAL-09 W3C/eIDAS credential verification | DCS-FR-SM-05; ADR-5/-20 | Presented `urn:dcs:poa:v1` credential and signed W3C or retained XFSC status evidence | ES256 credential signature, holder binding, issuer trust, PoA profile and live status validate | Unsupported profile/mechanism, invalid/untrusted signature, malformed list, issuer/status outage | **verified for the concrete PoA/status profiles in this baseline** — AC1/3/6/7 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:12-19`, `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:57-64` and `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:79-116`; no broader eIDAS conformance profile is claimed |
 | VAL-10 Signature workflow completion validation | DCS-FR-SM-13 | Workflow definition and signer-step states | Completion only after order, deadlines and dependencies are satisfied | Missing/failed/retried/out-of-order/late steps; parallel signer boundary | **candidate_not_run** — exact real-signing trace and ceremony-deadline implementation now exist; the captured suite did not reach this feature |
 | VAL-11 Cryptographically validated retrieval for signing | DCS-FR-SM-15 | Retrieved contract, expected identity/hash, signer authorization | Correct immutable contract delivered and retrieval logged | Hash/identity mismatch, altered/stale document, unauthorized signer, logging failure | **partial** — the exact signature-validation feature executed 8 active scenarios successfully with 1 skipped DSS scenario; the full immutable-retrieval matrix is not established |
 | VAL-12 Applied-signature validation | DCS-FR-SM-18; stakeholder input and accepted policy contract 2026-07-27 | Signed contract, credential status, raw DSS report, normalized versioned policy input and timestamp | Preserve the raw report; evaluate the versioned per-DCS Rego policy; record normalized input, output, version and hash; only `passed` plus `allow` continues | Tampered document/signature, revoked/unknown credential, invalid/untrusted/expired timestamp, DSS/TSA outage, missing/invalid policy, malformed report and unmapped DSS result | **partial** — policy contract, safe mapping boundaries and fail-closed behavior are decided; implementation, the initial explicit DSS allowlist and complete mapping tests remain |
@@ -226,16 +263,16 @@ behavioral obligation, not a claim that a single endpoint or existing test cover
 | VAL-18 Workflow Semantic Hub/PDP rule enforcement | DCS-FR-TR-03, DCS-FR-PACM-02/-03; ADR-6/-8/-9/-11 | Contract at submission, offer, approval, signature and deployment plus its immutable, artifact-pinned Semantic Hub shapes/libraries/profile and one configured executor decision | Local blocking findings prevent dispatch; combined precedence is `BLOCKED > REVIEW > PASSED`; REVIEW persists one immutable Compliance Officer decision and resumes without executor redispatch; only PASSED continues automatically | Activation/rollback and old pins; missing/unknown/unavailable Hub assets; timeout/non-2xx/malformed/mismatched/invalid executor result; empty valid result; same-snapshot concurrency and exactly-one dispatch | **verified for the concrete Ticket-27 gate scope** — `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:4-118`; independent final Ticket-27 run 27/27 scenarios and 188/188 steps green, final semantic re-verification 22/22 scenarios and 162/162 steps green. Generic legal-framework interpretation and the separately listed deferred policy choices are not claimed |
 | VAL-19 Multi-contract structural integrity | DCS-FR-PACM-06; stakeholder input 2026-07-27 | Locally IRI-reachable parent-linked contracts and annexes | Bundle export walks the local graph and emits each reachable contract once; cycles are permitted and flattened by a visited set; a deleted/missing linked artifact is a hard failure | Missing/deleted/orphan/wrong-version component; cycle termination and de-duplication; link to a contract not imported into the local DCS | **candidate_not_run + integration_gap** — hierarchy/bundle feature exists; cross-DCS linkage is not a remote dereference contract and requires prior import/transfer, which is not yet a complete workflow |
 | VAL-20 Template correctness/semantics/authenticity | UC-02-07 | Template, JSON-LD context, SHACL/schema, signature/VC provenance | Report lists schema and authenticity checks; failures block generation | Invalid JSON-LD/SHACL, missing context, signature/VC invalid, mixed pass/fail | **missing_trace** — related template integrity/SHACL candidates exist, but no exact UC trace or combined schema-plus-authenticity evidence was identified |
-| VAL-21 Counterparty signature use case | UC-04-03; stakeholder input 2026-07-27 | PDF, expected document hash, VC/status response in W3C or supported XFSC compatibility format | Report shows PDF integrity, hash match and a freshly renewed status check; official W3C support is the target while the XFSC format remains a compatibility path | Encoding mismatch, stale response, unknown entry, outage, incompatible bit order | **candidate_not_run + compatibility_gap** — exact OID4VP/real-signing traces exist; W3C plus XFSC dual-format behavior and the no-false-positive boundary need explicit tests |
+| VAL-21 Counterparty signature use case | UC-04-03; ADR-5/-20 | PDF, expected document hash, VC and live XFSC status response | Report keeps lifecycle and live status separate and cannot pass when the status query fails | Missing reference, encoding/signature/trust failure, unknown mechanism, outage, revoked live bit | **verified for the PoA/status-list baseline's live-status boundary** — AC9 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:139-162`; outage handling at `backend/internal/pdfgeneration/query/common.go:138-199`. This does not expand the separately named PDF-signature check beyond what the verifier actually performs |
 | VAL-22 Pre-execution contract validation | UC-10-02; DCS-FR-PACM-03; ADR-8/-9/-11 | Deployable contract plus its immutable Semantic Hub bundle and configured executor | The shared deployment gate persists the correlated run; blocked results prevent deployment and review results require an immutable Compliance Officer decision | Missing/unavailable pinned rules, executor failure, warning/block boundary, concurrent same-snapshot requests and review continuation | **verified for the Ticket-27 semantic workflow-gate scope** — deployment appears in the success and manual-review gate matrices at `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:16-22` and `features/27_external_checkpoint_and_workflow_gates/semantic_workflow_gates.feature:47-53`; aggregate legal-framework claims remain excluded |
 | VAL-23 System-driven API review | UC-12-02 | Contract review API request and rule set | Issues returned; failing contract cannot proceed to approval | Empty/malformed request, unauthorized caller, evaluator failure, concurrent transition | **partial** — exact lifecycle-via-API feature passed 3 scenarios; evaluator failure, concurrency and persisted review report remain unproven |
 | VAL-24 OIDC token validation | DCS-IR-SI-07, DCS-IR-CI-05; stakeholder input 2026-07-27 | Hydra discovery metadata, JWKS and token/client assertions | Issuer, signature, audience/client, expiry and required claims validate against the deployed Hydra provider | Key rotation, unknown `kid`, stale cache, bad issuer/audience/clock, discovery outage | **partial** — provider choice is resolved and the authentication feature passed 7 scenarios; rotation, cache and discovery-outage boundaries remain |
-| VAL-25 Credential/status validation interface | DCS-IR-SI-09, DCS-IR-CI-09; stakeholder input 2026-07-27 | Credential/contract identifier and official W3C status list or supported XFSC compatibility format | Current state is refreshed for enforcement and publication becomes visible within the binding <= 5-minute window | Encoding incompatibility, stale response, unknown entry, outage, suspended/revoked transition, refresh after cache expiry | **candidate_not_run + compatibility_gap** — five-minute target and refresh requirement are supplied; exact W3C profile, XFSC mapping and clean evidence remain |
+| VAL-25 Credential/status validation interface | DCS-IR-SI-09, DCS-IR-CI-09; ADR-5/-20 | Credential/contract identifier and signed W3C Bitstring or supported XFSC status list | Current state is refreshed for enforcement; contract suspension/termination publication becomes visible within the binding <= 5-minute window | Encoding/signature/trust failure, unknown entry/mechanism, outage, suspended/revoked transition, concurrent duplicate publication | **verified for the accepted PoA/XFSC baseline** — AC4/6/7/8 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:66-137`; independent final run 28/28 scenarios and 141/141 steps green. XFSC suspension deliberately maps to its binary set bit; production issuer/root selection remains out of scope |
 | VAL-26 DID/VC cryptographic verification interface | DCS-IR-SI-12 | DID document or VC/VP plus trust/resolution inputs | DID/VC/VP proof validates for wallet integration | Resolution failure, unsupported proof, revoked/rotated key, domain/challenge mismatch | **observed_failure** — peer-trust and PKI traces exist; the current peer feature recorded 9 passes, 5 failures and 1 error, while PKI was not reached |
-| VAL-27 C2PA compound verifier | DCS-OR-C2PA-006 | PDF plus embedded/remote C2PA, VC and live status | Four independently named checks and correct lifecycle banner | One failed/unavailable check must not be masked by others | **partial** — focused clean run passed all 9 active scenarios; `replaced` remains skipped and the four checks are not yet proven across every failure/unavailable combination |
+| VAL-27 C2PA compound verifier | DCS-OR-C2PA-006 | PDF plus embedded/remote C2PA, VC and live status | Independently named checks and correct lifecycle banner; live status never inferred from lifecycle | One failed/unavailable check must not be masked by others | **verified for lifecycle/live-status separation and outage handling** — AC9 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:139-162`; `backend/internal/pdfgeneration/query/common.go:138-199` returns `unavailable`/`failed`, a reason and `match=false` on status-service failure. Full all-banner/all-check coverage remains traced separately |
 | VAL-28 C2PA/PDF update compatibility | DCS-OR-C2PA-002/-010; stakeholder input 2026-07-27 | PAdES Baseline B-T candidate profile and one or more C2PA/signature increments | Existing PDF signatures remain valid after every append; a re-signing adds a new incremental signature rather than replacing history | Update/sign ordering, repeat update, corrupted xref/increment, peer synchronization, every formally supported signature profile | **observed_failure + confirmation_required** — “Baseline B-T” is plausible but must be confirmed by exact ETSI profile/version; provenance feature had 5 pre-fix timeout errors and needs a clean rerun |
 | VAL-29 C2PA remote fallback | DCS-OR-C2PA-008 | PDF with stripped/missing embedded credential plus contract-bound remote link | Verifier obtains and validates remote manifest | Missing/wrong/tampered/unavailable remote artifact; link substitution | **partial** — public manifest/history/link scenarios passed in the focused run, but the actual strip-then-remote-verify scenario remains skipped |
-| VAL-30 C2PA VC/status binding | DCS-OR-C2PA-004/-005 | Lifecycle assertion, status VC and published list | All binding fields agree and status publication meets <= 5 minutes | Field mismatch, revoked/untrusted VC, stale list, time boundary | **missing_trace** — no exact C2PA-004 or C2PA-005 feature trace was found |
+| VAL-30 C2PA VC/status binding | DCS-OR-C2PA-004/-005 | Lifecycle assertion, status VC and published list | Lifecycle and live status remain separately bound; suspension/termination publication meets <= 5 minutes | Revoked/unavailable live status, duplicate publication, stale list immediately after transition | **verified for C2PA-005 publication and verifier separation** — AC8/9 at `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:118-162`; durable queue at `backend/migrations/sql/20260729a_poa_sync_and_status_publication.sql:7-26`. Broader C2PA-004 field coverage is unchanged and not claimed by this baseline |
 | VAL-31 External audit-checkpoint publication | DCS-FR-PACM-02; ADR-16 | Every unconfirmed public Merkle checkpoint, in sequence, to the configured authenticated HTTPS sink | Only the public allowlist is sent; stable idempotency survives lost responses/restart; confirmation advances only after 2xx; a chain gap durably blocks later publication | Sequence gap, previous-root mismatch, lost response, restart, authentication/path/timeout and payload leakage | **verified for Ticket 27** — `features/27_external_checkpoint_and_workflow_gates/external_checkpoint_sink.feature:4-43`; included in the independent 27/27-scenario, 188/188-step final run. The separate external and internal timeout controls are defined at `deployment/helm/charts/orce/values.yaml:30-43` |
 
 ## C. Validation surfaces that must not become separate truth sources
@@ -288,8 +325,10 @@ Each validation path needs all of the following before it can be classified as s
   review dominates pass. This concrete gate set is verified by Ticket 27 and does not reinstate the
   removed generic legal-compliance obligation
   (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:304-333`).
-- UC-04-03 explicitly limits full status-list validation because of an incompatible external
-  encoding. Any report that calls retrieval alone a successful status validation is a false positive.
+- The earlier UC-04-03 status-list compatibility gap is closed for the accepted PoA baseline:
+  signed W3C Bitstring and retained XFSC lists are normalized and unusable evidence fails closed.
+  Retrieval alone still never counts as successful status validation
+  (`backend/internal/auth/oid4vp/status/verifier.go:34-79`).
 - Linked paths such as MR/HR consistency must be assessed per atomic obligation; an aggregate
   planning or implementation-status label is not evidence.
 
@@ -318,7 +357,7 @@ promoted to an approved requirement.
 | C2PA coverage | Every contract PDF carries C2PA | Decision supplied |
 | C2PA lifecycle | Tentative answer: only negotiation and renewal/cross-DCS changes, not all internal states | `confirmation_required`: conflicts with the explicit seven-state target in DCS-OR-C2PA-003 |
 | C2PA stripped-metadata fallback | Requirement should remain and be covered | Direction supplied; implementation/test remains skipped |
-| Status lists | Official W3C format is the target; XFSC service format is supported as a compatibility path; <= 5 minutes is binding and checks must refresh | Decision supplied; exact W3C profile and lossless XFSC mapping remain |
+| Status lists | Signed W3C Bitstring Status List and XFSC service format are supported; <= 5 minutes is binding and checks refresh. XFSC is binary active/revoked, with suspension fail-closed as the set bit | Decision implemented and independently verified for the PoA/status-list baseline; broader W3C profile selection is not inferred |
 | OIDC provider | Hydra | Decision supplied |
 | Wallets | Paradym wallet for custom credentials; EUDI Wallet reference implementation for document signing | Decision supplied; exact supported versions/conformance profiles remain |
 | DCS-to-DCS compatibility | Current development baseline, kept aligned with the latest development state | Provisional development policy; no stable protocol-version or backward-compatibility promise is defined |
@@ -327,11 +366,12 @@ promoted to an approved requirement.
 
 ### F.1 Trace changes since the previous draft
 
-- Active PoA-at-signing scenarios now cover successful authorization, missing PoA, wrong-party PoA
-  and a tampered counterparty PoA in
-  `features/22_real_signing_vertical/poa_at_signing.feature`. The separate issuer-chain walk to a
-  trusted root in `features/14_credential_acquisition/poa_credential_verification.feature` remains
-  skipped. PoA is therefore no longer wholly unimplemented or wholly skipped, but it is not complete.
+- The final PoA/status-list baseline replaces the earlier deferred issuer-chain statement. It covers
+  the accepted one-hop root chain, transferable peer evidence, fresh revoked/suspended status,
+  fail-closed status defects, durable contract-status publication and verifier outage behavior in
+  `features/14_credential_acquisition/poa_one_hop_trust_and_statuslist_baseline.feature:1-162`.
+  Production trust-profile selection remains operator configuration rather than an implementation
+  claim.
 - Active signing-hardening scenarios now cover revoked PID, trusted and untrusted x5c issuers,
   invalid JAdES, document-byte mismatch, AES where QES is required, replay and ceremony deadlines in
   `features/22_real_signing_vertical/signing_acceptance_hardening.feature` and related real-signing
@@ -372,6 +412,7 @@ promoted to an approved requirement.
 | `make -C tests/bdd run_bdd_kind_once F=features/19_c2pa_conformance/c2pa_conformance.feature` | 9 passed, 2 skipped after the infrastructure fix | Clean partial evidence for VAL-27/29 |
 | Ticket-27 independent final run (`2026-07-29`) | 27 scenarios passed, 188 steps passed; backend full/race, ORCE flow/Helm, JUnit and fingerprint checks reported green | Final evidence for VAL-18, VAL-22 and VAL-31 |
 | Ticket-27 final Semantic re-verification (`2026-07-29`) | 22 scenarios passed, 162 steps passed | Focused final evidence for deterministic bundles, all five gates, fail-closed behavior, review and concurrency |
+| PoA/status-list independent final run (`2026-07-29`) | 28 scenarios passed, 141 steps passed; complete backend suite reported green; AC1-AC9 independently fulfilled | Final evidence for VAL-07, VAL-08, VAL-09, VAL-21, VAL-25, the status boundary of VAL-27 and the C2PA-005 portion of VAL-30 |
 
 The JUnit directory must be cleaned or made run-scoped before the next evidence run. Its current
 append-only behavior mixes timestamps and can make stale XML files appear to belong to the latest
@@ -380,8 +421,9 @@ command.
 ## G. Remaining work in execution order
 
 1. **Confirm the remaining normative details.** Define the 32 NFR targets, production PoA/credential
-   trust profile, exact PAdES Baseline profile/version, TSA trust-validation policy, C2PA
-   lifecycle-event scope and exact W3C status-list profile. The QES/default-contract rule and DSS
+   trust profile, exact PAdES Baseline profile/version, TSA trust-validation policy and C2PA
+   lifecycle-event scope. The implemented status baseline supports signed W3C Bitstring and XFSC
+   lists without choosing a broader production credential ecosystem profile. The QES/default-contract rule and DSS
    policy contract are decided; their implementation and exhaustive mapping tests remain.
    The generic regulatory-rule question is closed: semantic rules are versioned Hub artifacts, while
    custom deployment policy runs through the verified external audit-executor
@@ -390,13 +432,14 @@ command.
    configuration and cluster identity, and avoid mixing old XML with current results.
 3. **Rerun current inconclusive paths on the fixed cluster.** At minimum rerun VAL-13, VAL-15,
    VAL-26 and VAL-28 candidates, then retain their logs and reports.
-4. **Execute newly added but uncaptured features.** Run hierarchy/bundle, PoA-at-signing,
-   signing-hardening, OID4VP retrieval, real-signing and PKI consolidation independently.
-5. **Implement or trace the missing paths.** VAL-09, VAL-20 and VAL-30 currently lack exact,
-   complete traceability. VAL-16 is intentionally retained only as a record of the removed generic
+4. **Execute newly added but uncaptured features.** Run hierarchy/bundle, signing-hardening,
+   OID4VP retrieval, real-signing and PKI consolidation independently. The PoA/status-list baseline
+   already has an independent final result.
+5. **Implement or trace the missing paths.** VAL-20 and the broader C2PA-004 part of VAL-30 still
+   lack complete traceability. VAL-16 is intentionally retained only as a record of the removed generic
    requirement and requires no implementation.
-6. **Unskip only by implementation or approved decision.** Resolve the PoA trusted-root chain walk,
-   EU DSS validation, C2PA strip-and-remote fallback and `replaced` lifecycle banner, or record an
+6. **Unskip only by implementation or approved decision.** Resolve EU DSS validation,
+   C2PA strip-and-remote fallback and `replaced` lifecycle banner, or record an
    approved scope/deviation decision.
 7. **Perform the atomic verification pass.** For each VAL row, link production code, configuration,
    positive/negative/boundary fixtures, enforcement evidence and one independently repeatable clean

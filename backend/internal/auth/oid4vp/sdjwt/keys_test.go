@@ -7,9 +7,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // mintTestCert issues a certificate for pub, signed by signer/signerCert, for
@@ -158,5 +161,45 @@ func TestVerificationKeyFromX5C_EmptyHeaderIsRejected(t *testing.T) {
 	roots := x509.NewCertPool()
 	if _, err := verificationKeyFromX5C([]any{}, roots); err == nil {
 		t.Fatal("expected an empty x5c header to be rejected")
+	}
+}
+
+type poaTrustStub struct {
+	roots *x509.CertPool
+}
+
+func (s poaTrustStub) IssuerTrusted(iss string) bool { return iss == "did:web:dev.example:issuer:poa" }
+func (s poaTrustStub) VCTAllowed(string) bool        { return true }
+func (s poaTrustStub) IssuerJWKS(string) (json.RawMessage, error) {
+	return json.RawMessage(`{"keys":[]}`), nil
+}
+func (s poaTrustStub) X5CTrustRoots() *x509.CertPool { return s.roots }
+
+func TestResolveIssuerVerificationKeyForPoARequiresDirectLeafAndRoot(t *testing.T) {
+	rootKey, root := mintSelfSignedCA(t, "Dev Root")
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := mintTestCert(t, "PoA Issuer", &leafKey.PublicKey, false, rootKey, root)
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	token := &jwt.Token{
+		Header: map[string]any{"x5c": x5cHeaderValue(leaf, root)},
+		Claims: jwt.MapClaims{"iss": "did:web:dev.example:issuer:poa"},
+	}
+	if _, err := ResolveIssuerVerificationKeyForPoA(poaTrustStub{roots: roots}, token); err != nil {
+		t.Fatalf("direct leaf/root chain rejected: %v", err)
+	}
+
+	intermediateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediate := mintTestCert(t, "Intermediate", &intermediateKey.PublicKey, true, rootKey, root)
+	deepLeaf := mintTestCert(t, "Deep Leaf", &leafKey.PublicKey, false, intermediateKey, intermediate)
+	token.Header["x5c"] = x5cHeaderValue(deepLeaf, intermediate, root)
+	if _, err := ResolveIssuerVerificationKeyForPoA(poaTrustStub{roots: roots}, token); err == nil {
+		t.Fatal("PoA chain longer than one hop was accepted")
 	}
 }

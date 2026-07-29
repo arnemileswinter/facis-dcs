@@ -17,11 +17,14 @@ type PresentationContext struct {
 
 // VerifiedLoginClaims holds subject and roles extracted from a verified VP.
 type VerifiedLoginClaims struct {
-	SubjectDID     string
-	ParticipantDID string
-	Roles          []string
-	GrantedRoles   []string
-	RawClaims      json.RawMessage
+	SubjectDID       string
+	ParticipantDID   string
+	Roles            []string
+	GrantedRoles     []string
+	RawClaims        json.RawMessage
+	Presentation     string
+	OriginalNonce    string
+	OriginalAudience string
 }
 
 // VerifiedPIDClaims holds subject data extracted from a verified PID presentation.
@@ -33,6 +36,7 @@ type VerifiedPIDClaims struct {
 // Verifier validates a wallet presentation and returns login claims.
 type Verifier interface {
 	Verify(vpToken string, ctx PresentationContext) (*VerifiedLoginClaims, error)
+	VerifyPoA(vpToken string, ctx PresentationContext) (*VerifiedLoginClaims, error)
 	VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedPIDClaims, error)
 }
 
@@ -58,6 +62,10 @@ func (unconfiguredVerifier) VerifyPID(_ string, _ PresentationContext) (*Verifie
 	return nil, fmt.Errorf("oid4vp trust config is not loaded (set OID4VP_TRUST_DATA_PATH)")
 }
 
+func (unconfiguredVerifier) VerifyPoA(_ string, _ PresentationContext) (*VerifiedLoginClaims, error) {
+	return nil, fmt.Errorf("oid4vp trust config is not loaded (set OID4VP_TRUST_DATA_PATH)")
+}
+
 func (v verifier) Verify(vpToken string, ctx PresentationContext) (*VerifiedLoginClaims, error) {
 	// Policy verification steps, in order of execution:
 	// 1. trust list + wallet binding (parse VP, issuer sig, trust, cnf/sub, KB sig + aud/nonce/sd_hash)
@@ -79,6 +87,17 @@ func (v verifier) Verify(vpToken string, ctx PresentationContext) (*VerifiedLogi
 	}
 	verified.GrantedRoles = granted
 
+	return verified, nil
+}
+
+func (v verifier) VerifyPoA(vpToken string, ctx PresentationContext) (*VerifiedLoginClaims, error) {
+	verified, err := verifyTrustAndWalletPoA(vpToken, ctx, v.trust)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkStatusList(verified.RawClaims); err != nil {
+		return nil, err
+	}
 	return verified, nil
 }
 
@@ -206,6 +225,51 @@ func verifyTrustAndWallet(vpToken string, ctx PresentationContext, trust *TrustC
 		ParticipantDID: organization,
 		Roles:          roles,
 		RawClaims:      raw,
+	}, nil
+}
+
+func verifyTrustAndWalletPoA(vpToken string, ctx PresentationContext, trust *TrustConfig) (*VerifiedLoginClaims, error) {
+	if trust == nil {
+		return nil, fmt.Errorf("trust config is not configured")
+	}
+	presentation, err := sdjwt.ParsePresentation(vpToken)
+	if err != nil {
+		return nil, err
+	}
+	claims, err := sdjwt.VerifyCredentialForPoA(presentation.IssuerJWT, presentation.Disclosures, trust)
+	if err != nil {
+		return nil, err
+	}
+	cnfJWK, err := sdjwt.CNFJWKFromClaims(claims)
+	if err != nil {
+		return nil, fmt.Errorf("credential cnf.jwk: %w", err)
+	}
+	sub, _ := claims["sub"].(string)
+	sub = strings.TrimSpace(sub)
+	if sub == "" {
+		return nil, fmt.Errorf("credential missing sub")
+	}
+	if err := sdjwt.HolderSubjectMatches(sub, cnfJWK); err != nil {
+		return nil, err
+	}
+	if err := sdjwt.VerifyKB(presentation.KBJWT, presentation.SDHash, cnfJWK, sub, ctx.Nonce, ctx.ClientID); err != nil {
+		return nil, err
+	}
+	roles, err := sdjwt.RolesFromClaims(claims)
+	if err != nil {
+		return nil, err
+	}
+	organization, err := sdjwt.OrganizationFromClaims(claims)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(claims)
+	if err != nil {
+		return nil, err
+	}
+	return &VerifiedLoginClaims{
+		SubjectDID: sub, ParticipantDID: organization, Roles: roles, RawClaims: raw,
+		Presentation: vpToken, OriginalNonce: ctx.Nonce, OriginalAudience: ctx.ClientID,
 	}, nil
 }
 

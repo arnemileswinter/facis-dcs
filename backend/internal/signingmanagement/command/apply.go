@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/auth/oid4vp"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -34,6 +35,7 @@ import (
 	"digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
 	event2 "digital-contracting-service/internal/signingmanagement/event"
+	"digital-contracting-service/internal/signingmanagement/pidverify"
 
 	"github.com/digitorus/pkcs7"
 	"github.com/jmoiron/sqlx"
@@ -733,8 +735,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	basePDFSum := sha256.Sum256(basePDF)
 	basePDFHash := hex.EncodeToString(basePDFSum[:])
 
-	// Issue the signing-summary credential carrying the verbatim PID
-	// presentation, to be embedded before signing (embed-first-sign-second).
+	// Issue the signing-summary credential carrying the verified PoA
+	// presentation context, to be embedded before signing
+	// (embed-first-sign-second). PID disclosures remain excluded.
 	vpToken := ""
 	if ceremony.VpToken != nil {
 		vpToken = *ceremony.VpToken
@@ -743,6 +746,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	if ceremony.KbSdHash != nil {
 		kbSDHash = *ceremony.KbSdHash
 	}
+	poaPresentation := poaPresentationFromEnvelope(vpToken)
 	signedAt := time.Now().UTC()
 	var evidence []byte
 	switch {
@@ -757,6 +761,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			PDFHash:              basePDFHash,
 			CredentialType:       cmd.CredentialType,
 			KBSDHash:             kbSDHash,
+			PoAPresentation:      poaPresentation,
+			PoANonce:             ceremony.Nonce,
+			PoAAudience:          pidverify.Audience,
 			SignedAt:             signedAt,
 			SchemaVersion:        schemaVersion,
 			ValidationReportHash: validationReportHash,
@@ -801,6 +808,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				PDFHash:              basePDFHash,
 				CredentialType:       credentialType,
 				KBSDHash:             fieldKB,
+				PoAPresentation:      poaPresentationFromEnvelope(derefStr(c.VpToken)),
+				PoANonce:             c.Nonce,
+				PoAAudience:          pidverify.Audience,
 				SignedAt:             signedAt,
 				SchemaVersion:        schemaVersion,
 				ValidationReportHash: validationReportHash,
@@ -845,6 +855,18 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		contractVersion:        data.ContractVersion,
 		requiredCredentialType: requiredCredentialType,
 	}, nil
+}
+
+func poaPresentationFromEnvelope(vpToken string) string {
+	var envelope map[string][]string
+	if json.Unmarshal([]byte(vpToken), &envelope) != nil {
+		return ""
+	}
+	values := envelope[oid4vp.PoACredentialQueryID]
+	if len(values) != 1 {
+		return ""
+	}
+	return strings.TrimSpace(values[0])
 }
 
 // resolveCeremony finds the verified ceremony a signature command applies to.

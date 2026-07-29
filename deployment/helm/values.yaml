@@ -62,15 +62,16 @@ volumeMounts: []
 
 oid4vp:
   trust:
-    enabled: true
-    # Baked into the container image (see deployment/docker/Dockerfile).
-    dataPath: /app/config/oid4vp/trust.dev.json
+    # Trust is deployment state. The chart default deliberately trusts no
+    # development issuer or Dev Root; dev/demo/BDD overlays opt in explicitly.
+    enabled: false
+    dataPath: ""
     # Name of an operator-supplied ConfigMap holding the trust document, for
     # deployments that must trust a REAL credential issuer rather than the dev
     # fixture baked into the image. When set it is mounted read-only and
     # dataPath above is ignored in favour of the mounted file, so the issuer
     # registry is deployment state rather than a hand-applied patch that the
-    # next upgrade silently reverts. Unset keeps the in-image default.
+    # next upgrade silently reverts.
     existingConfigMap: ""
     # Key within that ConfigMap; also the mounted file name.
     existingConfigMapKey: trust.json

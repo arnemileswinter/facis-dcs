@@ -15,18 +15,22 @@ import (
 // PID is NOT embedded: the disclosed Person Identification Data (name, birthdate,
 // address) never enters the shared PDF (eIDAS/GDPR data-minimisation). Only the
 // pseudonymous holder DID and the KB-JWT sd_hash of the presented credential are
-// bound in — enough to cryptographically tie the signature to the credential the
-// internal ceremony record holds, without leaking personal data downstream.
+// bound in, together with the separately verified PoA presentation and its
+// original nonce/audience. This preserves transferable authorization evidence
+// without embedding the PID disclosures.
 type SigningSummary struct {
-	ContractID     string
-	SignerDID      string
-	CeremonyID     string
-	FieldName      string
-	ContentHash    string // SHA-256 hex of the JSON-LD contract source
-	PDFHash        string // SHA-256 hex of the base PDF bytes bound by the signature
-	CredentialType string // e.g. "AES"
-	KBSDHash       string // KB-JWT sd_hash binding the signature to the presented credential
-	SignedAt       time.Time
+	ContractID      string
+	SignerDID       string
+	CeremonyID      string
+	FieldName       string
+	ContentHash     string // SHA-256 hex of the JSON-LD contract source
+	PDFHash         string // SHA-256 hex of the base PDF bytes bound by the signature
+	CredentialType  string // e.g. "AES"
+	KBSDHash        string // KB-JWT sd_hash binding the signature to the presented credential
+	PoAPresentation string // verbatim urn:dcs:poa:v1 SD-JWT+KB-JWT, already verified
+	PoANonce        string // original ceremony nonce
+	PoAAudience     string // original ceremony audience
+	SignedAt        time.Time
 	// SchemaVersion/ValidationReportHash (Phase 4, ADR-9): the Semantic Hub
 	// SHACL shapes version this contract validated against at signing time,
 	// and a stable hash of the resulting findings
@@ -59,6 +63,9 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 				"pdf_hash":                         "dcs:pdfHash",
 				"credential_type":                  "dcs:credentialType",
 				"kb_sd_hash":                       "dcs:kbSdHash",
+				"poa_presentation":                 "dcs:poaPresentation",
+				"poa_nonce":                        "dcs:poaNonce",
+				"poa_audience":                     "dcs:poaAudience",
 				"signed_at": map[string]interface{}{
 					"@id":   "dcs:signedAt",
 					"@type": "http://www.w3.org/2001/XMLSchema#dateTime",
@@ -81,6 +88,11 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 			"kb_sd_hash":      s.KBSDHash,
 			"signed_at":       s.SignedAt.UTC().Format(time.RFC3339),
 		},
+	}
+	if s.PoAPresentation != "" {
+		unsignedVC.CredentialSubject["poa_presentation"] = s.PoAPresentation
+		unsignedVC.CredentialSubject["poa_nonce"] = s.PoANonce
+		unsignedVC.CredentialSubject["poa_audience"] = s.PoAAudience
 	}
 	if s.ValidationReportHash != "" {
 		unsignedVC.CredentialSubject["schema_version"] = s.SchemaVersion

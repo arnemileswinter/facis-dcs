@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -128,6 +129,13 @@ func TestResolveAuditScopeMapsUIScopes(t *testing.T) {
 			contract:  true,
 		},
 		{
+			name:      "contract singular case insensitive",
+			scope:     "CONTRACT",
+			scopeName: "contracts",
+			component: componenttype.ContractWorkflowEngine,
+			contract:  true,
+		},
+		{
 			name:      "archive",
 			scope:     "archive",
 			scopeName: "archive",
@@ -233,6 +241,42 @@ func TestResolveAuditScopeAcceptsComponentTypes(t *testing.T) {
 func TestResolveAuditScopeRejectsUnknownScope(t *testing.T) {
 	if _, err := resolveAuditScope("unknown"); err == nil {
 		t.Fatal("resolveAuditScope returned nil error for unknown scope")
+	}
+}
+
+func TestAuditRequestDIDAcceptsResourceIDAlias(t *testing.T) {
+	resourceID := " did:example:contract "
+	request := &processauditandcompliance.PACAuditRequest{ResourceID: &resourceID}
+	if got := auditRequestDID(request); got != "did:example:contract" {
+		t.Fatalf("auditRequestDID() = %q", got)
+	}
+}
+
+func TestAuditEvidenceResourceUsesExecutorWireNames(t *testing.T) {
+	kind, result, ruleID, reason := "CHECK", "FAILED", "RULE-1", "Power of Attorney denied"
+	resource := auditEvidenceResource{
+		Did: "did:example:contract", Component: "PROCESS_AUDIT_AND_COMPLIANCE",
+		CreatedAt: "2026-07-29T12:00:00Z",
+		AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{{
+			ID: 1, EventType: "PAC_TRUST_GATE_DENIAL", CreatedAt: "2026-07-29T12:00:00Z",
+			Kind: &kind, Result: &result, RuleID: &ruleID, Reason: &reason,
+		}},
+	}
+	raw, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	trail := envelope["audit_trail"].([]any)
+	entry := trail[0].(map[string]any)
+	if entry["kind"] != "CHECK" || entry["rule_id"] != "RULE-1" || entry["reason"] != reason {
+		t.Fatalf("unexpected executor wire entry: %s", raw)
+	}
+	if _, leaked := entry["RuleID"]; leaked {
+		t.Fatalf("Goa service field name leaked into executor wire contract: %s", raw)
 	}
 }
 

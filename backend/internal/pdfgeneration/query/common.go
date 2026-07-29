@@ -35,6 +35,11 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // actually perform.
 const pdfSignatureNotAvailable = "not_available"
 
+const (
+	statusPublicationConsistencyWait = 6 * time.Second
+	statusPublicationRetryInterval   = 100 * time.Millisecond
+)
+
 // stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-004) for the
 // given contract state into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It performs no IPFS storage or DB
@@ -141,13 +146,26 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 
 	statusListURI := ""
 	statusListStatus := ""
+	statusListCheck := "not_available"
+	statusListError := ""
 	if result.VCProofValid && len(result.VCBytes) > 0 {
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
 		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			if status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx); err == nil {
-				statusListStatus = status
+			queryStatus := func() (string, error) {
+				return provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
 			}
+			var statusPassed bool
+			statusListStatus, statusListCheck, statusListError, statusPassed =
+				evaluateLiveStatusCheck(ctx, lifecycleStatus, queryStatus)
+			if !statusPassed {
+				match = false
+			}
+		} else {
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = "embedded lifecycle credential has no usable status-list reference"
 		}
 	}
 
@@ -158,6 +176,8 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		VcProofValid:       result.VCProofValid,
 		StatusListURI:      ptrToString(statusListURI),
 		StatusListStatus:   ptrToString(statusListStatus),
+		StatusListCheck:    statusListCheck,
+		StatusListError:    ptrToString(statusListError),
 		LifecycleStatus:    ptrToString(lifecycleStatus),
 		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
 		// check, distinct from the C2PA COSE signature check. This path performs
@@ -165,6 +185,57 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		// "not_available" rather than faking a passed PDF-signature verification.
 		PdfSignatureStatus: pdfSignatureNotAvailable,
 	}, nil
+}
+
+func evaluateLiveStatusCheck(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (status, check, failure string, passed bool) {
+	status, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
+	if err != nil {
+		return "unavailable", "failed", err.Error(), false
+	}
+	return status, "passed", "", true
+}
+
+// queryStatusWithPublicationBarrier preserves the separation between the
+// embedded lifecycle banner and the independently fetched live status list.
+// A terminal transition and its durable outbox entry commit atomically, while
+// the status-list worker publishes on its next (five-second) pass. Re-reading
+// only when that short consistency window is observable prevents a successful
+// termination response from being followed immediately by a stale "active"
+// verification result. The returned value always comes from the live status
+// service; lifecycle state is never substituted for credential status.
+func queryStatusWithPublicationBarrier(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (string, error) {
+	status, err := query()
+	if err != nil || status != "active" ||
+		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended") {
+		return status, err
+	}
+
+	timer := time.NewTimer(statusPublicationConsistencyWait)
+	defer timer.Stop()
+	ticker := time.NewTicker(statusPublicationRetryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timer.C:
+			return status, nil
+		case <-ticker.C:
+			status, err = query()
+			if err != nil || status != "active" {
+				return status, err
+			}
+		}
+	}
 }
 
 func stateToReason(state string) string {
