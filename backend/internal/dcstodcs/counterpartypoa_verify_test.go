@@ -12,17 +12,15 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp"
 )
 
-func signedEvidence(t *testing.T, proofMethod, proofPurpose string) ShippedSignatures {
-	t.Helper()
-	vc := `{
+func proofedPoA(proofMethod, proofPurpose string) SignatoryPoA {
+	return SignatoryPoA{
+		Party:        testSignedParty,
+		Presentation: "p",
+		Summary: `{
 	  "type": ["VerifiableCredential", "ContractSigningSummaryCredential"],
 	  "credentialSubject": {"id": "` + testSignedSignatory + `", "field_name": "` + testSignedParty + `"},
 	  "proof": {"type": "DataIntegrityProof", "verificationMethod": "` + proofMethod + `", "proofPurpose": "` + proofPurpose + `"}
-	}`
-	return ShippedSignatures{
-		Evidence:   []byte("[" + vc + "]"),
-		ResolveKey: func(string) (*ecdsa.PublicKey, error) { return nil, nil },
-		VerifyVC:   func(json.RawMessage, *ecdsa.PublicKey) error { return nil },
+	}`,
 	}
 }
 
@@ -30,9 +28,7 @@ func signedEvidence(t *testing.T, proofMethod, proofPurpose string) ShippedSigna
 // ran the branch where no verifier is configured.
 func TestSigningEvidenceMustBeVerifiable(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
-	err := gate.Check(testSignedParty, ShippedSignatures{Evidence: []byte("[]")}, []SignatoryPoA{
-		{Party: testSignedParty, Presentation: "irrelevant"},
-	})
+	err := gate.Check(testSignedParty, ShippedSignatures{}, []SignatoryPoA{poaFor(testSignedParty)})
 	require.Error(t, err, "evidence with no means to verify it must be refused, not believed")
 	assert.Contains(t, gateError(t, err).Error(), "no means to verify")
 }
@@ -45,14 +41,14 @@ func TestSigningEvidenceKeyComesFromTheProofAndMustBeAuthorized(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	shipped := signedEvidence(t, testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")
+	shipped := verifier()
 	var asked string
 	shipped.ResolveKey = func(id string) (*ecdsa.PublicKey, error) {
 		asked = id
 		return nil, assertErr("not listed as an assertionMethod")
 	}
 
-	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
+	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{proofedPoA(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
 
 	require.Error(t, err)
 	assert.Equal(t, testSignedParty+"#whatever-this-peer-calls-it", asked,
@@ -67,8 +63,7 @@ func TestSigningEvidenceMustProveAnAssertion(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check(testSignedParty, signedEvidence(t, testSignedParty+"#dcs-vc", "authentication"),
-		[]SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
+	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{proofedPoA(testSignedParty+"#dcs-vc", "authentication")})
 
 	require.Error(t, err)
 	assert.Contains(t, gateError(t, err).Error(), "not assertionMethod")
@@ -81,10 +76,10 @@ func TestUnverifiableSigningEvidenceIsRefusedBeforeItsClaimsAreUsed(t *testing.T
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	shipped := signedEvidence(t, testSignedParty+"#dcs-vc", "assertionMethod")
+	shipped := verifier()
 	shipped.VerifyVC = func(json.RawMessage, *ecdsa.PublicKey) error { return assertErr("bad signature") }
 
-	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{{Party: testSignedParty, Presentation: "p"}})
+	err := gate.Check(testSignedParty, shipped, []SignatoryPoA{proofedPoA(testSignedParty+"#whatever-this-peer-calls-it", "assertionMethod")})
 
 	require.Error(t, err)
 	assert.True(t, strings.Contains(gateError(t, err).Error(), "does not verify"))
@@ -104,8 +99,7 @@ func TestVerifiedSigningEvidenceIsAccepted(t *testing.T) {
 		return &oid4vp.CounterpartyPoA{}, nil
 	}
 
-	require.NoError(t, gate.Check(testSignedParty, signedEvidence(t, testSignedParty+"#dcs-vc", "assertionMethod"),
-		[]SignatoryPoA{{Party: testSignedParty, Presentation: "p"}}))
+	require.NoError(t, gate.Check(testSignedParty, verifier(), []SignatoryPoA{proofedPoA(testSignedParty+"#dcs-vc", "assertionMethod")}))
 	require.Len(t, seen, 1)
 	assert.Equal(t, testSignedSignatory, seen[0].SignatoryDID)
 }

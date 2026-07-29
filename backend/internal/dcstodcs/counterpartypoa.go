@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -24,6 +23,9 @@ import (
 type SignatoryPoA struct {
 	Party        string
 	Presentation string
+	// Summary is the signing summary credential the shipping instance issued
+	// for this signature, its attestation of who signed for that party.
+	Summary string
 }
 
 // SignatoryPoAs reads the evidence retained for the signatures an instance
@@ -53,7 +55,7 @@ func (c *CeremonyPoAs) ForContract(ctx context.Context, contractIRI string) ([]S
 
 	evidence := make([]SignatoryPoA, 0, len(applied))
 	for _, poa := range applied {
-		evidence = append(evidence, SignatoryPoA{Party: poa.FieldName, Presentation: poa.Presentation})
+		evidence = append(evidence, SignatoryPoA{Party: poa.FieldName, Presentation: poa.Presentation, Summary: poa.SummaryVC})
 	}
 	return evidence, nil
 }
@@ -65,7 +67,7 @@ func WireSignatoryPoAs(evidence []SignatoryPoA) []*dcstodcs.DCSToDCSSignatoryPoA
 	}
 	wire := make([]*dcstodcs.DCSToDCSSignatoryPoA, 0, len(evidence))
 	for _, poa := range evidence {
-		wire = append(wire, &dcstodcs.DCSToDCSSignatoryPoA{Party: poa.Party, Presentation: poa.Presentation})
+		wire = append(wire, &dcstodcs.DCSToDCSSignatoryPoA{Party: poa.Party, Presentation: poa.Presentation, Summary: summaryOrNil(poa.Summary)})
 	}
 	return wire
 }
@@ -80,9 +82,23 @@ func ReceivedSignatoryPoAs(wire []*dcstodcs.DCSToDCSSignatoryPoA) []SignatoryPoA
 		if poa == nil {
 			continue
 		}
-		evidence = append(evidence, SignatoryPoA{Party: poa.Party, Presentation: poa.Presentation})
+		evidence = append(evidence, SignatoryPoA{Party: poa.Party, Presentation: poa.Presentation, Summary: derefSummary(poa.Summary)})
 	}
 	return evidence
+}
+
+func summaryOrNil(summary string) *string {
+	if summary == "" {
+		return nil
+	}
+	return &summary
+}
+
+func derefSummary(summary *string) string {
+	if summary == nil {
+		return ""
+	}
+	return *summary
 }
 
 // CounterpartyPoAGate verifies the Power-of-Attorney evidence a peer ships with
@@ -116,7 +132,6 @@ func (g *CounterpartyPoAGate) verify() func(string, *oid4vp.TrustConfig, oid4vp.
 // embedded in the PDF (DCS-FR-SM-08), and the means to verify them against the
 // peer's key.
 type ShippedSignatures struct {
-	Evidence []byte
 	// VerifyVC checks one summary against the peer's VC key. Required: without
 	// it the summary is the peer telling us who signed, which is what the
 	// contract payload already was. Absent, the gate denies rather than
@@ -151,11 +166,6 @@ func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, ev
 		return deny(fmt.Errorf("counterparty Power of Attorney: no issuer trust is configured, so nothing shipped can be verified"))
 	}
 
-	parties, err := signedPartiesOf(signed)
-	if err != nil {
-		return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
-	}
-
 	verified := make(map[string]bool, len(evidence))
 	for _, poa := range evidence {
 		// The credential authorizes an organization, and the contract records
@@ -166,10 +176,15 @@ func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, ev
 		// while an authored multi-signatory contract names its fields freely and
 		// the two differ.
 		organization := strings.TrimSpace(poa.Party)
-		party, node, err := partyAuthorizedBy(parties, organization)
+		// Each credential arrives with the shipper's own attestation of the
+		// signature it stands behind. Reading it from the PDF instead meant
+		// reading whichever attachment happened to be last, which after a
+		// countersignature is the other party's.
+		node, err := signedPartyOf(signed, poa, organization)
 		if err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
 		}
+		party := organization
 		// A peer ships the evidence behind the signatures IT applied. Evidence
 		// for anyone else is a credential obtained in some other exchange being
 		// replayed here: the presentation carries no audience or nonce this
@@ -202,92 +217,53 @@ func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, ev
 	return nil
 }
 
-// partyAuthorizedBy finds the signed party the contract records as authorized by
-// this organization.
-//
-// Two parties authorized by the same organization make the credential ambiguous
-// — each records its own signatory, and the holder binding would be checked
-// against whichever the map happened to yield first. Refusing is the only answer
-// that is the same on every run.
-func partyAuthorizedBy(parties map[string]signedParty, organization string) (string, signedParty, error) {
-	if organization == "" {
-		return "", signedParty{}, fmt.Errorf("evidence names no organization")
-	}
-	matches := make([]string, 0, 1)
-	for party, node := range parties {
-		if node.PoAOrganization == organization {
-			matches = append(matches, party)
-		}
-	}
-	sort.Strings(matches)
-	switch len(matches) {
-	case 0:
-		return "", signedParty{}, fmt.Errorf("the shipped contract records no signed party authorized by %q", organization)
-	case 1:
-		return matches[0], parties[matches[0]], nil
-	default:
-		return "", signedParty{}, fmt.Errorf(
-			"the shipped contract records %v as all authorized by %q, so the credential does not identify which signature it stands behind",
-			matches, organization)
-	}
-}
-
 // signedParty is a party node of a shipped contract that carries a signature.
 type signedParty struct {
 	Signatory       string
 	PoAOrganization string
 }
 
-// signedPartiesOf reads what the peer's signing evidence attests, keyed by the
-// organization each signature was made for.
+// signedPartyOf reads what the shipper attests about ONE signature: which party
+// it was made for, and by whom.
 //
 // A ceremony refuses unless the Power of Attorney authorizes exactly the party
 // the signature field names (signingmanagement/command/ceremony.go), so the
-// summary's field_name IS the organization its Power of Attorney must authorize,
-// and credentialSubject.id is the signatory it must be held by.
-func signedPartiesOf(signed ShippedSignatures) (map[string]signedParty, error) {
+// summary's field_name IS the organization its Power of Attorney must
+// authorize, and credentialSubject.id is the signatory it must be held by.
+func signedPartyOf(signed ShippedSignatures, poa SignatoryPoA, organization string) (signedParty, error) {
 	if signed.VerifyVC == nil || signed.ResolveKey == nil {
-		return nil, fmt.Errorf("no means to verify the peer's signing evidence, so nothing it claims can be believed")
+		return signedParty{}, fmt.Errorf("no means to verify the peer's signing evidence, so nothing it claims can be believed")
 	}
-	if len(signed.Evidence) == 0 {
-		return nil, fmt.Errorf("the shipped PDF carries no signing evidence, so nothing attests which signature this credential stands behind")
-	}
-
-	var summaries []json.RawMessage
-	if err := json.Unmarshal(signed.Evidence, &summaries); err != nil {
-		// A single-signature contract embeds one credential rather than a bundle.
-		summaries = []json.RawMessage{signed.Evidence}
+	raw := json.RawMessage(strings.TrimSpace(poa.Summary))
+	if len(raw) == 0 {
+		return signedParty{}, fmt.Errorf("the ship carries a Power of Attorney for %q with no signing summary attesting the signature it stands behind", organization)
 	}
 
-	parties := make(map[string]signedParty, len(summaries))
-	for _, raw := range summaries {
-		var vc struct {
-			Type              []string `json:"type"`
-			CredentialSubject struct {
-				ID        string `json:"id"`
-				FieldName string `json:"field_name"`
-			} `json:"credentialSubject"`
-		}
-		if err := json.Unmarshal(raw, &vc); err != nil {
-			return nil, fmt.Errorf("decode signing evidence: %w", err)
-		}
-		if !slices.Contains(vc.Type, "ContractSigningSummaryCredential") {
-			continue
-		}
-		organization := strings.TrimSpace(vc.CredentialSubject.FieldName)
-		signatory := strings.TrimSpace(vc.CredentialSubject.ID)
-		if organization == "" || signatory == "" {
-			continue
-		}
-		// Verified against the peer's own key before anything it says is used:
-		// unverified, this is the peer telling us who signed, which is what the
-		// contract payload already was.
-		if err := verifySummary(signed, raw, organization); err != nil {
-			return nil, err
-		}
-		parties[organization] = signedParty{Signatory: signatory, PoAOrganization: organization}
+	var vc struct {
+		Type              []string `json:"type"`
+		CredentialSubject struct {
+			ID        string `json:"id"`
+			FieldName string `json:"field_name"`
+		} `json:"credentialSubject"`
 	}
-	return parties, nil
+	if err := json.Unmarshal(raw, &vc); err != nil {
+		return signedParty{}, fmt.Errorf("decode signing evidence for %q: %w", organization, err)
+	}
+	if !slices.Contains(vc.Type, "ContractSigningSummaryCredential") {
+		return signedParty{}, fmt.Errorf("the evidence shipped for %q is not a signing summary", organization)
+	}
+	if err := verifySummary(signed, raw, organization); err != nil {
+		return signedParty{}, err
+	}
+	if strings.TrimSpace(vc.CredentialSubject.FieldName) != organization {
+		return signedParty{}, fmt.Errorf("the signing summary shipped for %q attests a signature for %q instead",
+			organization, vc.CredentialSubject.FieldName)
+	}
+	signatory := strings.TrimSpace(vc.CredentialSubject.ID)
+	if signatory == "" {
+		return signedParty{}, fmt.Errorf("the signing summary for %q names no signatory", organization)
+	}
+	return signedParty{Signatory: signatory, PoAOrganization: organization}, nil
 }
 
 // verifySummary checks one summary credential before anything it says is used.

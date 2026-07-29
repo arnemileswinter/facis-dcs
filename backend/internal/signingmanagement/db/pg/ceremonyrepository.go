@@ -170,7 +170,7 @@ func (r *PostgresCeremonyRepo) MarkCeremonyVerified(ctx context.Context, tx *sql
 func (r *PostgresCeremonyRepo) ListAppliedPoAs(ctx context.Context, tx *sqlx.Tx, contractDID string) ([]db.AppliedPoA, error) {
 	var applied []db.AppliedPoA
 	err := tx.SelectContext(ctx, &applied, `
-		SELECT DISTINCT ON (field_name) field_name, signer_did, poa_vp_token
+		SELECT DISTINCT ON (field_name) field_name, signer_did, poa_vp_token, COALESCE(summary_vc, '') AS summary_vc
 		  FROM signature_ceremonies
 		 WHERE contract_did = $1
 		   AND consumed_at IS NOT NULL
@@ -223,4 +223,15 @@ func (r *PostgresCeremonyRepo) FindVerifiedCeremony(ctx context.Context, tx *sql
 		return nil, fmt.Errorf("find verified ceremony for %s/%s: %w", contractDID, signerDID, err)
 	}
 	return &c, nil
+}
+
+// RecordSummaryVC retains the signing summary issued for a ceremony, so it can
+// travel to the counterparty on the wire instead of being embedded a second
+// time in a PDF that already carries a signature.
+func (r *PostgresCeremonyRepo) RecordSummaryVC(ctx context.Context, tx *sqlx.Tx, ceremonyID string, summary []byte) error {
+	_, err := tx.ExecContext(ctx, `UPDATE signature_ceremonies SET summary_vc = $2 WHERE id = $1`, ceremonyID, string(summary))
+	if err != nil {
+		return fmt.Errorf("record signing summary for ceremony %s: %w", ceremonyID, err)
+	}
+	return nil
 }

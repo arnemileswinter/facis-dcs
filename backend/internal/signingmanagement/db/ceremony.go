@@ -133,6 +133,10 @@ type AppliedPoA struct {
 	FieldName    string `db:"field_name"`
 	SignerDID    string `db:"signer_did"`
 	Presentation string `db:"poa_vp_token"`
+	// SummaryVC is the signing summary this instance issued for that signature
+	// (DCS-FR-SM-08), carried so the counterparty can verify who signed for
+	// which party without trusting the shipper's word for it.
+	SummaryVC string `db:"summary_vc"`
 }
 
 // CeremonyRepo persists signing ceremonies.
@@ -144,6 +148,8 @@ type CeremonyRepo interface {
 	// applied to the contract, most recent per signature field — the evidence
 	// the synchronizer ships to the counterparty.
 	ListAppliedPoAs(ctx context.Context, tx *sqlx.Tx, contractDID string) ([]AppliedPoA, error)
+	// RecordSummaryVC retains the signing summary issued for a ceremony.
+	RecordSummaryVC(ctx context.Context, tx *sqlx.Tx, ceremonyID string, summary []byte) error
 	// StorePreparedRequest persists the published signing request (the
 	// to-be-signed PDF + digest + request object nonce/expiry + the publishing
 	// signer's context) on a verified ceremony (ADR-12 publish).

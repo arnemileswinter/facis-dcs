@@ -181,13 +181,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	// any other trust-gate denial; absent evidence does not, so a peer that
 	// retains none still federates and the compliance viewer keeps reporting a
 	// party that signed without one.
-	signingEvidence, _, evidenceErr := s.PDFCore.ExtractEvidence(ctx, req.Pdf)
-	if evidenceErr != nil {
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_pdf rejected: could not read the signing evidence embedded in the received PDF: %w", evidenceErr))
-	}
 	shipped := trustgate.ShippedSignatures{
-		Evidence: signingEvidence,
 		ResolveKey: func(methodID string) (*ecdsa.PublicKey, error) {
 			return trustgate.PeerAssertionKey(remoteDIDDocument, methodID)
 		},

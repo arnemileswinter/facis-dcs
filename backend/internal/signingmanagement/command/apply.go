@@ -844,8 +844,28 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		//
 		// The countersignature still needs an attestation the peer can verify.
 		// That belongs on the wire beside the Power of Attorney, not inside a
-		// signed artefact that must not change again.
+		// signed artefact that must not change again — so it is issued and
+		// retained here, and shipped by the synchronizer.
 		evidence = nil
+		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+			ContractID:           cmd.DID,
+			SignerDID:            cmd.SignerDID,
+			CeremonyID:           ceremony.ID,
+			FieldName:            ceremony.FieldName,
+			ContentHash:          contentHash,
+			PDFHash:              basePDFHash,
+			CredentialType:       cmd.CredentialType,
+			KBSDHash:             kbSDHash,
+			SignedAt:             signedAt,
+			SchemaVersion:        schemaVersion,
+			ValidationReportHash: validationReportHash,
+		})
+		if vcErr != nil {
+			return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", ceremony.FieldName, vcErr)
+		}
+		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, vc); err != nil {
+			return nil, err
+		}
 	}
 
 	// The JAdES payload over the machine-readable JSON-LD, the counterpart to

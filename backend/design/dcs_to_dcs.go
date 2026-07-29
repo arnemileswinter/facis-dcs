@@ -30,6 +30,7 @@ var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {
 
 	Attribute("party", String, "The party (organization) the credential authorizes, matching a dcs:parties node of the shipped contract")
 	Attribute("presentation", String, "The dc+sd-jwt Power of Attorney exactly as the signatory's wallet delivered it at the ceremony")
+	Attribute("summary", String, "The ContractSigningSummaryCredential the shipping instance issued for that signature (DCS-FR-SM-08), so the receiver can verify which party signed and by whom without taking the shipper's word for it. Carried here rather than read from the PDF: only the first signer's evidence survives embedding, and adding a second attachment would mutate an already-signed document")
 
 	Required("party", "presentation")
 })
