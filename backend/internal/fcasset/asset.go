@@ -65,8 +65,12 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 			},
 		},
 		"id": input.SubjectIRI,
+		// Not typed VerifiableCredential: BuildPayload attaches no proof, and
+		// under the VC data model a document with no securing mechanism is not
+		// one. An unsigned self-description carrying the type is the thing a
+		// trust framework exists to catch, so the type returns when the proof
+		// does.
 		"type": []string{
-			"VerifiableCredential",
 			"dcs:ContractTemplate",
 		},
 		"issuer":    input.Issuer,

@@ -11,10 +11,8 @@ issuers with their JWKS, `IssuerTrusted(iss)` returned a boolean, and login,
 counterparty PoA verification and PID verification all consulted it.
 
 That conflates authenticity with authorization, and on a two-instance
-federation it fails concretely. Both instances must trust the other's issuer,
-because verifying a counterparty's Power of Attorney is the whole point of
-peering. But the same entry then also permitted *login*: a PoA minted by
-instance A's issuer produced a valid session on instance B. Worse, the
+federation it fails concretely: a PoA minted by instance A's issuer produced a
+valid session on instance B. Worse, the
 credential's `organization` claim becomes the session's participant identity
 and the attribution recorded in the audit trail — so the holder acted **as
 A's party inside B**, and the two parties the federation exists to distinguish
@@ -69,7 +67,7 @@ Two further requirements land on the same structure:
 | purpose | meaning |
 |---|---|
 | `login` | may grant a session on **this** instance |
-| `peer` | its credentials may be verified when they arrive from a counterparty |
+| `peer` | its credentials may be verified in a signing ceremony |
 | `pid` | may attest the identity of a natural person (signing ceremonies, QES) |
 
 Purposes are configuration, not policy baked into the code. **An operator
@@ -82,17 +80,24 @@ The demonstration configures the narrow case, because it is the one that makes
 the two-party story legible:
 
 ```
-on instance A:   issuer A → login, peer      issuer B → peer      PID issuer → pid
-on instance B:   issuer B → login, peer      issuer A → peer      PID issuer → pid
+on instance A:   issuer A → login, peer      PID issuer → pid
+on instance B:   issuer B → login, peer      PID issuer → pid
 ```
 
-A credential from issuer B therefore verifies on A when it arrives as a
-counterparty's PoA, and is refused at A's login — because A's operator granted B
-`peer` and not `login`, not because the code says so. A different deployment
-granting `login` to five issuers is equally valid and needs no code change.
+A credential from issuer B is refused at A's login because A's operator granted
+it nothing — not because the code says so. A different deployment granting
+`login` to five issuers is equally valid and needs no code change.
 
-Peering is deliberately mutual: a signing ceremony verifies both sides' PoA, so
-each instance accepts its counterparty's issuer as well as its own.
+**What `peer` actually gates today.** It is the purpose used when a signing
+ceremony verifies the Power of Attorney presented at it. That is the *local*
+signatory's PoA: no code path verifies a counterparty's PoA, so the mutual
+binding this ADR was written to describe does not exist yet.
+
+Saying otherwise is not harmless. If an operator followed an instruction to
+grant `peer` to a counterparty's issuer, a holder of that counterparty's
+credentials could satisfy the ceremony here. Until a counterparty-PoA path
+exists, `peer` should be granted to the issuers whose PoAs may authorize a
+signature **on this instance** — in the demonstration, its own.
 
 **Peers are not enumerated.** Listing every counterparty issuer here would mean
 editing this file on every instance whenever a federation member is onboarded —
@@ -207,8 +212,14 @@ relying party verifies — and the substance arrives with a real issuer.
   expressed as an ORCE flow, and a small resolver otherwise. Neither requires
   touching the verification path.
 - The demo can state a defensible trust story: each instance grants access only
-  on its own issuer's word, verifies its counterparty's PoA on that
-  counterparty's issuer's word, and treats identity as something a third party
+  on its own issuer's word, and treats identity as something a third party
   attests.
-- QES remains blocked on a real PID issuer. The architecture no longer hides
-  that; it names it as a missing trusted entry.
+- Mutual Power-of-Attorney binding across instances is **not** implemented. The
+  purpose that would carry it exists; the verification path does not. Naming
+  that here is the point — the earlier version of this ADR described the
+  binding as though it were built, which would have led an operator to grant a
+  counterparty's issuer the purpose that authorizes a signature locally.
+- QES remains blocked on identity proofing. There is now a third-party PID
+  issuer and the chain-validation path it exercises is the real one, but nobody
+  verifies that the person is who the form says. The architecture no longer
+  hides that.
