@@ -92,7 +92,26 @@ counterparty's PoA, and is refused at A's login — because A's operator granted
 granting `login` to five issuers is equally valid and needs no code change.
 
 Peering is deliberately mutual: a signing ceremony verifies both sides' PoA, so
-each instance grants `peer` to its counterparty's issuer *and* to its own.
+each instance accepts its counterparty's issuer as well as its own.
+
+**Peers are not enumerated.** Listing every counterparty issuer here would mean
+editing this file on every instance whenever a federation member is onboarded —
+an allowlist wearing federation's clothes. Whether this instance deals with a
+peer at all is already decided dynamically and fail-closed by the ADR-19 trust
+gate: the peer's self-signed agreement credential must verify against its own
+`did.json` and carry this instance's federation rules hash, and the local policy
+endpoint (`DCS_TRUST_PDP_URL`) must approve the interaction. Duplicating that
+decision as static configuration would give it two sources of truth that drift.
+
+So `peer_dynamic` lets a did:web-resolvable issuer be verified for peering
+without an entry, with its key taken from its own DID document. The bound comes
+from the identifier rather than a list: an issuer at `did:web:X:issuer` may
+attest `did:web:X` and nothing else. Authorization stays with the gate and the
+PDP; the verifier only establishes that the credential is authentic and that the
+issuer spoke for its own party.
+
+`login` is deliberately **not** dynamic. Who may obtain a session on this
+deployment is local policy, and an operator states it explicitly.
 
 ### Organization binding
 

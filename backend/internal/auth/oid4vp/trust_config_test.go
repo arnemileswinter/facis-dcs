@@ -264,3 +264,59 @@ func TestResolveKeysByMechanism(t *testing.T) {
 		t.Errorf("expected a clear orce configuration error, got %v", err)
 	}
 }
+
+// Federation cannot require editing every instance's trust file whenever a
+// member is onboarded, so a peer's issuer is trusted dynamically — bounded by
+// its own authority, and authorized separately by the ADR-19 gate and the PDP.
+func TestDynamicPeerTrust(t *testing.T) {
+	cfg := &TrustConfig{
+		VCTs:        []string{"urn:dcs:poa:v1"},
+		PeerDynamic: true,
+		Issuers: map[string]TrustedIssuer{
+			"https://own.example/issuer": {
+				Purposes: []Purpose{PurposeLogin}, Organizations: []string{"did:web:own.example"},
+				Mechanism: MechanismJWKS, JWKS: json.RawMessage(jwksBlock),
+			},
+		},
+	}
+
+	unlisted := "did:web:newpeer.example:issuer"
+
+	if !cfg.For(PurposePeer).IssuerTrusted(unlisted) {
+		t.Error("an unlisted did:web peer issuer must be verifiable for peering")
+	}
+	// Access to this deployment stays the operator's explicit decision.
+	if cfg.For(PurposeLogin).IssuerTrusted(unlisted) {
+		t.Error("a dynamic peer issuer must NOT grant login")
+	}
+	if cfg.For(PurposePID).IssuerTrusted(unlisted) {
+		t.Error("a dynamic peer issuer must NOT serve as a PID issuer")
+	}
+	// It speaks for its own party and no other.
+	if !cfg.IssuerMayAttest(unlisted, "did:web:newpeer.example") {
+		t.Error("a peer issuer must attest its own authority")
+	}
+	if cfg.IssuerMayAttest(unlisted, "did:web:own.example") {
+		t.Error("a peer issuer must not attest another party")
+	}
+
+	// Without the flag, nothing is trusted implicitly.
+	cfg.PeerDynamic = false
+	if cfg.For(PurposePeer).IssuerTrusted(unlisted) {
+		t.Error("dynamic peer trust must be opt-in")
+	}
+}
+
+func TestPeerAuthority(t *testing.T) {
+	cases := map[string]string{
+		"did:web:example.com:issuer":             "did:web:example.com",
+		"did:web:example.com":                    "did:web:example.com",
+		"did:web:dcs-b.localhost%3A18080:issuer": "did:web:dcs-b.localhost%3A18080",
+		"https://example.com/issuer":             "",
+	}
+	for iss, want := range cases {
+		if got := peerAuthority(iss); got != want {
+			t.Errorf("%s → %q, want %q", iss, got, want)
+		}
+	}
+}

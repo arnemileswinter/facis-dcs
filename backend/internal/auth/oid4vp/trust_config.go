@@ -28,6 +28,23 @@ type TrustConfig struct {
 	// (OID4VP_ORCE_RESOLVER_URL). Empty unless a deployment uses it.
 	ORCEResolverURL string `json:"orce_resolver_url"`
 
+	// PeerDynamic lets a counterparty's issuer be trusted for `peer` without a
+	// static entry, provided it is did:web-resolvable.
+	//
+	// Enumerating peers here would mean editing this file on every instance
+	// whenever a federation member is onboarded — an allowlist, not a
+	// federation. Whether we deal with a peer AT ALL is already decided
+	// dynamically and fail-closed by the ADR-19 trust gate: the peer's
+	// self-signed agreement credential must verify against its own did.json and
+	// match this instance's federation rules hash, and the local policy
+	// endpoint (DCS_TRUST_PDP_URL) must approve the interaction. That is the
+	// authorization decision; this flag only says the verifier need not carry a
+	// second, static copy of it.
+	//
+	// Login is deliberately NOT dynamic: who may obtain a session here is local
+	// policy the operator states explicitly.
+	PeerDynamic bool `json:"peer_dynamic"`
+
 	keyFetcher KeyFetcher
 }
 
@@ -213,8 +230,30 @@ func (v *PurposeView) IssuerTrusted(iss string) bool {
 	if v == nil || v.cfg == nil {
 		return false
 	}
-	entry, ok := v.cfg.Issuers[strings.TrimSpace(iss)]
-	return ok && entry.Allows(v.purpose)
+	iss = strings.TrimSpace(iss)
+	if entry, ok := v.cfg.Issuers[iss]; ok && entry.Allows(v.purpose) {
+		return true
+	}
+	return v.cfg.dynamicPeerIssuer(v.purpose, iss)
+}
+
+// dynamicPeerIssuer reports whether an unlisted issuer may be verified for
+// peering. Only did:web qualifies: the identifier has to resolve to a document
+// this instance can fetch, or there is nothing to verify against.
+func (c *TrustConfig) dynamicPeerIssuer(purpose Purpose, iss string) bool {
+	return purpose == PurposePeer && c.PeerDynamic && strings.HasPrefix(iss, "did:web:")
+}
+
+// peerAuthority is the did:web authority an issuer belongs to:
+// did:web:example.com:issuer -> did:web:example.com. A peer's issuer speaks for
+// its own party and no other, which bounds a dynamically trusted issuer without
+// anyone having to enumerate it.
+func peerAuthority(iss string) string {
+	rest := strings.TrimPrefix(iss, "did:web:")
+	if rest == "" || rest == iss {
+		return ""
+	}
+	return "did:web:" + strings.Split(rest, ":")[0]
 }
 
 func (v *PurposeView) VCTAllowed(vct string) bool { return v.cfg.VCTAllowed(vct) }
@@ -234,8 +273,18 @@ func (c *TrustConfig) IssuerMayAttest(iss, org string) bool {
 	if c == nil {
 		return false
 	}
-	entry, ok := c.Issuers[strings.TrimSpace(iss)]
-	return ok && entry.MayAttest(org)
+	iss = strings.TrimSpace(iss)
+	if entry, ok := c.Issuers[iss]; ok {
+		return entry.MayAttest(org)
+	}
+	// A dynamically trusted peer issuer speaks for its own authority only, so
+	// the bound is derived from the identifier rather than configured.
+	if c.PeerDynamic {
+		if authority := peerAuthority(iss); authority != "" {
+			return strings.TrimSpace(org) == authority
+		}
+	}
+	return false
 }
 
 func (c *TrustConfig) IssuerTrusted(iss string) bool {
