@@ -1,13 +1,31 @@
 package oid4vp
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 )
+
+// The shipped fixtures, addressed from this package's directory.
+const (
+	devTrustConfigPath = "../../../config/oid4vp/trust.dev.json"
+	devX5CAnchorsPath  = "../../../config/oid4vp/x5c-trust-anchors.dev.pem"
+)
+
+// enforceDevKeyGuard makes the guard active regardless of the environment the
+// test run inherits — a developer with DCS_ALLOW_DEV_TRUST exported would
+// otherwise silently skip every assertion below.
+func enforceDevKeyGuard(t *testing.T) {
+	t.Helper()
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "")
+}
 
 func writeTrust(t *testing.T, body string) string {
 	t.Helper()
@@ -180,7 +198,7 @@ func TestDevTrustConfigLoads(t *testing.T) {
 	// The shipped fixture is keyed to committed material by design, so loading
 	// it is exactly the case that now requires saying so.
 	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
-	cfg, err := LoadTrustConfig("../../../config/oid4vp/trust.dev.json")
+	cfg, err := LoadTrustConfig(devTrustConfigPath)
 	if err != nil {
 		t.Fatalf("shipped dev trust config must load: %v", err)
 	}
@@ -191,9 +209,20 @@ func TestDevTrustConfigLoads(t *testing.T) {
 		if len(entry.Purposes) == 0 {
 			t.Errorf("issuer %q has no purposes", iss)
 		}
-		var probe map[string]any
-		if err := json.Unmarshal(entry.JWKS, &probe); err != nil {
-			t.Errorf("issuer %q jwks is not an object: %v", iss, err)
+		// Only a mechanism that publishes keys in the entry has a JWKS to check.
+		// An x5c issuer has none by design — its key arrives in the credential's
+		// certificate chain — so demanding one of every entry made the mechanism
+		// the configuration exists to choose unusable in the shipped file.
+		switch entry.Mechanism {
+		case MechanismX5C:
+			if len(entry.JWKS) != 0 {
+				t.Errorf("issuer %q resolves through a certificate chain but also bundles a jwks; one of the two is not what the operator meant", iss)
+			}
+		case MechanismJWKS:
+			var probe map[string]any
+			if err := json.Unmarshal(entry.JWKS, &probe); err != nil {
+				t.Errorf("issuer %q jwks is not an object: %v", iss, err)
+			}
 		}
 	}
 }
@@ -432,5 +461,188 @@ func TestCommittedDevKeyIsRefusedUnlessExplicitlyAllowed(t *testing.T) {
 	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
 	if _, err := LoadTrustConfig(writeTrust(t, body)); err != nil {
 		t.Fatalf("DCS_ALLOW_DEV_TRUST must permit the dev fixture: %v", err)
+	}
+}
+
+// The guard is only worth anything if it fires on the file that actually
+// ships. Asserting it against a fixture written by the test, while the one
+// test that reads the real file disables the guard first, left the shipped
+// configuration unexamined — which is the exact thing that reaches a
+// production install by omission.
+func TestShippedDevTrustConfigIsRefusedWithoutDevTrust(t *testing.T) {
+	enforceDevKeyGuard(t)
+
+	_, err := LoadTrustConfig(devTrustConfigPath)
+	if err == nil {
+		t.Fatal("the shipped dev trust config is keyed to committed material and must be refused unless DCS_ALLOW_DEV_TRUST says otherwise")
+	}
+	if !strings.Contains(err.Error(), "committed in this repository") {
+		t.Errorf("the refusal must say why: %v", err)
+	}
+}
+
+// Every private key in this repository, not the one that was noticed first.
+func TestDevKeyGuardCoversEveryCommittedKey(t *testing.T) {
+	enforceDevKeyGuard(t)
+
+	for x, source := range devIssuerKeySources {
+		t.Run(source, func(t *testing.T) {
+			body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+              "purposes":["login"],"organizations":["*"],"mechanism":"jwks",
+              "jwks":{"keys":[{"kty":"EC","crv":"P-256","x":%q,"y":"0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"}]}}}}`, x)
+			if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+				t.Fatalf("%s is committed here and must not be trustable as an issuer key", source)
+			}
+		})
+	}
+}
+
+// Verification decodes a coordinate into a big.Int, so a leading-zero-padded
+// encoding of a committed key IS that key. Comparing the base64 text let the
+// same private key be configured under a spelling the guard had never seen.
+func TestDevKeyGuardComparesKeysNotEncodings(t *testing.T) {
+	enforceDevKeyGuard(t)
+
+	const committed = "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss"
+	raw, err := base64.RawURLEncoding.DecodeString(committed)
+	if err != nil {
+		t.Fatalf("decode committed coordinate: %v", err)
+	}
+	padded := base64.RawURLEncoding.EncodeToString(append([]byte{0x00}, raw...))
+	if padded == committed {
+		t.Fatal("the padded encoding must differ textually, or this proves nothing")
+	}
+
+	body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+      "purposes":["login"],"organizations":["*"],"mechanism":"jwks",
+      "jwks":{"keys":[{"kty":"EC","crv":"P-256","x":%q,"y":"0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"}]}}}}`, padded)
+	if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+		t.Fatal("a re-encoding of committed key material is the same key and must be refused")
+	}
+}
+
+// The same private key reaches the verifier just as well through a did:jwk
+// identifier or a certificate, so a guard that reads only `jwks` was evadable
+// by writing the key down differently.
+func TestDevKeyGuardSeesDIDJWKAndCertificateForms(t *testing.T) {
+	enforceDevKeyGuard(t)
+
+	t.Run("did:jwk", func(t *testing.T) {
+		iss, err := sdjwt.DIDJWKFromPublicJWK(sdjwt.JWK{
+			Kty: "EC", Crv: "P-256",
+			X: "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss",
+			Y: "0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o",
+		})
+		if err != nil {
+			t.Fatalf("build did:jwk: %v", err)
+		}
+		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{%q:{
+          "purposes":["login"],"organizations":["*"],"mechanism":"did:jwk"}}}`, iss)
+		if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+			t.Fatal("a did:jwk issuer that IS committed key material must be refused")
+		}
+	})
+
+	t.Run("x5c member", func(t *testing.T) {
+		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+          "purposes":["pid"],"mechanism":"jwks",
+          "jwks":{"keys":[{"kty":"EC","crv":"P-256",
+            "x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI",
+            "y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk",
+            "x5c":[%q]}]}}}}`, devAnchorCertificateB64(t))
+		if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+			t.Fatal("a certificate carrying committed key material must be refused however it is bundled")
+		}
+	})
+}
+
+// The dev CA is self-signed with testWallet/keys/issuer-dev-x5c.jwk, so
+// configuring it as an anchor lets anyone with a clone issue a certificate
+// under it and be believed as a PID issuer — the same hazard as a bundled key,
+// one indirection further out.
+func TestDevX5CTrustAnchorsRefusedUnlessExplicitlyAllowed(t *testing.T) {
+	enforceDevKeyGuard(t)
+
+	_, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
+	if err == nil {
+		t.Fatal("the shipped dev CA must not be usable as a trust anchor without DCS_ALLOW_DEV_TRUST")
+	}
+	if !strings.Contains(err.Error(), "committed in this repository") {
+		t.Errorf("the refusal must say why: %v", err)
+	}
+
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	pool, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
+	if err != nil || pool == nil {
+		t.Fatalf("DCS_ALLOW_DEV_TRUST must permit the dev anchors: %v", err)
+	}
+}
+
+func devAnchorCertificateB64(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(devX5CAnchorsPath)
+	if err != nil {
+		t.Fatalf("read dev anchors: %v", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		t.Fatal("dev anchors hold no PEM certificate")
+	}
+	return base64.StdEncoding.EncodeToString(block.Bytes)
+}
+
+// A JWKS says what its keys are for. Reading only kty and crv let a key
+// published for encryption verify credential signatures — the separation the
+// did:web path honours through assertionMethod, ignored the moment the same
+// key set arrives as a plain JWKS.
+func TestKeysPublishedForEncryptionDoNotVerifySignatures(t *testing.T) {
+	const signing = `{"kty":"EC","crv":"P-256","kid":"sig","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}`
+	const encryption = `{"kty":"EC","crv":"P-256","kid":"enc","use":"enc","x":"s7UdtIM60zJuEbVASvQJC0utyyDxbe1EdmMBlN2MRUc","y":"d3pwxBZeRjZ5MePGlBiXRdK-Cb-u2H0t8HFhP26JVik"}`
+	const wrongAlg = `{"kty":"EC","crv":"P-256","kid":"ecdh","alg":"ECDH-ES","x":"s7UdtIM60zJuEbVASvQJC0utyyDxbe1EdmMBlN2MRUc","y":"d3pwxBZeRjZ5MePGlBiXRdK-Cb-u2H0t8HFhP26JVik"}`
+	const p384Alg = `{"kty":"EC","crv":"P-256","kid":"es384","alg":"ES384","x":"s7UdtIM60zJuEbVASvQJC0utyyDxbe1EdmMBlN2MRUc","y":"d3pwxBZeRjZ5MePGlBiXRdK-Cb-u2H0t8HFhP26JVik"}`
+	const encOps = `{"kty":"EC","crv":"P-256","kid":"ops","key_ops":["deriveKey"],"x":"s7UdtIM60zJuEbVASvQJC0utyyDxbe1EdmMBlN2MRUc","y":"d3pwxBZeRjZ5MePGlBiXRdK-Cb-u2H0t8HFhP26JVik"}`
+
+	cfg := &TrustConfig{
+		VCTs: []string{"urn:dcs:poa:v1"},
+		Issuers: map[string]TrustedIssuer{
+			"https://mixed.example/issuer": {
+				Purposes: []Purpose{PurposeLogin}, Organizations: []string{"*"}, Mechanism: MechanismJWKS,
+				JWKS: json.RawMessage(`{"keys":[` + signing + `,` + encryption + `,` + wrongAlg + `,` + p384Alg + `,` + encOps + `]}`),
+			},
+		},
+	}
+
+	keys, err := cfg.For(PurposeLogin).IssuerJWKS("https://mixed.example/issuer")
+	if err != nil {
+		t.Fatalf("the signing key must still resolve: %v", err)
+	}
+	if !strings.Contains(string(keys), `"sig"`) {
+		t.Errorf("the signing key was dropped: %s", keys)
+	}
+	for _, dropped := range []string{`"enc"`, `"ecdh"`, `"es384"`, `"ops"`} {
+		if strings.Contains(string(keys), dropped) {
+			t.Errorf("key %s is not published for signature verification and must not be offered for it: %s", dropped, keys)
+		}
+	}
+
+	// An issuer left with nothing usable is a refusal, not an empty key set that
+	// reads as "no matching kid" three layers down.
+	cfg.Issuers["https://enconly.example/issuer"] = TrustedIssuer{
+		Purposes: []Purpose{PurposeLogin}, Organizations: []string{"*"}, Mechanism: MechanismJWKS,
+		JWKS: json.RawMessage(`{"keys":[` + encryption + `]}`),
+	}
+	if _, err := cfg.For(PurposeLogin).IssuerJWKS("https://enconly.example/issuer"); err == nil {
+		t.Error("an issuer publishing only encryption keys must not resolve to a usable JWKS")
+	}
+}
+
+// Bundled keys are known at load, so a set that can verify nothing is a
+// startup error rather than a puzzle when the first credential arrives.
+func TestLoadRefusesJWKSThatCanVerifyNothing(t *testing.T) {
+	path := writeTrust(t, `{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+      "purposes":["login"],"organizations":["*"],"mechanism":"jwks",
+      "jwks":{"keys":[{"kty":"EC","crv":"P-256","use":"enc","x":"VlBNhqQn6gLyQXqKkLDHBwXlJsi0IES4OovRv9FrAHI","y":"vZMT1rkIeVaj7Om-FuIIcMHA1-xHtSk3OTGgovfeHCk"}]}}}}`)
+	if _, err := LoadTrustConfig(path); err == nil {
+		t.Fatal("an issuer whose only bundled key is an encryption key must be refused at load")
 	}
 }

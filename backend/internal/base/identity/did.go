@@ -32,9 +32,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // eIDAS / ETSI EN 319 412-5 OIDs
@@ -377,12 +380,44 @@ func (d *DIDDocument) loadCertificateChain() ([]*x509.Certificate, error) {
 // otherwise hang the caller (PostPdf's inbound verification, the outbound
 // trust gate's did.json fetch) indefinitely instead of failing.
 var fetchTimeout = 10 * time.Second
-var fetchClient = &http.Client{Timeout: fetchTimeout}
+
+// The two clients every outbound fetch here uses, differing only in whether
+// loopback may be dialled — see fetchClientForURL.
+var (
+	fetchClientStrict   = safehttp.Client(fetchTimeout, safehttp.Policy{})
+	fetchClientLoopback = safehttp.Client(fetchTimeout, safehttp.Policy{AllowLoopback: true})
+)
+
+// fetchClientForURL picks the client for one outbound fetch: no redirects, and
+// no dialling an address a published identity never lives on (safehttp).
+//
+// Loopback is permitted exactly when DIDWebSchemes has already decided this
+// host is a loopback one — the rule that lets the dev and CI stacks resolve
+// each other over http://*.localhost — so loopback is decided once here rather
+// than by a second rule that can drift away from the first.
+//
+// The redirect refusal matters most: following one let the responder choose the
+// next address after the first had been checked, and an https -> http hop
+// silently undid the https-only rule DIDWebSchemes exists to enforce.
+func fetchClientForURL(rawURL string) (*http.Client, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", rawURL, err)
+	}
+	if isLoopbackHost(parsed.Host) {
+		return fetchClientLoopback, nil
+	}
+	return fetchClientStrict, nil
+}
 
 // fetchCertificateDER fetches a certificate from a URL and returns it as
 // DER. The server may deliver PEM or raw DER.
 func fetchCertificateDER(certURL string) ([]byte, error) {
-	resp, err := fetchClient.Get(certURL)
+	client, err := fetchClientForURL(certURL)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Get(certURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetching certificate from %s: %w", certURL, err)
 	}
@@ -493,6 +528,16 @@ func DIDWebToHostname(did string) (string, error) {
 // DIDWebPath splits a did:web identifier into its authority and its path
 // segments, e.g. "did:web:example.com%3A8991:tenant:b" ->
 // ("example.com:8991", ["tenant", "b"]).
+//
+// The authority is decoded strictly: %3A, the port separator, is the only
+// escape did:web defines there, and everything else is refused rather than
+// decoded. Decoding arbitrary escapes turned "did:web:evil.example%2F..%2F.."
+// into the authority "evil.example/../..", which DIDWebBaseURL concatenates
+// straight into a URL — the identifier then picks the path that every
+// resolution, agreement-credential fetch and peer request lands on, and a
+// host check earlier in the flow has been left behind. A separator sitting in
+// the authority literally does the same without any escape at all, so the
+// decoded authority has to look like a host, not merely decode to one.
 func DIDWebPath(did string) (string, []string, error) {
 	const prefix = "did:web:"
 	if !strings.HasPrefix(did, prefix) {
@@ -500,26 +545,59 @@ func DIDWebPath(did string) (string, []string, error) {
 	}
 
 	parts := strings.Split(strings.TrimPrefix(did, prefix), ":")
-	host, err := url.QueryUnescape(parts[0]) // %3A -> ":"
+	host, err := didWebAuthority(parts[0])
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid percent-encoding in did:web host: %w", err)
-	}
-	if host == "" {
-		return "", nil, errors.New("did:web identifier has empty host component")
+		return "", nil, fmt.Errorf("did:web identifier %q: %w", did, err)
 	}
 
 	segments := make([]string, 0, len(parts)-1)
 	for _, raw := range parts[1:] {
-		segment, err := url.QueryUnescape(raw)
+		segment, err := url.PathUnescape(raw)
 		if err != nil {
 			return "", nil, fmt.Errorf("invalid percent-encoding in did:web path: %w", err)
 		}
 		if segment == "" {
 			return "", nil, fmt.Errorf("did:web identifier %q has an empty path segment", did)
 		}
+		// A segment that decodes to a separator or a traversal is a path the
+		// identifier writes rather than a name it carries.
+		if strings.ContainsAny(segment, `/\?#`) || segment == "." || segment == ".." {
+			return "", nil, fmt.Errorf("did:web identifier %q has a path segment %q that would rewrite its own document path", did, segment)
+		}
 		segments = append(segments, segment)
 	}
 	return host, segments, nil
+}
+
+// didWebHost is the shape the decoded authority must have: a host name, and at
+// most a numeric port. Deliberately no percent signs, separators, credentials
+// or bracketed IPv6 literal — none of which any deployment publishes, and each
+// of which changes where the document is read from.
+var didWebHost = regexp.MustCompile(`^[A-Za-z0-9._-]+(:[0-9]{1,5})?$`)
+
+func didWebAuthority(raw string) (string, error) {
+	if raw == "" {
+		return "", errors.New("has empty host component")
+	}
+
+	var decoded strings.Builder
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '%' {
+			decoded.WriteByte(raw[i])
+			continue
+		}
+		if i+3 > len(raw) || !strings.EqualFold(raw[i:i+3], "%3a") {
+			return "", fmt.Errorf("host component %q carries a percent-escape other than %%3A; only the port separator is encoded in a did:web authority", raw)
+		}
+		decoded.WriteByte(':')
+		i += 2
+	}
+
+	host := decoded.String()
+	if !didWebHost.MatchString(host) {
+		return "", fmt.Errorf("host component %q is not a hostname with an optional port", host)
+	}
+	return host, nil
 }
 
 // DIDWebDocumentPath is the path a did:web document is served at, per
@@ -544,15 +622,19 @@ func DIDWebBaseURL(scheme, host string, segments []string) string {
 	return base
 }
 
-func fetchDIDDocumentFromURL(url string) (*DIDDocument, error) {
-	resp, err := fetchClient.Get(url)
+func fetchDIDDocumentFromURL(docURL string) (*DIDDocument, error) {
+	client, err := fetchClientForURL(docURL)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Get(docURL)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %s from %s", resp.Status, url)
+		return nil, fmt.Errorf("unexpected status %s from %s", resp.Status, docURL)
 	}
 
 	body, err := io.ReadAll(resp.Body)

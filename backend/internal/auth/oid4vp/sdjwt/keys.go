@@ -105,7 +105,7 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 		return verificationKeyFromHeaderJWK(jwksRaw, rawJWK)
 	}
 
-	return verificationKeyFromTrustedJWKS(jwksRaw, token)
+	return verificationKeyFromTrustedJWKS(jwksRaw, token, iss)
 }
 
 // ResolveIssuerVerificationKeyForPID resolved a PID issuer's key from the
@@ -202,7 +202,7 @@ func verificationKeyFromHeaderJWK(jwksRaw json.RawMessage, rawJWK any) (any, err
 	return ecPublicKey(headerKey.X, headerKey.Y)
 }
 
-func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token) (any, error) {
+func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token, iss string) (any, error) {
 	var doc jwksDocument
 	err := json.Unmarshal(jwksRaw, &doc)
 
@@ -220,12 +220,45 @@ func verificationKeyFromTrustedJWKS(jwksRaw json.RawMessage, token *jwt.Token) (
 	}
 
 	for _, key := range doc.Keys {
-		if key.Kid == kid {
+		if kidNamesKey(key.Kid, kid, iss) {
 			return trustedECKey(key)
 		}
 	}
 
 	return nil, fmt.Errorf("no matching issuer jwk for kid %q", kid)
+}
+
+// kidNamesKey reports whether a credential's kid names the key a JWKS entry
+// carries.
+//
+// A DID document publishes two names for one key: the verification method's DID
+// URL (did:web:host#dev-key-1) and the JWK's own kid inside it (dev-key-1) —
+// this repository's gendid writes both. An issuer may sign under either, so
+// comparing the strings alone leaves the issuer and the verifier looking each
+// other up by different names. A DID URL therefore also matches the bare
+// fragment it ends in.
+//
+// A DID URL only names a key of the document it points at, so its base must be
+// the issuer whose keys were resolved. Matching on the fragment alone would let
+// a credential cite another controller's document and still be verified here.
+func kidNamesKey(jwkKid, credentialKid, iss string) bool {
+	if jwkKid == credentialKid {
+		return true
+	}
+	fragmentOf := func(didURL string) string {
+		base, fragment, found := strings.Cut(didURL, "#")
+		if !found || fragment == "" || base != iss {
+			return ""
+		}
+		return fragment
+	}
+	switch {
+	case strings.Contains(jwkKid, "#") && !strings.Contains(credentialKid, "#"):
+		return credentialKid != "" && fragmentOf(jwkKid) == credentialKid
+	case strings.Contains(credentialKid, "#") && !strings.Contains(jwkKid, "#"):
+		return jwkKid != "" && fragmentOf(credentialKid) == jwkKid
+	}
+	return false
 }
 
 func trustedECKey(key JWK) (any, error) {

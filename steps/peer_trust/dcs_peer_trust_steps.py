@@ -36,10 +36,9 @@ appending an arbitrary suffix to this instance's own DID — that names a
 document this instance does not serve, and PostPdf then fails at its very
 first step (FetchDIDDocument) long before any trust-gate layer runs.
 
-What DOES yield a self-resolving synthetic peer is percent-encoding: the
-resolver percent-decodes each component (`url.QueryUnescape` per part), so
-re-encoding one already-ASCII character of the host produces a DIFFERENT DID
-STRING that decodes to the SAME authority (see
+What DOES yield a self-resolving synthetic peer is letter case: DNS names are
+case-insensitive, so flipping the case of one host letter produces a DIFFERENT
+DID STRING that reaches the SAME authority (see
 `_self_resolving_peer_variant`). Such an identifier resolves to THIS SAME
 running instance's own `/.well-known/did.json`, its own
 `/.well-known/dcs-agreement-credential.json` and its own signing key, so
@@ -137,38 +136,39 @@ def _own_identity(context):
 
 
 def _self_resolving_peer_variant(real_did: str) -> str:
-    """Re-encode one character of a did:web identifier's host component, so the
-    result is a DIFFERENT DID STRING that resolves to exactly the SAME target.
+    """Flip the case of one letter in a did:web identifier's host component, so
+    the result is a DIFFERENT DID STRING that resolves to exactly the SAME
+    target.
 
-    did:web resolution percent-decodes each colon-separated component
-    (identity.DIDWebPath -> url.QueryUnescape), so "%64cs.example%3A8080" and
-    "dcs.example%3A8080" denote one and the same authority. That is what makes
-    a single-instance synthetic peer possible at all now that path segments are
-    part of the identity (see module docstring): the peer's did.json,
-    agreement credential and rules hash are this instance's own real,
-    self-consistent ones, while the identifier is still not the instance's own
-    DID string and so clears PostPdf's same-peer guard.
+    DNS names are case-insensitive, so "Dcs-a.localhost%3A18080" and
+    "dcs-a.localhost%3A18080" reach one and the same host. That is what makes a
+    single-instance synthetic peer possible at all now that path segments are
+    part of the identity (see module docstring): the peer's did.json, agreement
+    credential and rules hash are this instance's own real, self-consistent
+    ones, while the identifier is still not the instance's own DID string and so
+    clears PostPdf's same-peer guard.
 
-    The first host character is the one re-encoded — always present (an empty
-    host is rejected by the resolver) and, for a hostname, always ASCII, so a
-    single %XX byte is a faithful encoding of it.
+    This used to re-encode a host character as %XX instead. The resolver now
+    accepts no percent-escape in the authority except %3A for the port, because
+    decoding arbitrary escapes there let an identifier smuggle a path separator
+    into the host — so the old trick names a host that is refused outright.
     """
     prefix = "did:web:"
     assert real_did.startswith(prefix), f"not a did:web identifier: {real_did}"
     rest = real_did[len(prefix):]
     host_encoded, _, suffix = rest.partition(":")
     assert host_encoded, f"did:web identifier has empty host component: {real_did}"
-    first = host_encoded[0]
-    assert first != "%", (
-        f"host component of {real_did} already starts with a percent-escape; re-encoding its "
-        "first character would corrupt that escape rather than rename it"
+
+    for index, char in enumerate(host_encoded):
+        if char.isascii() and char.isalpha():
+            flipped = char.upper() if char.islower() else char.lower()
+            variant_host = host_encoded[:index] + flipped + host_encoded[index + 1:]
+            return prefix + variant_host + (f":{suffix}" if suffix else "")
+
+    raise AssertionError(
+        f"host component of {real_did} carries no ASCII letter to vary; a synthetic peer "
+        "identity that resolves to this same instance cannot be derived from it"
     )
-    assert first.isascii(), (
-        f"host component of {real_did} starts with non-ASCII {first!r}; a single-byte %XX escape "
-        "would not faithfully encode it (expected an IDNA/ASCII hostname)"
-    )
-    variant_host = f"%{ord(first):02X}{host_encoded[1:]}"
-    return prefix + variant_host + (f":{suffix}" if suffix else "")
 
 
 def _synthetic_peer_credentials(context):
