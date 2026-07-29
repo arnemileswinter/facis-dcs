@@ -180,7 +180,7 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     // until it is acknowledged and a justification is given.
     await expect(dialog.getByText('Encryption keys will be destroyed on both instances (irreversible)')).toBeVisible()
     await expect(a.page.getByTestId('confirmation-confirm')).toBeDisabled()
-    await a.page.locator('#confirmation-text-input').fill('GDPR Art. 17 erasure request (E2E)')
+    await dialog.locator('textarea[id^="v-"]').fill('GDPR Art. 17 erasure request (E2E)')
     await a.page.getByTestId('confirmation-acknowledgement-checkbox').check()
     const deleted = a.page.waitForResponse(
       (r) => r.url().includes('/archive/delete') && r.request().method() === 'DELETE' && r.ok(),
