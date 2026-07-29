@@ -89,7 +89,7 @@ async function expectErasureBadge(inst: Instance, contractDid: string, badge: st
 
 /** Export attempt on a shredded contract: the button must yield the defined
  *  "Content erased" message — a clean end state, not a crash. */
-async function expectErasedExportMessage(inst: Instance, contractDid: string): Promise<void> {
+async function expectErasedExportMessage(inst: Instance, contractDid: string, contractName: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
   const exportAnswered = inst.page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/`), {
     timeout: 120_000,
@@ -98,9 +98,10 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string): P
   await exportAnswered
   await expect(inst.page.getByText('Content erased — encryption keys destroyed')).toBeVisible({ timeout: 30_000 })
   // The view survives the refusal: the contract's metadata keeps rendering.
-  // The DID also appears in collapsed panels, so filter to the rendered one
-  // rather than taking whichever match happens to come first in the DOM.
-  await expect(inst.page.getByText(contractDid).filter({ visible: true }).first()).toBeVisible()
+  // It identifies the contract by name — the only DID on this view is the
+  // template's — so the name is what proves the Postgres-side record survived
+  // the shred.
+  await expect(inst.page.getByRole('textbox', { name: 'Global Name' })).toHaveValue(contractName)
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {
@@ -216,8 +217,8 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
   })
 
   await test.step('export attempts surface "Content erased" on both instances — no crash', async () => {
-    await expectErasedExportMessage(a, contractDid)
-    await expectErasedExportMessage(b, contractDid)
+    await expectErasedExportMessage(a, contractDid, templateName)
+    await expectErasedExportMessage(b, contractDid, templateName)
   })
 
   await test.step('the contract list still serves the metadata (erasure ≠ row deletion)', async () => {
