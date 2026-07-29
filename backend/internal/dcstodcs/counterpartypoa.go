@@ -153,7 +153,7 @@ type ShippedSignatures struct {
 // change the bytes the signature covers. DCS-FR-SM-08 already requires the
 // summary as a VC embedded in the PDF/A-3, which is issuer-signed by the
 // shipping instance rather than being a bare assertion beside the credential.
-func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, evidence []SignatoryPoA) error {
+func (g *CounterpartyPoAGate) Check(peerDID, contractIRI string, signed ShippedSignatures, evidence []SignatoryPoA) error {
 	if len(evidence) == 0 {
 		return nil
 	}
@@ -180,7 +180,7 @@ func (g *CounterpartyPoAGate) Check(peerDID string, signed ShippedSignatures, ev
 		// signature it stands behind. Reading it from the PDF instead meant
 		// reading whichever attachment happened to be last, which after a
 		// countersignature is the other party's.
-		node, err := signedPartyOf(signed, poa, organization)
+		node, err := signedPartyOf(signed, poa, organization, contractIRI)
 		if err != nil {
 			return deny(fmt.Errorf("counterparty Power of Attorney: %w", err))
 		}
@@ -230,7 +230,7 @@ type signedParty struct {
 // the signature field names (signingmanagement/command/ceremony.go), so the
 // summary's field_name IS the organization its Power of Attorney must
 // authorize, and credentialSubject.id is the signatory it must be held by.
-func signedPartyOf(signed ShippedSignatures, poa SignatoryPoA, organization string) (signedParty, error) {
+func signedPartyOf(signed ShippedSignatures, poa SignatoryPoA, organization, contractIRI string) (signedParty, error) {
 	if signed.VerifyVC == nil || signed.ResolveKey == nil {
 		return signedParty{}, fmt.Errorf("no means to verify the peer's signing evidence, so nothing it claims can be believed")
 	}
@@ -242,8 +242,9 @@ func signedPartyOf(signed ShippedSignatures, poa SignatoryPoA, organization stri
 	var vc struct {
 		Type              []string `json:"type"`
 		CredentialSubject struct {
-			ID        string `json:"id"`
-			FieldName string `json:"field_name"`
+			ID         string `json:"id"`
+			FieldName  string `json:"field_name"`
+			ContractID string `json:"contract_id"`
 		} `json:"credentialSubject"`
 	}
 	if err := json.Unmarshal(raw, &vc); err != nil {
@@ -254,6 +255,14 @@ func signedPartyOf(signed ShippedSignatures, poa SignatoryPoA, organization stri
 	}
 	if err := verifySummary(signed, raw, organization); err != nil {
 		return signedParty{}, err
+	}
+	// Without this the evidence is not bound to this exchange at all. The
+	// presentation carries no audience or nonce we can check, so the summary's
+	// own contract_id is what stops a genuine (summary, Power of Attorney) pair
+	// from another contract being replayed onto this one.
+	if subject := strings.TrimSpace(vc.CredentialSubject.ContractID); subject != strings.TrimSpace(contractIRI) {
+		return signedParty{}, fmt.Errorf("the signing summary shipped for %q attests a signature on contract %q, not %q",
+			organization, subject, contractIRI)
 	}
 	if strings.TrimSpace(vc.CredentialSubject.FieldName) != organization {
 		return signedParty{}, fmt.Errorf("the signing summary shipped for %q attests a signature for %q instead",

@@ -779,6 +779,12 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if err != nil {
 			return nil, fmt.Errorf("issue signing-summary VC: %w", err)
 		}
+		// Retained as well as embedded: the embedded copy cannot travel (only the
+		// last attachment survives, and a second one would mutate a signed PDF),
+		// so the peer gets this one on the wire.
+		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, evidence); err != nil {
+			return nil, err
+		}
 	case signedCount == 0 && !carriesPAdESSignature(basePDF):
 		// First signature on a multi-signer contract: embed EVERY declared
 		// field's summary VC as a JSON array, so no later signer needs a
@@ -828,6 +834,11 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", f, err)
 			}
 			summaries = append(summaries, vc)
+			// Each field's summary is retained against the ceremony that produced
+			// it, so a later ship carries the same attestation the PDF embedded.
+			if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, c.ID, vc); err != nil {
+				return nil, err
+			}
 		}
 		evidence, err = json.Marshal(summaries)
 		if err != nil {

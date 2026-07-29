@@ -187,7 +187,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		},
 		VerifyVC: provenance.VerifyDataIntegrityProof,
 	}
-	if err := s.PoAGate.Check(req.FromPeerDid, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+	if err := s.PoAGate.Check(req.FromPeerDid, req.ContractIri, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
 		var gateErr *trustgate.GateError
 		if errors.As(err, &gateErr) {
 			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {

@@ -15,6 +15,7 @@ import (
 const (
 	testSignedParty     = "did:web:peer.example"
 	testSignedSignatory = "did:jwk:eyJrdHkiOiJFQyJ9"
+	testContract        = "urn:contract:1"
 )
 
 // summaryVC is a ContractSigningSummaryCredential as the shipping instance
@@ -28,7 +29,7 @@ func summaryVC(organization, signatory string) string {
 	  "credentialSubject": {
 	    "id": "` + signatory + `",
 	    "field_name": "` + organization + `",
-	    "contract_id": "urn:contract:1"
+	    "contract_id": "` + testContract + `"
 	  },
 	  "proof": {
 	    "type": "DataIntegrityProof",
@@ -72,7 +73,7 @@ func gateError(t *testing.T, err error) *GateError {
 // from the contract itself.
 func TestCounterpartyPoAGate_AbsentEvidenceIsAccepted(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: nil}
-	require.NoError(t, gate.Check(testSignedParty, verifier(), nil))
+	require.NoError(t, gate.Check(testSignedParty, testContract, verifier(), nil))
 }
 
 // Present evidence that cannot be verified refuses the exchange rather than
@@ -80,7 +81,7 @@ func TestCounterpartyPoAGate_AbsentEvidenceIsAccepted(t *testing.T) {
 // verify it against.
 func TestCounterpartyPoAGate_EvidenceWithoutTrustConfigIsRefused(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: nil}
-	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{poaFor(testSignedParty)})
+	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{poaFor(testSignedParty)})
 	assert.Contains(t, gateError(t, err).Error(), "no issuer trust is configured")
 }
 
@@ -88,7 +89,7 @@ func TestCounterpartyPoAGate_EvidenceWithoutTrustConfigIsRefused(t *testing.T) {
 // credential from some other exchange.
 func TestCounterpartyPoAGate_EvidenceForAnotherPartyIsRefusedEarly(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
-	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{poaFor("did:web:the-other-party.example")})
+	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{poaFor("did:web:the-other-party.example")})
 	assert.Contains(t, gateError(t, err).Error(), "which is not its own")
 }
 
@@ -98,7 +99,7 @@ func TestCounterpartyPoAGate_SummaryForAnotherPartyIsRefused(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
 	poa := poaFor(testSignedParty)
 	poa.Summary = summaryVC("did:web:impostor.example", testSignedSignatory)
-	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{poa})
+	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{poa})
 	assert.Contains(t, gateError(t, err).Error(), "attests a signature for")
 }
 
@@ -106,12 +107,12 @@ func TestCounterpartyPoAGate_UnreadableSigningEvidenceIsRefused(t *testing.T) {
 	gate := CounterpartyPoAGate{Trust: &oid4vp.TrustConfig{}}
 	poa := poaFor(testSignedParty)
 	poa.Summary = "not json"
-	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{poa})
+	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{poa})
 	assert.Contains(t, gateError(t, err).Error(), "decode signing evidence")
 }
 
 func TestSignedPartyOf_ReadsTheShippersAttestation(t *testing.T) {
-	party, err := signedPartyOf(verifier(), poaFor(testSignedParty), testSignedParty)
+	party, err := signedPartyOf(verifier(), poaFor(testSignedParty), testSignedParty, testContract)
 	require.NoError(t, err)
 	assert.Equal(t, testSignedSignatory, party.Signatory)
 	assert.Equal(t, testSignedParty, party.PoAOrganization)
@@ -120,7 +121,7 @@ func TestSignedPartyOf_ReadsTheShippersAttestation(t *testing.T) {
 // A Power of Attorney with no attestation of the signature it stands behind is
 // refused: the shipper would be asserting the binding rather than proving it.
 func TestPoAWithoutASummaryIsRefused(t *testing.T) {
-	_, err := signedPartyOf(verifier(), SignatoryPoA{Party: testSignedParty, Presentation: "p"}, testSignedParty)
+	_, err := signedPartyOf(verifier(), SignatoryPoA{Party: testSignedParty, Presentation: "p"}, testSignedParty, testContract)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no signing summary")
 }
@@ -130,7 +131,7 @@ func TestPoAWithoutASummaryIsRefused(t *testing.T) {
 func TestSummaryForAnotherPartyIsRefused(t *testing.T) {
 	poa := poaFor(testSignedParty)
 	poa.Summary = summaryVC("did:web:elsewhere.example", testSignedSignatory)
-	_, err := signedPartyOf(verifier(), poa, testSignedParty)
+	_, err := signedPartyOf(verifier(), poa, testSignedParty, testContract)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "attests a signature for")
 }
@@ -156,7 +157,7 @@ func TestCounterpartyPoAGate_VerifiedEvidenceIsAccepted(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check(testSignedParty, verifier(), []SignatoryPoA{poaFor(testSignedParty)})
+	err := gate.Check(testSignedParty, testContract, verifier(), []SignatoryPoA{poaFor(testSignedParty)})
 	require.NoError(t, err)
 
 	require.Len(t, seen, 1, "the shipped credential must actually be verified, not skipped")
@@ -172,7 +173,7 @@ func TestCounterpartyPoAGate_EvidenceForAnotherPartyIsRefused(t *testing.T) {
 	var seen []oid4vp.CounterpartyPoAExpectation
 	gate := acceptingGate(&seen)
 
-	err := gate.Check("did:web:someone-else.example", verifier(), []SignatoryPoA{poaFor(testSignedParty)})
+	err := gate.Check("did:web:someone-else.example", testContract, verifier(), []SignatoryPoA{poaFor(testSignedParty)})
 
 	require.Error(t, err)
 	var gateErr *GateError
@@ -195,7 +196,7 @@ func TestCounterpartyPoAGate_DoubleSignedReturnLegIsAccepted(t *testing.T) {
 
 	doubleSigned := verifier()
 
-	require.NoError(t, gate.Check(testSignedParty, doubleSigned, []SignatoryPoA{poaFor(testSignedParty)}))
+	require.NoError(t, gate.Check(testSignedParty, testContract, doubleSigned, []SignatoryPoA{poaFor(testSignedParty)}))
 
 	require.Len(t, seen, 1, "the shipper's own evidence is still verified")
 	assert.Equal(t, testSignedParty, seen[0].Organization)
@@ -211,7 +212,7 @@ func TestCounterpartyPoAGate_AuthoredFieldNamesStillJoin(t *testing.T) {
 
 	payload := verifier()
 
-	require.NoError(t, gate.Check(testSignedParty, payload, []SignatoryPoA{poaFor("Acme Corp")}))
+	require.NoError(t, gate.Check(testSignedParty, testContract, payload, []SignatoryPoA{poaFor("Acme Corp")}))
 	require.Len(t, seen, 1)
 	assert.Equal(t, "Acme Corp", seen[0].Organization)
 }
