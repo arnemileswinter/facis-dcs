@@ -138,13 +138,25 @@ identically, until it expires or is revoked.
 
 **What the payload is and is not.** The party, its signatory and its claimed
 authorization are read from the contract the same ship carried rather than from
-fields beside the credential. That is worth doing, but it is a narrower
-guarantee than it first looks: the content gate establishes that the PDF's
-visible text is the deterministic re-render of its own embedded payload —
-self-consistency, not authenticity. The payload is still the peer's assertion.
-The residual requirement on an attacker is to hold a non-revoked credential from
-an issuer this instance trusts for `peer` and that is entitled to the named
-organization, and then to write the contract around it.
+fields beside the credential. The content gate establishes that the PDF's visible
+text is the deterministic re-render of its own embedded payload —
+self-consistency, not authenticity — so the payload remains the peer's
+assertion, and an attacker's residual task is to hold a credential this instance
+trusts for that organization and write the contract around it.
+
+**That is accepted.** A contract does not arrive as a fait accompli: negotiation
+puts the artifact in front of the counterparty again, and a party that never
+agreed to the terms a peer asserts sees them before it signs. The peer's
+assertion is a proposal the other side reads, not a record it is bound by. This
+verification exists to stop an authority being *invented*, not to remove the
+counterparty's own reading of what it is signing.
+
+**A peer may only vouch for itself.** Evidence naming a `did:web` organization
+other than the shipping peer is refused: B ships the credential behind B's
+signature, and a credential for A reaching us from B is one obtained in some
+other exchange. The presentation carries no audience or nonce we could check, so
+without that rule it would verify on its own merits and vouch for a party the
+shipper has nothing to do with.
 
 **What that establishes, precisely: an attestation of authority.** An issuer
 this instance trusts, entitled to speak for that organization, says the holder
@@ -175,15 +187,19 @@ originator does — which every two-instance flow drives — the originator's
 signatory and Power of Attorney were recorded against the *other* party. Nothing
 read those fields closely enough to notice until a peer began verifying them.
 
-**Retention.** The presentation is stored on the signing ceremony
-(`poa_vp_token`), alongside the PID presentation already held there, and is
-**not** covered by contract erasure: `AuditedShredder` destroys wrapped CEKs, and
-nothing clears the ceremony's token columns. That matches how `vp_token` and
-`pid_claims` are already treated, so it is not new, but it widens what survives
-an erasure — a holder-bound credential with disclosed `organization`, `roles`
-and a `sub` naming the signatory's key. Either those columns get shredded with
-the CEK, or the retention is justified as signing evidence; that decision is
-open.
+**Retention — a known unsolved problem.** The presentation is stored on the
+signing ceremony (`poa_vp_token`), alongside the PID presentation already held
+there, and is **not** covered by contract erasure: `AuditedShredder` destroys
+wrapped CEKs, and nothing clears the ceremony's token columns. That matches how
+`vp_token` and `pid_claims` are already treated, so it is not new — but this
+commit widens what survives an erasure to a holder-bound credential carrying a
+disclosed `organization`, `roles`, and a `sub` naming the signatory's key.
+
+This is recorded as **unsolved**, not as accepted. Erasure that leaves personal
+data behind is a defect under DCS-NFR-COMP-03 / DCS-NFR-SEC-13 whichever table
+it sits in, and the fix is a general one — ceremony evidence has to be erasable
+the way contract artifacts are — rather than something to bolt onto this
+column.
 
 **What `peer` gates, and why it is now overloaded.** The purpose is used in two
 places: a signing ceremony verifying the Power of Attorney presented at it, and

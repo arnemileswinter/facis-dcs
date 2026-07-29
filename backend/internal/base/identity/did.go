@@ -594,7 +594,13 @@ func didWebAuthority(raw string) (string, error) {
 		i += 2
 	}
 
-	host := decoded.String()
+	// DNS names are case-insensitive, so two identifiers differing only in the
+	// case of the authority name one and the same host. Normalising here makes
+	// everything derived from it — the resolution URL, the agreement-credential
+	// URL, the issuer comparison in the trust gate — agree on that, instead of
+	// comparing the two spellings as strings and concluding they are different
+	// peers. Path segments are NOT normalised: those are case-sensitive.
+	host := strings.ToLower(decoded.String())
 	if !didWebHost.MatchString(host) {
 		return "", fmt.Errorf("host component %q is not a hostname with an optional port", host)
 	}
