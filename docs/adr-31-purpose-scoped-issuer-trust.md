@@ -179,10 +179,17 @@ issuer would, and trusted by each for `pid` and nothing else. It issues
 — and carries neither roles nor an organization, because authority to act for a
 party is what a PoA is for and an identity document must not grant permissions.
 
-Because mechanism is configuration, the demo issuer and a real one differ only
-in a trust entry: the demo publishes through `did:web`, a genuine EUDI PID
-arrives with an `x5c` chain, and the same verification path serves both. That is
-what makes this a stepping stone rather than a mock to be thrown away.
+It presents its **certificate chain** (`x5c`), issued by the CA its own PKI flow
+provisions, exactly as a real EUDI PID does — and each DCS trusts it with
+`mechanism: x5c`, verifying that chain against anchors configured at
+`OID4VP_X5C_TRUST_ANCHORS_PATH`. The dev CA is therefore load-bearing rather
+than decorative: it had been provisioned and published all along while nothing
+verified against it, because the credential asserted identity through `did:web`
+instead.
+
+That makes this a stepping stone rather than a mock to be thrown away: a genuine
+national or QTSP issuer differs by an anchor and a trust entry, not by code, and
+the demo already exercises the chain-validation path a real PID depends on.
 
 What it is not: a real identity proofing process. Nobody checks that the person
 is who the form says. The demo shows the *shape* — a third party attests, the
