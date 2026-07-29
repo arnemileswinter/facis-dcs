@@ -38,6 +38,7 @@ import (
 	"digital-contracting-service/internal/auth"
 	pg "digital-contracting-service/internal/auth/db/pq"
 	"digital-contracting-service/internal/auth/machineidentity"
+	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
@@ -442,6 +443,12 @@ func main() {
 		"did-document":      os.Getenv("DCS_DID"),
 		"oid4vp-trust-data": os.Getenv("OID4VP_TRUST_DATA_PATH"),
 		"x5c-trust-anchors": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH"),
+		// The authorization policy outranks the trust document: a rule granting
+		// everything overrides every entry in it. Attesting the document while
+		// leaving the policy unpinned would put the pinned file under the
+		// unpinned one. Empty unless a deployment supplies its own — the built-in
+		// policy is compiled into the binary and covered by the image digest.
+		oid4vp.TrustPolicyAttestationKey: oid4vp.TrustPolicyPath(),
 	}, os.Getenv("DCS_CONFIG_SHA256_PINS")); err != nil {
 		log.Fatalf(ctx, err, "Config integrity verification failed")
 	}

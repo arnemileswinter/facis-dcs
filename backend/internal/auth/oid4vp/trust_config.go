@@ -377,6 +377,14 @@ func LoadTrustConfig(path string) (*TrustConfig, error) {
 		}
 	}
 
+	// A policy that cannot be compiled stops the process here, where the error is
+	// visible. Left to first use, a fat-fingered OID4VP_TRUST_POLICY_PATH
+	// produced a service that came up healthy and then refused every login, peer
+	// credential and PID, reporting each as an untrusted issuer.
+	if err := PrepareTrustPolicy(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 
@@ -400,7 +408,7 @@ func (v *PurposeView) IssuerTrusted(iss string) bool {
 	if v == nil || v.cfg == nil {
 		return false
 	}
-	return v.cfg.evaluate(v.purpose, iss, "").Trusted
+	return v.cfg.evaluateBool(queryTrusted, v.purpose, iss, "")
 }
 
 // IssuerUsesX5C reports whether the issuer publishes its key through a
@@ -562,7 +570,7 @@ func (c *TrustConfig) IssuerMayAttest(iss, org string) bool {
 	if c == nil {
 		return false
 	}
-	return c.evaluate(PurposePeer, iss, org).MayAttest
+	return c.evaluateBool(queryMayAttest, PurposePeer, iss, org)
 }
 
 func (c *TrustConfig) IssuerTrusted(iss string) bool {
