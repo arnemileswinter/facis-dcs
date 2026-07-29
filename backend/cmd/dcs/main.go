@@ -294,45 +294,29 @@ func main() {
 		log.Fatalf(ctx, err, "Could not load auth config")
 	}
 
-	// Sign OpenID4VP authorization request objects (JAR) with the HSM key; the
-	// public JWK is embedded in the JWT header and the key label is its kid.
-	jarLabel := hsm.KeyLabelJAR()
-	jarSigner, err := hsmClient.Signer(jarLabel)
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not load HSM JAR signing key")
-	}
-	jarJWK, err := hsmClient.PublicJWK(jarLabel)
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not read HSM JAR public key")
-	}
-	requestSigner, err := oid4vprequest.NewHSMSigner(jarLabel, jarSigner, jarJWK, hsm.SignES256)
+	// Every OpenID4VP request object this deployment issues — login, PID, the
+	// signing ceremony's identity presentation, and the Document-Retrieval
+	// request — is signed with the DCS's own DID/hostname certificate chain
+	// (already verified, just above, to carry a SAN matching its hostname). A
+	// wallet resolves trust from the leaf certificate's SAN named by the
+	// x509_san_dns client identifier; a bare jwk header proves possession of a
+	// key it has no reason to trust and anchors to nothing.
+	requestSigner, err := oid4vprequest.NewX5CSigner(didDocument)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
-
-	// The Document-Retrieval signing ceremony's request object declares
-	// client_id_scheme=x509_san_dns (docretrieval.go) — a real wallet resolves
-	// trust from the leaf certificate's SAN, not a bare jwk, so it is signed
-	// with the DCS's own DID/hostname certificate chain instead of the HSM JAR
-	// key above (already verified, just above, to carry a SAN matching its
-	// hostname).
-	docRetrievalSigner, err := oid4vprequest.NewX5CSigner(didDocument)
+	requestHostname, err := requestSigner.ClientID()
 	if err != nil {
-		log.Fatalf(ctx, err, "Could not build OID4VP document-retrieval request signer")
+		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
 	}
-	docRetrievalClientID, err := docRetrievalSigner.ClientID()
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not resolve document-retrieval client_id")
-	}
+	// The wallet is handed an OpenID4VP client identifier — prefix and value —
+	// not the Hydra OAuth client id: an unprefixed value means the
+	// "pre-registered" prefix, which a wallet outside a pre-agreed federation
+	// refuses before it looks at any credential.
+	oid4vpClientID := oid4vprequest.X509SANDNSClientID(requestHostname)
 
-	// Login and PID presentation use the same certificate-backed identity. The
-	// wallet is handed an OpenID4VP client identifier — prefix and value — not
-	// the Hydra OAuth client id: an unprefixed value means the "pre-registered"
-	// prefix, which a wallet outside a pre-agreed federation refuses before it
-	// looks at any credential. The request object is therefore signed with the
-	// chain the prefix names, so x5c travels with it.
-	authCfg.RequestSigner = docRetrievalSigner
-	authCfg.OID4VPClientID = oid4vprequest.X509SANDNSClientID(docRetrievalClientID)
+	authCfg.RequestSigner = requestSigner
+	authCfg.OID4VPClientID = oid4vpClientID
 	// Machine callers are resolved from the registry at request time, so an
 	// identity can be added, disabled or rotated without a redeploy (ADR-27).
 	// DCS_SYSTEM_CLIENTS remains a declarative seed for the callers a
@@ -729,7 +713,7 @@ func main() {
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, authCfg.Hydra.ClientID(), authCfg.PublicAPIBase, docRetrievalSigner, docRetrievalClientID, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, requestHostname, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService

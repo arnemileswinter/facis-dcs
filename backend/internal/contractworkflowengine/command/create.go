@@ -165,13 +165,29 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		Counterparty: cmd.Counterparty,
 	}
 
+	// Declare the two parties (origin + counterparty, ADR-13) as party nodes of
+	// the document itself. A signature is attributed to the party node its
+	// signature field names (signingmanagement/command/apply.go recordSignatory),
+	// and the Power of Attorney behind it is recorded there for the counterparty
+	// to verify (ADR-31) — with no node for the party, both have nowhere to land
+	// and the peer receives a signed contract that attributes its signature to
+	// nobody. Only role placeholders and read-authorization names reached
+	// dcs:parties before, neither of which a two-instance contract carries.
+	withParties, changed, err := SeedContractParties(*normalizedContractData, resp.GetParties())
+	if err != nil {
+		return fmt.Errorf("could not seed contract parties: %w", err)
+	}
+	if changed {
+		normalizedContractData = &withParties
+	}
+
 	// Seed one AcroForm signature field per party (origin + counterparty) into the
 	// genesis document, so the very first render carries the full signable
 	// structure. A signature field can only be materialized by a fresh render;
 	// seeding it here means every later render is a provenance-preserving amend of
 	// the stored PDF (or a verbatim carry-over of an inbound one) rather than a
 	// fresh render that would strip the C2PA chain and signatures (ADR-12/ADR-13).
-	seeded, changed, err := seedSignatureFields(*normalizedContractData, resp.GetParties())
+	seeded, changed, err := SeedSignatureFields(*normalizedContractData, resp.GetParties())
 	if err != nil {
 		return fmt.Errorf("could not seed signature fields: %w", err)
 	}
@@ -275,6 +291,56 @@ func bindOriginatorParty(raw *datatype.JSON, originDID, role string) (*datatype.
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
 	}
 	return &encoded, nil
+}
+
+// SeedContractParties records one typed dcs:CompanyParty node per contract
+// party DID (origin + counterparty, the same set the signature fields are
+// seeded for), skipping any party the document already declares — a role
+// placeholder bound to the origin, or a read-authorization node.
+//
+// The IRI is the party's own DID, so the seeded signature field's
+// dcs:signatoryName and the party node it attributes a signature to are the
+// same identifier on both instances of a federated contract.
+func SeedContractParties(raw datatype.JSON, partyDIDs []string) (datatype.JSON, bool, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false, fmt.Errorf("could not decode contract data: %w", err)
+	}
+
+	nodes, _ := doc["dcs:parties"].([]any)
+	declared := map[string]bool{}
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		if iri, _ := node["@id"].(string); iri != "" {
+			declared[iri] = true
+		}
+	}
+
+	changed := false
+	for _, did := range partyDIDs {
+		if did == "" || declared[did] {
+			continue
+		}
+		nodes = append(nodes, map[string]any{
+			"@id":   did,
+			"@type": "dcs:CompanyParty",
+		})
+		declared[did] = true
+		changed = true
+	}
+	if !changed {
+		return raw, false, nil
+	}
+
+	doc["dcs:parties"] = nodes
+	encoded, err := datatype.NewJSON(doc)
+	if err != nil {
+		return nil, false, fmt.Errorf("could not encode contract data: %w", err)
+	}
+	return encoded, true, nil
 }
 
 // partyPlaceholderIRI finds the dcs:parties node whose IRI carries the

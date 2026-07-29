@@ -44,11 +44,17 @@ running instance's own `/.well-known/did.json`, its own
 `/.well-known/dcs-agreement-credential.json` and its own signing key, so
 layers 1/2 (challenge-response) and layer 3a (agreement credential: valid
 signature, issuer resolving to the same target, matching rules hash) all pass
-GENUINELY, leaving layer 3b — the PDP — as the only gate under test. Being a
-different string, it also does not trip PostPdf's separate same-peer guard
-(`req.FromPeerDid == localPeer`), which would otherwise reject
-self-simulated same-DID requests for an unrelated reason and make the test
-dishonest.
+GENUINELY, leaving layer 3b — the PDP — as the only gate under test.
+
+OUTBOUND ONLY. PostPdf's same-peer guard compares did:web identifiers by what
+they denote (`identity.SameDIDWeb`), so inbound this identity is exactly what
+that guard exists to refuse — "shipping a contract PDF to the same peer is not
+allowed", before any trust layer runs. It is used where the ship goes the other
+way (`step_given_local_contract_offered_to_peer`), which applies no such guard.
+Inbound scenarios take the orce route instead (`_orce_synthetic_peer_credentials`),
+which is genuinely another authority; its agreement credential deliberately
+404s, so an inbound scenario that needs layer 3a to PASS has no scaffolding
+today — see the open point at the AC7/AC9 scenarios.
 
 Consequence: this identity is CONSTANT per instance rather than unique per
 scenario (uniqueness would require a distinguishing path segment, which is
@@ -386,14 +392,22 @@ def step_then_pdf_rejected_agreement_credential(context):
 
 @given('contract "{name}" exists locally, offered to a peer counterparty, created by this instance')
 def step_given_local_contract_offered_to_peer(context, name):
-    if not hasattr(context, "peer_from_did"):
-        step_given_peer_identity(context)
+    """The counterparty is the SELF-RESOLVING variant (_self_resolving_peer_variant),
+    not the orce route the inbound Given uses: the outbound gate is reached only
+    by a counterparty whose agreement credential VERIFIES, and the orce route
+    deliberately publishes none, so it would be refused by layer 3a
+    (AgreementFailure, which is retryable and does leave a sync_fails entry)
+    before the PDP under test is ever consulted. Resolving to this instance's own
+    did.json and credential makes layers 1/2/3a pass genuinely and leaves the PDP
+    as the only gate. Nothing on the outbound path applies the same-peer guard
+    that makes this identity unusable INBOUND (PostPdf, see step_given_peer_identity)."""
+    context.outbound_peer_did = _self_resolving_peer_variant(_own_identity(context)[0])
     t_did = ContractService._create_approved_template_for_contract(context)
     creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
     create_resp = post_json(
         context,
         contract_create_url(context),
-        {"template_did": t_did, "counterparty": context.peer_from_did},
+        {"template_did": t_did, "counterparty": context.outbound_peer_did},
         headers=creator_h,
     )
     assert create_resp.status_code == 200, create_resp.text
@@ -879,7 +893,7 @@ def step_when_sign_cross_instance(context):
     # Reuses the real-signing pack's ceremony machinery verbatim — every URL
     # builder reads context.base_url, which _as_instance swaps to A.
     from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
-        CEREMONY_AUD,
+        ceremony_aud,
         _build_pid_presentation,
         _complete_ceremony_via_presentation,
         _fetch_pending_nonce,
@@ -909,7 +923,7 @@ def step_when_sign_cross_instance(context):
         given_name, family_name = "PeerRevocation", "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
             given_name=given_name, family_name=family_name,
-            aud=CEREMONY_AUD, nonce=nonce,
+            aud=ceremony_aud(context), nonce=nonce,
         )
         completion = _complete_ceremony_via_presentation(
             context, ceremony_id, presentation, subject_did, given_name, family_name,

@@ -87,13 +87,24 @@ from steps.template_management.contract_state_machine_steps import (
 )
 
 
-# The ceremony's fixed OID4VP audience/client_id (backend/internal/
-# signingmanagement/pidverify.Audience) and the DCQL credential query ids
-# (backend/internal/auth/oid4vp/pid.go PIDCredentialQueryID, poa.go
-# PoACredentialQueryID) a wallet's combined vp_token is keyed by.
-CEREMONY_AUD = "dcs-signature-ceremony"
+# The DCQL credential query ids (backend/internal/auth/oid4vp/pid.go
+# PIDCredentialQueryID, poa.go PoACredentialQueryID) a wallet's combined
+# vp_token is keyed by.
 PID_QUERY_ID = "eudi_pid_credential"
 POA_QUERY_ID = "dcs_poa_credential"
+
+
+def ceremony_aud(context) -> str:
+    """The ceremony's OID4VP client_id, and therefore the audience its KB-JWTs
+    must be bound to. It is the deployment's own x509_san_dns identifier, so it
+    is read from the request object the DCS actually published (recorded by
+    _fetch_pending_nonce) rather than hardcoded."""
+    client_id = str(getattr(context, "ceremony_client_id", "") or "").strip()
+    assert client_id, (
+        "no ceremony client_id recorded - fetch the ceremony request object "
+        "(_fetch_pending_nonce) before building a presentation for it"
+    )
+    return client_id
 
 
 def _fetch_pending_nonce(context, ceremony_id: str) -> str:
@@ -117,6 +128,9 @@ def _fetch_pending_nonce(context, ceremony_id: str) -> str:
     claims = _decode_jwt_claims(resp.text.strip())
     nonce = str(claims.get("nonce") or "").strip()
     assert nonce, f"pending ceremony request object carries no nonce: {claims}"
+    client_id = str(claims.get("client_id") or "").strip()
+    assert client_id, f"pending ceremony request object carries no client_id: {claims}"
+    context.ceremony_client_id = client_id
     return nonce
 
 
@@ -352,7 +366,7 @@ def _complete_ceremony_via_presentation(
     vp_token = {PID_QUERY_ID: [presentation]}
     if poa_organization:
         vp_token[POA_QUERY_ID] = [
-            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=CEREMONY_AUD, nonce=nonce)
+            _build_poa_presentation(organization=poa_organization, roles=["Contract Signer"], aud=ceremony_aud(context), nonce=nonce)
         ]
     import json  # noqa: PLC0415
 
@@ -390,7 +404,7 @@ def _run_full_ceremony(context, name, field_name, signatory_name, holder_private
     nonce = _fetch_pending_nonce(context, ceremony_id)
     given_name, family_name = signatory_name, "BDD-Testperson"
     presentation, issuer_jwt, disclosures, subject_did = _build_pid_presentation(
-        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce,
+        given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce,
         holder_private=holder_private,
     )
     resp = _complete_ceremony_via_presentation(
@@ -590,7 +604,7 @@ def step_when_start_ceremony_as_role(context, name, field_name, role):
         nonce = _fetch_pending_nonce(context, ceremony_id)
         given_name, family_name = field_name, "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-            given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce
+            given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce
         )
         if not hasattr(context, "pid_presentations"):
             context.pid_presentations = {}
@@ -639,7 +653,7 @@ def step_when_presentation_wrong_nonce(context, name):
     wrong_nonce = str(uuid.uuid4())
     presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
         given_name=presentation_info["given_name"], family_name=presentation_info["family_name"],
-        aud=CEREMONY_AUD, nonce=wrong_nonce,
+        aud=ceremony_aud(context), nonce=wrong_nonce,
     )
     context.requests_response = _complete_ceremony_via_presentation(
         context,
@@ -668,7 +682,7 @@ def _present_pid_x5c(context, name, field_name, *, trusted):
     nonce = _fetch_pending_nonce(context, ceremony_id)
     given_name, family_name = field_name, "BDD-Testperson"
     presentation, subject_did = _build_pid_presentation_x5c(
-        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce, trusted=trusted,
+        given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce, trusted=trusted,
     )
     if not hasattr(context, "ceremony_ids"):
         context.ceremony_ids = {}

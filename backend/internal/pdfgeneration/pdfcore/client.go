@@ -424,6 +424,49 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 	return body.Match, body.Mismatch, nil
 }
 
+// MatchContent posts submitted and reference to POST /verify/content-match and
+// reports whether the submitted PDF's visible page content is still the
+// reference PDF's, resolving the last definition of every object on both sides.
+// Nothing is re-rendered, so the answer does not depend on render determinism:
+// the reference is a document the caller already holds. On a mismatch it returns
+// a diagnostic naming the page that diverged and a snippet of both sides.
+func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := writeField(mw, "pdf", submitted); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: write pdf field: %w", err)
+	}
+	if err := writeField(mw, "reference", reference); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: write reference field: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: close multipart: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/verify/content-match", &buf)
+	if err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := checkStatus(resp); err != nil {
+		return false, "", err
+	}
+	var body struct {
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, "", fmt.Errorf("pdf-core verify/content-match: decode: %w", err)
+	}
+	return body.Match, body.Mismatch, nil
+}
+
 // ExtractManifest posts pdf to POST /manifest/extract and returns the raw JUMBF
 // C2PA manifest store bytes embedded in the PDF (DCS-OR-C2PA-008).
 func (c *Client) ExtractManifest(ctx context.Context, pdf []byte) ([]byte, error) {

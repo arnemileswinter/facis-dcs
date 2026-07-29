@@ -28,7 +28,6 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
-	"digital-contracting-service/internal/signingmanagement/pidverify"
 )
 
 // signingRequestTTL is how long a published OID4VP signing request stays valid
@@ -56,7 +55,7 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	if s.DocRetrievalSigner == nil || strings.TrimSpace(s.DocRetrievalClientID) == "" {
+	if s.RequestSigner == nil || strings.TrimSpace(s.DocRetrievalClientID) == "" {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("OID4VP document-retrieval request signer is not configured"))
 	}
 	if strings.TrimSpace(s.PublicAPIBase) == "" {
@@ -244,7 +243,7 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 		credentialType = *ceremony.CredentialType
 	}
 
-	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.DocRetrievalSigner, oid4vprequest.DocRetrievalParams{
+	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.RequestSigner, oid4vprequest.DocRetrievalParams{
 		ClientID:           s.DocRetrievalClientID,
 		ResponseURI:        s.signatureRequestURL(ceremony.ID, "callback"),
 		Nonce:              *ceremony.RequestNonce,
@@ -262,7 +261,7 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 // buildIdentityPresentationJAR builds the pending-ceremony JAR that asks the
 // wallet for PID and PoA presentations.
 func (s *signatureManagementsrvc) buildIdentityPresentationJAR(ctx context.Context, ceremony *db.SignatureCeremony, walletNonce string) (io.ReadCloser, error) {
-	if s.RequestSigner == nil || s.PublicAPIBase == "" || s.PIDDCQLQuery == nil || s.DCQLQuery == nil {
+	if s.RequestSigner == nil || s.OID4VPClientID == "" || s.PublicAPIBase == "" || s.PIDDCQLQuery == nil || s.DCQLQuery == nil {
 		log.Printf(ctx, "SignatureRequestObject: OpenID4VP request signing is not configured")
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("could not build the authorization request"))
 	}
@@ -273,7 +272,7 @@ func (s *signatureManagementsrvc) buildIdentityPresentationJAR(ctx context.Conte
 	}
 
 	jwt, err := oid4vprequest.BuildJWT(s.RequestSigner, oid4vprequest.Params{
-		ClientID:    pidverify.Audience,
+		ClientID:    s.OID4VPClientID,
 		ResponseURI: s.signatureRequestURL(ceremony.ID, "callback"),
 		State:       ceremony.ID,
 		Nonce:       ceremony.Nonce,
@@ -466,15 +465,24 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 
 	presCtx := oid4vp.PresentationContext{
 		Nonce:    ceremony.Nonce,
-		ClientID: pidverify.Audience,
+		ClientID: s.OID4VPClientID,
 	}
 
-	pidPresentation, err := extractSinglePresentation(vpToken, oid4vp.PIDCredentialQueryID)
+	pidQueryIDs, err := credentialQueryIDsFromDCQL(s.PIDDCQLQuery)
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("invalid pid dcql_query: %w", err))
+	}
+	poaQueryIDs, err := credentialQueryIDsFromDCQL(s.DCQLQuery)
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("invalid poa dcql_query: %w", err))
+	}
+
+	pidPresentation, err := extractSinglePresentation(vpToken, pidQueryIDs...)
 	if err != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("invalid vp_token: %w", err))
 	}
 
-	poaPresentation, err := extractSinglePresentation(vpToken, oid4vp.PoACredentialQueryID)
+	poaPresentation, err := extractSinglePresentation(vpToken, poaQueryIDs...)
 	if err != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("%w: no Power of Attorney credential was presented at signing", command.ErrPoAUnauthorized))
 	}
@@ -651,32 +659,23 @@ func formList(form url.Values, name string) []string {
 	return form[name]
 }
 
+// mergeSigningCeremonyDCQL folds the PID and PoA queries into the single DCQL
+// query the pending ceremony's request object carries. The ceremony needs BOTH
+// credentials, while each part may offer several alternative ways to satisfy it
+// (the same credential under either SD-JWT VC format identifier), so the merged
+// credential_sets is the cross product of the parts' own alternatives: every
+// option names one acceptable query per part.
 func mergeSigningCeremonyDCQL(parts ...any) (any, error) {
 	var credentials []any
-	var ids []string
+	combinations := [][]string{{}}
 
 	for _, part := range parts {
-		creds, err := credentialsFromDCQL(part)
+		creds, options, err := credentialsAndOptionsFromDCQL(part)
 		if err != nil {
 			return nil, err
 		}
-
-		for _, cred := range creds {
-			entry, ok := cred.(map[string]any)
-			if !ok {
-				continue
-			}
-
-			id, _ := entry["id"].(string)
-			id = strings.TrimSpace(id)
-
-			if id == "" {
-				continue
-			}
-
-			ids = append(ids, id)
-			credentials = append(credentials, cred)
-		}
+		credentials = append(credentials, creds...)
+		combinations = crossProduct(combinations, options)
 	}
 
 	if len(credentials) == 0 {
@@ -685,36 +684,101 @@ func mergeSigningCeremonyDCQL(parts ...any) (any, error) {
 
 	out := map[string]any{"credentials": credentials}
 
-	if len(ids) > 1 {
-		option := make([]any, len(ids))
-
-		for i, id := range ids {
-			option[i] = id
+	if len(credentials) > 1 {
+		options := make([]any, 0, len(combinations))
+		for _, combination := range combinations {
+			option := make([]any, len(combination))
+			for i, id := range combination {
+				option[i] = id
+			}
+			options = append(options, option)
 		}
-
-		out["credential_sets"] = []any{
-			map[string]any{"options": []any{option}},
-		}
+		out["credential_sets"] = []any{map[string]any{"options": options}}
 	}
 
 	return out, nil
 }
 
-func credentialsFromDCQL(dcqlQuery any) ([]any, error) {
+// credentialsAndOptionsFromDCQL returns one query's credential entries and the
+// alternative id-sets that satisfy it. DCQL without credential_sets means
+// "satisfy every credential query", so that is the single option then.
+func credentialsAndOptionsFromDCQL(dcqlQuery any) ([]any, [][]string, error) {
 	query, ok := dcqlQuery.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("dcql query must be a JSON object")
+		return nil, nil, fmt.Errorf("dcql query must be a JSON object")
 	}
 
 	rawCredentials, ok := query["credentials"]
 	if !ok {
-		return nil, fmt.Errorf("missing credentials")
+		return nil, nil, fmt.Errorf("missing credentials")
 	}
 
 	credentials, ok := rawCredentials.([]any)
 	if !ok || len(credentials) == 0 {
-		return nil, fmt.Errorf("credentials must be a non-empty array")
+		return nil, nil, fmt.Errorf("credentials must be a non-empty array")
 	}
 
-	return credentials, nil
+	ids := make([]string, 0, len(credentials))
+	for _, cred := range credentials {
+		entry, ok := cred.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := entry["id"].(string)
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+
+	sets, ok := query["credential_sets"].([]any)
+	if !ok || len(sets) == 0 {
+		return credentials, [][]string{ids}, nil
+	}
+
+	options := [][]string{{}}
+	for _, rawSet := range sets {
+		set, ok := rawSet.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawOptions, ok := set["options"].([]any)
+		if !ok || len(rawOptions) == 0 {
+			continue
+		}
+		setOptions := make([][]string, 0, len(rawOptions))
+		for _, rawOption := range rawOptions {
+			option, ok := rawOption.([]any)
+			if !ok {
+				continue
+			}
+			combination := make([]string, 0, len(option))
+			for _, rawID := range option {
+				if id, ok := rawID.(string); ok && strings.TrimSpace(id) != "" {
+					combination = append(combination, strings.TrimSpace(id))
+				}
+			}
+			setOptions = append(setOptions, combination)
+		}
+		options = crossProduct(options, setOptions)
+	}
+
+	return credentials, options, nil
+}
+
+func crossProduct(left, right [][]string) [][]string {
+	if len(right) == 0 {
+		return left
+	}
+
+	out := make([][]string, 0, len(left)*len(right))
+	for _, l := range left {
+		for _, r := range right {
+			combined := make([]string, 0, len(l)+len(r))
+			combined = append(combined, l...)
+			combined = append(combined, r...)
+			out = append(out, combined)
+		}
+	}
+
+	return out
 }

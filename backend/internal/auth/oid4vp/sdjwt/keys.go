@@ -3,6 +3,7 @@ package sdjwt
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// minRSAKeyBits is the smallest RSA issuer key accepted from an x5c leaf.
+const minRSAKeyBits = 2048
 
 // JWK is an EC P-256 public key used for SD-JWT verification.
 type JWK struct {
@@ -165,26 +169,42 @@ func verificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, err
 		return nil, fmt.Errorf("x5c certificate chain does not verify against configured trust anchors: %w", err)
 	}
 
-	if err := leafMayAttest(leaf); err != nil {
-		return nil, err
-	}
-
 	// A chain proves the anchor vouched for this certificate. It does NOT say
 	// the certificate belongs to the issuer the credential names — without this
 	// check any certificate under any configured anchor, including a TLS server
 	// certificate, signs credentials asserting any issuer identity.
-	if err := leafIdentifiesIssuer(leaf, iss); err != nil {
+	binding, err := leafIdentifiesIssuer(leaf, iss)
+	if err != nil {
 		return nil, err
 	}
 
+	if err := leafMayAttest(leaf, binding); err != nil {
+		return nil, err
+	}
+
+	return leafVerificationKey(leaf)
+}
+
+// leafVerificationKey returns the leaf's public key, refusing key types and
+// sizes no issuer should be signing credentials with. Real PID and QTSP issuer
+// certificates are routinely RSA or a curve above P-256, so the accepted set is
+// what JWS can verify at an adequate strength rather than the single curve this
+// deployment's own issuer happens to use.
+func leafVerificationKey(leaf *x509.Certificate) (any, error) {
 	switch pk := leaf.PublicKey.(type) {
 	case *ecdsa.PublicKey:
-		if pk.Curve != elliptic.P256() {
-			return nil, fmt.Errorf("x5c leaf certificate is not P-256")
+		switch pk.Curve {
+		case elliptic.P256(), elliptic.P384(), elliptic.P521():
+			return pk, nil
+		}
+		return nil, fmt.Errorf("x5c leaf certificate uses unsupported curve %q", pk.Curve.Params().Name)
+	case *rsa.PublicKey:
+		if pk.N.BitLen() < minRSAKeyBits {
+			return nil, fmt.Errorf("x5c leaf certificate rsa key is %d bits, below the %d-bit minimum", pk.N.BitLen(), minRSAKeyBits)
 		}
 		return pk, nil
 	default:
-		return nil, fmt.Errorf("x5c leaf certificate public key is not ECDSA")
+		return nil, fmt.Errorf("x5c leaf certificate public key type %T cannot verify a JWS", leaf.PublicKey)
 	}
 }
 
@@ -358,6 +378,38 @@ func JWKFromDIDJWK(did string) (JWK, error) {
 	return ecP256PublicKeyFromMap(payload)
 }
 
+// HolderSubject returns the identifier of the holder a credential is bound to.
+//
+// SD-JWT VC makes `sub` OPTIONAL and its value arbitrary — the holder binding
+// is `cnf`. A credential that names no subject is therefore identified by the
+// did:jwk of its binding key, one that names a did:jwk must name that same key,
+// and any other identifier is the issuer's to choose.
+func HolderSubject(claims jwt.MapClaims) (string, error) {
+	cnfJWK, err := CNFJWKFromClaims(claims)
+	if err != nil {
+		return "", err
+	}
+
+	sub, _ := claims["sub"].(string)
+	sub = strings.TrimSpace(sub)
+
+	if sub == "" {
+		bindingDID, err := DIDJWKFromPublicJWK(cnfJWK)
+		if err != nil {
+			return "", fmt.Errorf("credential cnf.jwk: %w", err)
+		}
+		return bindingDID, nil
+	}
+
+	if strings.HasPrefix(sub, "did:jwk:") {
+		if err := HolderSubjectMatches(sub, cnfJWK); err != nil {
+			return "", err
+		}
+	}
+
+	return sub, nil
+}
+
 // HolderSubjectMatches reports whether credential sub and cnf.jwk identify the same holder key.
 func HolderSubjectMatches(sub string, cnfJWK JWK) error {
 	sub = strings.TrimSpace(sub)
@@ -458,18 +510,35 @@ func decodeCoordinate(value string) (*big.Int, error) {
 	return new(big.Int).SetBytes(raw), nil
 }
 
+// issuerBinding is how a leaf certificate was tied to the issuer identifier it
+// speaks for.
+type issuerBinding int
+
+const (
+	bindingNone issuerBinding = iota
+	// bindingURI: a SAN URI holding the issuer identifier verbatim.
+	bindingURI
+	// bindingDNS: a SAN DNS name matching the identifier's authority. This is
+	// the only binding an ordinary TLS certificate for the issuer's host also
+	// satisfies.
+	bindingDNS
+	// bindingCN: a subject common name equal to the issuer identifier.
+	bindingCN
+)
+
 // leafIdentifiesIssuer requires the certificate to carry the issuer identity it
 // is being used to speak for, as a SAN URI, a SAN DNS name matching the
-// identifier's authority, or failing both an exactly matching subject CN.
-func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) error {
+// identifier's authority, or failing both an exactly matching subject CN, and
+// reports which of those established it.
+func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) (issuerBinding, error) {
 	iss = strings.TrimSpace(iss)
 	if iss == "" {
-		return fmt.Errorf("x5c leaf cannot be bound to an empty issuer")
+		return bindingNone, fmt.Errorf("x5c leaf cannot be bound to an empty issuer")
 	}
 
 	for _, uri := range leaf.URIs {
 		if uri.String() == iss {
-			return nil
+			return bindingURI, nil
 		}
 	}
 
@@ -477,43 +546,46 @@ func leafIdentifiesIssuer(leaf *x509.Certificate, iss string) error {
 	if authority != "" {
 		for _, name := range leaf.DNSNames {
 			if strings.EqualFold(name, authority) {
-				return nil
+				return bindingDNS, nil
 			}
 		}
 	}
 
 	if leaf.Subject.CommonName == iss {
-		return nil
+		return bindingCN, nil
 	}
 
-	return fmt.Errorf("x5c leaf certificate (subject %q, dns %v, uris %v) does not identify issuer %q",
+	return bindingNone, fmt.Errorf("x5c leaf certificate (subject %q, dns %v, uris %v) does not identify issuer %q",
 		leaf.Subject.CommonName, leaf.DNSNames, leaf.URIs, iss)
 }
 
 // leafMayAttest refuses a certificate whose own extensions say it was issued
-// for something other than signing. The chain is verified with
-// ExtKeyUsageAny, so nothing else looks at usage: an anchor that also issues
-// TLS certificates would otherwise let a server certificate — whose DNS SAN
-// names the issuer's own host, and so satisfies leafIdentifiesIssuer — sign
-// credentials in that issuer's name.
-func leafMayAttest(leaf *x509.Certificate) error {
+// for something other than signing.
+//
+// The chain is verified with ExtKeyUsageAny, so nothing else looks at usage.
+// The hazard is an anchor that also issues TLS certificates: a server
+// certificate for the issuer's own host satisfies the DNS-name binding, and
+// nothing else would tell it apart from a credential signer. So TLS-only
+// extended key usage is refused for exactly that binding. A certificate that
+// names the issuer identifier itself — a SAN URI or a matching CN — is not a
+// server certificate for that host regardless of its EKUs, and many real issuer
+// certificates come out of web PKI carrying serverAuth and clientAuth.
+func leafMayAttest(leaf *x509.Certificate, binding issuerBinding) error {
 	if leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
 		return fmt.Errorf("x5c leaf certificate does not permit digital signatures")
 	}
 
+	if binding != bindingDNS || len(leaf.ExtKeyUsage) == 0 {
+		return nil
+	}
+
 	for _, usage := range leaf.ExtKeyUsage {
-		if usage == x509.ExtKeyUsageAny {
+		if usage != x509.ExtKeyUsageServerAuth && usage != x509.ExtKeyUsageClientAuth {
 			return nil
 		}
 	}
 
-	for _, usage := range leaf.ExtKeyUsage {
-		if usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageClientAuth {
-			return fmt.Errorf("x5c leaf certificate is a TLS certificate (extended key usage %v), which was not issued to attest credentials", leaf.ExtKeyUsage)
-		}
-	}
-
-	return nil
+	return fmt.Errorf("x5c leaf certificate is a TLS certificate (extended key usage %v) identified only by a dns name, which does not distinguish it from a server certificate for the issuer's host", leaf.ExtKeyUsage)
 }
 
 // issuerAuthority is the host an issuer identifier belongs to, for both the

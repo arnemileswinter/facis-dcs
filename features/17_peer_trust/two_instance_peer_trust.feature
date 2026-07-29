@@ -190,6 +190,19 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   # AC7: the local policy endpoint (PDP) is consulted on every interaction,
   # in- and outbound; a 2xx response lets it proceed. Single-instance, orce
   # trust-PDP flow in "allow" mode.
+  #
+  # OPEN POINT (inbound scenarios below: AC7 inbound, AC8, AC9): the inbound
+  # synthetic peer is the orce route, whose agreement credential deliberately
+  # 404s, so layer 3a refuses these ships before the PDP is consulted at all —
+  # the assertions still hold (a denial is recorded, and "the policy endpoint
+  # was consulted" reads the orce control surface's LAST request globally,
+  # which an earlier outbound consult satisfies), but not for the reason the
+  # AC names. An inbound peer that passes layer 3a needs an identity that is
+  # neither this instance (PostPdf's same-peer guard, identity.SameDIDWeb) nor
+  # the credential-less orce route: a third static orce identity publishing a
+  # correctly-hashed agreement credential, or instance B's own signing key
+  # exposed to the harness the way BDD_HSMSIGN_EXEC exposes A's. Flagged for
+  # the implementer rather than papered over.
   # ---------------------------------------------------------------------
 
   @REQ-fed-agreement-AC7

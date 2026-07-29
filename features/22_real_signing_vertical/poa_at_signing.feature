@@ -66,15 +66,22 @@ Feature: Power of Attorney at signing
     And instance A applies a ceremony-backed signature to the contract
     Then instance B holds instance A's signature with its Power of Attorney verified
 
-  @DCS-FR-SM-04 @UC-14 @ADR-31
+  # The refusal is exercised between the two REAL instances, not from a
+  # synthetic peer: the gates in front of the Power of Attorney — challenge-
+  # response, agreement credential, policy endpoint — and the signing summary
+  # the receiver reads the attribution from all have to pass for the credential
+  # to be what refuses the ship, and only the instance that actually signed
+  # holds evidence that does. The scenario ships A's own signed PDF, A's own
+  # summary and A's own identity, substituting nothing but the credential.
+  @DCS-FR-SM-04 @UC-14 @ADR-31 @two-instance
   Scenario: A ship whose Power of Attorney does not verify is refused and raises an incident
-    Given the local policy endpoint (PDP) is running and allows every request
-    And a cryptographically valid peer identity
+    Given instance A and instance B are both running and trust each other
+    And the local policy endpoint (PDP) is running and allows every request
     And contract "PoA Evidence Contract" is APPROVED and has completed a signing ceremony for signatory "SignerPoaEvidence"
     When the signer publishes the OID4VP signing request for contract "PoA Evidence Contract"
     Then get http 200:Success code
     When the wallet signs contract "PoA Evidence Contract" by consuming the OID4VP signing request as "SignerPoaEvidence"
     Then the contract "PoA Evidence Contract" has completed signing
-    When that peer ships contract "PoA Evidence Contract"'s PDF with a Power of Attorney that does not verify
-    Then the PDF is rejected because the counterparty's Power of Attorney does not verify
-    And the interaction is denied and exactly one incident is recorded in the audit trail for contract "PoA Evidence Contract"
+    When instance A ships contract "PoA Evidence Contract"'s PDF to instance B with a Power of Attorney that does not verify
+    Then instance B refuses the ship because the counterparty's Power of Attorney does not verify
+    And exactly one incident is recorded in instance B's audit trail for contract "PoA Evidence Contract"

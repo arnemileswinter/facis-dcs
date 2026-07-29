@@ -166,7 +166,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not read contract for signature-field seeding: %w", err)
 	}
-	seeded, changed, err := seedSignatureFields(*contract.ContractData, contract.Responsible.GetParties())
+	seeded, changed, err := SeedSignatureFields(*contract.ContractData, contract.Responsible.GetParties())
 	if err != nil {
 		return fmt.Errorf("could not seed signature fields: %w", err)
 	}
@@ -214,7 +214,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	return tx.Commit()
 }
 
-// seedSignatureFields adds one dcs:SignatureField per participating DCS
+// SeedSignatureFields adds one dcs:SignatureField per participating DCS
 // instance to the contract document, its dcs:signatoryName set to that
 // instance's DID — the value pdf-core renders as the AcroForm field's /T name,
 // which the wallet-driven signing ceremony targets (ADR-12). An explicit
@@ -224,7 +224,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 // field per instance and is idempotent — re-running over its own output adds
 // nothing. It reports whether the document changed so the caller only persists
 // real additions.
-func seedSignatureFields(raw datatype.JSON, instanceDIDs []string) (datatype.JSON, bool, error) {
+func SeedSignatureFields(raw datatype.JSON, instanceDIDs []string) (datatype.JSON, bool, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, false, fmt.Errorf("decode contract data: %w", err)

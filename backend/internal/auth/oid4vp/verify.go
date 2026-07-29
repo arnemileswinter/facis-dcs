@@ -3,7 +3,6 @@ package oid4vp
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -113,7 +112,7 @@ func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *
 		return nil, err
 	}
 
-	issuerClaims, err := sdjwt.VerifyCredentialForPID(presentation.IssuerJWT, presentation.Disclosures, trust.For(purpose))
+	issuerClaims, err := sdjwt.VerifyCredential(presentation.IssuerJWT, presentation.Disclosures, trust.For(purpose))
 	if err != nil {
 		return nil, err
 	}
@@ -124,15 +123,6 @@ func verifyTrustAndWalletForPID(vpToken string, ctx PresentationContext, trust *
 	}
 
 	sub, _ := issuerClaims["sub"].(string)
-	sub = strings.TrimSpace(sub)
-	if sub == "" {
-		return nil, fmt.Errorf("credential missing sub")
-	}
-
-	err = sdjwt.HolderSubjectMatches(sub, cnfJWK)
-	if err != nil {
-		return nil, err
-	}
 
 	err = sdjwt.VerifyKB(presentation.KBJWT, presentation.SDHash, cnfJWK, sub, ctx.Nonce, ctx.ClientID)
 	if err != nil {
@@ -173,29 +163,21 @@ func verifyCredentialDocument(issuerJWT string, disclosures []string, trust *Tru
 		return nil, fmt.Errorf("trust config is not configured")
 	}
 
-	// Verify issuer signature, header.jwk trust, vct/exp/iat, merge disclosures.
+	// Verify issuer signature, header.jwk trust, vct/exp/iat, merge disclosures,
+	// resolve the holder the credential is bound to (sub, or the did:jwk of
+	// cnf.jwk when the issuer named no subject).
 	issuerClaims, err := sdjwt.VerifyCredential(issuerJWT, disclosures, trust.For(purpose))
 	if err != nil {
 		return nil, err
 	}
 
-	// Holder binding: cnf.jwk is the verification key; sub must match did:jwk from cnf.
+	// Holder binding: cnf.jwk is the verification key the KB-JWT must be signed with.
 	cnfJWK, err := sdjwt.CNFJWKFromClaims(issuerClaims)
 	if err != nil {
 		return nil, fmt.Errorf("credential cnf.jwk: %w", err)
 	}
 
 	sub, _ := issuerClaims["sub"].(string)
-	sub = strings.TrimSpace(sub)
-
-	if sub == "" {
-		return nil, fmt.Errorf("credential missing sub")
-	}
-
-	err = sdjwt.HolderSubjectMatches(sub, cnfJWK)
-	if err != nil {
-		return nil, err
-	}
 
 	roles, err := sdjwt.RolesFromClaims(issuerClaims)
 	if err != nil {

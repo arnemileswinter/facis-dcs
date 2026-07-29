@@ -217,13 +217,13 @@ func TestLeafIdentifiesIssuer_SANDNSMatchesIssuerAuthority(t *testing.T) {
 	}, &leafKey.PublicKey, caKey, caCert)
 
 	for _, iss := range []string{"did:web:issuer.example:pid", "https://issuer.example/pid"} {
-		if err := leafIdentifiesIssuer(leaf, iss); err != nil {
+		if _, err := leafIdentifiesIssuer(leaf, iss); err != nil {
 			t.Errorf("dns san %v should identify %q: %v", leaf.DNSNames, iss, err)
 		}
 	}
 
 	// The DNS name must match the issuer's OWN authority, not merely appear.
-	if err := leafIdentifiesIssuer(leaf, "did:web:other.example:pid"); err == nil {
+	if _, err := leafIdentifiesIssuer(leaf, "did:web:other.example:pid"); err == nil {
 		t.Error("a dns san for a different authority must not identify the issuer")
 	}
 }
@@ -249,10 +249,10 @@ func TestLeafIdentifiesIssuer_SANURICarriesTheDID(t *testing.T) {
 		BasicConstraintsValid: true,
 	}, &leafKey.PublicKey, caKey, caCert)
 
-	if err := leafIdentifiesIssuer(leaf, iss); err != nil {
+	if _, err := leafIdentifiesIssuer(leaf, iss); err != nil {
 		t.Fatalf("a uri san holding the did must identify the issuer: %v", err)
 	}
-	if err := leafIdentifiesIssuer(leaf, "did:web:dev.example:issuer:other"); err == nil {
+	if _, err := leafIdentifiesIssuer(leaf, "did:web:dev.example:issuer:other"); err == nil {
 		t.Error("a uri san holding a different did must not identify the issuer")
 	}
 }

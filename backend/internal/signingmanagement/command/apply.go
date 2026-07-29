@@ -81,6 +81,15 @@ var ErrCeremonyConsumed = errors.New("ceremony signing request has already been 
 // the document pinned at prepare (ADR-20 TBS byte pinning).
 var ErrDocumentMismatch = errors.New("submitted document does not match the document prepared for signing")
 
+// ErrContentMismatch rejects a submitted PDF whose visible page content is no
+// longer the page content of the document pinned at prepare. Append-only
+// (ErrDocumentMismatch) and content-preserving are different properties: a PDF
+// incremental update may redefine ANY object, page content streams included, so
+// a submission can be a byte-prefix extension of the prepared document and still
+// display different contract text — with a /ByteRange over the whole file, so
+// the signature validates over the modified document.
+var ErrContentMismatch = errors.New("submitted document's visible content is not the content prepared for signing")
+
 // ErrNonceMismatch rejects a submitted signature that does not echo the
 // ceremony's request nonce, cryptographically bound inside the JAdES
 // signature's covered content (ADR-20 nonce binding).
@@ -135,6 +144,29 @@ type ApplyCmd struct {
 // development testWallet, whose keys are shared files.
 type SignatureValidator interface {
 	ValidatePDF(ctx context.Context, pdf []byte, name string) (*dss.Report, error)
+}
+
+// ContentMatcher compares the visible page content of a submitted PDF against a
+// reference PDF, resolving the last definition of every object on both sides
+// (pdfcore.Client satisfies it). It re-renders nothing: both sides are documents
+// the caller already holds.
+type ContentMatcher interface {
+	MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error)
+}
+
+// assertPreparedContent refuses a submission whose visible pages are no longer
+// the prepared document's. The diagnostic the matcher returns names the page
+// that diverged and a snippet of both sides, so the refusal says WHAT changed
+// rather than that something did.
+func assertPreparedContent(ctx context.Context, matcher ContentMatcher, submitted, prepared []byte, fieldName string) error {
+	match, mismatch, err := matcher.MatchContent(ctx, submitted, prepared)
+	if err != nil {
+		return fmt.Errorf("could not content-match the submitted document against the document prepared for %q: %w", fieldName, err)
+	}
+	if !match {
+		return fmt.Errorf("%w: field %q: %s", ErrContentMismatch, fieldName, mismatch)
+	}
+	return nil
 }
 
 // Applier runs the signing command flow: prepare the to-be-signed document,
@@ -257,6 +289,9 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if h.Validator == nil {
 		return fmt.Errorf("a signature validator is required to accept an external signature")
 	}
+	if h.PDFCore == nil {
+		return fmt.Errorf("a pdf-core client is required to content-match an external signature against the prepared document")
+	}
 	if len(cmd.SignedPDF) == 0 {
 		return fmt.Errorf("no signed document was submitted")
 	}
@@ -320,6 +355,20 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// independently of whether the signature itself validates.
 	if !bytes.HasPrefix(cmd.SignedPDF, ceremony.PreparedPDF) {
 		return fmt.Errorf("%w: the submitted PDF's initial revision is not the document prepared for signing", ErrDocumentMismatch)
+	}
+
+	// Content pinning, the second half of the same guarantee: the prefix check
+	// above proves the submission only APPENDED, which is not the same as
+	// leaving the document unmodified — an appended revision may supersede a
+	// page content stream and change what the contract says while the signature
+	// covers the whole file and validates. Compare the visible pages of the
+	// submission against the visible pages of the PINNED prepared bytes, which
+	// resolves the LAST definition of every object, so a superseding revision
+	// diverges. Nothing is re-rendered: the reference is the exact document
+	// prepare committed to, so this carries none of the render-determinism
+	// fragility a fresh compile would (ADR-13).
+	if err := assertPreparedContent(ctx, h.PDFCore, cmd.SignedPDF, ceremony.PreparedPDF, ceremony.FieldName); err != nil {
+		return err
 	}
 
 	report, err := h.Validator.ValidatePDF(ctx, cmd.SignedPDF, ceremony.FieldName)
@@ -1260,6 +1309,7 @@ func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, sig
 	if placeholder := singleOpenPartyPlaceholder(doc); placeholder != "" {
 		counterparty := counterpartyIdentity(responsible, signerDID)
 		replaceNodeIRI(doc, placeholder, counterparty)
+		mergePartyNodes(doc, counterparty)
 		if node := partyNodeByID(doc, counterparty); node != nil {
 			node["odrl:function"] = map[string]any{"@id": "odrl:contractedParty"}
 		}
@@ -1356,6 +1406,40 @@ func singleOpenPartyPlaceholder(doc map[string]any) string {
 func strconvAtoiOK(s string) (int, bool) {
 	n, err := strconv.Atoi(s)
 	return n, err == nil
+}
+
+// mergePartyNodes folds every dcs:parties node carrying id into the first of
+// them and drops the rest. Binding a role placeholder to a party the document
+// already declares (the contract's counterparty, seeded at creation) leaves two
+// nodes under one IRI, and everything downstream reads the first one — so the
+// role the placeholder carried would be lost, or found, depending on order.
+// Properties already on the surviving node win.
+func mergePartyNodes(doc map[string]any, id string) {
+	nodes, _ := doc["dcs:parties"].([]any)
+	var kept map[string]any
+	merged := make([]any, 0, len(nodes))
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			merged = append(merged, rawNode)
+			continue
+		}
+		if iri, _ := node["@id"].(string); iri != id {
+			merged = append(merged, rawNode)
+			continue
+		}
+		if kept == nil {
+			kept = node
+			merged = append(merged, rawNode)
+			continue
+		}
+		for key, value := range node {
+			if _, present := kept[key]; !present {
+				kept[key] = value
+			}
+		}
+	}
+	doc["dcs:parties"] = merged
 }
 
 func partyNodeByID(doc map[string]any, id string) map[string]any {
