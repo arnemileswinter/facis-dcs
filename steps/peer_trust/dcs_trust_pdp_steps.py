@@ -226,14 +226,20 @@ def step_then_pdp_was_consulted(context):
 
 
 def _pac_audit_entries(context, scope="PROCESS_AUDIT_AND_COMPLIANCE", api_base=None):
+    # api_base names the instance to audit, for BOTH the token and the query:
     # AuthService.get_headers_for_roles authenticates against api_base when
-    # given, else os.getenv("BDD_DCS_BASE_URL") — NOT context.base_url. In a
-    # cross-instance _as_instance(...) block, context.base_url has been
-    # swapped but that env var has not, so an explicit api_base is required
-    # there (same caveat already documented for the cross-instance
-    # offer/approve scenarios above).
-    headers = AuthService.get_headers_for_roles(["Auditor"], api_base=api_base) if api_base else AuthService.get_headers_for_roles(["Auditor"])
-    resp = post_json(context, pac_audit_url(context), {"scope": scope, "justification": "BDD PDP-gate audit re-trigger"}, headers=headers)
+    # given, else os.getenv("BDD_DCS_BASE_URL") — NOT context.base_url. Each
+    # instance's Hydra issues under its own issuer URL, so a token minted on one
+    # instance and presented to the other is rejected with 401; deriving the URL
+    # from api_base too keeps the two sides paired without also requiring the
+    # caller to be inside an _as_instance(...) block.
+    if api_base:
+        headers = AuthService.get_headers_for_roles(["Auditor"], api_base=api_base)
+        url = f"{api_base.rstrip('/')}/pac/audit"
+    else:
+        headers = AuthService.get_headers_for_roles(["Auditor"])
+        url = pac_audit_url(context)
+    resp = post_json(context, url, {"scope": scope, "justification": "BDD PDP-gate audit re-trigger"}, headers=headers)
     assert resp.status_code == 200, f"PAC-scope audit failed: {resp.status_code} {resp.text}"
     body = resp.json()
     return [
