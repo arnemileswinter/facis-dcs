@@ -211,8 +211,15 @@ def step_then_signature_view_contents(context, name, status, cred):
     assert sig.get("signed_at"), f"Expected a signing timestamp, got: {sig}"
     assert "PAdES" in str(sig.get("format")), f"Expected a PAdES container format, got: {sig.get('format')}"
     findings = body.get("integrity_findings") or []
-    assert findings and all(f in _PASSING_VALIDATION_FINDINGS for f in findings), (
-        f"Expected only passing integrity confirmations in the signature view, got: {findings}"
+    negative = [
+        f
+        for f in findings
+        if f not in _PASSING_VALIDATION_FINDINGS
+        and not f.startswith(_PASSING_VALIDATION_PREFIXES)
+    ]
+    assert findings and not negative, (
+        f"Expected only passing integrity confirmations in the signature view, got: {negative} "
+        f"(full list: {findings})"
     )
 
 

@@ -404,7 +404,7 @@ func fetchClientForURL(rawURL string) (*http.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", rawURL, err)
 	}
-	if isLoopbackHost(parsed.Host) {
+	if isLoopbackHost(parsed.Host) || isInsecureDIDWebHost(parsed.Host) {
 		return fetchClientLoopback, nil
 	}
 	return fetchClientStrict, nil
@@ -493,9 +493,10 @@ func parseQCStatements(cert *x509.Certificate) (qualified bool, qscd bool, err e
 	return false, false, nil // extension not present -> not an eIDAS certificate
 }
 
-// FetchDIDDocument resolves a did:web identifier to its document, first over
-// https, then falling back to http. Resolution follows the identifier's own path
-// segments, so several instances can share one host.
+// FetchDIDDocument resolves a did:web identifier to its document over https —
+// and over http only for the hosts DIDWebSchemes permits it for. Resolution
+// follows the identifier's own path segments, so several instances can share
+// one host.
 func FetchDIDDocument(did string) (*DIDDocument, error) {
 	host, segments, err := DIDWebPath(did)
 	if err != nil {
@@ -672,10 +673,33 @@ func fetchDIDDocumentFromURL(docURL string) (*DIDDocument, error) {
 // is the exception, because the dev and CI stacks resolve each other over
 // http://*.localhost and no attacker sits on that path.
 func DIDWebSchemes(host string) []string {
-	if isLoopbackHost(host) {
+	if isLoopbackHost(host) || isInsecureDIDWebHost(host) {
 		return []string{"https", "http"}
 	}
 	return []string{"https"}
+}
+
+// isInsecureDIDWebHost reports whether a deployment has named this host as one
+// did:web may be resolved from over plain http.
+//
+// did:web is https, and loopback is the only exception the code makes on its
+// own. But a cluster-internal identity is published by a Service on plain http
+// under a name that is not loopback — the BDD stack resolves
+// did:web:dcs-orce%3A1880 that way — and an https-only rule turns that into a
+// resolution failure reported as an unrelated 500. Naming those hosts in
+// DCS_DIDWEB_INSECURE_HOSTS keeps the exception explicit and per-deployment,
+// rather than reinstating a silent fallback that also applies on the internet.
+func isInsecureDIDWebHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	for _, allowed := range strings.Split(os.Getenv("DCS_DIDWEB_INSECURE_HOSTS"), ",") {
+		if allowed = strings.ToLower(strings.TrimSpace(allowed)); allowed != "" && allowed == host {
+			return true
+		}
+	}
+	return false
 }
 
 func isLoopbackHost(host string) bool {
