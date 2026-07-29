@@ -281,6 +281,7 @@ def _ensure_target_designated(context, name, target_id=None):
     A contract designates its own destination (ADR-25) because the automatic
     trigger on signing completion has no human present to choose one.
     """
+    ContractService._refresh_contract(context, name)
     did, updated_at = ContractService._contract_data(context, name)
     resolved = target_id if target_id is not None else _registered_target_id(context)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
@@ -291,7 +292,8 @@ def _ensure_target_designated(context, name, target_id=None):
         headers=manager_h,
     )
     assert resp.status_code == 200, (
-        f"could not designate a target system for contract '{name}': {resp.status_code} {resp.text}"
+        f"could not designate a target system for contract '{name}' with "
+        f"updated_at token {updated_at!r}: {resp.status_code} {resp.text}"
     )
     ContractService._refresh_contract(context, name)
 

@@ -232,7 +232,8 @@ def _advance_to_reviewed(context, name):
     reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
     assert retrieve.status_code == 200, retrieve.text
-    updated_at = retrieve.json().get("updated_at")
+    retrieved = retrieve.json()
+    updated_at = retrieved.get("updated_at")
     review_submit = post_json(
         context,
         contract_submit_url(context),
@@ -241,7 +242,8 @@ def _advance_to_reviewed(context, name):
     )
     assert review_submit.status_code == 200, (
         f"Reviewer submit (forward_to=approval) failed while preparing REVIEWED state for "
-        f"'{name}': {review_submit.status_code} {review_submit.text}"
+        f"'{name}' from retrieved state {retrieved.get('state')!r} with "
+        f"updated_at token {updated_at!r}: {review_submit.status_code} {review_submit.text}"
     )
     ContractService._refresh_contract(context, name)
 

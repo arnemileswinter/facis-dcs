@@ -37,6 +37,11 @@ BDD_INGRESS_PORT ?= 18080
 BDD_PUBLIC_ORIGIN ?= http://localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL ?= $(BDD_PUBLIC_ORIGIN)$(DCS_API_BASE_PATH)
 KIND_CONFIG ?= $(THIS_DIR)kind-config.yaml
+ifeq ($(IS_WSL),1)
+BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
+else
+BDD_CHECKPOINT_SINK_HOST ?= host.docker.internal
+endif
 BDD_HELM_SET := \
 	--set-string hydra.config.selfIssuerURL="$(BDD_PUBLIC_ORIGIN)" \
 	--set-string route.publicBaseURL="$(BDD_DCS_BASE_URL)" \
@@ -44,7 +49,8 @@ BDD_HELM_SET := \
 	--set-string hydra.config.consentURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/consent" \
 	--set-string hydra.config.logoutURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/callback" \
-	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete"
+	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
+	--set-string orce.checkpointSink.url="https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
 HELM_CHART_PATH ?= ../../deployment/helm
 HELM_TIMEOUT ?= 20m
 HELM_REFRESH ?= false
@@ -253,7 +259,8 @@ KIND_KUBECONFIG := $(CURDIR)/.tmp/kind-kubeconfig
 KIND_GOALS := kind_create kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b \
 	kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
 	run_e2e_kind run_e2e_kind_ci \
-	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once kind_down
+	run_bdd_audit_kind_ci kind_up kind_up_single kind_up_audit run_bdd_kind_once \
+	run_bdd_kind_fast_once run_bdd_audit_kind_once kind_down
 $(KIND_GOALS): export KUBECONFIG := $(KIND_KUBECONFIG)
 
 kind_export_kubeconfig:
@@ -352,6 +359,10 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image helm_d
 	@"$(KUBECTL_BIN)" create namespace "$(KIND_NAMESPACE)" --dry-run=client -o yaml | "$(KUBECTL_BIN)" apply -f -
 	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(HELM_RELEASE)" \
 		bash "$(ORCE_PERSISTENCE_SCRIPT)"
+	@if [[ -z "$(BDD_CHECKPOINT_SINK_HOST)" ]]; then \
+		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink."; \
+		exit 1; \
+	fi
 	@# Deploy without --wait: Helm defers post-install hooks until all deployments are
 	@# ready, but DCS can't become ready until the devCertChain post-install hook has
 	@# created its Secret — a deadlock. We break the cycle by letting helm return as
@@ -363,6 +374,8 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image helm_d
 		--values "$(HELM_CHART_PATH)/values.bdd.yml" \
 		--set image.repository="$(DOCKER_IMAGE_REPOSITORY)" \
 		--set image.tag="$(DOCKER_IMAGE_TAG)" \
+		--set pdfCore.image.repository="$(PDF_CORE_IMAGE_REPOSITORY)" \
+		--set pdfCore.image.tag="$(PDF_CORE_IMAGE_TAG)" \
 		--set dss.enabled="$(DSS_ENABLED)" \
 		$(BDD_HELM_SET) \
 		$(KIND_HELM_VALUES) \
@@ -449,6 +462,8 @@ kind_deploy_b: kind_deploy
 		--values "$(HELM_CHART_PATH)/values.bdd2.yml" \
 		--set image.repository="$(DOCKER_IMAGE_REPOSITORY)" \
 		--set image.tag="$(DOCKER_IMAGE_TAG)" \
+		--set pdfCore.image.repository="$(PDF_CORE_IMAGE_REPOSITORY)" \
+		--set pdfCore.image.tag="$(PDF_CORE_IMAGE_TAG)" \
 		$(BDD_HELM_SET_B) \
 		$(KIND_HELM_VALUES) \
 		$(KIND_HELM_SET)
