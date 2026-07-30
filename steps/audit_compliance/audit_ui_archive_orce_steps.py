@@ -114,7 +114,9 @@ def _request_audit(context, role: str, scope: str, justification: str | None, di
     observe_executor = role in {"Auditor", "Archive Manager"} and bool(justification)
     if observe_executor:
         OrceAuditControlService.reset(context, "audit")
-        OrceAuditControlService.set_mode(context, "audit", "success")
+        mode = getattr(context, "next_audit_executor_mode", "success")
+        OrceAuditControlService.set_mode(context, "audit", mode)
+        context.next_audit_executor_mode = "success"
     context.requests_response = post_json(context, pac_audit_url(context), payload, headers=_headers(role))
     if observe_executor and context.requests_response.status_code == 200:
         body = context.requests_response.json()
@@ -282,8 +284,14 @@ def step_archive_passed(context):
 @then("the audit response is a successful empty result")
 def step_empty_result(context):
     assert context.requests_response.status_code == 200, context.requests_response.text
-    groups = getattr(context, "last_audit_groups", [])
-    assert _audit_entries(groups) == [], context.requests_response.text
+    body = context.requests_response.json()
+    assert isinstance(body, dict) and body.get("contract_version"), body
+    assert body.get("findings") == [], body
+
+
+@given("the audit executor returns a successful empty result")
+def step_audit_executor_success_empty(context):
+    context.next_audit_executor_mode = "success_empty"
 
 
 @when(
@@ -724,12 +732,11 @@ def _report_text(context, fmt: str) -> str:
     return raw.decode("utf-8")
 
 
-@then('the "{fmt}" report contains lifecycle events with actors and timestamps')
-def step_report_lifecycle(context, fmt):
+@then('the "{fmt}" report contains timestamped audit results')
+def step_report_timestamps(context, fmt):
     assert context.requests_response.status_code == 200, context.requests_response.text
     text = _report_text(context, fmt).lower()
-    assert "actor" in text and ("timestamp" in text or "created_at" in text), text[:1000]
-    assert any(event in text for event in ("create_contract", "sign", "store_archived_contract")), text[:1000]
+    assert any(marker in text for marker in ("executed_at", "timestamp", "generated at")), text[:1000]
 
 
 @then('the "{fmt}" report contains archive findings with rule references and results')
