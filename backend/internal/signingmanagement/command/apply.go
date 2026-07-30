@@ -37,6 +37,7 @@ import (
 
 	"github.com/digitorus/pkcs7"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 // ErrCeremonyRequired is the typed precondition failure returned when a
@@ -121,6 +122,55 @@ var ErrCertInconsistent = errors.New("signing certificate is inconsistent with t
 
 // ErrJAdESInvalid rejects a submitted JAdES that fails DSS validation.
 var ErrJAdESInvalid = errors.New("submitted JAdES signature is invalid")
+
+// ErrRegenerationInFlight reports that the background PDF regenerator still
+// holds this contract, so the base document the signature would cover is not
+// settled yet. It is a retry-later condition, not a rejection of the caller.
+var ErrRegenerationInFlight = errors.New("the contract's PDF is still being regenerated; retry signing shortly")
+
+// regenerationLockWait is how long prepare waits for the background
+// regenerator to release a contract. It is a fraction of
+// conf.TransactionTimeout on purpose: one regeneration takes seconds, so this
+// absorbs a normal queue, while a regenerator wedged on pdf-core or the
+// artifact store holds the lock for its own full timeout — which equals the
+// whole transaction budget. Waiting that long cannot succeed and would leave
+// prepare no budget for its own work, so it would fail anyway, at whatever
+// query happened to run first and with a deadline error naming that query
+// instead of the contention. Failing here says what actually happened.
+const regenerationLockWait = 15 * time.Second
+
+// acquireRegenerationLock takes the per-contract PDF regeneration lock, bounded
+// by regenerationLockWait. lock_timeout is scoped to this statement and reset
+// afterwards, so the rest of the transaction keeps the caller's own deadline as
+// its only bound.
+func acquireRegenerationLock(ctx context.Context, tx *sqlx.Tx, did string) error {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL lock_timeout = %d", regenerationLockWait.Milliseconds())); err != nil {
+		return fmt.Errorf("bound the wait for the per-contract PDF regeneration lock for %s: %w", did, err)
+	}
+	_, lockErr := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", did)
+	if _, err := tx.ExecContext(ctx, "SET LOCAL lock_timeout TO DEFAULT"); err != nil && lockErr == nil {
+		return fmt.Errorf("restore the lock wait bound after locking %s: %w", did, err)
+	}
+	if lockErr != nil {
+		return regenerationLockError(did, lockErr)
+	}
+	return nil
+}
+
+// regenerationLockError reports a failed lock acquisition, distinguishing the
+// wait that ran out (the regenerator still holds the contract) from any other
+// database failure.
+func regenerationLockError(did string, err error) error {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == pqLockNotAvailable {
+		return fmt.Errorf("%w: %s", ErrRegenerationInFlight, did)
+	}
+	return fmt.Errorf("acquire per-contract PDF regeneration lock for %s: %w", did, err)
+}
+
+// pqLockNotAvailable is the PostgreSQL error code for a lock wait cut short by
+// lock_timeout (55P03, lock_not_available).
+const pqLockNotAvailable = "55P03"
 
 // ApplyCmd carries the inputs for applying a digital signature.
 type ApplyCmd struct {
@@ -651,10 +701,10 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// regeneration already in flight — holding this lock across its slow
 	// pdf-core render — commits its UpdatePDFState *after* SetSignedPDF and
 	// overwrites the signed CID with an unsigned re-render, stripping the PAdES
-	// signature. Blocking here lets the regenerator finish first; the signed
+	// signature. Waiting here lets the regenerator finish first; the signed
 	// state we then write is frozen, so its later events short-circuit.
-	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", cmd.DID); err != nil {
-		return nil, fmt.Errorf("acquire per-contract PDF regeneration lock for %s: %w", cmd.DID, err)
+	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return nil, err
 	}
 
 	data, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)

@@ -301,6 +301,20 @@ func (r *PostgresContractTemplateRepo) ReadPDFState(ctx context.Context, tx *sql
 	return &state, nil
 }
 
+func (r *PostgresContractTemplateRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int) ([]string, error) {
+	var dids []string
+	err := tx.SelectContext(ctx, &dids,
+		`SELECT DISTINCT did FROM contract_templates
+		 WHERE pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = ''
+		 ORDER BY did
+		 LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return dids, nil
+}
+
 func (r *PostgresContractTemplateRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractTemplatePDFState) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE contract_templates SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4 WHERE did=$5`,

@@ -56,6 +56,11 @@ extraEnv:
   # within the scenarios' replication wait (see values.bdd.yml for the rationale).
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
     value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut):
+  # fast in BDD/e2e so a transiently failed PDF regeneration is redone and the
+  # deferred ship has something to send (see values.bdd.yml for the rationale).
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
+    value: "10s"
 
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper — unique per release, so this doesn't

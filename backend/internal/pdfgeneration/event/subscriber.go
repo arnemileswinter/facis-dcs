@@ -6,8 +6,10 @@ package event
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -87,20 +89,104 @@ type Subscriber struct {
 	VCIssuer provenance.VCIssuer
 }
 
+// regenerationTimeout bounds one regeneration attempt: a pdf-core render, a VC
+// issuance and an artifact-store write.
+const regenerationTimeout = 60 * time.Second
+
+// missingPDFRetryBatch bounds how many entities one retry pass regenerates, so
+// a deployment with a large backlog makes steady progress per tick instead of
+// occupying the regenerator indefinitely.
+const missingPDFRetryBatch = 25
+
 // Start registers the event handler with the NATS sub-client and begins
-// consuming events. It returns immediately; the subscription runs in the
+// consuming events, alongside the retry pass that reconciles entities whose
+// regeneration never completed. It returns immediately; both run in the
 // background until the sub-client is closed.
 func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
+	go s.retryMissingPDFs(conf.PDFRegenerationRetryTimeOut())
+
 	return subClient.Subscribe(func(evt cloudevent.Event) {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		// The regenerator has no user JWT; present the in-cluster system
-		// credential so pdf-core can reach the internal signing primitives.
-		ctx = middleware.InjectBearerToken(ctx, conf.SystemToken())
+		ctx, cancel := s.regenerationContext()
 		defer cancel()
 		if err := s.handle(ctx, evt); err != nil {
 			log.Printf("pdfgeneration: failed to handle event %s/%s: %v", evt.Source(), evt.Type(), err)
 		}
 	})
+}
+
+// regenerationContext is the context every regeneration attempt runs under. The
+// regenerator has no user JWT, so it presents the in-cluster system credential
+// for pdf-core's internal signing primitives.
+func (s *Subscriber) regenerationContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), regenerationTimeout)
+	return middleware.InjectBearerToken(ctx, conf.SystemToken()), cancel
+}
+
+// retryMissingPDFs re-runs regeneration for contracts and templates that hold
+// no stored PDF. A lifecycle event is delivered at most once and a failed
+// regeneration is logged rather than redelivered, so a transient pdf-core or
+// artifact-store failure would otherwise leave the entity without a PDF for
+// good: not exportable, and — for a cross-instance contract — not shippable, so
+// the counterparty never receives it however often the sync-fail scheduler
+// retries the ship. The work list comes from the entity's own committed state
+// rather than a failure record, so the pass also recovers regenerations lost to
+// a restart, and both handlers short-circuit when the PDF is already current.
+func (s *Subscriber) retryMissingPDFs(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		contracts, templates, err := s.entitiesMissingStoredPDF()
+		if err != nil {
+			log.Printf("pdfgeneration: could not read entities missing a stored PDF: %v", err)
+			continue
+		}
+		for _, did := range contracts {
+			s.retryOne("contract", did, s.appendC2PA)
+		}
+		for _, did := range templates {
+			s.retryOne("template", did, s.appendTemplateC2PA)
+		}
+	}
+}
+
+// retryOne regenerates one entity. The event that first requested the
+// regeneration is gone, so the attempt carries no reason and is effective now;
+// everything else the handlers need they re-read from the record.
+func (s *Subscriber) retryOne(kind, did string, regenerate func(context.Context, minimalCWEEvent) error) {
+	ctx, cancel := s.regenerationContext()
+	defer cancel()
+	if err := regenerate(ctx, minimalCWEEvent{DID: did, OccurredAt: time.Now().UTC()}); err != nil {
+		log.Printf("pdfgeneration: retry for %s %s did not store a PDF: %v", kind, did, err)
+	}
+}
+
+func (s *Subscriber) entitiesMissingStoredPDF() ([]string, []string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func(tx *sqlx.Tx) {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", err)
+		}
+	}(tx)
+
+	contracts, err := s.CRepo.ReadDIDsMissingStoredPDF(ctx, tx, missingPDFRetryBatch)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read contracts without a stored PDF: %w", err)
+	}
+	templates, err := s.TRepo.ReadDIDsMissingStoredPDF(ctx, tx, missingPDFRetryBatch)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read templates without a stored PDF: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit read: %w", err)
+	}
+	return contracts, templates, nil
 }
 
 func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {

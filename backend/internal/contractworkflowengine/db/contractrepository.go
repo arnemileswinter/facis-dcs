@@ -283,5 +283,9 @@ type ContractRepo interface {
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)
+	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit contracts that
+	// have no PDF in the artifact store, oldest first — the work list of the
+	// background regenerator's retry pass.
+	ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int) ([]string, error)
 	UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data ContractPDFState) error
 }

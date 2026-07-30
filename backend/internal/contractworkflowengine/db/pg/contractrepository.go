@@ -434,6 +434,20 @@ func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, di
 	return &state, nil
 }
 
+func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int) ([]string, error) {
+	var dids []string
+	err := tx.SelectContext(ctx, &dids,
+		`SELECT did FROM contracts
+		 WHERE pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = ''
+		 ORDER BY created_at, did
+		 LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return dids, nil
+}
+
 func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractPDFState) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE contracts SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4 WHERE did=$5`,
