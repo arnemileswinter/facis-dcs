@@ -5,10 +5,7 @@ __debug_bin*
 .vscode
 .DS_Store
 .claude/
-.codex/*
-!.codex/config.toml
-!.codex/agents/
-!.codex/agents/*.toml
+.codex/
 node_modules
 __pycache__/
 backend/gen
