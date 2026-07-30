@@ -21,6 +21,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/middleware"
+	pacdb "digital-contracting-service/internal/processauditandcompliance/db"
 	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 	templatedb "digital-contracting-service/internal/templaterepository/db"
 
@@ -34,6 +35,7 @@ type processAuditAndCompliancesrvc struct {
 	CTRepo       templatedb.ContractTemplateRepo
 	CRepo        cwedb.ContractRepo
 	ATRepo       cwedb.ApprovalTaskRepo
+	FRepo        pacdb.RiskFindingRepo
 	auth.JWTAuthenticator
 }
 
@@ -48,8 +50,8 @@ type auditScopeConfig struct {
 	includeArchiveTrail            bool
 }
 
-func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo) processauditandcompliance.Service {
-	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo}
+func NewProcessAuditAndCompliance(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, auditTrailReader base.AuditTrailReader, ctRepo templatedb.ContractTemplateRepo, cRepo cwedb.ContractRepo, atRepo cwedb.ApprovalTaskRepo, fRepo pacdb.RiskFindingRepo) processauditandcompliance.Service {
+	return &processAuditAndCompliancesrvc{DB: db, JWTAuthenticator: jwtAuth, ATrailReader: auditTrailReader, CTRepo: ctRepo, CRepo: cRepo, ATRepo: atRepo, FRepo: fRepo}
 }
 
 func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processauditandcompliance.PACAuditRequest) (res []*processauditandcompliance.PACAuditResponse, err error) {
@@ -506,6 +508,7 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 		DB:     s.DB,
 		ATRepo: s.ATRepo,
 		CRepo:  s.CRepo,
+		FRepo:  s.FRepo,
 	}
 	result, err := handler.Handle(ctx, qry2.MonitorQry{
 		MonitoredBy: middleware.GetParticipantID(ctx),
