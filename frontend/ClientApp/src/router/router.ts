@@ -52,21 +52,6 @@ import NonComplianceInvestigationView from '@/views/non-compliance/NonCompliance
 import SecureContractViewerView from '@/views/signing/SecureContractViewerView.vue'
 import SigningListView from '@/views/signing/SigningListView.vue'
 import TaskListView from '@/views/task/TaskListView.vue'
-import TemplateCatalogueAdminView from '@/views/template-repository/TemplateCatalogueAdminView.vue'
-import {
-  ChatBubbleLeftRightIcon,
-  ClipboardDocumentListIcon,
-  DocumentCheckIcon,
-  DocumentDuplicateIcon,
-  DocumentMagnifyingGlassIcon,
-  ArrowsRightLeftIcon,
-  CheckCircleIcon,
-  DocumentTextIcon,
-  EyeIcon,
-  SquaresPlusIcon,
-} from '@heroicons/vue/20/solid'
-import NewContractTemplateView from '@template-repository/views/NewContractTemplateView.vue'
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 const ROUTES = {
   HOME: 'home',
