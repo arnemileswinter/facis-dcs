@@ -30,6 +30,17 @@ import (
 //     /Length (7.3.8.2) — the sole terminator a reader uses — and no keyword is
 //     sought inside stream data at all. "endobj" is never searched for.
 
+// maxObjectNesting bounds how deeply composite objects may nest before a walk
+// gives up. skipPDFObject and skipUntilClose descend once per "<<" or "[", so an
+// unbounded document controls the walker's stack depth: a peer PDF nesting a few
+// million arrays exhausts the goroutine stack, and a stack overflow is a runtime
+// throw, not a panic — net/http's per-connection recover cannot catch it and the
+// whole process dies. The deepest object this compiler emits measures 4 levels
+// (TestObjectNestingOfARealPDFIsFarBelowTheLimit); the deepest a PAdES or DSS
+// revision appends is a handful more. 256 is two orders of magnitude of headroom
+// and still bounds the walk to a few tens of kilobytes of stack.
+const maxObjectNesting = 256
+
 var (
 	objKeyword       = []byte("obj")
 	streamKeyword    = []byte("stream")
@@ -80,7 +91,9 @@ func objectHeaders(pdf []byte, objID int) []objectHeader {
 	definitions := objectDefinitions(pdf, objID)
 	headers := make([]objectHeader, 0, len(definitions))
 	for _, definition := range definitions {
-		headers = append(headers, resolveObject(pdf, definition))
+		if header, ok := resolveObject(pdf, definition); ok {
+			headers = append(headers, header)
+		}
 	}
 	return headers
 }
@@ -111,15 +124,21 @@ func objectDefinitions(pdf []byte, objID int) []objectHeader {
 }
 
 // resolveObject fills in what a definition holds: the extent of its object and,
-// when that object is a stream, the range of its data.
-func resolveObject(pdf []byte, header objectHeader) objectHeader {
+// when that object is a stream, the range of its data. It reports false when the
+// object nests past maxObjectNesting, so a definition no walker can bound is
+// treated as absent rather than as one spanning the rest of the file.
+func resolveObject(pdf []byte, header objectHeader) (objectHeader, bool) {
 	valueStart := skipPDFSpace(pdf, header.body)
-	header.value = skipPDFObject(pdf, valueStart)
+	value, ok := skipPDFObject(pdf, valueStart, 0)
+	if !ok {
+		return objectHeader{}, false
+	}
+	header.value = value
 	start, end, ok := streamExtent(pdf, pdf[valueStart:header.value], header.value)
 	if ok {
 		header.streamStart, header.streamEnd, header.hasStream = start, end, true
 	}
-	return header
+	return header, true
 }
 
 // streamExtent returns the range of the stream data following the object
@@ -144,8 +163,11 @@ func streamExtent(pdf, dict []byte, valueEnd int) (start, end int, ok bool) {
 		// 7.3.8.1 requires CRLF or LF after the keyword, never a bare CR.
 		return 0, 0, false
 	}
+	// Compared as a remaining-bytes budget, never as pos+length: /Length
+	// 9223372036854775807 makes that sum wrap negative, passing the guard and
+	// indexing the slice below out of range.
 	length, ok := streamLength(pdf, dict)
-	if !ok || pos+length > len(pdf) {
+	if !ok || length > len(pdf)-pos {
 		return 0, 0, false
 	}
 	if !bytes.HasPrefix(pdf[skipPDFSpace(pdf, pos+length):], endstreamKeyword) {
@@ -193,7 +215,11 @@ func indirectInteger(pdf []byte, objID int) (int, bool) {
 		return 0, false
 	}
 	start := skipPDFSpace(pdf, definitions[len(definitions)-1].body)
-	value, err := strconv.Atoi(string(pdf[start:skipPDFObject(pdf, start)]))
+	end, ok := skipPDFObject(pdf, start, 0)
+	if !ok {
+		return 0, false
+	}
+	value, err := strconv.Atoi(string(pdf[start:end]))
 	if err != nil {
 		return 0, false
 	}
@@ -215,7 +241,10 @@ func dictEntry(dict []byte, key string) ([]byte, bool) {
 		}
 		keyEnd := skipRegularToken(dict, pos)
 		valueStart := skipPDFSpace(dict, keyEnd)
-		valueEnd := skipPDFValue(dict, valueStart)
+		valueEnd, ok := skipPDFValue(dict, valueStart, 0)
+		if !ok {
+			return nil, false
+		}
 		if bytes.Equal(dict[pos:keyEnd], name) {
 			return dict[valueStart:valueEnd], true
 		}
@@ -229,24 +258,30 @@ func dictEntry(dict []byte, key string) ([]byte, bool) {
 
 // skipPDFValue returns the offset just past the value beginning at pos,
 // treating the three tokens of an indirect reference ("12 0 R") as one value.
-func skipPDFValue(pdf []byte, pos int) int {
-	end := skipPDFObject(pdf, pos)
+func skipPDFValue(pdf []byte, pos, depth int) (int, bool) {
+	end, ok := skipPDFObject(pdf, pos, depth)
+	if !ok {
+		return 0, false
+	}
 	if !isDigits(pdf[pos:end]) {
-		return end
+		return end, true
 	}
 	generation := skipPDFSpace(pdf, end)
-	generationEnd := skipPDFObject(pdf, generation)
+	generationEnd, ok := skipPDFObject(pdf, generation, depth)
+	if !ok {
+		return 0, false
+	}
 	if !isDigits(pdf[generation:generationEnd]) {
-		return end
+		return end, true
 	}
 	keyword := skipPDFSpace(pdf, generationEnd)
 	if keyword >= len(pdf) || pdf[keyword] != 'R' {
-		return end
+		return end, true
 	}
 	if next := keyword + 1; next < len(pdf) && !isPDFWhitespace(pdf[next]) && !isPDFDelimiter(pdf[next]) {
-		return end
+		return end, true
 	}
-	return keyword + 1
+	return keyword + 1, true
 }
 
 func isDigits(token []byte) bool {
@@ -265,42 +300,49 @@ func isDigits(token []byte) bool {
 // pos. Composite objects are walked token by token so that a literal string's
 // parens, a hex string's angle brackets and a name's characters are read as
 // content and never as structure; an unterminated object consumes the rest of
-// the file.
-func skipPDFObject(pdf []byte, pos int) int {
+// the file. depth is the number of composites already entered; nesting past
+// maxObjectNesting reports false rather than descending further.
+func skipPDFObject(pdf []byte, pos, depth int) (int, bool) {
 	if pos >= len(pdf) {
-		return len(pdf)
+		return len(pdf), true
+	}
+	if depth > maxObjectNesting {
+		return 0, false
 	}
 	switch {
 	case pdf[pos] == '(':
-		return skipLiteralString(pdf, pos)
+		return skipLiteralString(pdf, pos), true
 	case bytes.HasPrefix(pdf[pos:], dictOpen):
-		return skipUntilClose(pdf, pos+len(dictOpen), dictClose)
+		return skipUntilClose(pdf, pos+len(dictOpen), dictClose, depth+1)
 	case pdf[pos] == '<':
-		return skipHexString(pdf, pos)
+		return skipHexString(pdf, pos), true
 	case pdf[pos] == '[':
-		return skipUntilClose(pdf, pos+1, arrayClose)
+		return skipUntilClose(pdf, pos+1, arrayClose, depth+1)
 	}
-	return skipRegularToken(pdf, pos)
+	return skipRegularToken(pdf, pos), true
 }
 
 // skipUntilClose walks the members of a dictionary or array until its closing
 // token.
-func skipUntilClose(pdf []byte, pos int, closer []byte) int {
+func skipUntilClose(pdf []byte, pos int, closer []byte, depth int) (int, bool) {
 	for pos < len(pdf) {
 		pos = skipPDFSpace(pdf, pos)
 		if pos >= len(pdf) {
 			break
 		}
 		if bytes.HasPrefix(pdf[pos:], closer) {
-			return pos + len(closer)
+			return pos + len(closer), true
 		}
-		next := skipPDFObject(pdf, pos)
+		next, ok := skipPDFObject(pdf, pos, depth)
+		if !ok {
+			return 0, false
+		}
 		if next <= pos {
 			break
 		}
 		pos = next
 	}
-	return len(pdf)
+	return len(pdf), true
 }
 
 // skipLiteralString walks a "(...)" string, honouring the backslash escapes and
@@ -428,7 +470,7 @@ func firstObjectHeader(pdf []byte, objID int) (objectHeader, bool) {
 	if len(definitions) == 0 {
 		return objectHeader{}, false
 	}
-	return resolveObject(pdf, definitions[0]), true
+	return resolveObject(pdf, definitions[0])
 }
 
 // lastObjectHeader returns the definition of objID a reader resolves — the
@@ -439,7 +481,7 @@ func lastObjectHeader(pdf []byte, objID int) (objectHeader, bool) {
 	if len(definitions) == 0 {
 		return objectHeader{}, false
 	}
-	return resolveObject(pdf, definitions[len(definitions)-1]), true
+	return resolveObject(pdf, definitions[len(definitions)-1])
 }
 
 // objectStreamData returns the half-open range of a definition's raw stream

@@ -1,8 +1,8 @@
 package provenance
 
 import (
-	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -119,10 +119,106 @@ func IsFrozenC2PAState(c2paState string) bool {
 	return c2paState != "" && c2paState != "draft"
 }
 
-// CarriesPAdESSignature reports whether pdf already holds a PAdES signature,
-// detected by the signature dictionary's /ByteRange.
+// CarriesPAdESSignature reports whether pdf already holds a PAdES signature: a
+// signature value dictionary (/Type /Sig) carrying a /ByteRange. Both names are
+// required, and both are matched on the name a conforming reader resolves, with
+// #xx escapes decoded (ISO 32000-1 7.3.5).
+//
+// This is pdf-core's isPAdESSigned, and the two must agree: pdf-core refuses to
+// re-render a PDF it calls signed, so a PDF only this side calls unsigned is one
+// the regenerator keeps trying to amend, and a PDF only this side calls signed
+// is one frozen as "active" forever — the received artifact then asserts an
+// active contract while the workflow is merely OFFERED, and no local transition
+// corrects it.
+//
+// Requiring both names is what keeps the contract's own text out of the answer.
+// Clause text reaches the page content stream and the JSON-LD attachment
+// verbatim, so a clause discussing /ByteRange writes that name into the file;
+// decoding escapes is what keeps a peer's /Byte#52ange in it.
 func CarriesPAdESSignature(pdf []byte) bool {
-	return bytes.Contains(pdf, []byte("/ByteRange"))
+	names := pdfNameTokens(pdf)
+	byteRange, sigType := false, false
+	for i, name := range names {
+		switch name.text {
+		case "/ByteRange":
+			byteRange = true
+		case "/Type":
+			// The value follows the key directly, white space apart; the two
+			// spellings "/Type /Sig" and "/Type/Sig" are the same dictionary
+			// entry.
+			if i+1 < len(names) && names[i+1].text == "/Sig" && isPDFSpace(pdf[name.end:names[i+1].start]) {
+				sigType = true
+			}
+		}
+		if byteRange && sigType {
+			return true
+		}
+	}
+	return false
+}
+
+// pdfNameToken is one PDF name in a document, as a reader resolves it.
+type pdfNameToken struct {
+	text       string
+	start, end int
+}
+
+// pdfNameTokens returns every name token in pdf in file order, with #xx escapes
+// decoded.
+func pdfNameTokens(pdf []byte) []pdfNameToken {
+	var names []pdfNameToken
+	for pos := 0; pos < len(pdf); pos++ {
+		if pdf[pos] != '/' {
+			continue
+		}
+		var decoded strings.Builder
+		decoded.WriteByte('/')
+		end := pos + 1
+		for end < len(pdf) && !isPDFWhitespaceByte(pdf[end]) && !isPDFDelimiterByte(pdf[end]) {
+			if pdf[end] == '#' && end+2 < len(pdf) {
+				if b, err := strconv.ParseUint(string(pdf[end+1:end+3]), 16, 8); err == nil {
+					decoded.WriteByte(byte(b))
+					end += 3
+					continue
+				}
+			}
+			decoded.WriteByte(pdf[end])
+			end++
+		}
+		names = append(names, pdfNameToken{text: decoded.String(), start: pos, end: end})
+		pos = end - 1
+	}
+	return names
+}
+
+// isPDFSpace reports whether b is entirely PDF white space.
+func isPDFSpace(b []byte) bool {
+	for _, c := range b {
+		if !isPDFWhitespaceByte(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPDFWhitespaceByte reports whether b is one of the six PDF white-space
+// characters (ISO 32000-1 table 1).
+func isPDFWhitespaceByte(b byte) bool {
+	switch b {
+	case 0x00, '\t', '\n', '\f', '\r', ' ':
+		return true
+	}
+	return false
+}
+
+// isPDFDelimiterByte reports whether b is one of the delimiter characters
+// (ISO 32000-1 table 2), which end a name just as white space does.
+func isPDFDelimiterByte(b byte) bool {
+	switch b {
+	case '(', ')', '<', '>', '[', ']', '{', '}', '/', '%':
+		return true
+	}
+	return false
 }
 
 // ArtifactC2PAState is the lifecycle state a STORED artifact asserts, which is

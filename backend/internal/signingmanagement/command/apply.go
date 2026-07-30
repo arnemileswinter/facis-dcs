@@ -157,6 +157,17 @@ func acquireRegenerationLock(ctx context.Context, tx *sqlx.Tx, did string) error
 	return nil
 }
 
+// assertFieldUnsigned reports ErrFieldAlreadySigned when records already hold a
+// SIGNED signature for fieldName.
+func assertFieldUnsigned(records []db.SignatureRecord, fieldName string) error {
+	for _, rec := range records {
+		if rec.Status == "SIGNED" && rec.FieldName != nil && *rec.FieldName == fieldName {
+			return fmt.Errorf("%w: %s", ErrFieldAlreadySigned, fieldName)
+		}
+	}
+	return nil
+}
+
 // regenerationLockError reports a failed lock acquisition, distinguishing the
 // wait that ran out (the regenerator still holds the contract) from any other
 // database failure.
@@ -446,10 +457,8 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if err != nil {
 		return fmt.Errorf("could not load existing signatures: %w", err)
 	}
-	for _, rec := range existingRecords {
-		if rec.Status == "SIGNED" && rec.FieldName != nil && *rec.FieldName == ceremony.FieldName {
-			return fmt.Errorf("%w: %s", ErrFieldAlreadySigned, ceremony.FieldName)
-		}
+	if err := assertFieldUnsigned(existingRecords, ceremony.FieldName); err != nil {
+		return err
 	}
 
 	// TBS byte pinning (ADR-20): a submitted PDF may only ADD a PAdES
@@ -628,6 +637,26 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// ErrRegenerationInFlight. This is still the first lock the transaction
 	// takes, so the order that keeps it deadlock-free is unchanged.
 	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return err
+	}
+
+	// The already-signed guard, re-read now that the writers are serialised. The
+	// read above it runs before the DSS round trips, so two submits for the same
+	// field can both pass it: a field can have two verified unconsumed
+	// ceremonies at once — the wallet callback pins the ceremony from its
+	// callback URL while FindVerifiedCeremonyByField returns the newest — so
+	// each submit consumes its OWN ceremony and MarkCeremonyConsumed's guard
+	// stops neither. Both would then write a SIGNED row for one field, the
+	// second SetSignedPDF would drop the first signature from the stored bytes,
+	// and both would archive. Under the lock this read sees the winner's
+	// committed row, so the loser stops here with ErrFieldAlreadySigned. The
+	// earlier read stays: it costs one query and saves the whole DSS window on
+	// the ordinary already-signed submission.
+	serialisedRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not re-load existing signatures: %w", err)
+	}
+	if err := assertFieldUnsigned(serialisedRecords, ceremony.FieldName); err != nil {
 		return err
 	}
 

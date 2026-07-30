@@ -112,14 +112,24 @@ func firstDiffSnippet(candidate, reference []byte) string {
 		len(candidate), len(reference), diff, window(candidate), window(reference))
 }
 
-// extractPageContentStreams follows the PDF page tree of pdf, returning the raw
-// bytes of each page's content stream in document order.
-func extractPageContentStreams(pdf []byte) ([][]byte, error) {
+// pageContentStream is one page's content stream: the object holding it and the
+// half-open range of its raw data.
+type pageContentStream struct {
+	objID      int
+	start, end int
+}
+
+// pageContentStreamRanges follows the PDF page tree of pdf, returning each
+// page's content stream in document order. Every page is reached through the
+// page tree and every stream's extent comes from its own /Length, so no keyword
+// is ever sought inside stream data — see objectheader.go for what searching
+// there costs.
+func pageContentStreamRanges(pdf []byte) ([]pageContentStream, error) {
 	pageIDs, err := parseCurrentPagesKids(pdf)
 	if err != nil {
 		return nil, err
 	}
-	streams := make([][]byte, 0, len(pageIDs))
+	streams := make([]pageContentStream, 0, len(pageIDs))
 	for _, pageID := range pageIDs {
 		dictStart, dictEnd, ok := lastObjectBody(pdf, pageID)
 		if !ok {
@@ -133,11 +143,25 @@ func extractPageContentStreams(pdf []byte) ([][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("page object %d /Contents ref invalid: %w", pageID, err)
 		}
-		stream, err := extractStreamContentByObjID(pdf, contentID)
-		if err != nil {
-			return nil, fmt.Errorf("content stream %d: %w", contentID, err)
+		start, end, ok := lastObjectStreamData(pdf, contentID)
+		if !ok {
+			return nil, fmt.Errorf("content stream %d: object %d has no stream", contentID, contentID)
 		}
-		streams = append(streams, stream)
+		streams = append(streams, pageContentStream{objID: contentID, start: start, end: end})
+	}
+	return streams, nil
+}
+
+// extractPageContentStreams returns the raw bytes of each page's content stream
+// in document order.
+func extractPageContentStreams(pdf []byte) ([][]byte, error) {
+	ranges, err := pageContentStreamRanges(pdf)
+	if err != nil {
+		return nil, err
+	}
+	streams := make([][]byte, 0, len(ranges))
+	for _, r := range ranges {
+		streams = append(streams, append([]byte(nil), pdf[r.start:r.end]...))
 	}
 	return streams, nil
 }
