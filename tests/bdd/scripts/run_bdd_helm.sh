@@ -1,30 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HARNESS_DIR="$PWD"
-HARNESS_TMP_DIR="${HARNESS_TMP_DIR:-$HARNESS_DIR/.tmp}"
-REPORTS_JUNIT_DIR="${REPORTS_JUNIT_DIR:-$HARNESS_DIR/.reports/junit}"
-RUN_PID_DIR="$HARNESS_TMP_DIR/run-$$"
-mkdir -p "$RUN_PID_DIR"
-
 cleanup() {
-  local pid_file pid
-  for pid_file in "$RUN_PID_DIR"/*.pid; do
-    [[ -f "$pid_file" ]] || continue
-    pid="$(cat "$pid_file")"
-    kill "$pid" >/dev/null 2>&1 || true
-  done
-  for pid_file in "$RUN_PID_DIR"/*.pid; do
-    [[ -f "$pid_file" ]] || continue
-    pid="$(cat "$pid_file")"
-    wait "$pid" >/dev/null 2>&1 || true
-  done
-  rm -rf "$RUN_PID_DIR"
+  if [[ -f .tmp/port-forward-db.pid ]]; then
+    kill "$(cat .tmp/port-forward-db.pid)" >/dev/null 2>&1 || true
+  fi
+  if [[ -f .tmp/port-forward-dcs.pid ]]; then
+    kill "$(cat .tmp/port-forward-dcs.pid)" >/dev/null 2>&1 || true
+  fi
+  if [[ -f .tmp/port-forward-orce.pid ]]; then
+    kill "$(cat .tmp/port-forward-orce.pid)" >/dev/null 2>&1 || true
+  fi
+  if [[ -f .tmp/port-forward-dss.pid ]]; then
+    kill "$(cat .tmp/port-forward-dss.pid)" >/dev/null 2>&1 || true
+  fi
 }
 
 trap cleanup EXIT
-trap 'exit 143' TERM HUP
-trap 'exit 130' INT
 
 : "${VENV_PATH:?VENV_PATH is required}"
 : "${FEATURES_PATH:?FEATURES_PATH is required}"
@@ -39,25 +31,6 @@ trap 'exit 130' INT
 # alone matches both releases' backend pods — an unscoped selector previously
 # caused a wrong-pod log dump / signing-exec pick here.
 : "${HELM_RELEASE:?HELM_RELEASE is required}"
-
-NEEDS_DSS="${NEEDS_DSS:-1}"
-NEEDS_ORCE="${NEEDS_ORCE:-1}"
-FAST_MODE="${FAST_MODE:-0}"
-
-exec 9>"$HARNESS_TMP_DIR/run.lock"
-if ! flock -n 9; then
-  echo "run_bdd_helm: another BDD/E2E harness already owns $HARNESS_TMP_DIR/run.lock" >&2
-  exit 1
-fi
-
-export HARNESS_DIR K8S_NAMESPACE HELM_RELEASE
-bash "$HARNESS_DIR/scripts/cleanup_orphan_forwards.sh"
-
-if ! "$KUBECTL_BIN" --request-timeout=5s get --raw=/readyz >/dev/null 2>&1; then
-  echo "run_bdd_helm: Kubernetes API is not reachable through the selected kubeconfig." >&2
-  echo "Recreate/export the kind cluster with 'make -C tests/bdd kind_up'." >&2
-  exit 1
-fi
 
 BDD_PUBLIC_ORIGIN="${BDD_PUBLIC_ORIGIN:-http://localhost:18080}"
 export BDD_PUBLIC_ORIGIN
@@ -109,7 +82,8 @@ wait_for_running_pod() {
 # a SINGLE instance shared across both BDD releases (values.bdd2.yml's
 # ipfsClient.mfsBaseURL points at "dcs-ipfs" regardless of caller instance),
 # so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
-mkdir -p "$HARNESS_TMP_DIR" "$REPORTS_JUNIT_DIR"
+mkdir -p .tmp .reports/junit
+REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 # A previous local run must not satisfy the fail-closed scenario-count gate
 # below. Behave writes one report per feature, so remove only its generated
 # JUnit XML artifacts before starting the selected suite.
@@ -262,20 +236,20 @@ fi
 # run — possibly against a DIFFERENT cluster/kubeconfig — binds first, the
 # nc readiness check below then passes against the squatter, and every
 # DB/ORCE test seam silently talks to the wrong stack.
-for harness_port in 5432 18991 18099 18880; do
+for harness_port in 5432 18991 18880; do
   fuser -k -n tcp "$harness_port" >/dev/null 2>&1 || true
 done
 sleep 1
 
 echo "Starting port-forward for PostgreSQL"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/dcs-postgresql" 5432:5432 > "$HARNESS_TMP_DIR/port-forward-db.log" 2>&1 &
-echo $! > "$RUN_PID_DIR/port-forward-db.pid"
+"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/dcs-postgresql" 5432:5432 > .tmp/port-forward-db.log 2>&1 &
+echo $! > .tmp/port-forward-db.pid
 
 deadline=$(( $(date +%s) + 30 ))
 until nc -z 127.0.0.1 5432 2>/dev/null; do
   if [ "$(date +%s)" -gt "$deadline" ]; then
     echo "Timed out waiting for port-forward on 5432"
-    cat "$HARNESS_TMP_DIR/port-forward-db.log" || true
+    cat .tmp/port-forward-db.log || true
     exit 1
   fi
   sleep 1
@@ -289,14 +263,14 @@ LOCAL_FORWARD_PORT="${LOCAL_FORWARD_PORT:-18991}"
 SERVICE_PORT="${SERVICE_PORT:-8991}"
 echo "Starting port-forward for DCS service ($DCS_SERVICE)"
 "$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/$DCS_SERVICE" \
-  "$LOCAL_FORWARD_PORT:$SERVICE_PORT" > "$HARNESS_TMP_DIR/port-forward-dcs.log" 2>&1 &
-echo $! > "$RUN_PID_DIR/port-forward-dcs.pid"
+  "$LOCAL_FORWARD_PORT:$SERVICE_PORT" > .tmp/port-forward-dcs.log 2>&1 &
+echo $! > .tmp/port-forward-dcs.pid
 
 deadline=$(( $(date +%s) + 30 ))
 until nc -z 127.0.0.1 "$LOCAL_FORWARD_PORT" 2>/dev/null; do
   if [ "$(date +%s)" -gt "$deadline" ]; then
     echo "Timed out waiting for port-forward on $LOCAL_FORWARD_PORT"
-    cat "$HARNESS_TMP_DIR/port-forward-dcs.log" || true
+    cat .tmp/port-forward-dcs.log || true
     exit 1
   fi
   sleep 1
@@ -304,42 +278,39 @@ done
 export BDD_DCS_INTERNAL_ORIGIN="http://localhost:$LOCAL_FORWARD_PORT"
 echo "Port-forward on $LOCAL_FORWARD_PORT is ready"
 
-if [[ "$NEEDS_DSS" == "1" ]]; then
-  # The wallet-driven signing scenarios call the EU DSS demonstration webapp
-  # (charts/dss) as the external SCA that computes getDataToSign/signDocument.
-  # It is deliberately omitted from non-signing focused stacks because its
-  # multi-gigabyte image and Tomcat readiness delay dominate startup time.
-  DSS_DEPLOYMENT="${HELM_RELEASE}-dss"
-  DSS_SERVICE="${HELM_RELEASE}-dss"
-  DSS_LOCAL_FORWARD_PORT="${DSS_LOCAL_FORWARD_PORT:-18099}"
-  echo "Waiting for DSS deployment ($DSS_DEPLOYMENT) to be available"
-  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=available --timeout=420s "deployment/$DSS_DEPLOYMENT"
+# The wallet-driven signing scenarios call the EU DSS demonstration webapp
+# (charts/dss) as the external SCA that computes getDataToSign/signDocument.
+# It is an in-cluster ClusterIP service; the harness reaches it through a
+# port-forward at the localhost:18099 default that BDD_DSS_URL points at. The
+# DSS Tomcat bundle boots slowly (readiness initialDelaySeconds 90), so allow a
+# generous availability timeout before forwarding.
+DSS_DEPLOYMENT="${HELM_RELEASE}-dss"
+DSS_SERVICE="${HELM_RELEASE}-dss"
+DSS_LOCAL_FORWARD_PORT="${DSS_LOCAL_FORWARD_PORT:-18099}"
+echo "Waiting for DSS deployment ($DSS_DEPLOYMENT) to be available"
+"$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=condition=available --timeout=420s "deployment/$DSS_DEPLOYMENT"
 
-  echo "Starting port-forward for DSS service ($DSS_SERVICE)"
-  OWNER_PID="$$" KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
-    SERVICE_NAME="$DSS_SERVICE" PORT_MAPPING="$DSS_LOCAL_FORWARD_PORT:8080" \
-    bash "$PWD/scripts/keep_port_forward.sh" > "$HARNESS_TMP_DIR/port-forward-dss.log" 2>&1 &
-  echo $! > "$RUN_PID_DIR/port-forward-dss.pid"
+echo "Starting port-forward for DSS service ($DSS_SERVICE)"
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+  SERVICE_NAME="$DSS_SERVICE" PORT_MAPPING="$DSS_LOCAL_FORWARD_PORT:8080" \
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-dss.log 2>&1 &
+echo $! > .tmp/port-forward-dss.pid
 
-  deadline=$(( $(date +%s) + 30 ))
-  until nc -z 127.0.0.1 "$DSS_LOCAL_FORWARD_PORT" 2>/dev/null; do
-    if [ "$(date +%s)" -gt "$deadline" ]; then
-      echo "Timed out waiting for DSS port-forward on $DSS_LOCAL_FORWARD_PORT"
-      cat "$HARNESS_TMP_DIR/port-forward-dss.log" || true
-      exit 1
-    fi
-    sleep 1
-  done
-  export BDD_DSS_URL="http://localhost:$DSS_LOCAL_FORWARD_PORT"
-  echo "DSS port-forward on $DSS_LOCAL_FORWARD_PORT is ready"
-else
-  echo "Skipping DSS readiness and port-forward (NEEDS_DSS=0)"
-fi
+deadline=$(( $(date +%s) + 30 ))
+until nc -z 127.0.0.1 "$DSS_LOCAL_FORWARD_PORT" 2>/dev/null; do
+  if [ "$(date +%s)" -gt "$deadline" ]; then
+    echo "Timed out waiting for DSS port-forward on $DSS_LOCAL_FORWARD_PORT"
+    cat .tmp/port-forward-dss.log || true
+    exit 1
+  fi
+  sleep 1
+done
+export BDD_DSS_URL="http://localhost:$DSS_LOCAL_FORWARD_PORT"
+echo "DSS port-forward on $DSS_LOCAL_FORWARD_PORT is ready"
 
 # Archive notary and audit-log endpoints are intentionally not exposed by the
 # public ORCE ingress. Reach the release-scoped service directly and obtain the
 # configured token from the running pod rather than duplicating it here.
-if [[ "$NEEDS_ORCE" == "1" ]]; then
 ORCE_DEPLOYMENT="${HELM_RELEASE}-orce"
 ORCE_SERVICE="${HELM_RELEASE}-orce"
 ORCE_LOCAL_FORWARD_PORT="${ORCE_LOCAL_FORWARD_PORT:-18880}"
@@ -370,16 +341,16 @@ while [[ -z "$ORCE_TOKEN" ]]; do
 done
 
 echo "Starting port-forward for ORCE service ($ORCE_SERVICE)"
-OWNER_PID="$$" KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
   SERVICE_NAME="$ORCE_SERVICE" PORT_MAPPING="$ORCE_LOCAL_FORWARD_PORT:1880" \
-  bash "$PWD/scripts/keep_port_forward.sh" > "$HARNESS_TMP_DIR/port-forward-orce.log" 2>&1 &
-echo $! > "$RUN_PID_DIR/port-forward-orce.pid"
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-orce.log 2>&1 &
+echo $! > .tmp/port-forward-orce.pid
 
 deadline=$(( $(date +%s) + 30 ))
 until nc -z 127.0.0.1 "$ORCE_LOCAL_FORWARD_PORT" 2>/dev/null; do
   if [ "$(date +%s)" -gt "$deadline" ]; then
     echo "Timed out waiting for ORCE port-forward on $ORCE_LOCAL_FORWARD_PORT"
-    cat "$HARNESS_TMP_DIR/port-forward-orce.log" || true
+    cat .tmp/port-forward-orce.log || true
     exit 1
   fi
   sleep 1
@@ -387,8 +358,6 @@ done
 export BDD_ORCE_ARCHIVE_NOTARY_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive/notary"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive-audit-events.jsonl"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN="$ORCE_TOKEN"
-export BDD_ORCE_AUDIT_CONTROL_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit-executor/test"
-export BDD_ORCE_AUDIT_EXECUTOR_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit/run"
 export BDD_ORCE_NAMESPACE="$K8S_NAMESPACE"
 export BDD_ORCE_DEPLOYMENT="$ORCE_DEPLOYMENT"
 export BDD_KUBECTL="$KUBECTL_BIN"
@@ -430,11 +399,7 @@ until orce_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" -X POST "
   sleep 2
 done
 echo "ORCE contract-target flow is reachable (HTTP $orce_code); BDD_ORCE_TARGET_URL=$BDD_ORCE_TARGET_URL"
-else
-  echo "Skipping ORCE test controls and port-forward (NEEDS_ORCE=0)"
-fi
 
-# shellcheck disable=SC1091
 source "$VENV_PATH/bin/activate"
 export BDD_DCS_BASE_URL
 
@@ -442,7 +407,6 @@ echo "Checking statuslist for BDD at $STATUSLIST_SERVICE_URL"
 python "$PWD/scripts/ensure_statuslist_for_bdd.py"
 
 export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
-read -r -a FEATURE_ARGS <<< "$FEATURES_PATH"
 
 # Canonical bdd-executor integration requires the package in the active environment.
 python -c 'import eu.xfsc.bdd.core' >/dev/null
@@ -450,17 +414,13 @@ python -c 'import eu.xfsc.bdd.core' >/dev/null
 # Isolated-stack features (clean-DB assumptions, component restarts) run in
 # their dedicated targets, not the shared full-suite stack. Callers that DO
 # provide the isolation (run_bdd_audit_kind_once) override ARG_BDD_TAGS.
-if [[ -n "${ARG_BDD_TAGS:-}" ]]; then
-  read -r -a EXTRA_ARGS <<< "$ARG_BDD_TAGS"
-else
-  EXTRA_ARGS=(--tags=-isolated_stack)
-fi
+EXTRA_ARGS=(${ARG_BDD_TAGS---tags=-isolated_stack})
 if [[ -n "${ARG_BDD:-}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_ARGS+=(${ARG_BDD})
 fi
 
-JUNIT_ARGS=(--junit --junit-directory "$REPORTS_JUNIT_DIR")
+JUNIT_ARGS=(--junit --junit-directory .reports/junit)
 if [[ -n "${ARG_BDD_JUNIT:-}" ]]; then
   # shellcheck disable=SC2206
   JUNIT_ARGS=(${ARG_BDD_JUNIT})
@@ -485,16 +445,11 @@ if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   DCS_HYDRA_TARGET="${BDD_PUBLIC_ORIGIN}" \
     npm run e2e
 else
+  echo "Running BDD suite via bdd-executor environment"
   cd "$PROJECT_ROOT"
-  if [[ "$FAST_MODE" == "1" ]]; then
-    echo "Running focused BDD without coverage/JUnit (FAST_MODE=1)"
-    "$VENV_PATH/bin/behave" --stop "${FEATURE_ARGS[@]}" "${EXTRA_ARGS[@]}"
-  else
-    echo "Running BDD suite via bdd-executor environment"
-    "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" "${FEATURE_ARGS[@]}" "${EXTRA_ARGS[@]}"
+  "$VENV_PATH/bin/coverage" run --append -m behave "${JUNIT_ARGS[@]}" "$FEATURES_PATH" "${EXTRA_ARGS[@]}"
 
-    JUNIT_COUNT=$(find "$REPORTS_JUNIT_DIR" -name "*.xml" 2>/dev/null | wc -l || true)
-    echo "Generated $JUNIT_COUNT junit XML files in $REPORTS_JUNIT_DIR/"
-    python "$PWD/tests/bdd/scripts/assert_junit_scenarios.py" "$REPORTS_JUNIT_DIR"
-  fi
+  JUNIT_COUNT=$(find "$REPORTS_JUNIT_DIR" -name "*.xml" 2>/dev/null | wc -l || true)
+  echo "Generated $JUNIT_COUNT junit XML files in $REPORTS_JUNIT_DIR/"
+  python "$PWD/tests/bdd/scripts/assert_junit_scenarios.py" "$REPORTS_JUNIT_DIR"
 fi

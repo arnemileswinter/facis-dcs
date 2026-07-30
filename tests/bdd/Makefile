@@ -3,21 +3,16 @@ SHELL := /bin/bash -eu -o pipefail
 PYTHON ?= python3
 # Unter WSL gegen /mnt/c liegt das Repo auf dem 9P-Dateisystem — ein venv dort
 # macht jeden Python-Import 5-20x langsamer. Default daher: venv im nativen
-# ext4-Home der Distro. WSLInterop ist in sandboxed Agent-Prozessen nicht immer
-# gemountet; /proc/version bleibt dort die zuverlässige Erkennung.
-IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && echo 1)
-ifeq ($(IS_WSL),1)
+# ext4-Home der Distro. Explizites VENV_PATH=... überschreibt weiterhin;
+# außerhalb von WSL (CI-Runner, macOS) bleibt der bisherige Default .venv.
+ifneq ($(wildcard /proc/sys/fs/binfmt_misc/WSLInterop),)
 VENV_PATH ?= $(HOME)/.dcs-bdd-venv
 endif
 VENV_PATH ?= .venv
 THIS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(THIS_DIR)../..)
 VENV_ABS := $(if $(filter /%,$(VENV_PATH)),$(VENV_PATH),$(THIS_DIR)$(VENV_PATH))
-HARNESS_TMP_PATH ?= .tmp
-REPORTS_PATH ?= .reports
-COVERAGE_FILE ?= $(THIS_DIR).coverage
-HARNESS_TMP_ABS := $(if $(filter /%,$(HARNESS_TMP_PATH)),$(HARNESS_TMP_PATH),$(THIS_DIR)$(HARNESS_TMP_PATH))
-REPORTS_ABS := $(if $(filter /%,$(REPORTS_PATH)),$(REPORTS_PATH),$(THIS_DIR)$(REPORTS_PATH))
+REPORTS_ABS := $(THIS_DIR).reports
 BDD_EXECUTOR_REPO ?= https://github.com/eclipse-xfsc/bdd-executor.git
 BDD_EXECUTOR_PATH ?= ../../bdd-executor
 BDD_EXECUTOR_FALLBACK_PATH ?= .tmp/bdd-executor
@@ -37,6 +32,7 @@ BDD_INGRESS_PORT ?= 18080
 BDD_PUBLIC_ORIGIN ?= http://localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL ?= $(BDD_PUBLIC_ORIGIN)$(DCS_API_BASE_PATH)
 KIND_CONFIG ?= $(THIS_DIR)kind-config.yaml
+IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && echo 1)
 ifeq ($(IS_WSL),1)
 BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
 else
@@ -53,19 +49,14 @@ BDD_HELM_SET := \
 	--set-string orce.checkpointSink.url="https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
 HELM_CHART_PATH ?= ../../deployment/helm
 HELM_TIMEOUT ?= 20m
-HELM_REFRESH ?= false
 
 KIND_CLUSTER_NAME ?= dcs-bdd
 KIND_WAIT ?= 120s
 DOCKER_IMAGE_REPOSITORY ?= digital-contracting-service
-ifeq ($(origin DOCKER_IMAGE_TAG),undefined)
-DOCKER_IMAGE_TAG := bdd-$(shell bash scripts/source_fingerprint.sh dcs)
-endif
+DOCKER_IMAGE_TAG ?= bdd
 DOCKER_IMAGE ?= $(DOCKER_IMAGE_REPOSITORY):$(DOCKER_IMAGE_TAG)
 PDF_CORE_IMAGE_REPOSITORY ?= pdf-core
-ifeq ($(origin PDF_CORE_IMAGE_TAG),undefined)
-PDF_CORE_IMAGE_TAG := bdd-$(shell bash scripts/source_fingerprint.sh pdf-core)
-endif
+PDF_CORE_IMAGE_TAG ?= bdd
 PDF_CORE_IMAGE ?= $(PDF_CORE_IMAGE_REPOSITORY):$(PDF_CORE_IMAGE_TAG)
 KIND_NAMESPACE ?= dcs-bdd
 KIND_HELM_VALUES ?=
@@ -78,10 +69,6 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 # What run_bdd_helm runs against the live stack: bdd (behave, default) or e2e
 # (Playwright). See run_e2e_kind_ci.
 RUN_MODE ?= bdd
-NEEDS_DSS ?= 1
-NEEDS_ORCE ?= 1
-FAST_MODE ?= 0
-DSS_ENABLED ?= true
 CERT_CHAIN_SECRET ?= $(DCS_SERVICE)-hsm-c2pa-x5chain
 COREDNS_REWRITE_SCRIPT ?= scripts/kind_coredns_rewrite.sh
 ORCE_PERSISTENCE_SCRIPT ?= scripts/ensure_orce_persistence.sh
@@ -107,7 +94,7 @@ BDD_HELM_SET_B := \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/callback" \
 	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/logout-complete"
 
-.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm cleanup_orphan_forwards ensure_kind ensure_k8s_tools helm_repositories helm_refresh helm_dependencies kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_single kind_up_audit run_bdd_kind_once run_bdd_kind_fast_once run_bdd_audit_kind_once kind_down
+.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once kind_down
 
 help:
 	@echo "make setup_environment   # Create venv and install bdd-executor"
@@ -115,11 +102,8 @@ help:
 	@echo "make run_bdd_fast T=@tag	# Fast dev loop: tag-scoped, --stop, no coverage/junit"
 	@echo "make run_bdd_helm		# Run BDD via Traefik on http://localhost:18080"
 	@echo "make run_bdd_kind		# Build ephemeral kind+Helm stack and run all scenarios"
-	@echo "make kind_up_single		# Fast single-DCS stack without the slow DSS service"
 	@echo "make kind_up_audit		# Build a single-instance audit BDD stack"
-	@echo "make run_bdd_kind_fast_once F=... # Focused run, stop-on-failure, no coverage/JUnit"
 	@echo "make run_bdd_audit_kind_once # Run only the audit/archive/ORCE feature"
-	@echo "make cleanup_orphan_forwards # Stop stale harness-owned DSS/ORCE forwards"
 	@echo "make ensure_kind			# Validate kind is available in PATH"
 	@echo "make ensure_k8s_tools	# Validate kubectl and helm are available in PATH"
 	@echo "make kind_delete			# Delete kind cluster used for BDD"
@@ -135,7 +119,7 @@ setup_environment:
 	fi
 	@SRC_PATH="$(BDD_EXECUTOR_PATH)"; \
 	if [[ ! -f "$$SRC_PATH/pyproject.toml" ]]; then \
-		mkdir -p "$(dir $(BDD_EXECUTOR_FALLBACK_PATH))"; \
+		mkdir -p .tmp; \
 		if [[ ! -d "$(BDD_EXECUTOR_FALLBACK_PATH)/.git" ]]; then \
 			git clone --depth 1 "$(BDD_EXECUTOR_REPO)" "$(BDD_EXECUTOR_FALLBACK_PATH)"; \
 		fi; \
@@ -153,7 +137,6 @@ ensure_venv:
 		$(MAKE) setup_environment
 
 run_bdd_test: ensure_venv
-	export COVERAGE_FILE="$(COVERAGE_FILE)" PYTHONDONTWRITEBYTECODE=1 && \
 	source "$(VENV_ABS)/bin/activate" && \
 	mkdir -p "$(REPORTS_ABS)/junit" && \
 	cd "$(PROJECT_ROOT)" && \
@@ -167,12 +150,8 @@ run_bdd_fast: ensure_venv
 	@cd "$(PROJECT_ROOT)" && \
 	"$(VENV_ABS)/bin/behave" --stop $(if $(T),--tags=$(T)) $(if $(F),$(F),$(FEATURES_PATH)) $(ARG_BDD)
 
-run_bdd_helm: ensure_venv ensure_k8s_tools
+run_bdd_helm: setup_environment ensure_k8s_tools
 	@VENV_PATH="$(VENV_ABS)" \
-		HARNESS_TMP_DIR="$(HARNESS_TMP_ABS)" \
-		REPORTS_JUNIT_DIR="$(REPORTS_ABS)/junit" \
-		COVERAGE_FILE="$(COVERAGE_FILE)" \
-		PYTHONDONTWRITEBYTECODE=1 \
 		PROJECT_ROOT="$(PROJECT_ROOT)" \
 		FEATURES_PATH="$(FEATURES_PATH)" \
 		KUBECTL_BIN="$(KUBECTL_BIN)" \
@@ -194,15 +173,8 @@ run_bdd_helm: ensure_venv ensure_k8s_tools
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
 		ARG_BDD_TAGS="$(ARG_BDD_TAGS)" \
 		ARG_BDD="$(ARG_BDD)" \
-		NEEDS_DSS="$(NEEDS_DSS)" \
-		NEEDS_ORCE="$(NEEDS_ORCE)" \
-		FAST_MODE="$(FAST_MODE)" \
 		RUN_MODE="$(RUN_MODE)" \
 		bash "$(BDD_RUNNER_SCRIPT)"
-
-cleanup_orphan_forwards:
-	@HARNESS_DIR="$(patsubst %/,%,$(THIS_DIR))" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(HELM_RELEASE)" \
-		bash "$(THIS_DIR)scripts/cleanup_orphan_forwards.sh"
 
 # Image build command + optional per-image layer-cache flags. CI overrides
 # DOCKER_BUILD to `docker buildx build --load` and passes GitHub Actions layer
@@ -226,31 +198,6 @@ ensure_k8s_tools:
 	@command -v "$(KUBECTL_BIN)" >/dev/null 2>&1 || (echo "kubectl not found in PATH" && exit 1)
 	@command -v "$(HELM_BIN)" >/dev/null 2>&1 || (echo "helm not found in PATH" && exit 1)
 
-helm_repositories: ensure_k8s_tools
-	@if ! "$(HELM_BIN)" repo list 2>/dev/null | awk 'NR > 1 { print $$1 }' | grep -qx prometheus-community; then \
-		"$(HELM_BIN)" repo add prometheus-community https://prometheus-community.github.io/helm-charts; \
-	fi
-	@if ! "$(HELM_BIN)" repo list 2>/dev/null | awk 'NR > 1 { print $$1 }' | grep -qx traefik; then \
-		"$(HELM_BIN)" repo add traefik https://traefik.github.io/charts; \
-	fi
-	@if [[ "$(HELM_REFRESH)" == "true" ]]; then \
-		"$(HELM_BIN)" repo update; \
-	fi
-
-helm_refresh:
-	@$(MAKE) helm_repositories HELM_REFRESH=true
-
-HELM_SOURCE_FILES := $(HELM_CHART_PATH)/Chart.yaml $(HELM_CHART_PATH)/Chart.lock \
-	$(shell find "$(HELM_CHART_PATH)/charts" -type f ! -name '*.tgz' -print)
-HELM_DEPENDENCY_STAMP := $(CURDIR)/.tmp/helm-dependencies.stamp
-
-$(HELM_DEPENDENCY_STAMP): $(HELM_SOURCE_FILES) | helm_repositories
-	@mkdir -p "$(CURDIR)/.tmp"
-	@"$(HELM_BIN)" dependency build "$(HELM_CHART_PATH)" --skip-refresh
-	@touch "$@"
-
-helm_dependencies: $(HELM_DEPENDENCY_STAMP)
-
 # Every kind-targeted goal pins kubectl/helm to the kind cluster through a
 # dedicated kubeconfig, independent of the developer's current context —
 # otherwise deploys land wherever the context points while the suite's
@@ -259,15 +206,15 @@ KIND_KUBECONFIG := $(CURDIR)/.tmp/kind-kubeconfig
 KIND_GOALS := kind_create kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b \
 	kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
 	run_e2e_kind run_e2e_kind_ci \
-	run_bdd_audit_kind_ci kind_up kind_up_single kind_up_audit run_bdd_kind_once \
-	run_bdd_kind_fast_once run_bdd_audit_kind_once kind_down
+	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once \
+	run_bdd_audit_kind_once kind_down
 $(KIND_GOALS): export KUBECONFIG := $(KIND_KUBECONFIG)
 
 kind_export_kubeconfig:
 	@mkdir -p "$(CURDIR)/.tmp"
 	@"$(KIND_BIN)" export kubeconfig --name "$(KIND_CLUSTER_NAME)" --kubeconfig "$(KIND_KUBECONFIG)"
 	@server="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
-		--minify -o jsonpath='{.clusters[0].cluster.server}')"; \
+		-o jsonpath='{.clusters[0].cluster.server}')"; \
 	if ! curl -ksS --max-time 2 "$${server}/readyz" >/dev/null 2>&1 && \
 		ip link show veth-rd-wsl >/dev/null 2>&1; then \
 		rd_gateway="$$(ip -4 -o addr show dev veth-rd-wsl | \
@@ -276,7 +223,7 @@ kind_export_kubeconfig:
 		if [[ -n "$$rd_gateway" ]] && \
 			curl -ksS --max-time 2 "https://$${rd_gateway}:$${api_port}/readyz" >/dev/null 2>&1; then \
 			cluster_name="$$("$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config view \
-				--minify -o jsonpath='{.clusters[0].name}')"; \
+				-o jsonpath='{.clusters[0].name}')"; \
 			echo "Using Rancher Desktop WSL gateway $${rd_gateway}:$${api_port} for kind API"; \
 			"$(KUBECTL_BIN)" --kubeconfig "$(KIND_KUBECONFIG)" config set-cluster "$$cluster_name" \
 				--server="https://$${rd_gateway}:$${api_port}" \
@@ -313,19 +260,7 @@ kind_load_image: kind_create
 		exit 1; \
 	fi
 	@docker image inspect "$(DOCKER_IMAGE)" >/dev/null 2>&1 || (echo "Missing local image $(DOCKER_IMAGE). Build it first." && exit 1)
-	@marker="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dcs-image.state"; \
-	changed="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dcs-image.changed"; \
-	node_id="$$(docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{.Id}}')"; \
-	image_id="$$(docker image inspect "$(DOCKER_IMAGE)" --format '{{.Id}}')"; \
-	state="$$node_id $$image_id"; \
-	if [[ -f "$$marker" ]] && [[ "$$(cat "$$marker")" == "$$state" ]]; then \
-		echo "$(DOCKER_IMAGE) is already loaded into $(KIND_CLUSTER_NAME)"; \
-		echo 0 > "$$changed"; \
-	else \
-		"$(KIND_BIN)" load docker-image "$(DOCKER_IMAGE)" --name "$(KIND_CLUSTER_NAME)"; \
-		echo "$$state" > "$$marker"; \
-		echo 1 > "$$changed"; \
-	fi
+	@"$(KIND_BIN)" load docker-image "$(DOCKER_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
 kind_load_pdf_core_image: kind_create
 	@if ! command -v docker >/dev/null 2>&1; then \
@@ -333,21 +268,13 @@ kind_load_pdf_core_image: kind_create
 		exit 1; \
 	fi
 	@docker image inspect "$(PDF_CORE_IMAGE)" >/dev/null 2>&1 || (echo "Missing local image $(PDF_CORE_IMAGE). Build it first." && exit 1)
-	@marker="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-pdf-core-image.state"; \
-	changed="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-pdf-core-image.changed"; \
-	node_id="$$(docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{.Id}}')"; \
-	image_id="$$(docker image inspect "$(PDF_CORE_IMAGE)" --format '{{.Id}}')"; \
-	state="$$node_id $$image_id"; \
-	if [[ -f "$$marker" ]] && [[ "$$(cat "$$marker")" == "$$state" ]]; then \
-		echo "$(PDF_CORE_IMAGE) is already loaded into $(KIND_CLUSTER_NAME)"; \
-		echo 0 > "$$changed"; \
-	else \
-		"$(KIND_BIN)" load docker-image "$(PDF_CORE_IMAGE)" --name "$(KIND_CLUSTER_NAME)"; \
-		echo "$$state" > "$$marker"; \
-		echo 1 > "$$changed"; \
-	fi
+	@"$(KIND_BIN)" load docker-image "$(PDF_CORE_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
-kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image helm_dependencies
+kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
+	@"$(HELM_BIN)" repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	@"$(HELM_BIN)" repo add traefik https://traefik.github.io/charts --force-update
+	@"$(HELM_BIN)" repo update
+	@"$(HELM_BIN)" dependency build "$(HELM_CHART_PATH)"
 	@"$(HELM_BIN)" show crds "$(HELM_CHART_PATH)/charts/kube-prometheus-stack-"*.tgz | "$(KUBECTL_BIN)" apply --server-side -f -
 	@# DID identity for DCS (DCS_DID is fatal on startup when missing);
 	@# mounted via identity.enabled in values.bdd.yml. The <fullname>-identity
@@ -376,7 +303,6 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image helm_d
 		--set image.tag="$(DOCKER_IMAGE_TAG)" \
 		--set pdfCore.image.repository="$(PDF_CORE_IMAGE_REPOSITORY)" \
 		--set pdfCore.image.tag="$(PDF_CORE_IMAGE_TAG)" \
-		--set dss.enabled="$(DSS_ENABLED)" \
 		$(BDD_HELM_SET) \
 		$(KIND_HELM_VALUES) \
 		$(KIND_HELM_SET)
@@ -387,19 +313,11 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image helm_d
 	@# time: a prior version wired only to cluster creation was observed to
 	@# not reliably stick.
 	@$(MAKE) kind_coredns_rewrite
-	@# CI may intentionally pin a static tag. Restart only workloads whose
-	@# loaded image ID changed; content-tagged local images normally roll via
-	@# the Helm manifest itself.
-	@if [[ "$$(cat "$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dcs-image.changed" 2>/dev/null)" == "1" ]]; then \
-		"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart deployment/"$(DCS_DEPLOYMENT)" 2>/dev/null || true; \
-	fi
-	@if [[ "$$(cat "$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-pdf-core-image.changed" 2>/dev/null)" == "1" ]]; then \
-		"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart deployment/"$(DCS_DEPLOYMENT)"-pdf-core 2>/dev/null || true; \
-	fi
-	@if [[ "$(DSS_ENABLED)" == "true" ]] && \
-		[[ "$$(cat "$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dss-image.changed" 2>/dev/null)" == "1" ]]; then \
-		"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart deployment/"$(HELM_RELEASE)"-dss 2>/dev/null || true; \
-	fi
+	@# The image tag is static, so an unchanged manifest never rolls the pods
+	@# even though kind load just replaced the node image — restart both
+	@# freshly-built workloads so the run tests the image that was built.
+	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
+		deployment/"$(DCS_DEPLOYMENT)" deployment/"$(DCS_DEPLOYMENT)"-pdf-core 2>/dev/null || true
 	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET) (created by post-install hook)..."
 	@deadline=$$(( $$(date +%s) + 1200 )); \
 	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
@@ -545,24 +463,8 @@ DSS_IMAGE ?= conectx/dss-demo:6.2.1
 # signature VALIDATOR for the wallet-driven /signature/submit path (ADR-12,
 # DCS-FR-SM-18); the DCS holds no signing key.
 kind_load_dss_image: kind_create
-	@if [[ "$(DSS_ENABLED)" != "true" ]]; then \
-		echo "Skipping DSS image for focused stack (DSS_ENABLED=$(DSS_ENABLED))"; \
-	else \
-		docker image inspect "$(DSS_IMAGE)" >/dev/null 2>&1 || docker pull "$(DSS_IMAGE)"; \
-		marker="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dss-image.state"; \
-		changed="$(CURDIR)/.tmp/kind-$(KIND_CLUSTER_NAME)-dss-image.changed"; \
-		node_id="$$(docker inspect "$(KIND_CLUSTER_NAME)-control-plane" --format '{{.Id}}')"; \
-		image_id="$$(docker image inspect "$(DSS_IMAGE)" --format '{{.Id}}')"; \
-		state="$$node_id $$image_id"; \
-		if [[ -f "$$marker" ]] && [[ "$$(cat "$$marker")" == "$$state" ]]; then \
-			echo "$(DSS_IMAGE) is already loaded into $(KIND_CLUSTER_NAME)"; \
-			echo 0 > "$$changed"; \
-		else \
-			"$(KIND_BIN)" load docker-image "$(DSS_IMAGE)" --name "$(KIND_CLUSTER_NAME)"; \
-			echo "$$state" > "$$marker"; \
-			echo 1 > "$$changed"; \
-		fi; \
-	fi
+	@docker image inspect "$(DSS_IMAGE)" >/dev/null 2>&1 || docker pull "$(DSS_IMAGE)"
+	@"$(KIND_BIN)" load docker-image "$(DSS_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
 clean:
 	rm -rf "$(VENV_PATH)" .tmp .reports
@@ -573,19 +475,8 @@ kind_up: build_dcs_image build_pdf_core_image kind_deploy_b setup_environment en
 	@echo "kind cluster $(KIND_CLUSTER_NAME) is up with DCS deployed in namespace $(KIND_NAMESPACE)"
 	@echo "You can now run 'make run_bdd_kind_once' to execute the BDD suite against this cluster without redeploying between runs."
 
-# Most focused features need neither the second DCS instance nor the slow DSS
-# demo webapp. ORCE remains deployed because it is a configured backend
-# dependency, but its test-only port-forward can be skipped per run.
-kind_up_single: DSS_ENABLED=false
-kind_up_single: NEEDS_DSS=0
-kind_up_single: build_dcs_image build_pdf_core_image kind_deploy setup_environment ensure_k8s_tools
-	@echo "kind cluster $(KIND_CLUSTER_NAME) is up with one DCS instance and no DSS"
-	@echo "Run 'make -C tests/bdd run_bdd_kind_fast_once F=features/<path> NEEDS_ORCE=0'."
-
 # Audit/archive/ORCE needs only instance A. ORCE still uses persistent storage
 # so the receipt chain survives the restart scenario.
-kind_up_audit: DSS_ENABLED=false
-kind_up_audit: NEEDS_DSS=0
 kind_up_audit: build_dcs_image build_pdf_core_image kind_deploy setup_environment ensure_k8s_tools
 	@echo "kind cluster $(KIND_CLUSTER_NAME) is up with the single-instance audit BDD stack"
 	@echo "Run 'make run_bdd_audit_kind_once' to execute the focused feature."
@@ -598,25 +489,11 @@ run_bdd_kind_once:
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		FEATURES_PATH="$(if $(F),$(F),$(FEATURES_PATH))"
 
-run_bdd_kind_fast_once: FAST_MODE=1
-run_bdd_kind_fast_once: NEEDS_DSS=0
-run_bdd_kind_fast_once: NEEDS_ORCE=0
-run_bdd_kind_fast_once:
-	@$(MAKE) run_bdd_helm \
-		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
-		HELM_RELEASE="$(HELM_RELEASE)" \
-		FAST_MODE="1" \
-		NEEDS_DSS="$(NEEDS_DSS)" \
-		NEEDS_ORCE="$(NEEDS_ORCE)" \
-		FEATURES_PATH="$(if $(F),$(F),$(FEATURES_PATH))"
-
-run_bdd_audit_kind_once: NEEDS_DSS=0
 run_bdd_audit_kind_once:
 	@$(MAKE) run_bdd_helm \
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		DCS_DEPLOYMENT_B="" \
-		NEEDS_DSS="0" \
 		ARG_BDD_TAGS="--tags=isolated_stack" \
 		FEATURES_PATH="features/08_audit_compliance/audit_ui_archive_orce.feature"
 
