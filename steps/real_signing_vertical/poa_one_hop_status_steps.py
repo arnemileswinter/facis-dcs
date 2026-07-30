@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import requests
 from behave import then, when
@@ -19,10 +20,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
-    CEREMONY_AUD,
     POA_QUERY_ID,
     _build_poa_presentation,
     _complete_ceremony_via_presentation,
+    ceremony_aud,
 )
 from steps.support.api_client import (
     contract_terminate_url,
@@ -91,7 +92,7 @@ def _sign_poa(
         issuer_jwt=issuer_jwt,
         disclosures=disclosures,
         wallet_private=keys.wallet_private,
-        aud=CEREMONY_AUD,
+        aud=ceremony_aud(context),
         nonce=nonce,
     )
     return join_sd_jwt(issuer_jwt, disclosures, kb)
@@ -258,7 +259,10 @@ def step_when_poa_status_changed(context, state):
     from dcs_wallet.status_list import credential_status_from_claims, revoke_status_index
     c = context.poa_ceremony
     poa = _build_poa_presentation(
-        organization=c["party_did"], roles=["Contract Signer"], aud=CEREMONY_AUD, nonce=c["nonce"],
+        organization=c["party_did"],
+        roles=["Contract Signer"],
+        aud=ceremony_aud(context),
+        nonce=c["nonce"],
     )
     claims = decode_jwt_payload(split_sd_jwt(poa)[0])
     idx, uri = credential_status_from_claims(claims)
@@ -469,11 +473,17 @@ def _peer_poa_evidence(context, did: str, defect: str) -> dict | None:
     if defect == "missing":
         return None
 
+    # This negative-path packet is built without starting a ceremony. Derive
+    # the audience from instance A's configured public host, using the same
+    # x509_san_dns client-id scheme as the real request object.
+    instance_a_host = str(urlsplit(context.base_url_a).hostname or "").strip()
+    assert instance_a_host, f"instance A base URL has no host: {context.base_url_a!r}"
+    audience = f"x509_san_dns:{instance_a_host}"
     nonce = f"bdd-peer-poa-{time.time_ns()}"
     presentation = _build_poa_presentation(
         organization=context.peer_did_a,
         roles=["Contract Signer"],
-        aud=CEREMONY_AUD,
+        aud=audience,
         nonce=nonce,
     )
     pieces = [piece for piece in presentation.split("~") if piece]
@@ -482,12 +492,12 @@ def _peer_poa_evidence(context, did: str, defect: str) -> dict | None:
     kb_claims = _decode_jwt_part(pieces[-1], 1)
     holder_did = issuer_claims.get("sub")
     assert holder_did, f"PoA presentation has no holder subject: {issuer_claims}"
-    assert kb_claims.get("nonce") == nonce and kb_claims.get("aud") == CEREMONY_AUD
+    assert kb_claims.get("nonce") == nonce and kb_claims.get("aud") == audience
 
     evidence = {
         "presentation": presentation,
         "nonce": nonce,
-        "aud": CEREMONY_AUD,
+        "aud": audience,
         "vct": "urn:dcs:poa:v1",
         "contract_id": did,
         "field_name": context.peer_did_a,
@@ -501,7 +511,7 @@ def _peer_poa_evidence(context, did: str, defect: str) -> dict | None:
     elif defect == "wrong nonce":
         evidence["nonce"] = nonce + "-transport-tampered"
     elif defect == "wrong audience":
-        evidence["aud"] = CEREMONY_AUD + "-transport-tampered"
+        evidence["aud"] = audience + "-transport-tampered"
     elif defect == "wrong organization":
         evidence["organization"] = context.peer_did_b
     elif defect != "valid":

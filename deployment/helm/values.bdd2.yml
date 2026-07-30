@@ -62,6 +62,16 @@ extraEnv:
   - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
     value: "10s"
 
+# Instance B deliberately shares instance A's ORCE deployment. Explicit URLs
+# avoid the empty-value helper deriving unavailable dcs2-orce service names.
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
+  timeout: "2s"
+
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper — unique per release, so this doesn't
 # collide with instance A's own identity Secret in the same namespace) is
