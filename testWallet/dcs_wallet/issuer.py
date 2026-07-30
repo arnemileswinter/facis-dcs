@@ -82,7 +82,7 @@ def sign_credential_sd_jwt_x5c(
     visible_claims: dict[str, Any],
     selective_claims: dict[str, Any],
     issuer_private: dict[str, Any],
-    issuer_cert_der: bytes | list[bytes],
+    issuer_cert_der: bytes,
 ) -> str:
     """Same as sign_credential_sd_jwt, but the issuer JWT header carries the
     issuer's own x5c certificate chain instead of a bare jwk+kid — what a
@@ -99,11 +99,10 @@ def sign_credential_sd_jwt_x5c(
         sd_digests.append(digest)
 
     payload = {**visible_claims, "_sd": sd_digests, "_sd_alg": DEFAULT_SD_ALG}
-    chain = issuer_cert_der if isinstance(issuer_cert_der, list) else [issuer_cert_der]
     headers = {
         "typ": CREDENTIAL_JWT_TYP,
         "alg": "ES256",
-        "x5c": [base64.b64encode(cert).decode() for cert in chain],
+        "x5c": [base64.b64encode(issuer_cert_der).decode()],
     }
     issuer_jwt = jwt.encode(
         payload,
@@ -172,8 +171,6 @@ def issue_stored_credential(
     credential_status: dict[str, Any] | None = None,
     statuslist_service_base: str | None = None,
     statuslist_tenant: str | None = None,
-    issuer_x5c_chain_der: list[bytes] | None = None,
-    status_index_salt: str = "",
 ) -> str:
     """Issuer-signed SD-JWT for wallet storage (no KB-JWT; aud/nonce belong to presentation)."""
     holder_public = public_jwk(wallet_private)
@@ -199,10 +196,7 @@ def issue_stored_credential(
         "status": credential_status
         or build_credential_status(
             sub=holder_did_value,
-            # A presentation-time issuance must not reuse a status bit from a
-            # different ceremony. Stored credentials keep their stable index;
-            # issue_access_credential supplies the ceremony nonce as salt.
-            organization=organization + ("\x1f" + status_index_salt if status_index_salt else ""),
+            organization=organization,
             roles=roles,
             service_base=status_base,
             tenant=status_tenant,
@@ -212,15 +206,11 @@ def issue_stored_credential(
         "organization": organization,
         "roles": roles,
     }
-    sign = sign_credential_sd_jwt_x5c if issuer_x5c_chain_der else sign_credential_sd_jwt
-    kwargs = {
-        "visible_claims": visible_claims,
-        "selective_claims": selective_claims,
-        "issuer_private": issuer_private,
-    }
-    if issuer_x5c_chain_der:
-        kwargs["issuer_cert_der"] = issuer_x5c_chain_der
-    return sign(**kwargs)
+    return sign_credential_sd_jwt(
+        visible_claims=visible_claims,
+        selective_claims=selective_claims,
+        issuer_private=issuer_private,
+    )
 
 
 def issue_access_credential(
@@ -241,24 +231,6 @@ def issue_access_credential(
     BDD_CREDENTIAL_TENANT explicitly for a presentation the BDD/CI status-list
     provisioning actually seeds (the "default" tenant is not guaranteed to
     be, see ensure_statuslist_for_dev.py)."""
-    issuer_x5c_chain_der = None
-    # The built-in dev/demo PoA issuer uses the explicit v1 one-hop profile:
-    # [issuer leaf, Dev Root]. Production issuers are deployment configuration
-    # and never inherit these fixtures.
-    dev_keys_dir = Path(__file__).resolve().parent.parent / "keys"
-    leaf_path = dev_keys_dir / "issuer-dev-x5c.crt.pem"
-    root_path = dev_keys_dir / "dev-root-ca.crt.pem"
-    x5c_key_path = dev_keys_dir / "issuer-dev-x5c.jwk"
-    if issuer_did in TRUSTED_ISSUER_DIDS and leaf_path.exists() and root_path.exists() and x5c_key_path.exists():
-        from cryptography import x509
-        from cryptography.hazmat.primitives import serialization
-
-        issuer_private = private_key_material(json.loads(x5c_key_path.read_text(encoding="utf-8")))
-        issuer_x5c_chain_der = [
-            x509.load_pem_x509_certificate(path.read_bytes()).public_bytes(serialization.Encoding.DER)
-            for path in (leaf_path, root_path)
-        ]
-
     issued_sd_jwt = issue_stored_credential(
         organization=organization,
         roles=roles,
@@ -267,8 +239,6 @@ def issue_access_credential(
         issuer_did=issuer_did,
         statuslist_service_base=statuslist_service_base,
         statuslist_tenant=statuslist_tenant,
-        issuer_x5c_chain_der=issuer_x5c_chain_der,
-        status_index_salt=nonce,
     )
     return attach_key_binding(
         issued_sd_jwt=issued_sd_jwt,

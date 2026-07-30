@@ -108,7 +108,7 @@ def step_executor_observations_reset(context):
 @given('the reference ORCE audit executor is reachable and returns "{mode}"')
 def step_reference_executor_mode(context, mode):
     _reset(context)
-    _set_mode(context, mode.replace(" ", "_"))
+    _set_mode(context, mode.replace(" ", "_").replace("-", "_"))
 
 
 @given("the reference ORCE audit executor is reachable and returns a valid result with a receipt")
