@@ -33,9 +33,6 @@ var genesisProfile []byte
 //go:embed assets/facis-dcs-clause-catalog.ttl
 var genesisClauseCatalog []byte
 
-//go:embed assets/facis-dcs-ontology.ttl
-var genesisOntology []byte
-
 //go:embed assets/facis-sla-ontology.ttl
 var genesisSLAOntology []byte
 
@@ -47,11 +44,18 @@ var genesisODRLProfile []byte
 // independently-versioned kind="shapes" entry (Phase 3, ADR-10): typed
 // clause NodeShapes the template builder's palette (GET /semantic/clauses)
 // and contract validation (validateAgainstHubShapes) both read.
+//
+// The dcs: envelope vocabulary has no ontology entry. What constrains an
+// envelope term is ShapesName, the only graph documents are validated
+// against; there is no second, OWL-shaped declaration of those terms.
+// Both kind="ontology" entries below are parsed RDF configuration, not
+// axioms: SLAOntologyName is the dcs:DomainField index the field picker
+// and the audit's canonical-field check read, ODRLProfileName the operator
+// vocabulary the obligation editor reads.
 const (
 	ContextName       = "facis-dcs"
 	ShapesName        = "facis-dcs"
 	ProfileName       = "facis.sla.basic"
-	OntologyName      = "facis-dcs"
 	SLAOntologyName   = "facis-sla"
 	ODRLProfileName   = "dcs-odrl-profile"
 	ClauseCatalogName = "clause-catalog"
@@ -257,7 +261,6 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 		{ShapesName, "shapes", "text/turtle", genesisShapes},
 		{ProfileName, "profile", "application/yaml", genesisProfile},
 		{ClauseCatalogName, "shapes", "text/turtle", genesisClauseCatalog},
-		{OntologyName, "ontology", "text/turtle", genesisOntology},
 		{SLAOntologyName, "ontology", "text/turtle", genesisSLAOntology},
 		{ODRLProfileName, "ontology", "text/turtle", genesisODRLProfile},
 	}

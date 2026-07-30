@@ -875,11 +875,6 @@ func (s *service) ontologyContext(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(ontologyContext)
 }
 
-func (s *service) ontologyOwl(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/turtle; charset=utf-8")
-	_, _ = w.Write(ontologyOWL)
-}
-
 // readMultipartParts reads all parts from a multipart body into a map keyed by form field name.
 func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, error) {
 	parts := make(map[string][]byte)

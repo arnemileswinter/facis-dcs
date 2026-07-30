@@ -242,7 +242,7 @@ var _ = Service("SemanticHub", func() {
 	})
 
 	Method("resolve_ontology", func() {
-		Description("Serve a registered ontology version — the dereference target of the dcs: term IRIs (via the w3id.org redirect) and of /semantic/ontology/{name} directly.")
+		Description("Serve a registered ontology version — the dereference target of the dcst: taxonomy IRIs (via the w3id.org redirect) and of /semantic/ontology/{name} directly. Ontology entries are parsed configuration (the domain-field index, the ODRL operator vocabulary), not axioms: what constrains a dcs: envelope term is the shapes graph, served by resolve_shapes.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
 		NoSecurity()
 
