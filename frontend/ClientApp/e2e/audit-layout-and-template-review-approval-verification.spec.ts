@@ -106,6 +106,50 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     expect(new Set(boxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1)
   })
 
+  test('AC4 Audit enables export only after a successful current-scope run and clears filtered selection', async ({
+    page,
+  }) => {
+    await authenticate(page, 'Auditor')
+    let failAudit = true
+    await page.route('**/pac/audit', (route) => {
+      if (failAudit) return json(route, { message: 'executor unavailable' }, 500)
+      return json(route, {
+        audit_id: 'audit-1',
+        correlation_id: 'correlation-1',
+        executed_at: '2026-07-30T08:00:00Z',
+        scope: 'contracts',
+        executor: { id: 'policy-engine', version: '1' },
+        resource: { did: 'did:web:example.test:contract-1' },
+        findings: [{ rule_id: 'RULE-1', result: 'FAILED', reason: 'Policy mismatch' }],
+      })
+    })
+    await page.goto('/ui/audit')
+    await page.getByLabel('Audit justification').fill('Focused verification')
+    await expect(page.getByText('Failed Checks')).toHaveCount(0)
+    const exports = page.getByRole('button', { name: /^(JSON|CSV|PDF)$/ })
+    for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
+
+    await page.getByRole('button', { name: 'Execute Audit' }).click()
+    await expect(page.getByRole('alert')).toContainText(/executor unavailable/i)
+    await expect(page.getByText('Failed Checks')).toHaveCount(0)
+    for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
+
+    failAudit = false
+    await page.getByRole('button', { name: 'Execute Audit' }).click()
+    await expect(page.getByText('Policy mismatch')).toBeVisible()
+    await expect(page.getByText('Failed Checks').locator('..')).toContainText('1')
+    for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeEnabled()
+    await page.getByText('Policy mismatch').click()
+    await expect(page.getByRole('heading', { name: 'Finding Details' }).locator('..')).toContainText('RULE-1')
+
+    await page.getByRole('button', { name: /Component/ }).click()
+    await page.getByRole('button', { name: 'None' }).click()
+    await expect(page.getByText('Select a row to inspect the corresponding audit evidence.')).toBeVisible()
+
+    await page.getByLabel('DID (optional)').fill('did:web:example.test:other')
+    for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()
+  })
+
   test('AC1/AC2/AC3 Compliance keeps list bounded and JSON/PDF exports visible in one row', async ({ page }) => {
     await authenticate(page, 'Auditor')
     const longDid = `did:web:example.test:${'contract-segment-'.repeat(14)}`

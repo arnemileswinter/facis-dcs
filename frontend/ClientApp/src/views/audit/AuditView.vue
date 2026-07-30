@@ -11,7 +11,7 @@ import type { AuditFinding } from '@/models/responses/auditing-response'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
-const executedAuditScopes = ref<Partial<Record<AuditScope, boolean>>>({})
+const successfulAuditQueries = ref<Partial<Record<AuditScope, string>>>({})
 const selectedFindingId = ref<number | string | null>(null)
 const auditLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingScope = ref<AuditScope | null>(null)
@@ -66,7 +66,8 @@ watch(
 
 const findings = computed(() => auditFindingsByScope.value[selectedScope.value] ?? [])
 const error = computed(() => auditErrorsByScope.value[selectedScope.value] ?? null)
-const hasExecutedAudit = computed(() => executedAuditScopes.value[selectedScope.value] === true)
+const currentAuditQuery = computed(() => `${selectedScope.value}:${didFilter.value.trim()}`)
+const hasExecutedAudit = computed(() => successfulAuditQueries.value[selectedScope.value] === currentAuditQuery.value)
 const auditLoading = computed(() => auditLoadingScope.value !== null)
 const reportLoading = computed(() => reportLoadingScope.value !== null)
 const selectedAuditLoading = computed(() => auditLoadingScope.value === selectedScope.value)
@@ -84,6 +85,14 @@ const filteredFindings = computed(() => {
 })
 const selectedFinding = computed(() => {
   return findings.value.find((finding) => String(finding.id) === String(selectedFindingId.value)) ?? null
+})
+watch(filteredFindings, (visibleFindings) => {
+  if (
+    selectedFindingId.value !== null &&
+    !visibleFindings.some((finding) => String(finding.id) === String(selectedFindingId.value))
+  ) {
+    selectedFindingId.value = null
+  }
 })
 const selectedFindingDetailRows = computed(() => {
   const finding = selectedFinding.value
@@ -112,9 +121,15 @@ const selectedFindingDetailRows = computed(() => {
   ].filter((row) => row.value !== emptyValueLabel)
 })
 
-const failedCheckCount = computed(() => findings.value.filter((finding) => auditResult(finding) === 'failed').length)
-const passedCheckCount = computed(() => findings.value.filter((finding) => auditResult(finding) === 'passed').length)
-const reviewCheckCount = computed(() => findings.value.filter((finding) => auditResult(finding) === 'review').length)
+const failedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'failed').length : 0,
+)
+const passedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'passed').length : 0,
+)
+const reviewCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'review').length : 0,
+)
 const auditIsEmpty = computed(() => hasExecutedAudit.value && findings.value.length === 0 && !error.value)
 const auditHasPassed = computed(
   () =>
@@ -176,9 +191,12 @@ watchDebounced(
 
 const executeAudit = async () => {
   const scope = selectedScope.value
+  const query = currentAuditQuery.value
   auditLoadingScope.value = scope
   auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: undefined }
-  executedAuditScopes.value = { ...executedAuditScopes.value, [scope]: true }
+  successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: undefined }
+  auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: [] }
+  selectedFindingId.value = null
   try {
     const scopeFindings = await auditingService.audit({
       scope,
@@ -186,6 +204,7 @@ const executeAudit = async () => {
       justification: justification.value.trim(),
     })
     auditFindingsByScope.value = { ...auditFindingsByScope.value, [scope]: scopeFindings }
+    successfulAuditQueries.value = { ...successfulAuditQueries.value, [scope]: query }
     selectedFindingId.value = null
   } catch (err) {
     console.error('Audit Error:', err)
@@ -429,7 +448,10 @@ function formatDateTime(value?: string): string {
 
   <section class="space-y-4 px-4">
     <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
-      <div class="stats max-w-full stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal">
+      <div
+        v-if="hasExecutedAudit"
+        class="stats max-w-full stats-vertical border border-base-content/10 bg-base-200 sm:stats-horizontal"
+      >
         <div class="stat">
           <div class="stat-title flex items-center gap-2 text-base-content/70">
             <span class="size-2 rounded-full bg-error/50"></span>
@@ -536,12 +558,12 @@ function formatDateTime(value?: string): string {
       </div>
     </div>
 
-    <div v-if="selectedAuditLoading" class="p-4">Executing audit...</div>
-    <div v-else-if="error" class="alert rounded-box alert-error">{{ error }}</div>
-    <div v-if="auditHasPassed" class="alert rounded-box alert-success">
+    <div v-if="selectedAuditLoading" class="p-4" role="status">Executing audit...</div>
+    <div v-else-if="error" class="alert rounded-box alert-error" role="alert">{{ error }}</div>
+    <div v-if="auditHasPassed" class="alert rounded-box alert-success" role="status">
       Audit passed. No failed checks or review findings were returned.
     </div>
-    <div v-if="auditIsEmpty" class="alert rounded-box alert-info">
+    <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
       Audit completed successfully. No matching entries were found.
     </div>
 
