@@ -60,10 +60,25 @@ export function newGroup(): GroupDraft {
   return { kind: 'group', combine: 'and', children: [] }
 }
 
-function typed(value: string): JsonLdTypedValue {
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return { '@value': value, '@type': 'xsd:dateTime' }
-  const isNumber = value !== '' && !Number.isNaN(Number(value))
-  return { '@value': value, '@type': isNumber ? 'xsd:decimal' : 'xsd:string' }
+/** ISO-8601 duration (XSD 1.1 xsd:duration lexical space): at least one
+ *  component, and a T section, when present, is non-empty. */
+const ISO_DURATION = /^-?P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/
+
+/** The XSD datatype a typed-in boundary literal carries, so a target system
+ *  evaluating the constraint can tell a duration from a label and an integral
+ *  count from a decimal amount. */
+function literalDatatype(value: string): string {
+  if (/^-?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return 'xsd:dateTime'
+  if (/^-?\d{4}-\d{2}-\d{2}$/.test(value)) return 'xsd:date'
+  if (ISO_DURATION.test(value)) return 'xsd:duration'
+  if (value !== '' && !Number.isNaN(Number(value))) {
+    return /^[+-]?\d+$/.test(value) ? 'xsd:integer' : 'xsd:decimal'
+  }
+  return 'xsd:string'
+}
+
+export function typed(value: string): JsonLdTypedValue {
+  return { '@value': value, '@type': literalDatatype(value) }
 }
 
 function isSetOperator(operator: string): boolean {
