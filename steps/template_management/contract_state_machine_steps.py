@@ -319,7 +319,11 @@ def _revoke_signature(context, name):
     resp = post_json(
         context,
         signature_revoke_url(context),
-        {"did": did, "signer_did": signatures[0]["signer_did"]},
+        {
+            "did": did,
+            "signer_did": signatures[0]["signer_did"],
+            "reason": "BDD setup to reach REVOKED state",
+        },
         headers=manager_h,
     )
     assert resp.status_code == 200, (

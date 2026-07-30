@@ -128,6 +128,7 @@ func (e AuditEvt) GetDID() string {
 type RevokeEvent struct {
 	DID             string             `json:"did"`
 	ContractVersion int                `json:"contract_version,omitempty"`
+	Reason          string             `json:"reason"`
 	RevokedBy       string             `json:"revoked_by"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	HolderDID       string             `json:"holder_did"`

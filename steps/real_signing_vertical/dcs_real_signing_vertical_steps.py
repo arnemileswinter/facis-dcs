@@ -578,7 +578,11 @@ def step_when_revoke_post_sign_update(context, name):
     context.requests_response = post_json(
         context,
         signature_revoke_url(context),
-        {"did": did, "signer_did": signer_did},
+        {
+            "did": did,
+            "signer_did": signer_did,
+            "reason": "Post-sign C2PA lifecycle revocation",
+        },
         headers=manager_h,
     )
 

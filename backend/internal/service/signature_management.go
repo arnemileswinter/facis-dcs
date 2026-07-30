@@ -72,6 +72,7 @@ func mapSignatureCommandError(err error) error {
 		return signaturemanagement.MakeSignatureInvalid(err)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
+		errors.Is(err, command.ErrRevocationReasonRequired) ||
 		errors.Is(err, command.ErrUnknownSignatureField) ||
 		errors.Is(err, command.ErrFieldAlreadySigned) ||
 		errors.Is(err, command.ErrCeremonyNotPrepared) ||
@@ -575,6 +576,10 @@ func mapDSSReport(r *dss.Report) *signaturemanagement.SMDSSReport {
 }
 
 func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemanagement.SMContractRevokeRequest) (res *signaturemanagement.SMContractRevokeResponse, err error) {
+	reason, err := command.NormalizeRevocationReason(req.Reason)
+	if err != nil {
+		return nil, signaturemanagement.MakeBadRequest(err)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -582,6 +587,7 @@ func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemana
 	qry := command.RevokeCmd{
 		DID:       req.Did,
 		SignerDID: req.SignerDid,
+		Reason:    reason,
 		RevokedBy: middleware.GetParticipantID(ctx),
 		HolderDID: middleware.GetHolderDID(ctx),
 		UserRoles: middleware.GetUserRoles(ctx),

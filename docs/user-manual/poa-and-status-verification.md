@@ -39,7 +39,8 @@ Vertragszustand (`terminated`) sichtbar, während der Live-Status zugleich
 ## Vertragsstatus veröffentlichen und prüfen
 
 1. Beenden Sie als Vertragsmanager den Vertrag oder widerrufen Sie eine
-   Signatur.
+   Signatur. Geben Sie beim Signaturwiderruf einen nachvollziehbaren Grund ein
+   und bestätigen Sie den Vorgang.
 2. Die Statusänderung wird dauerhaft zur Veröffentlichung vorgemerkt und bei
    vorübergehenden Fehlern erneut versucht.
 3. Exportieren und verifizieren Sie den Vertrag.
@@ -62,6 +63,8 @@ einer frischen Prüfung berücksichtigt.
 - **Widerrufene oder suspendierte Vollmacht:** Die Signatur wird nicht
   fortgesetzt. Im binären Demo-/XFSC-Statusmodell werden beide Fälle als
   gesetzte Sperre behandelt.
+- **Fehlender Widerrufsgrund:** Ein leerer oder nur aus Leerzeichen bestehender
+  Grund wird nicht akzeptiert; die Signatur bleibt unverändert.
 - **Fehlender, unbekannter oder ungültiger Statusnachweis:** Die Prüfung wird
   aus Sicherheitsgründen abgelehnt.
 - **Statusdienst nicht erreichbar:** Die PDF-Verifikation meldet den

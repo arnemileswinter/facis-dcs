@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from 'vue'
+import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import {
   type SignatureAuditEntry,
   type SignatureComplianceResult,
@@ -38,6 +39,7 @@ const canAudit = computed(
 
 const contracts = ref<SignatureContract[]>([])
 const loadingContracts = ref(false)
+const contractsLoaded = ref(false)
 const error = ref<string | null>(null)
 
 const search = ref('')
@@ -51,10 +53,22 @@ const activeTab = ref<Tab>('validation')
 
 const view = ref<SignatureViewResult | null>(null)
 const loadingView = ref(false)
+const viewLoaded = ref(false)
 const validateResult = ref<SignatureValidateResult | null>(null)
 const complianceResult = ref<SignatureComplianceResult | null>(null)
 const auditEntries = ref<SignatureAuditEntry[] | null>(null)
 const busy = ref(false)
+const pendingRevocations = ref(new Set<string>())
+const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
+let viewRequestSequence = 0
+const canExport = computed(
+  () =>
+    selected.value !== null &&
+    viewLoaded.value &&
+    view.value !== null &&
+    !loadingView.value &&
+    pendingRevocations.value.size === 0,
+)
 
 const statuses = computed(() => {
   const set = new Set<string>()
@@ -77,6 +91,7 @@ onMounted(async () => {
   loadingContracts.value = true
   try {
     contracts.value = await signatureManagementService.retrieveContracts()
+    contractsLoaded.value = true
   } catch {
     error.value = 'Failed to load contracts.'
   } finally {
@@ -85,19 +100,26 @@ onMounted(async () => {
 })
 
 async function selectContract(contract: SignatureContract) {
+  const requestSequence = ++viewRequestSequence
   selected.value = contract
+  error.value = null
   activeTab.value = 'validation'
   view.value = null
+  viewLoaded.value = false
   validateResult.value = null
   complianceResult.value = null
   auditEntries.value = null
   loadingView.value = true
   try {
-    view.value = await signatureManagementService.getSignatureView(contract.did)
+    const loadedView = await signatureManagementService.getSignatureView(contract.did)
+    if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
+    view.value = loadedView
+    viewLoaded.value = true
   } catch (e: unknown) {
+    if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
     error.value = `Failed to load signature data: ${e instanceof Error ? e.message : String(e)}`
   } finally {
-    loadingView.value = false
+    if (requestSequence === viewRequestSequence) loadingView.value = false
   }
 }
 
@@ -129,16 +151,46 @@ async function runCompliance() {
 
 async function revoke(sig: SignatureViewItem) {
   if (!selected.value) return
-  busy.value = true
+  const contractDid = selected.value.did
+  const key = `${contractDid}:${sig.signer_did}`
+  if (pendingRevocations.value.has(key)) return
+  const result = await confirmationModal.value?.reveal({
+    message: `Revoke the signature by ${sig.signer_did}? This action is recorded in the audit trail.`,
+    editor: { requiredText: true, placeholder: 'Reason for revocation' },
+  })
+  const reason = result?.data?.trim()
+  if (!result || result.isCanceled || !reason) return
+  pendingRevocations.value = new Set(pendingRevocations.value).add(key)
   error.value = null
   try {
-    await signatureManagementService.revokeSignature(selected.value.did, sig.signer_did)
-    view.value = await signatureManagementService.getSignatureView(selected.value.did)
+    await signatureManagementService.revokeSignature(contractDid, sig.signer_did, reason)
+    if (selected.value?.did !== contractDid) return
+
+    const requestSequence = ++viewRequestSequence
+    view.value = null
+    viewLoaded.value = false
+    loadingView.value = true
+    try {
+      const refreshedView = await signatureManagementService.getSignatureView(contractDid)
+      if (requestSequence !== viewRequestSequence || selected.value?.did !== contractDid) return
+      view.value = refreshedView
+      viewLoaded.value = true
+    } finally {
+      if (requestSequence === viewRequestSequence) loadingView.value = false
+    }
   } catch (e: unknown) {
-    error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
+    if (selected.value?.did === contractDid) {
+      error.value = `Revocation failed: ${e instanceof Error ? e.message : String(e)}`
+    }
   } finally {
-    busy.value = false
+    const next = new Set(pendingRevocations.value)
+    next.delete(key)
+    pendingRevocations.value = next
   }
+}
+
+function revocationPending(sig: SignatureViewItem): boolean {
+  return selected.value ? pendingRevocations.value.has(`${selected.value.did}:${sig.signer_did}`) : false
 }
 
 async function loadAudit() {
@@ -311,7 +363,7 @@ function exportPdf() {
   </div>
 
   <div class="p-4">
-    <div v-if="error" class="mb-4 alert alert-error">{{ error }}</div>
+    <div v-if="error" class="mb-4 alert alert-error" role="alert">{{ error }}</div>
 
     <div class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
       <!-- Contract list: filter/search signed contracts by compliance status -->
@@ -336,8 +388,13 @@ function exportPdf() {
           </select>
         </div>
 
-        <div v-if="loadingContracts" class="text-base-content/70">Loading contracts…</div>
-        <div v-else-if="filteredContracts.length === 0" class="text-base-content/70">No contracts match.</div>
+        <div v-if="loadingContracts" class="text-base-content/70" role="status">Loading contracts…</div>
+        <div v-else-if="contractsLoaded && contracts.length === 0" class="text-base-content/70" role="status">
+          No signed contracts are available.
+        </div>
+        <div v-else-if="contractsLoaded && filteredContracts.length === 0" class="text-base-content/70" role="status">
+          No contracts match the current filters.
+        </div>
         <ul v-else class="menu w-full min-w-0 overflow-x-hidden rounded-box bg-base-200 p-1">
           <li v-for="contract in filteredContracts" :key="contract.did" class="max-w-full min-w-0 overflow-hidden">
             <button
@@ -396,14 +453,18 @@ function exportPdf() {
               </button>
             </div>
             <div class="flex shrink-0 flex-nowrap gap-2">
-              <button class="btn whitespace-nowrap btn-outline btn-sm" @click="exportJson">Export JSON</button>
-              <button class="btn whitespace-nowrap btn-outline btn-sm" @click="exportPdf">Export PDF</button>
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportJson">
+                Export JSON
+              </button>
+              <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportPdf">
+                Export PDF
+              </button>
             </div>
           </div>
 
-          <div v-if="loadingView" class="text-base-content/60">Loading signature data…</div>
+          <div v-if="loadingView" class="text-base-content/60" role="status">Loading signature data…</div>
 
-          <template v-else>
+          <template v-else-if="viewLoaded && view">
             <!-- Validation tab: trust anchors, crypto integrity, timestamps -->
             <div v-if="activeTab === 'validation'" class="space-y-4">
               <div class="flex items-center gap-2">
@@ -485,10 +546,10 @@ function exportPdf() {
                     <td>
                       <button
                         class="btn btn-outline btn-xs btn-error"
-                        :disabled="!canManage || busy || sig.status.toUpperCase() === 'REVOKED'"
+                        :disabled="!canManage || revocationPending(sig) || sig.status.toUpperCase() === 'REVOKED'"
                         @click="revoke(sig)"
                       >
-                        Revoke
+                        {{ revocationPending(sig) ? 'Revoking…' : 'Revoke' }}
                       </button>
                     </td>
                   </tr>
@@ -628,4 +689,5 @@ function exportPdf() {
       </div>
     </div>
   </div>
+  <ConfirmationModal ref="confirmation-modal" />
 </template>

@@ -223,8 +223,9 @@ var SMContractRevokeRequest = Type("SMContractRevokeRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("signer_did", String, "DID of the signer whose signature should be revoked")
+	Attribute("reason", String, "Reason for revoking the signature", func() { MinLength(1) })
 
-	Required("did", "signer_did")
+	Required("did", "signer_did", "reason")
 })
 
 var SMContractRevokeResponse = Type("SMContractRevokeResponse", func() {

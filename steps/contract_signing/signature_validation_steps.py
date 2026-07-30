@@ -70,7 +70,12 @@ def step_when_applied_signature_revoked(context, name):
     signer_did = signatures[0]["signer_did"]
     context.requests_response = post_json(
         context, signature_revoke_url(context),
-        {"did": did, "signer_did": signer_did}, headers=manager_h,
+        {
+            "did": did,
+            "signer_did": signer_did,
+            "reason": "Compliance check revocation",
+        },
+        headers=manager_h,
     )
 
 

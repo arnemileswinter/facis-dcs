@@ -273,8 +273,8 @@ export const signatureManagementService = {
     return http.get<SignatureViewResult>('/signature/view', { params: { did } }).then((res) => res.data)
   },
 
-  async revokeSignature(did: string, signerDid: string): Promise<void> {
-    await http.post('/signature/revoke', { did, signer_did: signerDid })
+  async revokeSignature(did: string, signerDid: string, reason: string): Promise<void> {
+    await http.post('/signature/revoke', { did, signer_did: signerDid, reason })
   },
 
   async getAudit(did: string): Promise<SignatureAuditEntry[]> {

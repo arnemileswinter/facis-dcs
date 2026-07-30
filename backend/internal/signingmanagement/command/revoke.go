@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -22,9 +23,22 @@ import (
 	signingmanagementevents "digital-contracting-service/internal/signingmanagement/event"
 )
 
+// ErrRevocationReasonRequired prevents a revocation without an auditable reason.
+var ErrRevocationReasonRequired = errors.New("revocation reason is required")
+
+// NormalizeRevocationReason removes transport whitespace and rejects an empty reason.
+func NormalizeRevocationReason(reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "", ErrRevocationReasonRequired
+	}
+	return reason, nil
+}
+
 type RevokeCmd struct {
 	DID       string
 	SignerDID string
+	Reason    string
 	RevokedBy string
 	HolderDID string
 	UserRoles userrole.UserRoles
@@ -36,6 +50,11 @@ type Revoker struct {
 }
 
 func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
+	reason, err := NormalizeRevocationReason(cmd.Reason)
+	if err != nil {
+		return err
+	}
+	cmd.Reason = reason
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -77,6 +96,7 @@ func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
 	evt := signingmanagementevents.RevokeEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
+		Reason:          cmd.Reason,
 		RevokedBy:       cmd.RevokedBy,
 		OccurredAt:      occurredAt,
 		HolderDID:       cmd.HolderDID,
@@ -90,7 +110,7 @@ func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
 	if err != nil {
 		return err
 	}
-	if err := statuspublication.EnqueueTx(ctx, tx, cmd.DID, status, "signature revoked", occurredAt); err != nil {
+	if err := statuspublication.EnqueueTx(ctx, tx, cmd.DID, status, cmd.Reason, occurredAt); err != nil {
 		return err
 	}
 
