@@ -358,6 +358,7 @@ done
 export BDD_ORCE_ARCHIVE_NOTARY_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive/notary"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive-audit-events.jsonl"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN="$ORCE_TOKEN"
+export BDD_ORCE_AUDIT_CONTROL_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit-executor/test"
 export BDD_ORCE_NAMESPACE="$K8S_NAMESPACE"
 export BDD_ORCE_DEPLOYMENT="$ORCE_DEPLOYMENT"
 export BDD_KUBECTL="$KUBECTL_BIN"

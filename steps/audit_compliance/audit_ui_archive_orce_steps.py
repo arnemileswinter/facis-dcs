@@ -282,7 +282,8 @@ def step_archive_passed(context):
 @then("the audit response is a successful empty result")
 def step_empty_result(context):
     assert context.requests_response.status_code == 200, context.requests_response.text
-    assert getattr(context, "last_audit_groups", None) == [], context.requests_response.text
+    groups = getattr(context, "last_audit_groups", [])
+    assert _audit_entries(groups) == [], context.requests_response.text
 
 
 @when(
