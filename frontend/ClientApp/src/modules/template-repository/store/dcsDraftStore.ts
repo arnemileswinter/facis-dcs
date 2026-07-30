@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { TemplateType } from '@template-repository/models/contract-template'
-import { ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
+import { ONTOLOGY_ASSETS, ONTOLOGY_DOMAIN_FIELDS } from '@template-repository/utils/ontology-domain-fields'
 import { DCS_ODRL_PROFILE_IRI, DEFAULT_FIELD_CONSTRAINT_ACTION } from '@template-repository/utils/sla-ontology-catalog'
 import { applyInlineSemanticValues } from '@contract-workflow-engine/utils/semantic-condition-values'
 import {
@@ -39,6 +39,7 @@ import type {
 import type { DcsOperator } from '@/models/semantic/facis-dcs-semantic'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type {
+  DomainFieldDefinition,
   MetaData,
   SemanticCondition,
   SemanticConditionParameter,
@@ -454,8 +455,16 @@ export const useDcsDraftStore = defineStore(storeId, {
       rule: OdrlRule | null
     }): void {
       const blockId = this.addClause({ title: payload.title, content: payload.content })
+      // A field brought in with a declared asset is described by that class's
+      // property shape, not by a flat ontology domain field.
+      const assetClassByFieldId = new Map<string, string>()
+      for (const asset of payload.assets ?? []) {
+        for (const property of asset.properties) assetClassByFieldId.set(property.fieldId, asset.classIri)
+      }
       for (const f of payload.fields) {
-        this.contractFields.push(contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri, f.label))
+        this.contractFields.push(
+          contractFieldFromDomainField(f.id, f.parameterName, f.domainFieldIri, f.label, assetClassByFieldId.get(f.id)),
+        )
       }
       for (const asset of payload.assets ?? []) {
         this.contractData.push({
@@ -1162,6 +1171,11 @@ function xsdToParamType(
     case 'xsd:date':
     case 'xsd:dateTime':
       return 'date'
+    // A duration is typed as free text (an ISO-8601 token, "P14D"), but the
+    // field keeps its declared xsd:duration — the parameter type only picks
+    // the input widget, and PARAM_TYPE_TO_XSD is never applied to a field
+    // that already declares its own datatype.
+    case 'xsd:duration':
     case 'xsd:string':
       return hasOptions ? 'enum' : 'string'
   }
@@ -1191,19 +1205,38 @@ function semanticParamToContractField(
   }
 }
 
+/** The hub definition a picked field derives from: a flat ontology domain
+ *  field, or — when the field came in with a declared asset — the property
+ *  shape the asset's class declares for that path, so the shape's datatype
+ *  (sh:datatype) and value constraints (sh:in, sh:minInclusive/sh:maxInclusive,
+ *  sh:pattern) reach the emitted field. */
+function hubFieldDefinition(domainFieldIri: string, classIri?: string): DomainFieldDefinition | undefined {
+  const owner = classIri ? ONTOLOGY_ASSETS.find((asset) => asset.id === classIri) : undefined
+  return (
+    owner?.properties.find((property) => property.ontologyId === domainFieldIri) ??
+    ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri) ??
+    ONTOLOGY_ASSETS.flatMap((asset) => asset.properties).find((property) => property.ontologyId === domainFieldIri)
+  )
+}
+
 /** Builds a ContractField for a clause-editor field binding. */
 function contractFieldFromDomainField(
   id: string,
   parameterName: string,
   domainFieldIri: string,
   label?: string,
+  classIri?: string,
 ): DcsContractField {
-  const domainField = ONTOLOGY_DOMAIN_FIELDS.find((f) => f.ontologyId === domainFieldIri)
+  const domainField = hubFieldDefinition(domainFieldIri, classIri)
   return {
     '@id': id,
     '@type': 'dcs:ContractField',
     'dcs:label': label ?? domainField?.label ?? parameterName,
-    'dcs:datatype': PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
+    // The hub's declared datatype wins: the parameter type is the input
+    // widget, whose vocabulary has no duration and no instant, so deriving
+    // the datatype from it silently rewrites an imported xsd:duration field
+    // to xsd:string and every boundary over it then compares bytes.
+    'dcs:datatype': domainField?.datatype ?? PARAM_TYPE_TO_XSD[domainField?.type ?? 'string'],
     'dcs:shape': { '@id': domainFieldIri },
     'dcs:required': true,
     ...(domainField?.valueConstraint
@@ -1327,22 +1360,17 @@ function contractFieldsToSemanticConditions(
       if (!isStandardOdrlOperator(operate)) continue
       const rightOperand = constraint['odrl:rightOperand']
       // A right operand may be a bare literal (95), a typed value ({@value}), a
-      // field reference ({@id} — a negotiated boundary, not a fixed target), or
-      // a list. Only an OBJECT can be probed with `in`; guarding it keeps a
-      // primitive operand from throwing and blanking the whole clause render.
-      const isReference =
-        typeof rightOperand === 'object' &&
-        rightOperand !== null &&
-        !Array.isArray(rightOperand) &&
-        '@id' in rightOperand
-      const targets =
-        rightOperand === undefined || isReference
-          ? []
-          : Array.isArray(rightOperand)
-            ? rightOperand.map(jsonLdValue)
-            : [jsonLdValue(rightOperand)]
+      // field reference ({@id} — a negotiated boundary whose bound is whatever
+      // that field ends up holding), or a list of those. Only an OBJECT can be
+      // probed with `in`; guarding it keeps a primitive operand from throwing
+      // and blanking the whole clause render.
+      const operands = rightOperand === undefined ? [] : Array.isArray(rightOperand) ? rightOperand : [rightOperand]
+      const isReference = (operand: (typeof operands)[number]): operand is JsonLdReference =>
+        typeof operand === 'object' && operand !== null && '@id' in operand
+      const targets = operands.filter((operand) => !isReference(operand)).map(jsonLdValue)
+      const targetRefs = operands.filter(isReference).map((operand) => operand['@id'])
       const fieldId = constraint['odrl:leftOperand']['@id']
-      operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets }])
+      operatorsByField.set(fieldId, [...(operatorsByField.get(fieldId) ?? []), { operate, targets, targetRefs }])
     }
   }
 
@@ -1446,9 +1474,12 @@ function jsonLdValue(value: JsonLdTypedValue | JsonLdReference): unknown {
       return Number(value['@value'])
     case 'xsd:boolean':
       return value['@value'] === 'true'
-    case 'xsd:string':
-    case 'xsd:date':
-    case 'xsd:dateTime':
+    // Every other datatype keeps its lexical form. The switch used to list
+    // the cases it knew and fall off the end for the rest, which turned an
+    // xsd:duration boundary into `undefined` — the bound vanished and the
+    // constraint reported "Expected <= undefined" against every value.
+    // compareXsdValues orders the lexical form inside its own value space.
+    default:
       return value['@value']
   }
 }

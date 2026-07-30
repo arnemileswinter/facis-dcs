@@ -25,8 +25,81 @@ export interface DcsContractMetadata {
   'dcs:customMetaData'?: unknown[]
 }
 
-/** An XSD datatype declared by a contract field. */
-export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime'}`
+/** An XSD datatype declared by a contract field. Every member is a value
+ *  space DCS can order, so an ODRL boundary stated over the field has a
+ *  defined answer. */
+export type XsdDatatype = `xsd:${'string' | 'decimal' | 'integer' | 'boolean' | 'date' | 'dateTime' | 'duration'}`
+
+const XSD = 'http://www.w3.org/2001/XMLSchema#'
+
+/**
+ * The XSD datatypes an imported library may declare, each mapped to the
+ * compact term a dcs:ContractField carries. A member maps only where the two
+ * share a value space: the integer and decimal families keep their numeric
+ * order, the string family its lexical order, durations stay durations.
+ * Anything else in the XSD namespace is a datatype DCS cannot order — reading
+ * it as a string turns "PT6H <= PT24H" into a byte comparison that answers,
+ * and answers wrong — so compactXsdDatatype rejects it rather than coercing.
+ */
+const XSD_TO_COMPACT: Readonly<Record<string, XsdDatatype>> = {
+  string: 'xsd:string',
+  normalizedString: 'xsd:string',
+  token: 'xsd:string',
+  language: 'xsd:string',
+  Name: 'xsd:string',
+  NCName: 'xsd:string',
+  NMTOKEN: 'xsd:string',
+  anyURI: 'xsd:string',
+  hexBinary: 'xsd:string',
+  base64Binary: 'xsd:string',
+  decimal: 'xsd:decimal',
+  double: 'xsd:decimal',
+  float: 'xsd:decimal',
+  integer: 'xsd:integer',
+  int: 'xsd:integer',
+  long: 'xsd:integer',
+  short: 'xsd:integer',
+  byte: 'xsd:integer',
+  nonNegativeInteger: 'xsd:integer',
+  positiveInteger: 'xsd:integer',
+  nonPositiveInteger: 'xsd:integer',
+  negativeInteger: 'xsd:integer',
+  unsignedLong: 'xsd:integer',
+  unsignedInt: 'xsd:integer',
+  unsignedShort: 'xsd:integer',
+  unsignedByte: 'xsd:integer',
+  boolean: 'xsd:boolean',
+  date: 'xsd:date',
+  dateTime: 'xsd:dateTime',
+  dateTimeStamp: 'xsd:dateTime',
+  duration: 'xsd:duration',
+  dayTimeDuration: 'xsd:duration',
+  yearMonthDuration: 'xsd:duration',
+}
+
+/**
+ * The compact term for a declared datatype IRI (absolute or already compact),
+ * or undefined when the IRI names no datatype at all — an rdfs:range that is
+ * a class, an sh:class leaf, an absent declaration.
+ *
+ * Throws for an IRI that IS in the XSD namespace but names a datatype DCS
+ * cannot order. Silently degrading it to xsd:string is the failure this
+ * guards: the declaration is lost, and every later comparison over the field
+ * runs on bytes.
+ */
+export function compactXsdDatatype(iri: string): XsdDatatype | undefined {
+  const local = iri.startsWith(XSD) ? iri.slice(XSD.length) : iri.startsWith('xsd:') ? iri.slice(4) : ''
+  if (!local) return undefined
+  const compact = XSD_TO_COMPACT[local]
+  if (!compact) {
+    throw new Error(
+      `<${iri}> is an XSD datatype DCS cannot order. Reading it as a string would let a policy boundary over ` +
+        'this field compare lexically and answer wrong — declare a supported datatype, or add this one to ' +
+        'XSD_TO_COMPACT and to compareXsdValues in xsd-order.ts.',
+    )
+  }
+  return compact
+}
 
 /** A declared contract field referenced by domain data and clause prose. */
 export interface DcsContractField {
