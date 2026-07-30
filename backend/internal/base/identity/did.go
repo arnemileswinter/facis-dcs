@@ -264,15 +264,16 @@ func (d *DIDDocument) Verify(content []byte, signature []byte) error {
 // VerifyEIDASCertificate validates the x5c certificate chain of the first
 // verification method:
 //
-//  1. Chain validation leaf -> intermediates -> root. trustedRoots
-//     determines the trust anchor; nil means the system trust store.
+//  1. Chain validation leaf -> intermediates -> root against trustPool.
 //  2. The leaf certificate must match the hostname of the DID.
 //  3. The public key of the leaf must match the JWK (x/y).
 //  4. The leaf must carry the eIDAS QcCompliance statement.
 //
-// Note: QCStatements are a self-declaration by the issuer. For a legally
-// binding eIDAS validation, trustedRoots must be populated from the EU
-// Trusted Lists (LOTL/TSL), e.g. via EUTrustPool.Refresh.
+// Steps 1 and 4 are performed only if trustPool holds a populated pool; a nil
+// or unrefreshed pool reduces the check to steps 2 and 3. QCStatements are a
+// self-declaration by the issuer, so a legally binding eIDAS validation
+// additionally requires the pool to be built from the EU Trusted Lists
+// (LOTL/TSL) via EUTrustPool.Refresh.
 func (d *DIDDocument) VerifyEIDASCertificate(trustPool *EUTrustPool) error {
 
 	var trustedRoots *x509.CertPool

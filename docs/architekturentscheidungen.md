@@ -181,15 +181,17 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
 - **Was gilt:** Peer-Vertrauen ruht auf drei Schichten: (1) eIDAS-Zertifikatskette
   im DID-Dokument, validiert gegen den EU-Trust-Pool; (2) Challenge-Response
   mit dem DID-Schlüssel pro Request; (3) Federation-Trust-Gate
-  (Agreement-Credential + Policy-Endpoint, ADR-18/ADR-19). **Warum:** Es
+  (Agreement-Credential + Policy-Endpoint, ADR-19). **Warum:** Es
   gibt keine gemeinsame Auth-Autorität über unabhängige Betreiber hinweg,
   daher kein Shared Token.
 - **Was gilt:** Der EU-Trust-Pool wird aus der LOTL und den nationalen
   Trusted Lists gebaut (nur CA/QC mit Status "granted"), täglich
   aktualisiert; ein fehlgeschlagener Refresh behält den letzten guten Pool.
   Selbstsignierte Zertifikate aus der übermittelten Kette werden nie als
-  Trust-Anchor akzeptiert. QCStatements werden nur bei aktivem Trust-Pool
-  geprüft (`DCS_FORCE_EIDAS_CERT`). **Warum:** QCStatements sind eine
+  Trust-Anchor akzeptiert. Der Pool wird nur bei gesetztem
+  `DCS_FORCE_EIDAS_CERT` gebaut; ohne ihn entfallen Kettenprüfung UND
+  QCStatements-Prüfung, es bleiben Hostname- und JWK-Abgleich — das ist keine
+  eIDAS-Validierung. **Warum:** QCStatements sind eine
   Selbstdeklaration des Ausstellers; rechtlich tragfähig wird die Prüfung
   erst mit den EU Trusted Lists als Anker.
 - **Was gilt:** did:web-Auflösung folgt der Methodenspezifikation exakt:
@@ -631,8 +633,8 @@ Detail-Entscheidungen:
   MISSING_APPROVAL (Vertrag in approval-pending-Zustand mit offener
   Pflicht-Approval-Task), UNAUTHORIZED_ACCESS (persistiertes
   CONTRACT_ACCESS_DENIED-Artefakt des Party-Read-Scopings),
-  UNDERPERFORMANCE (vom Zielsystem gemeldeter KPI-Wert, der die
-  vertragseigene ODRL-SLA-Constraint verletzt) und DEPLOYMENT_FAILED
+  CONTRACT_UNDERPERFORMANCE (vom Zielsystem gemeldeter KPI-Wert, der die
+  vertragseigene ODRL-SLA-Constraint verletzt) und CONTRACT_DEPLOYMENT_FAILED
   (Dispatch, den das Zielsystem nie erreichte). Risiken werden pro
   (Vertrag, Akteur) bzw. (Vertrag, Approver) dedupliziert; der Sweep selbst
   wird als Audit-Event verankert, jedes Risiko zusätzlich an der

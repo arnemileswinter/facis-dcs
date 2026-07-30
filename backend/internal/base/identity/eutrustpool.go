@@ -77,9 +77,9 @@ func NewEUTrustPool() *EUTrustPool {
 }
 
 // Pool returns the current certificate pool, or nil if the pool has never
-// been successfully refreshed. Note that a nil pool makes
-// VerifyEIDASCertificate fall back to the system trust store, which is almost
-// certainly NOT what you want in an eIDAS context.
+// been successfully refreshed. With a nil pool VerifyEIDASCertificate skips
+// both chain validation and the eIDAS QcCompliance check entirely — only
+// hostname and JWK match remain, which is not an eIDAS validation.
 func (t *EUTrustPool) Pool() *x509.CertPool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
