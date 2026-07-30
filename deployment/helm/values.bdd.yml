@@ -89,6 +89,8 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
     # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
     # issuer" scenarios) verifies against this baked-in dev cert.
