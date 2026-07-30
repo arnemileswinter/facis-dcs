@@ -126,12 +126,6 @@ function displayDate(value: unknown): string {
             <div class="card-body">
               <p class="text-sm text-base-content/70">This template is free to use.</p>
               <div class="flex flex-col gap-2 pt-2">
-                <RouterLink
-                  class="btn rounded-box btn-sm btn-primary"
-                  :to="{ name: 'ROUTES.TEMPLATE_CATALOGUES.NEGOTIATION_CREATE', params: { did } }"
-                >
-                  Create Negotiation
-                </RouterLink>
                 <button class="btn rounded-box btn-outline btn-sm" @click="router.back()">Back</button>
               </div>
             </div>
