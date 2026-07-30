@@ -429,7 +429,7 @@ instead, where the message can say what to set.
 {{- $devAllowed = true -}}
 {{- end -}}
 {{- if and $devFixture (not $devAllowed) -}}
-{{- fail "oid4vp.trust: this release would run on the dev trust fixture baked into the image, whose issuer keys are committed to the repository. Set oid4vp.trust.existingConfigMap to a ConfigMap holding this deployment's trust document (see tmp/redeploy/build-trust.py), or, for a dev or CI stack only, add DCS_ALLOW_DEV_TRUST=true to extraEnv." -}}
+{{- fail "oid4vp.trust: this release would run on the dev trust fixture baked into the image, whose issuer keys are committed to the repository. Set oid4vp.trust.existingConfigMap to a ConfigMap holding this deployment's trust document (see deployment/README.md, \"Credential issuers\"), or, for a dev or CI stack only, add DCS_ALLOW_DEV_TRUST=true to extraEnv." -}}
 {{- end -}}
 {{- .Values.oid4vp.trust.dataPath -}}
 {{- end -}}
