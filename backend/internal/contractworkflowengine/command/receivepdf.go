@@ -159,7 +159,15 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err != nil {
 			return fmt.Errorf("could not store carried-over peer PDF in IPFS: %w", err)
 		}
-		c2paState, err := provenance.MapCWEStateToC2PA(data.State)
+		// pdf_c2pa_state describes the STORED ARTIFACT, not this instance's
+		// workflow. The peer ships a PDF it may already have signed while our own
+		// copy starts at OFFERED, so mapping the local state alone files a
+		// PAdES-signed artifact as "draft": a later local terminate, or the expiry
+		// cron, would then see a re-renderable draft and append a C2PA manifest
+		// onto the counterparty's signed bytes. The shipped bytes are in hand
+		// here, so the artifact answers for itself once, at the moment it is
+		// stored, instead of every lifecycle event afterwards having to ask.
+		c2paState, err := provenance.ArtifactC2PAState(data.State, cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)
 		}

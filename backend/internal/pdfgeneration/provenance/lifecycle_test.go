@@ -120,3 +120,44 @@ func TestLifecycleAssertion_OptionalFieldsOmittedWhenEmpty(t *testing.T) {
 	assert.NotContains(t, string(raw), `"reason"`)
 	assert.NotContains(t, string(raw), `"vc_id"`)
 }
+
+// A peer ships a PDF it has already signed, and the receiving instance's own
+// workflow starts over at OFFERED. Recording the local state would file that
+// signed artifact as "draft" — re-renderable — so the next local terminate or
+// expiry would append a C2PA manifest onto the counterparty's signed bytes.
+func TestArtifactC2PAStateFreezesAPeerSignedPDFTheLocalStateCallsADraft(t *testing.T) {
+	signed := []byte("%PDF-1.7\n/Type /Sig /ByteRange [0 840 960 1200]\n")
+
+	for _, localState := range []string{"OFFERED", "NEGOTIATION", "APPROVED"} {
+		state, err := ArtifactC2PAState(localState, signed)
+		require.NoError(t, err)
+		assert.True(t, IsFrozenC2PAState(state),
+			"a PAdES-signed artifact received in %s must be frozen, got %q", localState, state)
+		assert.Equal(t, "active", state)
+	}
+}
+
+// The same receipt without a signature is an ordinary draft artifact: it must
+// stay renderable, or this instance could never render its own first artifact
+// for the contract.
+func TestArtifactC2PAStateLeavesAnUnsignedReceiptRenderable(t *testing.T) {
+	state, err := ArtifactC2PAState("OFFERED", []byte("%PDF-1.7\nno signature here\n"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "draft", state)
+	assert.False(t, IsFrozenC2PAState(state))
+}
+
+// A state that is already frozen says something the signature does not: a
+// revocation ship lands in REVOKED, and its artifact is suspended, not active.
+func TestArtifactC2PAStateKeepsAnAlreadyFrozenState(t *testing.T) {
+	state, err := ArtifactC2PAState("REVOKED", []byte("%PDF-1.7\n/ByteRange [0 1 2 3]\n"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "suspended", state)
+}
+
+func TestCarriesPAdESSignatureDetectsTheByteRange(t *testing.T) {
+	assert.True(t, CarriesPAdESSignature([]byte("/ByteRange [0 840 960 1200]")))
+	assert.False(t, CarriesPAdESSignature([]byte("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n")))
+}

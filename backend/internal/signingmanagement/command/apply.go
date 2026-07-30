@@ -412,6 +412,22 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		}
 	}(tx)
 
+	// Hold the per-contract regeneration lock for the whole acceptance, on the
+	// same key prepare() and the background regenerator use. This is the
+	// transaction that WRITES the signature — SetSignedPDF, the signature row,
+	// the SIGNED state — and the regenerator's decision to leave a contract
+	// alone is read under that lock. Without it the two interleave: the sweep
+	// picks up an APPROVED contract with no stored CID, this transaction spends
+	// seconds in DSS validation, the regenerator takes the free lock, counts no
+	// signature, fresh-renders, and whichever UPDATE commits last owns
+	// pdf_ipfs_cid — an unsigned render over a signed one. Only one lock is ever
+	// taken per transaction, so waiting here cannot deadlock against prepare();
+	// a regenerator that outlasts the bounded wait surfaces as
+	// ErrRegenerationInFlight, a retry-later condition.
+	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return err
+	}
+
 	// SubmitSignature is a pure validate-and-record step (ADR-20): it never
 	// re-runs prepare() — no re-sealing the agreement, no re-issuing the
 	// summary VC, no re-stamping the C2PA lifecycle. Everything it needs was
@@ -897,7 +913,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// exportcontract.go/verifycontract.go never need to touch it again for the
 	// SIGNED/ACTIVE C2PA state (DCS-OR-C2PA-004, DCS-FR-SM-16).
 	rendererVersion := ""
-	if signedCount == 0 && !carriesPAdESSignature(basePDF) {
+	if signedCount == 0 && !provenance.CarriesPAdESSignature(basePDF) {
 		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, *data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)
 		if err != nil {
 			return nil, fmt.Errorf("stamp active lifecycle assertion before signing: %w", err)
@@ -956,7 +972,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, evidence); err != nil {
 			return nil, err
 		}
-	case signedCount == 0 && !carriesPAdESSignature(basePDF):
+	case signedCount == 0 && !provenance.CarriesPAdESSignature(basePDF):
 		// First signature on a multi-signer contract: embed EVERY declared
 		// field's summary VC as a JSON array, so no later signer needs a
 		// post-signature attachment (all-ceremonies-before-first-signature).
@@ -1600,19 +1616,6 @@ func isPeerPartyField(resp *db.Responsible, localDID, field string) bool {
 		return false
 	}
 	return field == resp.Counterparty || field == resp.Creator
-}
-
-// carriesPAdESSignature reports whether pdf already holds a PAdES signature,
-// detected by the signature dictionary's /ByteRange.
-//
-// signedCount counts only signatures recorded in THIS instance's database, so
-// across a federation it is 0 on the counterparty even when the artifact it
-// received already carries the originator's signature. Embedding evidence then
-// mutates an already-signed document — the very thing the multi-signer flow
-// avoids, since an attachment added after a PAdES signature trips diff analysis
-// and breaks PDF/A conformance. The artifact itself is the reliable witness.
-func carriesPAdESSignature(pdf []byte) bool {
-	return bytes.Contains(pdf, []byte("/ByteRange"))
 }
 
 // derefStr returns "" for a nil string pointer.

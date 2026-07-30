@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
 
 // The retry pass has no event to work from — the one that first asked for the
@@ -172,5 +174,30 @@ func TestRegenerationContextIsBounded(t *testing.T) {
 	}
 	if remaining := time.Until(deadline); remaining > regenerationTimeout {
 		t.Fatalf("the deadline must be at most %s away, got %s", regenerationTimeout, remaining)
+	}
+}
+
+// A peer's signature exists only in the peer's database: CountSignedSignatures
+// reads THIS instance's contract_signatures, and the receive path writes no row
+// there. So carriesSignature is false for a counterparty's signed artifact, and
+// a local terminate (allowed from OFFERED/NEGOTIATION/APPROVED) or the expiry
+// cron would otherwise append a C2PA manifest onto its signed bytes. What
+// freezes it is the state receivepdf records for the stored artifact, read from
+// the shipped PDF itself.
+func TestAPeerSignedArtifactIsFrozenWithoutALocalSignatureRow(t *testing.T) {
+	peerSigned := []byte("%PDF-1.7\n/Type /Sig /ByteRange [0 840 960 1200]\n")
+	stored, err := provenance.ArtifactC2PAState("OFFERED", peerSigned)
+	if err != nil {
+		t.Fatalf("map the received artifact's state: %v", err)
+	}
+
+	for _, target := range []string{"terminated", "expired", "draft"} {
+		frozen, err := frozenArtifactVerdict("did:contract:1", "OFFERED", "bafy...", stored, target, unsigned)
+		if err != nil {
+			t.Fatalf("target %s: %v", target, err)
+		}
+		if !frozen {
+			t.Fatalf("target %s: a counterparty's signed artifact must never be re-rendered", target)
+		}
 	}
 }

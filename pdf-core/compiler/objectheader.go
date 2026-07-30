@@ -3,15 +3,16 @@ package compiler
 import (
 	"bytes"
 	"strconv"
+	"strings"
 )
 
 // Locating an indirect object by its id, per ISO 32000-1 7.3.10 and 7.3.8.
 //
 // A definition is "<id> <gen> obj", the tokens separated by ANY run of white
-// space (7.2.3), and it ends at the "endobj" keyword. Every lookup here resolves
-// the definition a reader resolves and reads only bytes belonging to it, because
-// each of the three ways to get that wrong hands a checker bytes the rendered
-// document does not contain:
+// space (7.2.3), followed by one object and — when that object is a stream —
+// its raw data. Every lookup here resolves the definition a reader resolves and
+// reads only bytes belonging to it, because each of the ways to get that wrong
+// hands a checker bytes the rendered document does not contain:
 //
 //   - A bare substring match for "19 0 obj" also hits inside "100019 0 obj", so
 //     a decoy object whose id merely ENDS in the wanted digits supplies the
@@ -19,16 +20,23 @@ import (
 //   - A fixed "%d 0 obj" spelling misses "19  0 obj" and the superseding
 //     "19 1 obj" — a freed and reused object comes back with a raised generation
 //     — and silently falls back to an EARLIER definition.
-//   - A forward scan for the "stream" keyword that is not clipped at the
-//     object's own "endobj" runs into the NEXT object and returns its stream.
-//     "stream\n" alone does it: 7.3.8.1 permits CRLF after the keyword and most
-//     producers emit it, so the object's own stream is stepped over.
+//   - Stream data is arbitrary bytes. Contract text reaches the page content
+//     stream and the contract.jsonld attachment VERBATIM, so a clause that says
+//     "terminates at the endobj keyword" writes that keyword into the file. Any
+//     search for "endobj", "endstream" or "stream" that can reach stream data
+//     makes the contract's own words a structural marker: it truncates the
+//     attachment at whatever the author wrote and returns the short bytes with
+//     no error. A stream's extent is therefore taken ONLY from its dictionary's
+//     /Length (7.3.8.2) — the sole terminator a reader uses — and no keyword is
+//     sought inside stream data at all. "endobj" is never searched for.
 
 var (
 	objKeyword       = []byte("obj")
-	endobjKeyword    = []byte("endobj")
 	streamKeyword    = []byte("stream")
 	endstreamKeyword = []byte("endstream")
+	dictOpen         = []byte("<<")
+	dictClose        = []byte(">>")
+	arrayClose       = []byte("]")
 )
 
 // isPDFWhitespace reports whether b is one of the six PDF white-space
@@ -58,15 +66,31 @@ type objectHeader struct {
 	// body is the offset at which the definition's content begins: past the
 	// "obj" keyword and the end-of-line closing it.
 	body int
-	// end is the offset of the "endobj" keyword closing this definition, or
-	// the end of the file when it has none.
-	end int
+	// value is the offset just past the object the definition holds — its
+	// dictionary — and before any stream keyword.
+	value int
+	// streamStart and streamEnd bound the raw stream data, valid only when
+	// hasStream is set.
+	streamStart, streamEnd int
+	hasStream              bool
 }
 
 // objectHeaders returns every definition of objID in pdf, in file order.
 func objectHeaders(pdf []byte, objID int) []objectHeader {
+	definitions := objectDefinitions(pdf, objID)
+	headers := make([]objectHeader, 0, len(definitions))
+	for _, definition := range definitions {
+		headers = append(headers, resolveObject(pdf, definition))
+	}
+	return headers
+}
+
+// objectDefinitions returns every definition of objID with its start and body
+// offsets only. Resolving what the definition HOLDS is separate so that an
+// indirect /Length can be read without re-entering stream resolution.
+func objectDefinitions(pdf []byte, objID int) []objectHeader {
 	id := []byte(strconv.Itoa(objID))
-	var headers []objectHeader
+	var definitions []objectHeader
 	for searchFrom := 0; searchFrom+len(id) <= len(pdf); {
 		rel := bytes.Index(pdf[searchFrom:], id)
 		if rel < 0 {
@@ -81,9 +105,264 @@ func objectHeaders(pdf []byte, objID int) []objectHeader {
 		if !ok {
 			continue
 		}
-		headers = append(headers, objectHeader{start: at, body: body, end: objectDefinitionEnd(pdf, body)})
+		definitions = append(definitions, objectHeader{start: at, body: body})
 	}
-	return headers
+	return definitions
+}
+
+// resolveObject fills in what a definition holds: the extent of its object and,
+// when that object is a stream, the range of its data.
+func resolveObject(pdf []byte, header objectHeader) objectHeader {
+	valueStart := skipPDFSpace(pdf, header.body)
+	header.value = skipPDFObject(pdf, valueStart)
+	start, end, ok := streamExtent(pdf, pdf[valueStart:header.value], header.value)
+	if ok {
+		header.streamStart, header.streamEnd, header.hasStream = start, end, true
+	}
+	return header
+}
+
+// streamExtent returns the range of the stream data following the object
+// dictionary that ends at valueEnd. The keyword is only recognised where a
+// stream may begin — directly after the dictionary — so a dictionary key named
+// /stream can never be read as it, and the data's extent comes from /Length, so
+// the data's own bytes are never inspected. The declared length must land on
+// "endstream": a length that does not is a malformed object, reported as having
+// no stream rather than answered with a guess.
+func streamExtent(pdf, dict []byte, valueEnd int) (start, end int, ok bool) {
+	pos := skipPDFSpace(pdf, valueEnd)
+	if !bytes.HasPrefix(pdf[pos:], streamKeyword) {
+		return 0, 0, false
+	}
+	pos += len(streamKeyword)
+	switch {
+	case pos < len(pdf) && pdf[pos] == '\n':
+		pos++
+	case pos+1 < len(pdf) && pdf[pos] == '\r' && pdf[pos+1] == '\n':
+		pos += 2
+	default:
+		// 7.3.8.1 requires CRLF or LF after the keyword, never a bare CR.
+		return 0, 0, false
+	}
+	length, ok := streamLength(pdf, dict)
+	if !ok || pos+length > len(pdf) {
+		return 0, 0, false
+	}
+	if !bytes.HasPrefix(pdf[skipPDFSpace(pdf, pos+length):], endstreamKeyword) {
+		return 0, 0, false
+	}
+	return pos, pos + length, true
+}
+
+// streamLength returns the declared length of the stream whose dictionary is
+// dict, resolving an indirect reference against pdf.
+func streamLength(pdf, dict []byte) (int, bool) {
+	value, ok := dictEntry(dict, "Length")
+	if !ok {
+		return 0, false
+	}
+	if length, err := strconv.Atoi(string(value)); err == nil {
+		return length, length >= 0
+	}
+	objID, ok := indirectReferenceID(value)
+	if !ok {
+		return 0, false
+	}
+	return indirectInteger(pdf, objID)
+}
+
+// indirectReferenceID returns the object id of an indirect reference "12 0 R".
+func indirectReferenceID(value []byte) (int, bool) {
+	fields := strings.Fields(string(value))
+	if len(fields) != 3 || fields[2] != "R" {
+		return 0, false
+	}
+	objID, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, false
+	}
+	return objID, true
+}
+
+// indirectInteger returns the value of the numeric object objID, the form a
+// /Length reference points at. It reads the object's value only — never a
+// stream — so a reference cycle cannot recurse.
+func indirectInteger(pdf []byte, objID int) (int, bool) {
+	definitions := objectDefinitions(pdf, objID)
+	if len(definitions) == 0 {
+		return 0, false
+	}
+	start := skipPDFSpace(pdf, definitions[len(definitions)-1].body)
+	value, err := strconv.Atoi(string(pdf[start:skipPDFObject(pdf, start)]))
+	if err != nil {
+		return 0, false
+	}
+	return value, value >= 0
+}
+
+// dictEntry returns the value of key in the dictionary dict, searching its top
+// level only so that a nested dictionary's entry of the same name — /Params
+// << /Size ... >> beside /Length — is not mistaken for it.
+func dictEntry(dict []byte, key string) ([]byte, bool) {
+	if !bytes.HasPrefix(dict, dictOpen) {
+		return nil, false
+	}
+	name := []byte("/" + key)
+	for pos := len(dictOpen); pos < len(dict); {
+		pos = skipPDFSpace(dict, pos)
+		if pos >= len(dict) || dict[pos] != '/' {
+			return nil, false
+		}
+		keyEnd := skipRegularToken(dict, pos)
+		valueStart := skipPDFSpace(dict, keyEnd)
+		valueEnd := skipPDFValue(dict, valueStart)
+		if bytes.Equal(dict[pos:keyEnd], name) {
+			return dict[valueStart:valueEnd], true
+		}
+		if valueEnd <= pos {
+			return nil, false
+		}
+		pos = valueEnd
+	}
+	return nil, false
+}
+
+// skipPDFValue returns the offset just past the value beginning at pos,
+// treating the three tokens of an indirect reference ("12 0 R") as one value.
+func skipPDFValue(pdf []byte, pos int) int {
+	end := skipPDFObject(pdf, pos)
+	if !isDigits(pdf[pos:end]) {
+		return end
+	}
+	generation := skipPDFSpace(pdf, end)
+	generationEnd := skipPDFObject(pdf, generation)
+	if !isDigits(pdf[generation:generationEnd]) {
+		return end
+	}
+	keyword := skipPDFSpace(pdf, generationEnd)
+	if keyword >= len(pdf) || pdf[keyword] != 'R' {
+		return end
+	}
+	if next := keyword + 1; next < len(pdf) && !isPDFWhitespace(pdf[next]) && !isPDFDelimiter(pdf[next]) {
+		return end
+	}
+	return keyword + 1
+}
+
+func isDigits(token []byte) bool {
+	if len(token) == 0 {
+		return false
+	}
+	for _, b := range token {
+		if b < '0' || b > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// skipPDFObject returns the offset just past the complete object beginning at
+// pos. Composite objects are walked token by token so that a literal string's
+// parens, a hex string's angle brackets and a name's characters are read as
+// content and never as structure; an unterminated object consumes the rest of
+// the file.
+func skipPDFObject(pdf []byte, pos int) int {
+	if pos >= len(pdf) {
+		return len(pdf)
+	}
+	switch {
+	case pdf[pos] == '(':
+		return skipLiteralString(pdf, pos)
+	case bytes.HasPrefix(pdf[pos:], dictOpen):
+		return skipUntilClose(pdf, pos+len(dictOpen), dictClose)
+	case pdf[pos] == '<':
+		return skipHexString(pdf, pos)
+	case pdf[pos] == '[':
+		return skipUntilClose(pdf, pos+1, arrayClose)
+	}
+	return skipRegularToken(pdf, pos)
+}
+
+// skipUntilClose walks the members of a dictionary or array until its closing
+// token.
+func skipUntilClose(pdf []byte, pos int, closer []byte) int {
+	for pos < len(pdf) {
+		pos = skipPDFSpace(pdf, pos)
+		if pos >= len(pdf) {
+			break
+		}
+		if bytes.HasPrefix(pdf[pos:], closer) {
+			return pos + len(closer)
+		}
+		next := skipPDFObject(pdf, pos)
+		if next <= pos {
+			break
+		}
+		pos = next
+	}
+	return len(pdf)
+}
+
+// skipLiteralString walks a "(...)" string, honouring the backslash escapes and
+// the balanced inner parens of 7.3.4.2.
+func skipLiteralString(pdf []byte, pos int) int {
+	depth := 0
+	for ; pos < len(pdf); pos++ {
+		switch pdf[pos] {
+		case '\\':
+			pos++
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return pos + 1
+			}
+		}
+	}
+	return len(pdf)
+}
+
+// skipHexString walks a "<...>" string.
+func skipHexString(pdf []byte, pos int) int {
+	if end := bytes.IndexByte(pdf[pos:], '>'); end >= 0 {
+		return pos + end + 1
+	}
+	return len(pdf)
+}
+
+// skipRegularToken walks a name, a number or a keyword — the run of regular
+// characters after an optional leading solidus. A stray delimiter is consumed
+// alone so that a walk always makes progress.
+func skipRegularToken(pdf []byte, pos int) int {
+	if pos < len(pdf) && pdf[pos] == '/' {
+		pos++
+	}
+	start := pos
+	for pos < len(pdf) && !isPDFWhitespace(pdf[pos]) && !isPDFDelimiter(pdf[pos]) {
+		pos++
+	}
+	if pos == start && pos < len(pdf) {
+		pos++
+	}
+	return pos
+}
+
+// skipPDFSpace advances past white space and comments (7.2.3).
+func skipPDFSpace(pdf []byte, pos int) int {
+	for pos < len(pdf) {
+		if isPDFWhitespace(pdf[pos]) {
+			pos++
+			continue
+		}
+		if pdf[pos] != '%' {
+			return pos
+		}
+		for pos < len(pdf) && pdf[pos] != '\n' && pdf[pos] != '\r' {
+			pos++
+		}
+	}
+	return pos
 }
 
 // objectHeaderBody parses the rest of a header — white space, the generation
@@ -142,90 +421,34 @@ func endOfLineLength(pdf []byte, pos int) int {
 	return 0
 }
 
-// objectDefinitionEnd returns the offset of the "endobj" keyword closing the
-// definition whose content starts at body, or the end of the file when the
-// definition is unterminated. Every scan inside an object is clipped here.
-func objectDefinitionEnd(pdf []byte, body int) int {
-	for at := body; at < len(pdf); {
-		rel := bytes.Index(pdf[at:], endobjKeyword)
-		if rel < 0 {
-			break
-		}
-		found := at + rel
-		at = found + 1
-		if found > 0 && !isPDFWhitespace(pdf[found-1]) && !isPDFDelimiter(pdf[found-1]) {
-			continue // a word merely ending in "endobj"
-		}
-		return found
-	}
-	return len(pdf)
-}
-
 // firstObjectHeader returns the FIRST definition of objID — the genesis object
 // of an incrementally updated document.
 func firstObjectHeader(pdf []byte, objID int) (objectHeader, bool) {
-	headers := objectHeaders(pdf, objID)
-	if len(headers) == 0 {
+	definitions := objectDefinitions(pdf, objID)
+	if len(definitions) == 0 {
 		return objectHeader{}, false
 	}
-	return headers[0], true
+	return resolveObject(pdf, definitions[0]), true
 }
 
 // lastObjectHeader returns the definition of objID a reader resolves — the
 // last one, since an incremental update supersedes an object by appending a new
 // definition.
 func lastObjectHeader(pdf []byte, objID int) (objectHeader, bool) {
-	headers := objectHeaders(pdf, objID)
-	if len(headers) == 0 {
+	definitions := objectDefinitions(pdf, objID)
+	if len(definitions) == 0 {
 		return objectHeader{}, false
 	}
-	return headers[len(headers)-1], true
+	return resolveObject(pdf, definitions[len(definitions)-1]), true
 }
 
 // objectStreamData returns the half-open range of a definition's raw stream
-// data: past the "stream" keyword and the end-of-line after it, up to the
-// end-of-line preceding "endstream". Both scans stay inside the definition.
+// data.
 func objectStreamData(pdf []byte, header objectHeader) (start, end int, ok bool) {
-	start, ok = streamDataOffset(pdf, header)
-	if !ok {
+	if !header.hasStream {
 		return 0, 0, false
 	}
-	rel := bytes.Index(pdf[start:header.end], endstreamKeyword)
-	if rel < 0 {
-		return 0, 0, false
-	}
-	end = start + rel
-	if end > start && pdf[end-1] == '\n' {
-		end--
-	}
-	if end > start && pdf[end-1] == '\r' {
-		end--
-	}
-	return start, end, true
-}
-
-// streamDataOffset locates the definition's "stream" keyword and returns the
-// offset just past the CRLF or LF that ISO 32000-1 7.3.8.1 requires after it.
-func streamDataOffset(pdf []byte, header objectHeader) (int, bool) {
-	for at := header.body; at < header.end; {
-		rel := bytes.Index(pdf[at:header.end], streamKeyword)
-		if rel < 0 {
-			return 0, false
-		}
-		found := at + rel
-		at = found + 1
-		if found > 0 && !isPDFWhitespace(pdf[found-1]) && !isPDFDelimiter(pdf[found-1]) {
-			continue // the tail of "endstream", or a name ending in "stream"
-		}
-		data := found + len(streamKeyword)
-		switch {
-		case data < len(pdf) && pdf[data] == '\n':
-			return data + 1, true
-		case data+1 < len(pdf) && pdf[data] == '\r' && pdf[data+1] == '\n':
-			return data + 2, true
-		}
-	}
-	return 0, false
+	return header.streamStart, header.streamEnd, true
 }
 
 // lastObjectStreamData returns the raw stream data of the definition of objID a
@@ -248,20 +471,12 @@ func firstObjectStreamData(pdf []byte, objID int) (start, end int, ok bool) {
 	return objectStreamData(pdf, header)
 }
 
-// lastObjectBody returns the range of the definition of objID a reader
-// resolves — its dictionary, without the end-of-line closing it before
-// "endobj".
+// lastObjectBody returns the range of the object held by the definition of
+// objID a reader resolves — its dictionary, without any stream that follows.
 func lastObjectBody(pdf []byte, objID int) (start, end int, ok bool) {
 	header, found := lastObjectHeader(pdf, objID)
 	if !found {
 		return 0, 0, false
 	}
-	end = header.end
-	if end > header.body && pdf[end-1] == '\n' {
-		end--
-	}
-	if end > header.body && pdf[end-1] == '\r' {
-		end--
-	}
-	return header.body, end, true
+	return skipPDFSpace(pdf, header.body), header.value, true
 }

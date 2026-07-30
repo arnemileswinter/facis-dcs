@@ -14,8 +14,8 @@ import (
 // visible page had been replaced.
 func TestObjectHeaderLookupIsNotFooledByAnIDSuffix(t *testing.T) {
 	pdf := []byte("%PDF-1.7\n" +
-		"19 0 obj\n<< >>\nstream\nORIGINAL\nendstream\nendobj\n" +
-		"100019 0 obj\n<< >>\nstream\nDECOY\nendstream\nendobj\n")
+		"19 0 obj\n<< /Length 8 >>\nstream\nORIGINAL\nendstream\nendobj\n" +
+		"100019 0 obj\n<< /Length 5 >>\nstream\nDECOY\nendstream\nendobj\n")
 
 	last, ok := lastObjectHeader(pdf, 19)
 	if !ok || last.start != 9 {
@@ -42,8 +42,8 @@ func TestObjectHeaderLookupIsNotFooledByAnIDSuffix(t *testing.T) {
 // A superseding revision must win: the gate compares what a reader renders.
 func TestObjectHeaderLookupPrefersTheLatestDefinition(t *testing.T) {
 	pdf := []byte("%PDF-1.7\n" +
-		"19 0 obj\n<< >>\nstream\nFIRST\nendstream\nendobj\n" +
-		"19 0 obj\n<< >>\nstream\nSUPERSEDED\nendstream\nendobj\n")
+		"19 0 obj\n<< /Length 5 >>\nstream\nFIRST\nendstream\nendobj\n" +
+		"19 0 obj\n<< /Length 10 >>\nstream\nSUPERSEDED\nendstream\nendobj\n")
 
 	content, err := extractStreamContentByObjID(pdf, 19)
 	if err != nil {

@@ -265,13 +265,18 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 // render into that state, leaving pdf_state behind the contract forever — an
 // export that polls to its deadline and answers "being regenerated" for good.
 // So the target state freezes only together with a committed signature, which
-// covers the case the stored artifact cannot: a signed contract whose stored CID
-// is empty (a peer-receive whose transaction rolled back after the row
-// committed) reads as "not frozen" on the artifact alone, and the regeneration
-// path's answer to a missing artifact is a FRESH render — an unsigned PDF, issued
-// a new lifecycle VC and stamped as authoritative over the counterparty's
-// provenance. There is nothing to render from in that case; the artifact can only
-// come back from its signed bytes.
+// covers the case the stored artifact cannot: a contract signed HERE whose
+// stored CID is empty (the artifact store accepted the signed bytes but the
+// pointer never committed) reads as "not frozen" on the artifact alone, and the
+// regeneration path's answer to a missing artifact is a FRESH render — an
+// unsigned PDF, issued a new lifecycle VC. There is nothing to render from in
+// that case; the artifact can only come back from its signed bytes.
+//
+// A peer's signature is invisible to that count — CountSignedSignatures reads
+// only this instance's contract_signatures, and the receive path writes none.
+// What protects a peer's signed bytes is the stored artifact's own state, which
+// receivepdf records from the shipped PDF (provenance.ArtifactC2PAState) rather
+// than from this instance's workflow state.
 //
 // carriesSignature is consulted only when the answer can still change the
 // verdict, so an ordinary draft regeneration costs no extra query.

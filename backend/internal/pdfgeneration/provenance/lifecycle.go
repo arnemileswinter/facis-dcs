@@ -1,6 +1,7 @@
 package provenance
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -116,4 +117,30 @@ func MapCWEStateToC2PA(cweState string) (string, error) {
 // export/verify read paths and the background regenerator all gate on this.
 func IsFrozenC2PAState(c2paState string) bool {
 	return c2paState != "" && c2paState != "draft"
+}
+
+// CarriesPAdESSignature reports whether pdf already holds a PAdES signature,
+// detected by the signature dictionary's /ByteRange.
+func CarriesPAdESSignature(pdf []byte) bool {
+	return bytes.Contains(pdf, []byte("/ByteRange"))
+}
+
+// ArtifactC2PAState is the lifecycle state a STORED artifact asserts, which is
+// not always what the contract's own state maps to. A peer ships a PDF it has
+// already signed while the receiving instance's workflow starts over at OFFERED,
+// so recording the local state would file a PAdES-signed artifact as "draft" —
+// re-renderable, and the next local terminate or expiry would append a manifest
+// onto the counterparty's signed bytes. The artifact is the witness: it carries
+// the /ByteRange a re-render would destroy, whatever the local workflow thinks.
+// A state that is already frozen stands (a revoked contract's artifact is
+// suspended, not active).
+func ArtifactC2PAState(contractState string, pdf []byte) (string, error) {
+	state, err := MapCWEStateToC2PA(contractState)
+	if err != nil {
+		return "", err
+	}
+	if IsFrozenC2PAState(state) || !CarriesPAdESSignature(pdf) {
+		return state, nil
+	}
+	return MapCWEStateToC2PA("SIGNED")
 }
