@@ -27,6 +27,9 @@ type VerifyContractPdfHandler struct {
 	PDFCore   *pdfcore.Client
 	VCIssuer  provenance.VCIssuer
 	IssuerDID string
+	// Credentials verifies the lifecycle credential embedded in the PDF against
+	// the key its issuer publishes for assertions.
+	Credentials *provenance.CredentialVerifier
 }
 
 func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContractPdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -95,7 +98,7 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch frozen signed contract PDF %s from IPFS for verify: %w", qry.DID, err)
 		}
-		return runVerify(ctx, pdf, h.PDFCore, currentC2PAState)
+		return runVerify(ctx, pdf, h.PDFCore, h.Credentials, currentC2PAState)
 	}
 
 	if pdfState.IPFSCID != "" && pdfState.C2PAState != currentC2PAState {
@@ -133,7 +136,7 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 			return nil, fmt.Errorf("commit pre-verify append tx for contract %s: %w", qry.DID, err)
 		}
 
-		return runVerify(ctx, updatedPDF, h.PDFCore, currentC2PAState)
+		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, currentC2PAState)
 	}
 
 	if latestCID == "" {
@@ -148,5 +151,5 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 		return nil, fmt.Errorf("fetch contract PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, pdf, h.PDFCore, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, currentC2PAState)
 }

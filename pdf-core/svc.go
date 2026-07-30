@@ -213,18 +213,28 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 // verifyResponse is the JSON body returned by POST /verify.
 type verifyResponse struct {
 	Match bool `json:"match"`
-	// C2PASignatureValid reports that the manifest chain verified and the
-	// document reproduces its embedded payload. On a PAdES-signed contract the
-	// last manifest's whole-file hard binding does NOT cover the appended
-	// signature revisions — the signature is applied after the manifest so that
-	// it commits to the provenance (ADR-26) — so PAdESSigned states how far the
-	// binding reaches rather than leaving a consumer to assume it covers
-	// everything.
+	// C2PASignatureValid is the outcome of compiler.VerifyC2PAClaimSignatures:
+	// every manifest's COSE_Sign1 claim signature verified against its own
+	// x5chain leaf and every assertion the signed claim commits to still hashes
+	// to the recorded value. C2PASignatureError carries the reason it did not, so
+	// a consumer reports the finding rather than a bare false.
+	//
+	// On a PAdES-signed contract the last manifest's whole-file hard binding does
+	// NOT cover the appended signature revisions — the signature is applied after
+	// the manifest so that it commits to the provenance (ADR-26) — so PAdESSigned
+	// states how far the binding reaches rather than leaving a consumer to assume
+	// it covers everything.
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	C2PASignatureError string `json:"c2pa_signature_error,omitempty"`
 	PAdESSigned        bool   `json:"pades_signed"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
-	VCProofValid       bool   `json:"vc_proof_valid"`
-	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
+	// VCPresent says only that the PDF carries a lifecycle-credential attachment,
+	// which is the whole of what pdf-core can say about it: verifying the
+	// credential's proof means resolving its issuer to a key it publishes for
+	// assertions, and pdf-core holds no key material and resolves no DID. The
+	// caller gets VCBytes and verifies them against the issuer itself.
+	VCPresent bool   `json:"vc_present"`
+	Artifact  string `json:"artifact"` // base64-encoded verification-witness PDF
 }
 
 // renderReanchor appends a provenance-only C2PA manifest binding the submitted
@@ -319,10 +329,14 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract VC attachment if present — returned to the caller so it can
-	// perform status-list checks without parsing PDF bytes itself.
+	// Extract VC attachment if present — returned to the caller so it can verify
+	// its proof and check the status list without parsing PDF bytes itself.
 	vcBytes, vcFound, _ := compiler.ExtractEmbeddedVC(raw)
-	vcProofValid := vcFound && len(vcBytes) > 0 && isVCProofStructurallyValid(vcBytes)
+
+	c2paSignatureError := ""
+	if err := compiler.VerifyC2PAClaimSignatures(raw); err != nil {
+		c2paSignatureError = err.Error()
+	}
 
 	// Append a verification witness and embed the resulting PDF as artifact.
 	witness, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw, payload)
@@ -333,9 +347,10 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 
 	resp := verifyResponse{
 		Match:              true,
-		C2PASignatureValid: true,
+		C2PASignatureValid: c2paSignatureError == "",
+		C2PASignatureError: c2paSignatureError,
 		PAdESSigned:        compiler.IsPAdESSigned(raw),
-		VCProofValid:       vcProofValid,
+		VCPresent:          vcFound && len(vcBytes) > 0,
 		Artifact:           base64.StdEncoding.EncodeToString(witness),
 	}
 	if vcFound && len(vcBytes) > 0 {
@@ -443,17 +458,6 @@ func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
 		Match    bool   `json:"match"`
 		Mismatch string `json:"mismatch,omitempty"`
 	}{Match: mismatch == "", Mismatch: mismatch})
-}
-
-// isVCProofStructurallyValid returns true when the VC JSON contains a
-// recognisable proof field, without performing cryptographic verification.
-func isVCProofStructurallyValid(vcBytes []byte) bool {
-	var vc map[string]json.RawMessage
-	if err := json.Unmarshal(vcBytes, &vc); err != nil {
-		return false
-	}
-	_, ok := vc["proof"]
-	return ok
 }
 
 func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {

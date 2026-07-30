@@ -30,6 +30,9 @@ type pdfGenerationSrvc struct {
 	IssuerDID string
 	VCIssuer  provenance.VCIssuer
 	LocalPeer string
+	// Credentials verifies a credential read out of a stored PDF against the key
+	// its issuer publishes for assertions.
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
@@ -44,12 +47,18 @@ func NewPDFGeneration(
 	issuerDID string,
 	vcIssuer provenance.VCIssuer,
 	localPeer string,
+	credentials *provenance.CredentialVerifier,
 ) pdfgen.Service {
 	if vcIssuer == nil {
 		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
 	}
 	if pdfCore == nil {
 		panic("PDFCore client is required")
+	}
+	// Without it every embedded-credential verdict would be indeterminate, which
+	// is a verify endpoint that reports nothing.
+	if credentials == nil {
+		panic("CredentialVerifier is required to verify embedded credentials")
 	}
 	return &pdfGenerationSrvc{
 		DB:               db,
@@ -61,6 +70,7 @@ func NewPDFGeneration(
 		IssuerDID:        issuerDID,
 		VCIssuer:         vcIssuer,
 		LocalPeer:        localPeer,
+		Credentials:      credentials,
 		JWTAuthenticator: jwtAuth,
 	}
 }
@@ -164,12 +174,13 @@ func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.Exp
 
 func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.VerifyContractPdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyContractPdfHandler{
-		DB:        s.DB,
-		CRepo:     s.CRepo,
-		Artifacts: s.Artifacts,
-		PDFCore:   s.PDFCore,
-		VCIssuer:  s.VCIssuer,
-		IssuerDID: s.IssuerDID,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		Artifacts:   s.Artifacts,
+		PDFCore:     s.PDFCore,
+		VCIssuer:    s.VCIssuer,
+		IssuerDID:   s.IssuerDID,
+		Credentials: s.Credentials,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
@@ -183,12 +194,13 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 
 func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.VerifyTemplatePdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyTemplatePdfHandler{
-		DB:        s.DB,
-		TRepo:     s.TRepo,
-		Artifacts: s.Artifacts,
-		PDFCore:   s.PDFCore,
-		VCIssuer:  s.VCIssuer,
-		IssuerDID: s.IssuerDID,
+		DB:          s.DB,
+		TRepo:       s.TRepo,
+		Artifacts:   s.Artifacts,
+		PDFCore:     s.PDFCore,
+		VCIssuer:    s.VCIssuer,
+		IssuerDID:   s.IssuerDID,
+		Credentials: s.Credentials,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {

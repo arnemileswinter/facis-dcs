@@ -350,6 +350,21 @@ func RefreshValidationAnchors(ctx context.Context, db *sqlx.DB) error {
 	if err != nil {
 		return fmt.Errorf("load active hub shapes version: %w", err)
 	}
+	// The class -> library index a produced document's sh:shapesGraph
+	// declares its registered shape libraries from (ADR-23): validation
+	// honours the declaration, so a library must be declared to be enforced.
+	libraryClasses, err := semantichub.ActiveShapeLibraryClasses(ctx, db)
+	if err != nil {
+		return fmt.Errorf("index active hub shape libraries: %w", err)
+	}
+	libraryAnchors := make(map[string]validation.ShapeLibraryAnchor, len(libraryClasses))
+	for class, library := range libraryClasses {
+		libraryAnchors[class] = validation.ShapeLibraryAnchor{
+			Name: library.Name,
+			URL:  semantichub.AnchorURL("shapes", library.Name, library.Version),
+		}
+	}
+	validation.SetShapeLibraryAnchors(libraryAnchors)
 	validation.SetCanonicalOntologyIRIs(hubIRIs)
 	validation.ResetDomainOntologyCache()
 	validation.SetSchemaAnchorRefs(

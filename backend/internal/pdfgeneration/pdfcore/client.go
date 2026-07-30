@@ -339,13 +339,20 @@ func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]byte, bool,
 type VerifyResult struct {
 	// Match is true when the PDF was deterministically produced from its embedded payload.
 	Match bool
-	// C2PASignatureValid is true when the C2PA provenance chain is intact.
+	// C2PASignatureValid is the outcome of pdf-core's COSE claim-signature check:
+	// every manifest's claim signature verified against its own x5chain leaf and
+	// the assertions the signed claim commits to still hash to the recorded
+	// values. C2PASignatureError carries the reason when it did not.
 	C2PASignatureValid bool
+	C2PASignatureError string
 	// VCBytes are the raw contract-lifecycle-vc.json bytes from the PDF attachment,
 	// present only when the PDF contains that attachment.
 	VCBytes []byte
-	// VCProofValid is true when a VC attachment is present and its proof is structurally valid.
-	VCProofValid bool
+	// VCPresent says the PDF carries a lifecycle-credential attachment — all
+	// pdf-core can say about it, since it holds no key material and resolves no
+	// issuer. Whether the credential's proof VERIFIES is decided by the caller,
+	// against the issuer's published assertion key (provenance.CredentialVerifier).
+	VCPresent bool
 }
 
 // Verify posts pdf to POST /verify and returns the structured verification result.
@@ -369,8 +376,9 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	var body struct {
 		Match              bool   `json:"match"`
 		C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+		C2PASignatureError string `json:"c2pa_signature_error"`
 		VCBytes            string `json:"vc_bytes"`
-		VCProofValid       bool   `json:"vc_proof_valid"`
+		VCPresent          bool   `json:"vc_present"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return VerifyResult{}, fmt.Errorf("pdf-core verify decode: %w", err)
@@ -378,7 +386,8 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	result := VerifyResult{
 		Match:              body.Match,
 		C2PASignatureValid: body.C2PASignatureValid,
-		VCProofValid:       body.VCProofValid,
+		C2PASignatureError: body.C2PASignatureError,
+		VCPresent:          body.VCPresent,
 	}
 	if body.VCBytes != "" {
 		decoded, err := base64.StdEncoding.DecodeString(body.VCBytes)

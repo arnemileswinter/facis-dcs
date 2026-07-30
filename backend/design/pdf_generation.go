@@ -13,10 +13,12 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	Attribute("base_pdf_hash", String, "SHA-256 hex of the re-generated base PDF from the same JSON-LD")
 	Attribute("stored_base_pdf_hash", String, "SHA-256 hex of the stored PDF base layer (before any C2PA incremental updates)")
 
-	// C2PA provenance validation (DCS-OR-C2PA-006)
+	// C2PA provenance validation (DCS-OR-C2PA-006). Both signature checks are
+	// three-state rather than boolean: a check that could not be performed reports
+	// so, and never borrows the vocabulary of one that passed.
 	Attribute("c2pa_manifest_found", Boolean, "True when a C2PA JUMBF manifest was found in the PDF")
-	Attribute("c2pa_signature_valid", Boolean, "True when the C2PA COSE_Sign1 signature is cryptographically valid")
-	Attribute("vc_proof_valid", Boolean, "True when the embedded W3C VC Ed25519 proof is cryptographically valid")
+	Attribute("c2pa_signature_status", String, "C2PA COSE_Sign1 claim-signature verification status (DCS-OR-C2PA-006): 'valid' when every manifest's claim signature verified against its x5chain leaf and the assertions the signed claim commits to still hash to the recorded values, 'invalid' when one did not, 'not_available' when the PDF carries no manifest to check.")
+	Attribute("vc_proof_status", String, "Embedded contract-lifecycle credential proof status: 'valid' when its Data Integrity proof verified against a key the credential's issuer publishes for assertions, 'invalid' when it did not, 'indeterminate' when the issuer could not be resolved, 'not_available' when the PDF carries no such credential. Never reports a pass for a credential that was only parsed.")
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
 	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
 	Attribute("status_list_status", String, "Live revocation state queried from the XFSC status list service: active or revoked (DCS-OR-C2PA-006)")
@@ -36,7 +38,7 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// be made about the content they were supposed to carry.
 	Attribute("discrepancy", String, "Failure class when match is false: 'content_hash_mismatch' (manifest present, content differs from the embedded JSON-LD), 'artifact_not_authentic' (stored bytes failed authenticated decryption — altered or substituted at rest), or 'verification_failed' (any other check failure). Empty when match is true.")
 
-	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_valid", "vc_proof_valid", "status_list_check", "pdf_signature_status")
+	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
 })
 
 // BundleExportRefusedError is returned when the FR-PACM-06 structural-integrity

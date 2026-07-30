@@ -681,6 +681,11 @@ func TestVerify_AmendedDocument(t *testing.T) {
 	if !result.Match {
 		t.Error("expected match=true for valid amended PDF")
 	}
+	// An amendment carries the previous manifest forward verbatim next to a newly
+	// signed one, so both claim signatures must verify.
+	if !result.C2PASignatureValid {
+		t.Errorf("expected c2pa_signature_valid=true for a valid amended PDF, got error %q", result.C2PASignatureError)
+	}
 }
 
 // TestVerify_AmendedDocumentRejectsCorruption proves that /verify rejects an
@@ -786,8 +791,9 @@ func TestClaim_MissingPDFField(t *testing.T) {
 type verifyResult struct {
 	Match              bool   `json:"match"`
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	C2PASignatureError string `json:"c2pa_signature_error,omitempty"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
-	VCProofValid       bool   `json:"vc_proof_valid"`
+	VCPresent          bool   `json:"vc_present"`
 	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
 }
 
@@ -815,7 +821,62 @@ func TestVerify_ReturnsJSON(t *testing.T) {
 		t.Error("expected match=true for a valid compiled PDF")
 	}
 	if !result.C2PASignatureValid {
-		t.Error("expected c2pa_signature_valid=true for a valid compiled PDF")
+		t.Errorf("expected c2pa_signature_valid=true for a valid compiled PDF, got error %q", result.C2PASignatureError)
+	}
+}
+
+// TestVerify_ReportsForgedC2PASignature is the behaviour the field's old
+// hardcoded true hid: /verify now runs the COSE claim-signature check, so a PDF
+// whose signature bytes were replaced is reported as invalid with the reason.
+func TestVerify_ReportsForgedC2PASignature(t *testing.T) {
+	pdf := compilePDF(t)
+	idx := bytes.Index(pdf, []byte{0xA0, 0xF6, 0x58, 0x40})
+	if idx < 0 {
+		t.Fatal("compiled PDF carries no COSE signature to forge")
+	}
+	forged := append([]byte(nil), pdf...)
+	start := idx + 4
+	for i := start; i < start+64; i++ {
+		forged[i] ^= 0xFF
+	}
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(forged), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var result verifyResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if result.C2PASignatureValid {
+		t.Error("expected c2pa_signature_valid=false for a PDF with a forged COSE signature")
+	}
+	if result.C2PASignatureError == "" {
+		t.Error("expected c2pa_signature_error to name the reason the signature failed")
+	}
+}
+
+// TestVerify_ReportsVCPresenceNotProofValidity pins that pdf-core reports only
+// what it can establish about an embedded lifecycle credential. Verifying the
+// proof needs the issuer's assertion key, which pdf-core cannot resolve, so the
+// response carries presence plus the bytes and leaves the verdict to the caller.
+func TestVerify_ReportsVCPresenceNotProofValidity(t *testing.T) {
+	pdf := compilePDF(t)
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(pdf), "application/pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify: status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.Bytes()
+	if bytes.Contains(body, []byte("vc_proof_valid")) {
+		t.Error("pdf-core must not report a vc_proof_valid verdict it cannot establish")
+	}
+	var result verifyResult
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if result.VCPresent {
+		t.Error("expected vc_present=false for a compiled PDF carrying no lifecycle credential")
 	}
 }
 
@@ -877,6 +938,12 @@ func TestVerify_JSONIncludesVCBytesWhenPresent(t *testing.T) {
 	}
 	if result.VCBytes == "" {
 		t.Error("expected vc_bytes to be non-empty when PDF contains contract-lifecycle-vc.json")
+	}
+	if !result.VCPresent {
+		t.Error("expected vc_present=true when PDF contains contract-lifecycle-vc.json")
+	}
+	if !result.C2PASignatureValid {
+		t.Errorf("expected c2pa_signature_valid=true for a VC-carrying amended PDF, got error %q", result.C2PASignatureError)
 	}
 }
 

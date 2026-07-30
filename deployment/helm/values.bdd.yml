@@ -63,6 +63,12 @@ extraEnv:
   # re-attempted and delivered well within the scenarios' replication wait.
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
     value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut).
+  # The prod default is minutes; BDD/e2e run it fast so a PDF whose regeneration
+  # failed transiently (pdf-core or IPFS) is re-rendered and stored — and the
+  # deferred peer ship then has something to send — within the scenarios' waits.
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
+    value: "10s"
   # Real deployment dispatch to the shipped ORCE contract-target-flow
   # (UC-05-01): the flow verifies the payload hash, acks synchronously, and
   # then POSTs the authoritative acknowledgement + a measured KPI back to
@@ -303,6 +309,11 @@ statuslistService:
     tenantIDs:
       - credential
       - c2pa
+      # Instance B shares this service but not this instance's database, and a
+      # revocation entry is allocated out of that database (migration 20260734).
+      # Two instances allocating into one list would hand the same bit to two
+      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
+      - c2pa2
 
 statusListLocalhostProxy:
   enabled: true

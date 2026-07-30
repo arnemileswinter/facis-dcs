@@ -55,7 +55,7 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	if s.RequestSigner == nil || strings.TrimSpace(s.DocRetrievalClientID) == "" {
+	if s.RequestSigner == nil || strings.TrimSpace(s.OID4VPClientID) == "" {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("OID4VP document-retrieval request signer is not configured"))
 	}
 	if strings.TrimSpace(s.PublicAPIBase) == "" {
@@ -150,9 +150,9 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	requestURI := s.signatureRequestURL(ceremony.ID, "object")
 	return &signaturemanagement.SMSignatureRequestPublishResponse{
 		CeremonyID: ceremony.ID,
-		ClientID:   s.DocRetrievalClientID,
+		ClientID:   s.OID4VPClientID,
 		RequestURI: requestURI,
-		WalletURI:  buildOpenID4VPPresentationURI(s.DocRetrievalClientID, requestURI),
+		WalletURI:  buildOpenID4VPPresentationURI(s.OID4VPClientID, requestURI),
 		Nonce:      &nonce,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
 	}, nil
@@ -188,22 +188,22 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s not found", p.CeremonyID))
 	}
 
+	walletNonce := ""
+	if p.WalletNonce != nil {
+		walletNonce = strings.TrimSpace(*p.WalletNonce)
+	}
+
 	if ceremony.PreparedPDFSHA256 != nil && ceremony.RequestNonce != nil && ceremony.RequestExpiresAt != nil && ceremony.SignerDID != nil {
 		published, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
 		if err != nil {
 			return nil, err
 		}
-		return s.buildDocumentRetrievalJAR(published)
+		return s.buildDocumentRetrievalJAR(published, walletNonce)
 	}
 
 	pending, err := s.loadPendingCeremony(ctx, p.CeremonyID)
 	if err != nil {
 		return nil, err
-	}
-
-	walletNonce := ""
-	if p.WalletNonce != nil {
-		walletNonce = strings.TrimSpace(*p.WalletNonce)
 	}
 
 	return s.buildIdentityPresentationJAR(ctx, pending, walletNonce)
@@ -215,7 +215,7 @@ func (s *signatureManagementsrvc) SignatureRequestObject(ctx context.Context, p 
 // together, so one ceremony yields both a PAdES and a JAdES over the same
 // content hash"). The payload's digest doubles as the nonce-binding and
 // byte-pin anchor the callback checks the returned JAdES against (ADR-20).
-func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony) (io.ReadCloser, error) {
+func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.SignatureCeremony, walletNonce string) (io.ReadCloser, error) {
 	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
@@ -244,13 +244,14 @@ func (s *signatureManagementsrvc) buildDocumentRetrievalJAR(ceremony *db.Signatu
 	}
 
 	jwt, err := oid4vprequest.BuildDocumentRetrievalJWT(s.RequestSigner, oid4vprequest.DocRetrievalParams{
-		ClientID:           s.DocRetrievalClientID,
+		ClientID:           s.OID4VPClientID,
 		ResponseURI:        s.signatureRequestURL(ceremony.ID, "callback"),
 		Nonce:              *ceremony.RequestNonce,
 		ExpiresAt:          *ceremony.RequestExpiresAt,
 		SignatureQualifier: signatureQualifierFor(credentialType),
 		DocumentDigests:    digests,
 		DocumentLocations:  locations,
+		WalletNonce:        walletNonce,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("build signing request object: %w", err))

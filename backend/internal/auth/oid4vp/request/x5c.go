@@ -31,20 +31,23 @@ func NewX5CSigner(did *identity.DIDDocument) (*X5CSigner, error) {
 	if did == nil {
 		return nil, fmt.Errorf("did document is required for x5c JAR signing")
 	}
-	if len(did.VerificationMethod) == 0 {
-		return nil, fmt.Errorf("did document has no verification method")
+	method := did.SigningMethod()
+	if method == nil {
+		return nil, fmt.Errorf("did document is not bound to a signer")
 	}
-	if len(did.VerificationMethod[0].PublicKeyJWK.X5C) == 0 {
-		return nil, fmt.Errorf("did document carries no x5c certificate chain")
+	if len(method.PublicKeyJWK.X5C) == 0 {
+		return nil, fmt.Errorf("verification method %q carries no x5c certificate chain", method.ID)
 	}
 	return &X5CSigner{did: did}, nil
 }
 
-// ClientID returns the DNS hostname the signer's own certificate identifies
-// (VerifyEIDASCertificate already asserts the leaf matches it) — the
-// client_id an x509_san_dns request object must declare. The deployment's
-// hostname may carry a port; a dNSName SAN never does, so it is dropped here
-// rather than leaving every caller to remember.
+// ClientID returns the complete OpenID4VP client identifier every request
+// object this signer signs must declare — prefix and the DNS hostname the
+// signer's own certificate identifies (VerifyEIDASCertificate already asserts
+// the leaf matches it). It is the sole source of that identifier, so the deep
+// link, the identity request object, the Document-Retrieval request object and
+// the audience a presentation is checked against cannot name the verifier
+// differently.
 func (s *X5CSigner) ClientID() (string, error) {
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
@@ -53,11 +56,11 @@ func (s *X5CSigner) ClientID() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dnsName := dnsNameOf(hostname)
-	if dnsName == "" {
+	clientID := X509SANDNSClientID(hostname)
+	if clientID == "" {
 		return "", fmt.Errorf("did document hostname %q carries no dns name", hostname)
 	}
-	return dnsName, nil
+	return clientID, nil
 }
 
 // SignAuthorizationRequestJWT returns a compact oauth-authz-req+jwt signed by
@@ -67,9 +70,14 @@ func (s *X5CSigner) SignAuthorizationRequestJWT(claims jwt.MapClaims) (string, e
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
 	}
-	kid := s.did.VerificationMethod[0].ID
-	x5c := []string(s.did.VerificationMethod[0].PublicKeyJWK.X5C)
-	extraHeaders := map[string]any{"x5c": x5c}
+	// kid and chain both describe the key that actually signs below: the method
+	// the document publishes this instance's signer as.
+	method := s.did.SigningMethod()
+	if method == nil {
+		return "", fmt.Errorf("did document is not bound to a signer")
+	}
+	kid := method.ID
+	extraHeaders := map[string]any{"x5c": []string(method.PublicKeyJWK.X5C)}
 
 	return signES256JWT(kid, claims, extraHeaders, func(signingInput string) ([]byte, error) {
 		der, err := s.did.Sign([]byte(signingInput))

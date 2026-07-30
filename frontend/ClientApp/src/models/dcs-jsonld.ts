@@ -248,6 +248,16 @@ export interface DcsContractData extends DcsDocumentData {
   'dcs:metadata': DcsContractMetadata | DcsTemplateMetadata
   'dcs:parentContract'?: JsonLdReference
   derivedFromTemplate?: DcsTemplateProvenance
+  /**
+   * Server-owned parts of the document the editor neither authors nor models:
+   * the contract's party nodes (which carry the recorded signatory and Power of
+   * Attorney of an applied signature), the AcroForm signature fields naming
+   * them, and the pinned shapes graph the document is validated against. The
+   * client only carries them — see preserveServerOwnedFields.
+   */
+  'dcs:parties'?: unknown[]
+  'dcs:signatureFields'?: unknown[]
+  'sh:shapesGraph'?: unknown
 }
 
 /** The source-template node: a prov:wasDerivedFrom edge plus version assertion. */

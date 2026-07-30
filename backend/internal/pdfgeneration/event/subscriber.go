@@ -6,8 +6,10 @@ package event
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -85,22 +87,142 @@ type Subscriber struct {
 	LocalPeer string
 	// VCIssuer issues and signs a W3C VC for each lifecycle event (DCS-OR-C2PA-004/005).
 	VCIssuer provenance.VCIssuer
+	// retries bounds and paces the retry sweep's attempts per entity.
+	retries retryBudget
 }
 
+// regenerationTimeout bounds one regeneration attempt: a pdf-core render, a VC
+// issuance and an artifact-store write.
+const regenerationTimeout = 60 * time.Second
+
+// missingPDFRetryBatch bounds how many entities one retry pass regenerates, so
+// a deployment with a large backlog makes steady progress per tick instead of
+// occupying the regenerator indefinitely.
+const missingPDFRetryBatch = 25
+
+// missingPDFRetryAttempts bounds how often the sweep re-attempts one entity,
+// and maxMissingPDFRetryBackoff caps the wait between those attempts. The
+// batch is a fixed-size window over the oldest rows: an entity whose
+// regeneration can never succeed would otherwise be selected on every tick
+// forever and starve every recoverable failure behind it.
+const (
+	missingPDFRetryAttempts   = 5
+	maxMissingPDFRetryBackoff = time.Hour
+)
+
 // Start registers the event handler with the NATS sub-client and begins
-// consuming events. It returns immediately; the subscription runs in the
+// consuming events, alongside the retry pass that reconciles entities whose
+// regeneration never completed. It returns immediately; both run in the
 // background until the sub-client is closed.
 func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
+	go s.retryMissingPDFs(conf.PDFRegenerationRetryTimeOut())
+
 	return subClient.Subscribe(func(evt cloudevent.Event) {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		// The regenerator has no user JWT; present the in-cluster system
-		// credential so pdf-core can reach the internal signing primitives.
-		ctx = middleware.InjectBearerToken(ctx, conf.SystemToken())
+		ctx, cancel := s.regenerationContext()
 		defer cancel()
 		if err := s.handle(ctx, evt); err != nil {
 			log.Printf("pdfgeneration: failed to handle event %s/%s: %v", evt.Source(), evt.Type(), err)
 		}
 	})
+}
+
+// regenerationContext is the context every regeneration attempt runs under. The
+// regenerator has no user JWT, so it presents the in-cluster system credential
+// for pdf-core's internal signing primitives.
+func (s *Subscriber) regenerationContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), regenerationTimeout)
+	return middleware.InjectBearerToken(ctx, conf.SystemToken()), cancel
+}
+
+// retryMissingPDFs re-runs regeneration for contracts and templates that hold
+// no stored PDF. A lifecycle event is delivered at most once and a failed
+// regeneration is logged rather than redelivered, so a transient pdf-core or
+// artifact-store failure would otherwise leave the entity without a PDF for
+// good: not exportable, and — for a cross-instance contract — not shippable, so
+// the counterparty never receives it however often the sync-fail scheduler
+// retries the ship. The work list comes from the entity's own committed state
+// rather than a failure record, so the pass also recovers regenerations lost to
+// a restart, and both handlers short-circuit when the PDF is already current.
+func (s *Subscriber) retryMissingPDFs(interval time.Duration) {
+	s.retries.pace(interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		contracts, templates, err := s.entitiesMissingStoredPDF()
+		if err != nil {
+			log.Printf("pdfgeneration: could not read entities missing a stored PDF: %v", err)
+			continue
+		}
+		now := time.Now()
+		for _, did := range contracts {
+			if !s.retries.ready("contract", did, now) {
+				continue
+			}
+			s.retryOne("contract", did, s.appendC2PA)
+		}
+		for _, did := range templates {
+			if !s.retries.ready("template", did, now) {
+				continue
+			}
+			s.retryOne("template", did, s.appendTemplateC2PA)
+		}
+	}
+}
+
+// retryOne regenerates one entity. The event that first requested the
+// regeneration is gone, so the attempt carries no reason and is effective now;
+// everything else the handlers need they re-read from the record.
+func (s *Subscriber) retryOne(kind, did string, regenerate func(context.Context, minimalCWEEvent) error) {
+	ctx, cancel := s.regenerationContext()
+	defer cancel()
+	if err := regenerate(ctx, minimalCWEEvent{DID: did, OccurredAt: time.Now().UTC()}); err != nil {
+		attempts := s.retries.failed(kind, did, time.Now())
+		log.Printf("pdfgeneration: retry %d/%d for %s %s did not store a PDF: %v",
+			attempts, missingPDFRetryAttempts, kind, did, err)
+		return
+	}
+	s.retries.succeeded(kind, did)
+}
+
+// carriesSignature reports whether the contract holds a committed signature —
+// the thing that makes its stored PDF unrenderable.
+func (s *Subscriber) carriesSignature(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
+	count, err := s.CRepo.CountSignedSignatures(ctx, tx, did)
+	if err != nil {
+		return false, fmt.Errorf("count signatures on contract %s: %w", did, err)
+	}
+	return count > 0, nil
+}
+
+func (s *Subscriber) entitiesMissingStoredPDF() ([]string, []string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), conf.TransactionTimeout())
+	defer cancel()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func(tx *sqlx.Tx) {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("could not rollback transaction: %v", err)
+		}
+	}(tx)
+
+	contracts, err := s.CRepo.ReadDIDsMissingStoredPDF(ctx, tx, missingPDFRetryBatch,
+		s.retries.exhausted("contract"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read contracts without a stored PDF: %w", err)
+	}
+	templates, err := s.TRepo.ReadDIDsMissingStoredPDF(ctx, tx, missingPDFRetryBatch,
+		s.retries.exhausted("template"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read templates without a stored PDF: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit read: %w", err)
+	}
+	return contracts, templates, nil
 }
 
 func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
@@ -125,6 +247,58 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 		return s.appendTemplateC2PA(ctx, cweEvt)
 	}
 	return s.appendC2PA(ctx, cweEvt)
+}
+
+// frozenArtifactVerdict decides what a background regeneration may do to a
+// contract whose PDF is frozen — a PAdES-signed artifact (DCS-FR-SM-16), or a
+// peer's signed bytes received verbatim. The signing command already produced
+// and stored the final bytes, and any post-signing C2PA lifecycle update runs
+// through the explicit signing/revoke endpoints, never this regenerator:
+// re-rendering here would replace the signed PDF with an unsigned one and
+// destroy the signature's /ByteRange. Returns true when there is nothing to do.
+//
+// What freezes an artifact is a SIGNATURE, not a state past "draft". The stored
+// artifact's own C2PA state says so directly — it was written by the signing
+// command. The target state does not: a contract reaches a frozen state without
+// ever being signed (DRAFT -> APPROVED -> terminate, or the expiry cron flipping
+// an unsigned contract to EXPIRED), and freezing on it would decline the FIRST
+// render into that state, leaving pdf_state behind the contract forever — an
+// export that polls to its deadline and answers "being regenerated" for good.
+// So the target state freezes only together with a committed signature, which
+// covers the case the stored artifact cannot: a contract signed HERE whose
+// stored CID is empty (the artifact store accepted the signed bytes but the
+// pointer never committed) reads as "not frozen" on the artifact alone, and the
+// regeneration path's answer to a missing artifact is a FRESH render — an
+// unsigned PDF, issued a new lifecycle VC. There is nothing to render from in
+// that case; the artifact can only come back from its signed bytes.
+//
+// A peer's signature is invisible to that count — CountSignedSignatures reads
+// only this instance's contract_signatures, and the receive path writes none.
+// What protects a peer's signed bytes is the stored artifact's own state, which
+// receivepdf records from the shipped PDF (provenance.ArtifactC2PAState) rather
+// than from this instance's workflow state.
+//
+// carriesSignature is consulted only when the answer can still change the
+// verdict, so an ordinary draft regeneration costs no extra query.
+func frozenArtifactVerdict(did, contractState, storedCID, storedC2PAState, targetC2PAState string,
+	carriesSignature func() (bool, error)) (bool, error) {
+	frozen := provenance.IsFrozenC2PAState(storedC2PAState)
+	if !frozen && provenance.IsFrozenC2PAState(targetC2PAState) {
+		signed, err := carriesSignature()
+		if err != nil {
+			return false, err
+		}
+		frozen = signed
+	}
+	if !frozen {
+		return false, nil
+	}
+	if storedCID == "" {
+		return false, fmt.Errorf(
+			"contract %s carries a signature (state %q) but holds no stored PDF: refusing to render one, a signed contract's artifact can only be restored from its signed bytes",
+			did, contractState)
+	}
+	return true, nil
 }
 
 func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) error {
@@ -174,13 +348,12 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return fmt.Errorf("read PDF state for contract %s: %w", cweEvt.DID, err)
 	}
 
-	// A frozen PDF is a PAdES-signed artifact (DCS-FR-SM-16): the signing
-	// command already produced the final signed bytes and stored them, and any
-	// post-signing C2PA lifecycle update runs through the explicit signing/
-	// revoke endpoints — never this background regenerator. Re-rendering here
-	// would replace the signed PDF with an unsigned one and destroy the
-	// signature's /ByteRange, so leave a frozen artifact untouched.
-	if pdfState.IPFSCID != "" && provenance.IsFrozenC2PAState(pdfState.C2PAState) {
+	frozen, err := frozenArtifactVerdict(cweEvt.DID, string(contract.State), pdfState.IPFSCID, pdfState.C2PAState, c2paState,
+		func() (bool, error) { return s.carriesSignature(ctx, tx, cweEvt.DID) })
+	if err != nil {
+		return err
+	}
+	if frozen {
 		return nil
 	}
 

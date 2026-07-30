@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -17,6 +18,12 @@ import (
 // URLs for the JSON-LD context ("@context") and the SHACL shapes
 // ("sh:shapesGraph"). Re-pointed at startup and on every hub activation
 // (SetSchemaAnchorRefs).
+//
+// All four are written together by one hub-activation request handler while
+// normalization and validation read them on other request goroutines, so they
+// share anchorsMu. The maps are only ever replaced wholesale, never mutated in
+// place, which lets a reader take a snapshot under the read lock and walk it
+// after releasing.
 //
 // No validation profile is stamped. The anchor named one hardcoded entry
 // whose rules are about the DCS envelope — a contract root and its party
@@ -30,11 +37,40 @@ var (
 	// canonicalOntologyIRIs is the active hub context's prefix -> IRI map;
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
+	// shapeLibraryAnchors maps a class targeted by an ACTIVE registered hub
+	// shapes library to that library's anchor (SetShapeLibraryAnchors).
+	shapeLibraryAnchors map[string]ShapeLibraryAnchor
+	anchorsMu           sync.RWMutex
 )
+
+// ShapeLibraryAnchor is a registered hub SHACL library's name and the
+// versioned anchor URL a document declaring it carries.
+type ShapeLibraryAnchor struct {
+	Name string
+	URL  string
+}
+
+// SetShapeLibraryAnchors installs the class -> registered-library index used
+// to declare, in a produced document's sh:shapesGraph, the shape libraries
+// its own data objects are governed by (ADR-23). Re-installed on every hub
+// activation alongside SetSchemaAnchorRefs.
+func SetShapeLibraryAnchors(byTargetClass map[string]ShapeLibraryAnchor) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
+	shapeLibraryAnchors = byTargetClass
+}
+
+func currentShapeLibraryAnchors() map[string]ShapeLibraryAnchor {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return shapeLibraryAnchors
+}
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
 // the Semantic Hub's served URLs.
 func SetSchemaAnchorRefs(contextRef, shapesRef string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	if contextRef != "" {
 		schemaRefJSONLDContext = contextRef
 	}
@@ -43,9 +79,20 @@ func SetSchemaAnchorRefs(contextRef, shapesRef string) {
 	}
 }
 
-// PinSemanticBundle stamps the effective Semantic Hub bundle selected while a
-// new artifact is created. Existing anchors are intentionally replaced only
-// on that creation path; subsequent normalizations preserve the pins.
+func currentJSONLDContextRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefJSONLDContext
+}
+
+func currentSHACLShapesRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefSHACLShapes
+}
+
+// PinSemanticBundle stamps the immutable Semantic Hub bundle selected while a
+// new artifact is created.
 func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
 	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
 		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
@@ -81,23 +128,32 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 // SetCanonicalOntologyIRIs installs the ACTIVE hub context's prefix -> IRI
 // map for enforcement during normalization.
 func SetCanonicalOntologyIRIs(iris map[string]string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	canonicalOntologyIRIs = iris
+}
+
+func currentCanonicalOntologyIRIs() map[string]string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return canonicalOntologyIRIs
 }
 
 // enforceCanonicalOntologyIRIs rejects documents whose @context redefines a
 // hub-declared prefix to a different IRI (DCS-FR-TR-03: templating and
 // contracting validate against the Semantic Hub's active schema).
 func enforceCanonicalOntologyIRIs(data documentData) error {
-	if len(canonicalOntologyIRIs) == 0 {
+	canonical := currentCanonicalOntologyIRIs()
+	if len(canonical) == 0 {
 		return nil
 	}
 	switch context := data["@context"].(type) {
 	case map[string]any:
-		return enforceCanonicalOntologyIRIMap(context)
+		return enforceCanonicalOntologyIRIMap(context, canonical)
 	case []any:
 		for _, entry := range context {
 			if inline, ok := entry.(map[string]any); ok {
-				if err := enforceCanonicalOntologyIRIMap(inline); err != nil {
+				if err := enforceCanonicalOntologyIRIMap(inline, canonical); err != nil {
 					return err
 				}
 			}
@@ -106,13 +162,13 @@ func enforceCanonicalOntologyIRIs(data documentData) error {
 	return nil
 }
 
-func enforceCanonicalOntologyIRIMap(context map[string]any) error {
+func enforceCanonicalOntologyIRIMap(context map[string]any, canonicalIRIs map[string]string) error {
 	for prefix, iri := range context {
 		supplied, ok := iri.(string)
 		if !ok {
 			continue
 		}
-		canonical, known := canonicalOntologyIRIs[prefix]
+		canonical, known := canonicalIRIs[prefix]
 		if known && supplied != canonical {
 			return fmt.Errorf(
 				"%w: document @context redefines prefix %q to %q, but the Semantic Hub's active context declares %q",
@@ -424,8 +480,9 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 	// Anchors are set once, at production time: a document keeps the hub
 	// versions it was authored under.
 	if _, exists := data["sh:shapesGraph"]; !exists {
-		data["sh:shapesGraph"] = map[string]any{"@id": schemaRefSHACLShapes}
+		data["sh:shapesGraph"] = map[string]any{"@id": currentSHACLShapesRef()}
 	}
+	declareShapeLibraries(data)
 	if _, ok := topLevelValue(data, "contractData").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "contractData"); !exists {
 			setTopLevelValue(data, "dcs:contractData", []any{})
@@ -442,6 +499,93 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 		}
 	}
 	typeLayoutNodes(data)
+}
+
+// declareShapeLibraries adds to the document's own sh:shapesGraph the
+// versioned anchor of every registered hub shapes library that governs a
+// class the document's data uses. Validation loads exactly the declared
+// graphs, so this declaration is what keeps a data object modelled against a
+// registered library under that library's constraints (ADR-23) — and what
+// keeps every other registered library out of the verdict.
+//
+// A library the document already declares keeps the version it was authored
+// under: anchors are added, never rewritten (ADR-8). "Already declared" is
+// name AND version, so a document that arrives pre-declaring an OLD version of
+// a library still gets the active anchor added: a submitter cannot pick which
+// version of a library governs its data by naming a laxer one first, and the
+// document ends up validated against both.
+func declareShapeLibraries(data documentData) {
+	anchors := currentShapeLibraryAnchors()
+	if len(anchors) == 0 {
+		return
+	}
+	declared := map[shapesGraphAnchor]bool{}
+	for _, anchor := range declaredShapesGraphs(data) {
+		declared[anchor] = true
+	}
+	var added []any
+	for _, class := range assertedTypeIRIs(data) {
+		anchor, governed := anchors[class]
+		if !governed {
+			continue
+		}
+		declaration := shapesGraphAnchor{Name: anchor.Name, Version: anchorVersion(anchor.URL)}
+		if declared[declaration] {
+			continue
+		}
+		declared[declaration] = true
+		added = append(added, map[string]any{"@id": anchor.URL})
+	}
+	if len(added) == 0 {
+		return
+	}
+	existing, isList := data["sh:shapesGraph"].([]any)
+	if !isList {
+		existing = []any{data["sh:shapesGraph"]}
+	}
+	data["sh:shapesGraph"] = append(existing, added...)
+}
+
+// assertedTypeIRIs collects every @type the document asserts anywhere in its
+// graph, sorted — the anchor list a document ends up with must not depend on
+// map iteration order.
+func assertedTypeIRIs(data documentData) []string {
+	seen := map[string]bool{}
+	var types []string
+	collect := func(value any) {
+		iri, ok := value.(string)
+		if !ok || seen[iri] {
+			return
+		}
+		seen[iri] = true
+		types = append(types, iri)
+	}
+	var walk func(node any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			switch asserted := typed["@type"].(type) {
+			case string:
+				collect(asserted)
+			case []any:
+				for _, entry := range asserted {
+					collect(entry)
+				}
+			}
+			for key, value := range typed {
+				if key != "@type" {
+					walk(value)
+				}
+			}
+		case []any:
+			for _, entry := range typed {
+				walk(entry)
+			}
+		}
+	}
+	walk(map[string]any(data))
+	slices.Sort(types)
+	return types
 }
 
 // typeLayoutNodes asserts rdf:type on the document's layout nodes — the
@@ -476,23 +620,24 @@ func typeLayoutNodes(data documentData) {
 // it in JSON-LD array form. A document whose @context already carries a
 // URL entry keeps it.
 func normalizeCanonicalContext(data documentData) {
+	anchor := currentJSONLDContextRef()
 	switch context := data["@context"].(type) {
 	case string:
 		if isHubContextAnchor(context) {
 			return
 		}
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	case []any:
 		for _, entry := range context {
 			if url, ok := entry.(string); ok && isHubContextAnchor(url) {
 				return
 			}
 		}
-		data["@context"] = append([]any{schemaRefJSONLDContext}, context...)
+		data["@context"] = append([]any{anchor}, context...)
 	case map[string]any:
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	default:
-		data["@context"] = schemaRefJSONLDContext
+		data["@context"] = anchor
 	}
 }
 

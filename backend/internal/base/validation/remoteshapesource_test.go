@@ -19,13 +19,18 @@ func TestVerifyAgainstOriginatorHub(t *testing.T) {
 	shapesTTL := mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-shapes.ttl")
 	contextJSON := mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-context.jsonld")
 
+	catalogTTL := mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-clause-catalog.ttl")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		kind := r.URL.Query().Get("kind")
+		name := r.URL.Query().Get("name")
 		var content string
-		switch kind {
-		case "shapes":
+		switch {
+		case kind == "shapes" && name == "clause-catalog":
+			content = catalogTTL
+		case kind == "shapes" && name == "facis-dcs":
 			content = shapesTTL
-		case "context":
+		case kind == "context":
 			content = contextJSON
 		default:
 			w.WriteHeader(http.StatusNotFound)

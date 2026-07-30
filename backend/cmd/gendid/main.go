@@ -71,8 +71,9 @@ func main() {
 
 	// The federation agreement credential (ADR-19) is signed by a SEPARATE
 	// HSM key, published here as its own verificationMethod so a verifier can
-	// tell the eIDAS/JAdES identity key (verificationMethod[0], above) apart
-	// from the VC signing key.
+	// tell the eIDAS/JAdES identity key (#dev-key-1, above) apart from the VC
+	// signing key. Which is which is stated by the relationships below, not by
+	// the order of this list.
 	vcLabel := hsm.KeyLabelVC()
 	vcSigner, err := h.Signer(vcLabel)
 	if err != nil {
@@ -131,6 +132,11 @@ func main() {
 				"publicKeyJwk": ecdhJWK,
 			},
 		},
+		// The identity key authenticates this instance to a peer (the DCS-to-DCS
+		// challenge-response) and asserts (JAdES, JAR); the VC key only asserts;
+		// the key-agreement key does neither. A consumer resolves a key by the
+		// relationship its use requires, so each one has to be stated.
+		"authentication":  []string{*did + "#dev-key-1"},
 		"assertionMethod": []string{*did + "#dev-key-1", *did + "#" + vcLabel},
 		"keyAgreement":    []string{*did + "#" + ecdhLabel},
 	}

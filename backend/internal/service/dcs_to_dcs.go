@@ -97,10 +97,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if err := remoteDIDDocument.VerifyEIDASCertificate(s.TrustPool); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	if err := remoteDIDDocument.Verify([]byte(req.SecretValue), req.SecretHash); err != nil {
+	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
@@ -183,7 +180,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	// party that signed without one.
 	shipped := trustgate.ShippedSignatures{
 		ResolveKey: func(methodID string) (*ecdsa.PublicKey, error) {
-			return trustgate.PeerAssertionKey(remoteDIDDocument, methodID)
+			return remoteDIDDocument.AssertionKey(methodID)
 		},
 		VerifyVC: provenance.VerifyDataIntegrityProof,
 	}
@@ -270,10 +267,7 @@ func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContract
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if err := remoteDIDDocument.VerifyEIDASCertificate(s.TrustPool); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	if err := remoteDIDDocument.Verify([]byte(req.SecretValue), req.SecretHash); err != nil {
+	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
@@ -328,9 +322,13 @@ func verifyShippedJades(jadesSignature, contractIRI, fromPeerDID string, pdfPayl
 	if err != nil {
 		return nil, err
 	}
-	peerKey := remoteDIDDocument.PublicKey()
-	if peerKey == nil || leafKey.X.Cmp(peerKey.X) != 0 || leafKey.Y.Cmp(peerKey.Y) != 0 {
-		return nil, fmt.Errorf("JAdES x5c leaf key does not match peer %s's did:web key", fromPeerDID)
+	// The JAdES header names no key, only its x5c chain, so the leaf key itself
+	// has to be one the peer publishes as able to make assertions — signing a
+	// contract is one. A key merely present in the document is not: the same
+	// document publishes the peer's key-agreement key.
+	if !remoteDIDDocument.PublishesKeyFor(identity.PurposeAssertion, leafKey) {
+		return nil, fmt.Errorf("JAdES x5c leaf key is not published by peer %s as an %s key",
+			fromPeerDID, identity.PurposeAssertion)
 	}
 
 	// The payload is self-describing ({dcs:contractDid, dcs:contractVersion,

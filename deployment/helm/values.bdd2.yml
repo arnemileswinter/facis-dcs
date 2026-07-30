@@ -56,6 +56,11 @@ extraEnv:
   # within the scenarios' replication wait (see values.bdd.yml for the rationale).
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
     value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut):
+  # fast in BDD/e2e so a transiently failed PDF regeneration is redone and the
+  # deferred ship has something to send (see values.bdd.yml for the rationale).
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
+    value: "10s"
 
 # DID identity (fatal on startup when missing). The <fullname>-identity
 # Secret (identitySecretName helper — unique per release, so this doesn't
@@ -67,20 +72,7 @@ identity:
 
 oid4vp:
   trust:
-    enabled: true
-    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
-    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
-
-# Instance B deliberately shares instance A's ORCE deployment. Explicit URLs
-# avoid the empty-value helper deriving unavailable dcs2-orce service names.
-auditExecutor:
-  url: "http://dcs-orce:1880/customer-audit/run"
-  timeout: "2s"
-
-workflowGateExecutor:
-  url: "http://dcs-orce:1880/workflow-gate/run"
-  timeout: "2s"
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
 # database. No "fc" or "statuslist" database — B doesn't run the Federated
@@ -134,6 +126,31 @@ hydra:
       post_logout_redirect_uris: ["http://dcs-b.localhost:18080/digital-contracting-service/api/auth/logout-complete"]
       token_endpoint_auth_method: client_secret_post
       skip_consent: true
+    # The shared ORCE contract-target flow, authenticating its deployment
+    # callback to THIS instance (ADR-27). One target system serves both
+    # deployments, so it holds one credential per DCS it reports to; both are
+    # registered under the same client id because the id names the target, and
+    # a token minted here is only ever accepted here — B's Hydra is a separate
+    # issuer with its own keys, so instance A's credential cannot be presented
+    # to instance B, or the reverse.
+    - client_id: dcs-orce-target
+      client_secret: dcs-orce-target-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
+
+# The roles a machine caller holds are fixed here, not carried in its token
+# (see values.bdd.yml's systemClients block). Instance B needs exactly one:
+# without it the contract-target flow's callback authenticates but holds no
+# "Contract Target System" scope, and B's deployments could never be
+# acknowledged — which is what leaves a countersigned contract SIGNED forever.
+systemClients:
+  # Authorises the deployment callback and nothing else, and only for the
+  # deployments dispatched to this target (ADR-27).
+  - client_id: dcs-orce-target
+    participant_did: "did:web:dcs-b.localhost%3A18080"
+    roles: ["Contract Target System"]
 
 # Ingress: Host-only rule for dcs-b.localhost (API + domain-level did.json),
 # same path shape as instance A's dcs-a.localhost rule (values.bdd.yml),
@@ -172,10 +189,17 @@ pkcs11:
 # the 'statuslistServiceURL' helper's own naming convention (mirrored
 # explicitly here since statuslistService.enabled=false on this release, so
 # the helper's auto-wired branch never fires).
+#
+# The tenant is B's own, not A's: each instance allocates revocation entries out
+# of its own database (migration 20260734), so sharing one tenant's list would
+# have both instances hand out entry 0, entry 1, ... to different contracts and
+# a termination on A would read as a revocation on B. A tenant per instance
+# keeps the index spaces apart; A's list-init hook creates it
+# (values.bdd.yml bddListInit.tenantIDs).
 statuslistService:
   enabled: false
   url: "http://dcs-statuslist-service:8080"
-  tenantID: default
+  tenantID: c2pa2
 
 # Same loopback proxy as instance A (values.bdd.yml): status list credential
 # IDs embedded by the shared Status List Service are public-origin URLs
@@ -190,7 +214,7 @@ statusListLocalhostProxy:
   # reaches A's through the same Ingress. Without this the probe falls back to
   # the chart default /statuslist/health, which nothing serves — the sidecar
   # then never turns ready and holds B's rollout open until it times out.
-  readinessPath: "/statuslist/v1/tenants/credential/status/1"
+  readinessPath: "/statuslist/v1/tenants/c2pa2/status/1"
 
 # IPFS / IPFS Document Manager: instance B runs its OWN, like a real second
 # organization (two independent provenance stores) — sharing instance A's Kubo
@@ -261,3 +285,27 @@ kubeStateMetrics:
 dss:
   enabled: false
   url: http://dcs-dss:8080
+
+# Seeded into this instance's target registry at startup (ADR-25), exactly as
+# instance A seeds its own (values.bdd.yml). Both point at the SAME shipped
+# ORCE contract-target flow — instance B runs no ORCE of its own (see the orce
+# block above) and does not need one: a target system serving two customers is
+# the normal case, not a test shortcut.
+#
+# What the flow cannot guess is where to acknowledge. SIGNED -> ACTIVE happens
+# only on the target's own callback, so a dispatch from B that is acknowledged
+# to A is reported against a correlation id A never issued and is refused.
+# The registered endpoint therefore carries this instance's callback wiring on
+# the dispatch: dcs_url is B's in-cluster API base, token_url is B's own Hydra,
+# which is the only issuer B's backend accepts. The flow falls back to its own
+# DCS_URL / HYDRA_TOKEN_URL environment (instance A's) when a registry entry
+# carries neither, so A's dispatches are unchanged.
+contractTargets:
+  - name: "BDD Contract Target"
+    url: "http://dcs-orce:1880/contract-target/deploy?dcs_url=http://dcs2-digital-contracting-service:8991/digital-contracting-service/api&token_url=http://dcs2-hydra:4444/oauth2/token"
+    description: "The shipped ORCE contract-target flow used by the test suites, acknowledging to this instance."
+    # Matches the hydra client and the systemClients entry above: this is what
+    # binds a callback's caller to the registry row the deployment went to
+    # (ADR-27). A target registered through the API instead gets its credential
+    # from POST /contract/targets/{id}/credential.
+    oauth_client_id: "dcs-orce-target"

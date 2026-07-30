@@ -93,6 +93,7 @@ from datetime import datetime, timezone
 import requests as _requests
 from behave import given, then, when
 
+from steps.contract_deployment.dcs_contract_deployment_steps import BDD_TARGET_NAME as _SEEDED_TARGET_NAME
 from steps.peer_trust.synthetic_trusted_peer import publish_trusted_peer
 from steps.support.api_client import (
     contract_create_url,
@@ -103,6 +104,7 @@ from steps.support.api_client import (
     contract_retrieve_by_id_url,
     did_document_url,
     get_with_headers,
+    hub_shapes_anchors,
     origin_url,
     post_json,
     signature_request_url,
@@ -1302,9 +1304,13 @@ def step_then_schema_ref_resolves_against_a(context):
         timeout=context.http_timeout_seconds,
     )
     assert retrieve.status_code == 200, retrieve.text
-    shapes_ref = (retrieve.json().get("contract_data") or {}).get("sh:shapesGraph") or {}
-    anchor = shapes_ref.get("@id") if isinstance(shapes_ref, dict) else shapes_ref
-    assert anchor, f"Expected the contract stored on instance B to carry a sh:shapesGraph anchor, got: {shapes_ref}"
+    contract_data = retrieve.json().get("contract_data") or {}
+    anchors = hub_shapes_anchors(contract_data)
+    assert anchors, (
+        "Expected the contract stored on instance B to carry a sh:shapesGraph anchor, "
+        f"got: {contract_data.get('sh:shapesGraph')}"
+    )
+    anchor = anchors[0]
 
     url = anchor if anchor.startswith("http") else f"{origin_url(context.base_url_a)}{anchor}"
     resp = _requests.get(url, timeout=context.http_timeout_seconds)
@@ -1368,3 +1374,348 @@ def step_then_provenance_on_b(context):
         "Expected the JAdES payload's version to match the stored provenance version"
     )
     assert "dcs:contractDocument" in payload, "Expected the JAdES payload to embed the contract document"
+
+
+# ---------------------------------------------------------------------------
+# Federated deployment gate (DCS-NFR-BR-03)
+#
+# The seeded signature fields name the PARTIES (create.go seedSignatureFields:
+# one field per instance DID), and each party's signature row stays in its own
+# database. The deploy gate therefore satisfies a counterparty's field from the
+# evidence the instance actually holds for it — the JAdES that peer ships with
+# its own signed copy — and refuses while no such artifact exists, on the
+# manual endpoint and on the auto-deploy subscriber alike.
+# ---------------------------------------------------------------------------
+
+
+def _instance_target_id(context, base_url: str) -> str:
+    """The SEEDED registry entry for the shipped ORCE contract-target flow on ONE
+    named instance (values.bdd.yml / values.bdd2.yml contractTargets), by name.
+
+    Not registered here on the fly. A target registered through the API holds no
+    credential until one is issued for it, and authorizeCaller refuses a callback
+    from a target with no credential (ADR-27) — a target this suite invented
+    could dispatch but never acknowledge, so its contract would stay SIGNED. The
+    seeded entry carries the oauth_client_id its instance's Hydra and
+    systemClients both declare, which is what lets the acknowledgement land.
+
+    Resolved per instance: the single-instance helper caches one id on the
+    context, which is wrong across two instances — a target registered on A does
+    not exist on B, and the two entries point the flow's callback at different
+    deployments."""
+    cache = getattr(context, "peer_target_ids", None)
+    if cache is None:
+        cache = {}
+        context.peer_target_ids = cache
+    if base_url in cache:
+        return cache[base_url]
+    admin_h = AuthService.get_headers_for_roles(["Sys. Administrator"], api_base=base_url)
+    listed = _requests.get(
+        f"{base_url}/contract/targets", headers=admin_h, timeout=context.http_timeout_seconds
+    )
+    assert listed.status_code == 200, f"could not list contract targets on {base_url}: {listed.text}"
+    entries = listed.json() or []
+    for entry in entries:
+        if entry.get("name") == _SEEDED_TARGET_NAME:
+            cache[base_url] = entry["id"]
+            return entry["id"]
+    raise AssertionError(
+        f"{base_url} has no seeded contract target {_SEEDED_TARGET_NAME!r} — deploy this instance with a "
+        f"contractTargets entry carrying an oauth_client_id, or its deployments can never be acknowledged. "
+        f"Registered: {[e.get('name') for e in entries]}"
+    )
+
+
+def _cross_instance_contract(context, base_url: str):
+    c_did = context.cross_instance_contract_did
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=base_url)
+    retrieve = _requests.get(
+        f"{base_url}/contract/retrieve/{c_did}", headers=manager_h, timeout=context.http_timeout_seconds
+    )
+    assert retrieve.status_code == 200, f"could not read {c_did} on {base_url}: {retrieve.text}"
+    return retrieve.json(), manager_h
+
+
+def _designate_target(context, base_url: str):
+    body, manager_h = _cross_instance_contract(context, base_url)
+    resp = post_json(
+        context,
+        f"{base_url}/contract/target/designate",
+        {
+            "did": context.cross_instance_contract_did,
+            "updated_at": body.get("updated_at"),
+            "target_id": _instance_target_id(context, base_url),
+        },
+        headers=manager_h,
+    )
+    assert resp.status_code == 200, (
+        f"could not designate a target system on {base_url}: {resp.status_code} {resp.text}"
+    )
+
+
+def _cross_instance_state(context, base_url: str) -> str:
+    body, _ = _cross_instance_contract(context, base_url)
+    return str(body.get("state", "")).upper()
+
+
+def _deploy_cross_instance(context, base_url: str):
+    body, manager_h = _cross_instance_contract(context, base_url)
+    return post_json(
+        context,
+        f"{base_url}/contract/deploy",
+        {"did": context.cross_instance_contract_did, "updated_at": body.get("updated_at")},
+        headers=manager_h,
+    )
+
+
+@when("instance {label} points the cross-instance contract at its own target system")
+def step_when_designate_target_on_instance(context, label):
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    _designate_target(context, base_url)
+
+
+# The counterparty identity instance B runs its own workflow under. A BDD
+# identity is only (roles, organization), and the participant it resolves to
+# (the organization — auth/oid4vp/verify.go sets ParticipantDID from it) is
+# what the open-decision check compares against: HasOpenNegotiationDecisions
+# excludes a pending decision on a change request the CALLER itself authored
+# and nobody else's, so the negotiate that opens the round and the submit that
+# closes it have to come from one and the same participant. A dedicated
+# organization keeps that pairing out of the suite-shared role tokens, whose
+# state other scenarios rely on.
+_B_COUNTERPARTY_ORG = "BDD Peer Trust Counterparty"
+
+# Contract Manager is the scope /contract/negotiate grants the responder of an
+# inbound offer (design/contract_workflow_engine.go); Contract Negotiator is
+# the local role submit.go's NEGOTIATION branch accepts. One token carries
+# both, so every call of the round is made by one participant.
+_B_COUNTERPARTY_ROLES = ["Contract Manager", "Contract Negotiator"]
+
+
+def _post_on_b_with_fresh_updated_at(context, path: str, payload: dict, headers: dict, what: str):
+    """POST a mutating contract command to instance B, reading updated_at from
+    B's OWN copy immediately beforehand. B's copy moves without B acting — the
+    peer's ships land on it asynchronously — so a value read earlier in the
+    step can already be behind the lost-update guard by the time the call is
+    made; a guard refusal is answered by re-reading rather than by failing the
+    scenario on a race it is not testing."""
+    c_did = context.cross_instance_contract_did
+    last = None
+    for _ in range(3):
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=headers)
+        assert retrieve.status_code == 200, f"could not read {c_did} on instance B: {retrieve.text}"
+        body = dict(payload, did=c_did, updated_at=retrieve.json().get("updated_at"))
+        last = post_json(context, f"{context.base_url_b}{path}", body, headers=headers)
+        if last.status_code == 200:
+            return last
+        if "updated elsewhere" not in last.text.lower():
+            break
+        time.sleep(2)
+    raise AssertionError(f"{what} failed on instance B: {last.status_code} {last.text}")
+
+
+@when("instance B drives its own copy of the contract to APPROVED through its own local workflow")
+def step_when_drive_to_approved_on_b(context):
+    """B holds an inbound OFFER, not a draft of its own, and runs its OWN
+    workflow on it (ADR-13): OFFERED -> NEGOTIATION -> SUBMITTED -> REVIEWED ->
+    APPROVED.
+
+    Leaving OFFERED is where B differs from A. /contract/submit is the
+    CREATOR's path — submit.go's DRAFT/OFFERED branch requires the caller to be
+    the contract's creator, and receivepdf.go records the ORIGIN peer as
+    CreatedBy on a received copy, so no local user of B can ever be it. The
+    responder's path is /contract/negotiate: transition.go declares the
+    Offered -> Negotiation edge for exactly this, and negotiate.go derives the
+    authority for an inbound offer (Origin != localPeer) from being the
+    designated counterparty rather than from a local negotiator task.
+
+    The change request is FREE TEXT on purpose. A structured redline is applied
+    to contract_data immediately and re-shipped as a fresh PDF (negotiate.go),
+    which would rewrite the document instance A has already signed — the very
+    thing this scenario measures. Free text decodes into no ChangeRequest, so
+    it is recorded for the negotiation audit trail and changes nothing.
+
+    From NEGOTIATION on, the received copy is fully equipped for B's own
+    workflow — receivepdf.go assigns B's peer DID to the reviewer, approver and
+    negotiator tasks — so the tail is the same submit / submit / review /
+    approve sequence instance A runs, and the one the two-instance Playwright
+    vertical drives through the UI (multi-dcs-helpers settleToApprovedOn).
+    """
+    with _as_instance(context, context.base_url_b):
+        counterparty_h = AuthService.get_headers_for_roles(
+            _B_COUNTERPARTY_ROLES,
+            api_base=context.base_url_b,
+            organization=_B_COUNTERPARTY_ORG,
+        )
+        _post_on_b_with_fresh_updated_at(
+            context,
+            "/contract/negotiate",
+            {
+                "negotiated_by": AuthService.username_for_roles(_B_COUNTERPARTY_ROLES),
+                "change_request": "Reviewed on the counterparty side; the offer is accepted as it stands.",
+            },
+            counterparty_h,
+            "opening the negotiation on the received offer",
+        )
+
+        # Submit, from the participant that opened the round, until the round
+        # closes: the first submit closes B's negotiation task and folds the
+        # round into contract_version + 1, leaving the contract in NEGOTIATION;
+        # the next finds no negotiation against the new version and advances to
+        # SUBMITTED (submit.go's NEGOTIATION branch). Driving on the state
+        # rather than a fixed count keeps this right if a peer ship bumps the
+        # version in between and the first submit already finds nothing to
+        # merge — one submit too many would land in the reviewer's branch and
+        # be refused for the role.
+        for _ in range(4):
+            if _cross_instance_state(context, context.base_url_b) != "NEGOTIATION":
+                break
+            _post_on_b_with_fresh_updated_at(context, "/contract/submit", {}, counterparty_h, "submit")
+        state = _cross_instance_state(context, context.base_url_b)
+        assert state == "SUBMITTED", (
+            f"expected instance B's copy to close its negotiation round and reach SUBMITTED, got {state!r}"
+        )
+
+        # Review and approval are peer-scoped tasks (IsValidReviewer /
+        # IsValidApprover check the instance DID, not the participant), so the
+        # suite's shared role tokens are the right callers for them.
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_b)
+        _post_on_b_with_fresh_updated_at(
+            context,
+            "/contract/submit",
+            {"forward_to": "approval"},
+            reviewer_h,
+            "reviewer forward-to-approval",
+        )
+
+        approver_h = AuthService.get_headers_for_roles(["Contract Approver"], api_base=context.base_url_b)
+        approve = _post_on_b_with_fresh_updated_at(context, "/contract/approve", {}, approver_h, "approve")
+        context.requests_response = approve
+
+
+@when("instance B applies a ceremony-backed signature to the contract")
+def step_when_countersign_on_b(context):
+    """The counterparty's own signature, on its own copy, for its OWN seeded
+    field (its peer DID) — the signature A's database will never hold a row
+    for."""
+    from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
+        ceremony_aud,
+        _build_pid_presentation,
+        _complete_ceremony_via_presentation,
+        _fetch_pending_nonce,
+    )
+
+    with _as_instance(context, context.base_url_b):
+        c_did = context.cross_instance_contract_did
+        field_name = context.peer_did_b
+        signer_h = AuthService.get_headers_for_roles(["Contract Signer"], api_base=context.base_url_b)
+        start = post_json(
+            context,
+            signature_request_url(context),
+            {"contract_did": c_did, "field_name": field_name},
+            headers=signer_h,
+        )
+        assert start.status_code == 200, (
+            f"POST /signature/request failed on instance B: {start.status_code} {start.text}"
+        )
+        ceremony_id = start.json().get("ceremony_id")
+        assert ceremony_id, f"/signature/request response has no ceremony_id: {start.text}"
+
+        nonce = _fetch_pending_nonce(context, ceremony_id)
+        given_name, family_name = "PeerCountersignature", "BDD-Testperson"
+        presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
+            given_name=given_name, family_name=family_name,
+            aud=ceremony_aud(context), nonce=nonce,
+        )
+        completion = _complete_ceremony_via_presentation(
+            context, ceremony_id, presentation, subject_did, given_name, family_name,
+            poa_organization=field_name, nonce=nonce,
+        )
+        assert completion.status_code == 200, (
+            f"ceremony presentation failed on instance B: {completion.status_code} {completion.text}"
+        )
+        apply_resp = wallet_sign(
+            context,
+            c_did,
+            signer_did=subject_did,
+            signatory=given_name,
+            field_name=field_name,
+            credential_type="AES",
+            headers=signer_h,
+            ceremony_id=ceremony_id,
+        )
+        assert apply_resp.status_code == 200, (
+            f"wallet signing failed on instance B: {apply_resp.status_code} {apply_resp.text}"
+        )
+        context.requests_response = apply_resp
+
+
+@then("a manual deployment of the cross-instance contract on instance {label} is rejected because signing is incomplete")
+def step_then_cross_instance_deploy_rejected(context, label):
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    resp = _deploy_cross_instance(context, base_url)
+    assert resp.status_code == 400, (
+        f"Expected instance {label} to refuse deploying a contract its counterparty has not signed, "
+        f"got {resp.status_code}: {resp.text}"
+    )
+    assert "incomplete" in resp.text.lower(), (
+        f"Expected the refusal to name the incomplete signing workflow: {resp.text}"
+    )
+
+
+@then("the cross-instance contract on instance {label} does not activate while the counterparty has not signed")
+def step_then_no_auto_activation(context, label):
+    """The auto-deploy subscriber (DCS-FR-CWE-06) fires on this instance's own
+    APPLIED_SIGNATURE and runs the same gate. The contract designates a target,
+    so an ungated deployment would have been dispatched and the target's
+    acknowledgement would have moved it to ACTIVE — staying SIGNED is what says
+    the gate held on that path too."""
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    assert _cross_instance_state(context, base_url) == "SIGNED", (
+        f"Expected instance {label} to hold its own signature and be SIGNED before this is asserted, got "
+        f"{_cross_instance_state(context, base_url)!r}"
+    )
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        state = _cross_instance_state(context, base_url)
+        assert state != "ACTIVE", (
+            f"Instance {label} activated a contract its counterparty has never signed (DCS-NFR-BR-03)"
+        )
+        time.sleep(3)
+
+
+@then("the cross-instance contract on instance {label} activates automatically once both parties have signed")
+def step_then_auto_activation(context, label):
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    state = None
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        state = _cross_instance_state(context, base_url)
+        if state == "ACTIVE":
+            return
+        time.sleep(3)
+    raise AssertionError(
+        f"Expected the auto-deploy subscriber on instance {label} to deploy the countersigned contract "
+        f"and the target's acknowledgement to move it to ACTIVE within 120s, state is still {state!r}"
+    )
+
+
+@then("a manual deployment of the cross-instance contract on instance {label} is accepted once the counterparty has countersigned")
+def step_then_cross_instance_deploy_accepted(context, label):
+    """The countersignature reaches this instance as the JAdES the peer ships
+    with its signed copy, so poll until that ship has landed rather than racing
+    it."""
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    resp = None
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        resp = _deploy_cross_instance(context, base_url)
+        if resp.status_code == 200:
+            body = resp.json()
+            assert body.get("correlation_id"), f"Expected a dispatched deployment, got: {body}"
+            return
+        time.sleep(3)
+    raise AssertionError(
+        f"Expected instance {label} to deploy the countersigned contract, got "
+        f"{resp.status_code if resp else 'n/a'}: {resp.text if resp else ''}"
+    )

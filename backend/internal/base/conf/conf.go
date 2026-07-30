@@ -89,6 +89,24 @@ func SyncFailCronJobTimeOut() time.Duration {
 	return 5 * time.Minute
 }
 
+// PDFRegenerationRetryTimeOut is how often the background regenerator
+// re-attempts entities left without a stored PDF. Lifecycle events arrive over
+// NATS at-most-once and a regeneration that fails is not redelivered, so a
+// single transient pdf-core or IPFS failure otherwise leaves the artifact
+// missing permanently: the contract cannot be exported, and a cross-instance
+// contract cannot be shipped at all — the sync-fail scheduler keeps retrying a
+// ship that has nothing to send. This is that path's counterpart, so it shares
+// its cadence. DCS_PDF_REGENERATION_RETRY_INTERVAL (a Go duration, e.g. "10s")
+// overrides the default; BDD/e2e set it low.
+func PDFRegenerationRetryTimeOut() time.Duration {
+	if v := os.Getenv("DCS_PDF_REGENERATION_RETRY_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 5 * time.Minute
+}
+
 // ArchiveExpiringWindow is how far ahead the archive dashboard's
 // expiring-contracts list looks (DCS-FR-CSA-04, DCS-FR-CSA-21).
 // DCS_ARCHIVE_EXPIRING_WINDOW_DAYS (a positive integer number of days)

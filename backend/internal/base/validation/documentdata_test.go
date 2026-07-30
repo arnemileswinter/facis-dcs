@@ -440,9 +440,9 @@ func TestValidateContractSemanticsAcceptsCanonicalContract(t *testing.T) {
 func TestNormalizedDocumentsClaimNoValidationProfile(t *testing.T) {
 	// Anchors as a running instance has them: RefreshValidationAnchors points
 	// them at the hub's served URLs at startup and on every activation.
-	restore := schemaRefSHACLShapes
+	restore := currentSHACLShapesRef()
 	SetSchemaAnchorRefs("", "https://dcs.example/api/semantic/shapes/facis-dcs?version=2")
-	t.Cleanup(func() { schemaRefSHACLShapes = restore })
+	t.Cleanup(func() { SetSchemaAnchorRefs("", restore) })
 
 	normalized, err := NormalizeTemplateData(canonicalTemplateData(t))
 	require.NoError(t, err)

@@ -18,7 +18,7 @@ const (
 // declares; the historical default applies until the hub anchors are
 // installed.
 func dcsNamespace() string {
-	if iri, ok := canonicalOntologyIRIs["dcs"]; ok && iri != "" {
+	if iri, ok := currentCanonicalOntologyIRIs()["dcs"]; ok && iri != "" {
 		return iri
 	}
 	return defaultDCSOntologyIRI

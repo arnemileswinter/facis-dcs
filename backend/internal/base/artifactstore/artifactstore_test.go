@@ -135,7 +135,7 @@ func newTestStore(t *testing.T) (*Store, *fakeObjectStore, *memoryCEKRepo) {
 	}
 	objects := newFakeObjectStore()
 	repo := &memoryCEKRepo{}
-	store := New(objects, repo, softwareKeyAgreement{priv: priv}, "did:web:test.local", &priv.PublicKey)
+	store := New(objects, repo, softwareKeyAgreement{priv: priv}, "did:web:test.local", "did:web:test.local#dcs-ecdh", &priv.PublicKey)
 	return store, objects, repo
 }
 

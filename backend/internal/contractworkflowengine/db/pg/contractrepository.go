@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
@@ -432,6 +433,36 @@ func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, di
 		return nil, err
 	}
 	return &state, nil
+}
+
+func (r *PostgresContractRepo) CountSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM contract_signatures WHERE contract_did = $1 AND status = 'SIGNED'`, did)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
+	var dids []string
+	// COALESCE: an empty Go slice binds as SQL NULL, and "did <> ALL (NULL)"
+	// is NULL — which would filter out every row and stall the sweep.
+	err := tx.SelectContext(ctx, &dids,
+		`SELECT c.did FROM contracts c
+		 WHERE (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
+		   AND NOT EXISTS (
+		       SELECT 1 FROM contract_signatures s
+		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')
+		   AND c.did <> ALL (COALESCE($2::text[], '{}'))
+		 ORDER BY c.created_at, c.did
+		 LIMIT $1`, limit, pq.Array(excludeDIDs),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return dids, nil
 }
 
 func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractPDFState) error {

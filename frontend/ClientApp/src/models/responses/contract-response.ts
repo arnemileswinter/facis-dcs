@@ -37,6 +37,12 @@ export interface ContractRetrieveByIdResponse {
   did: string
   contract_version: number
   state: ContractState
+  /**
+   * Peer-facing lifecycle inferred by the backend (ADR-13): one of
+   * ExtrinsicLifecycle, or a lowercased off-ramp state. Only 'executed' claims
+   * every declared signature is collected.
+   */
+  extrinsic_lifecycle?: string
   name?: string
   description?: string
   created_by: string

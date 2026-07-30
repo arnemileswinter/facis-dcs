@@ -24,6 +24,11 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
+      annotations:
+        # The flows are mounted as a subPath, which Kubernetes never refreshes
+        # in a running pod, so an upgrade that only changes a flow left the pod
+        # serving the previous one and the change looked like it had no effect.
+        checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: orce
         app.kubernetes.io/instance: {{ .Release.Name }}

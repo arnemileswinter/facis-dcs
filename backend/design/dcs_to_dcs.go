@@ -19,10 +19,11 @@ var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
 	Description("The contract's content-encryption key wrapped to the receiving peer's keyAgreement public key via ECDH-ES+A256KW (DCS-NFR-SEC-14) — the same shape a content_encryption_keys.wrapped_cek record has. The receiver unwraps it with its HSM and re-wraps it to its own keyAgreement key, so both instances hold the same contract CEK, each unwrappable only by its own HSM.")
 
 	Attribute("alg", String, "CEK wrap algorithm (ECDH-ES+A256KW)")
+	Attribute("kid", String, "The receiver's verification method the CEK was wrapped to, as the receiver's own did.json publishes it under keyAgreement (RFC 7516 §4.1.6). The sender names the key it resolved instead of the receiver having to publish exactly one: a receiver that rotates keys resolves this id in its own keyAgreement relationship and knows which key to unwrap with")
 	Attribute("epk", DCSToDCSEphemeralPublicKey, "The sender's ephemeral public key")
 	Attribute("wrapped", Bytes, "The wrapped CEK (RFC 3394 key wrap output)")
 
-	Required("alg", "epk", "wrapped")
+	Required("alg", "kid", "epk", "wrapped")
 })
 
 var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {

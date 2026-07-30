@@ -73,7 +73,7 @@ func TestHSMWrapUnwrapRoundtrip(t *testing.T) {
 	hsmPub := hsmPublicKey(t)
 
 	cek := mustNewCEK(t)
-	w, err := Wrap(cek, hsmPub)
+	w, err := Wrap(cek, "did:web:test.local#dcs-ecdh", hsmPub)
 	if err != nil {
 		t.Fatalf("Wrap to hsm key: %v", err)
 	}

@@ -33,7 +33,7 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // (pdf-core's /verify treats the signed span as an opaque suffix), and the
 // verifier must never falsely report a passed PDF signature check it did not
 // actually perform.
-const pdfSignatureNotAvailable = "not_available"
+const pdfSignatureNotAvailable = provenance.CheckNotAvailable
 
 const (
 	statusPublicationConsistencyWait = 6 * time.Second
@@ -150,24 +150,26 @@ func appendAndCache(
 // content to hash.
 func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 	return &pdfgen.PDFVerifyResult{
-		Match:              false,
-		C2paManifestFound:  false,
-		C2paSignatureValid: false,
-		VcProofValid:       false,
-		LifecycleStatus:    ptrToString(lifecycleStatus),
-		PdfSignatureStatus: pdfSignatureNotAvailable,
-		Discrepancy:        ptrToString(discrepancyNotAuthentic),
+		Match:               false,
+		C2paManifestFound:   false,
+		C2paSignatureStatus: provenance.CheckInvalid,
+		VcProofStatus:       provenance.CheckInvalid,
+		StatusListCheck:     "failed",
+		StatusListError:     ptrToString("stored artifact is not authentic"),
+		LifecycleStatus:     ptrToString(lifecycleStatus),
+		PdfSignatureStatus:  pdfSignatureNotAvailable,
+		Discrepancy:         ptrToString(discrepancyNotAuthentic),
 	}
 }
 
-func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
+	credentials *provenance.CredentialVerifier, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
 	if verifyErr != nil {
 		c2paManifestFound = strings.Contains(verifyErr.Error(), "status 409")
 	}
-	c2paSignatureValid := verifyErr == nil
 
 	// pdf-core answers 409 specifically for "manifest present, content hash
 	// comparison failed" — the genuine MR/HR discrepancy — which is a different
@@ -181,16 +183,52 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		discrepancy = discrepancyFailed
 	}
 
+	// A /verify that never returned a body carries no claim-signature verdict:
+	// pdf-core reports one only for a PDF it accepted, so there is nothing to
+	// report rather than a failure to report.
+	c2paSignatureStatus := provenance.CheckNotAvailable
+	switch {
+	case verifyErr != nil:
+	case result.C2PASignatureValid:
+		c2paSignatureStatus = provenance.CheckValid
+	default:
+		c2paSignatureStatus = provenance.CheckInvalid
+	}
+
+	vcProofStatus := provenance.CheckNotAvailable
+	if result.VCPresent && len(result.VCBytes) > 0 {
+		vcProofStatus = provenance.CredentialCheck(credentials.Verify(result.VCBytes))
+	}
+
+	// The revocation lookup follows the credential's OWN credentialStatus, so it
+	// runs only once the credential is known to be the issuer's: an unverified
+	// credential points the check wherever its author chose. Without a verdict on
+	// the credential the revocation state is unknown, which is said rather than
+	// left empty — empty reads as "nothing to report", and that is how a revoked
+	// contract came back clean.
 	statusListURI := ""
 	statusListStatus := ""
 	statusListCheck := "not_available"
 	statusListError := ""
-	if result.VCProofValid && len(result.VCBytes) > 0 {
+	switch {
+	case vcProofStatus == provenance.CheckValid:
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
-		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
+		ref, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
+		switch {
+		case err != nil:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = fmt.Sprintf("invalid embedded status-list reference: %v", err)
+		case !present:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = "embedded lifecycle credential has no usable status-list reference"
+		default:
 			httpClient := &http.Client{Timeout: 10 * time.Second}
 			queryStatus := func() (string, error) {
-				return provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
+				return provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
 			}
 			var statusPassed bool
 			statusListStatus, statusListCheck, statusListError, statusPassed =
@@ -198,24 +236,21 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 			if !statusPassed {
 				match = false
 			}
-		} else {
-			match = false
-			statusListStatus = "unavailable"
-			statusListCheck = "failed"
-			statusListError = "embedded lifecycle credential has no usable status-list reference"
 		}
+	case vcProofStatus != provenance.CheckNotAvailable:
+		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
 	return &pdfgen.PDFVerifyResult{
-		Match:              match,
-		C2paManifestFound:  c2paManifestFound,
-		C2paSignatureValid: c2paSignatureValid,
-		VcProofValid:       result.VCProofValid,
-		StatusListURI:      ptrToString(statusListURI),
-		StatusListStatus:   ptrToString(statusListStatus),
-		StatusListCheck:    statusListCheck,
-		StatusListError:    ptrToString(statusListError),
-		LifecycleStatus:    ptrToString(lifecycleStatus),
+		Match:               match,
+		C2paManifestFound:   c2paManifestFound,
+		C2paSignatureStatus: c2paSignatureStatus,
+		VcProofStatus:       vcProofStatus,
+		StatusListURI:       ptrToString(statusListURI),
+		StatusListStatus:    ptrToString(statusListStatus),
+		StatusListCheck:     statusListCheck,
+		StatusListError:     ptrToString(statusListError),
+		LifecycleStatus:     ptrToString(lifecycleStatus),
 		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
 		// check, distinct from the C2PA COSE signature check. This path performs
 		// no cryptographic PAdES re-verification, so it honestly reports
@@ -237,13 +272,6 @@ func evaluateLiveStatusCheck(
 	return status, "passed", "", true
 }
 
-// queryStatusWithPublicationBarrier preserves the separation between the
-// embedded lifecycle banner and the independently fetched live status list.
-// A terminal transition and its durable outbox entry commit atomically, while
-// the status-list worker publishes on its next pass. Re-reading only when that
-// short consistency window is observable prevents a successful termination
-// response from being followed immediately by a stale "active" verification
-// result. The returned value always comes from the live status service.
 func queryStatusWithPublicationBarrier(
 	ctx context.Context,
 	lifecycleStatus string,

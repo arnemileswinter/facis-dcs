@@ -8,7 +8,7 @@ import (
 )
 
 func TestScopeForEvent(t *testing.T) {
-	store := artifactstore.New(nil, nil, nil, "did:web:me", nil)
+	store := artifactstore.New(nil, nil, nil, "did:web:me", "did:web:me#dcs-ecdh", nil)
 	j := OutboxProcessor{Artifacts: store}
 
 	contractIRI := "did:web:me:contract:1"

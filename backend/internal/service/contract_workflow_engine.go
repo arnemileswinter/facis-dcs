@@ -214,6 +214,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrContractNotRenewable) ||
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
+		errors.Is(err, command.ErrAgreementSettled) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
@@ -693,7 +694,11 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		}
 	}
 
-	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String()))
+	evidence, err := s.signatureEvidence(ctx, req.Did, localPeer, contractResult)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	extrinsic := string(contractstate.InferExtrinsic(contractResult.State.String(), evidence))
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
 		Did:                contractResult.DID,
 		ContractVersion:    contractResult.ContractVersion,
@@ -718,6 +723,47 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		TargetID:           contractResult.TargetID,
 		TargetName:         targetName,
 	}, nil
+}
+
+// signatureEvidence collects who has signed a contract as far as this instance
+// can evidence it: the fields the document declares, the ones carrying a local
+// SIGNED signature row, and the peer this instance holds a verified
+// cross-instance signature from. The extrinsic projection needs this to report
+// an agreement executed only once every declared signature is collected
+// (DCS-FR-SM-10) rather than on the first local one.
+func (s *contractWorkflowEnginesrvc) signatureEvidence(ctx context.Context, did, localPeer string, result *contract.GetByIDResult) (contractstate.SignatureEvidence, error) {
+	evidence := contractstate.SignatureEvidence{LocalPeer: localPeer}
+	if result.ContractData == nil || !result.ContractData.IsNotNullValue() {
+		return evidence, nil
+	}
+	evidence.Declared = validation.RequiredSignatureFields([]byte(*result.ContractData))
+	if len(evidence.Declared) == 0 {
+		return evidence, nil
+	}
+	if result.Responsible != nil {
+		evidence.Parties = []string{result.Responsible.Creator, result.Responsible.Counterparty}
+	}
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return evidence, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	signed, err := s.CRepo.ReadSignedSignatureFieldNames(ctx, tx, did)
+	if err != nil {
+		return evidence, fmt.Errorf("could not read signed signature fields: %w", err)
+	}
+	evidence.SignedLocally = signed
+
+	peerSig, err := s.SRepo.GetSyncSignature(ctx, tx, did)
+	if err != nil {
+		return evidence, fmt.Errorf("could not read the counterparty signature: %w", err)
+	}
+	if peerSig != nil {
+		evidence.PeerSigners = []string{peerSig.FromPeerDID}
+	}
+	return evidence, nil
 }
 
 // KpiObservations serves the reported KPI values as a JSON-LD observation
@@ -1651,6 +1697,7 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		DeploymentRepo: s.DeploymentRepo,
 		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
 	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
@@ -1893,8 +1940,25 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 		return contractworkflowengine.MakeBadRequest(fmt.Errorf(
 			"%d contract(s) still deploy to this target system; designate another one for them first", designating))
 	}
+	// The credential's authority goes with the target it belonged to. Its
+	// registry row is what grants the Contract Target System scope, so leaving
+	// it behind would keep a client authorised for a destination that no longer
+	// exists. The Hydra client itself is left alone: a target whose client comes
+	// from deployment configuration shares it with a declared system client, and
+	// removing that from here would take a configured credential away with no
+	// way to put it back short of a reinstall. Without a registry row it
+	// resolves to no caller and is refused everywhere.
+	target, err := s.TargetRepo.ReadTarget(ctx, tx, req.ID)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
 	if err := s.TargetRepo.DeleteTarget(ctx, tx, req.ID); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
+	}
+	if target != nil && target.OAuthClientID != nil && strings.TrimSpace(*target.OAuthClientID) != "" {
+		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, strings.TrimSpace(*target.OAuthClientID)); err != nil {
+			return contractworkflowengine.MakeInternalError(err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return contractworkflowengine.MakeInternalError(err)

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -308,15 +309,14 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not build OID4VP request signer")
 	}
-	requestHostname, err := requestSigner.ClientID()
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
-	}
 	// The wallet is handed an OpenID4VP client identifier — prefix and value —
 	// not the Hydra OAuth client id: an unprefixed value means the
 	// "pre-registered" prefix, which a wallet outside a pre-agreed federation
 	// refuses before it looks at any credential.
-	oid4vpClientID := oid4vprequest.X509SANDNSClientID(requestHostname)
+	oid4vpClientID, err := requestSigner.ClientID()
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not resolve OID4VP client_id")
+	}
 
 	authCfg.RequestSigner = requestSigner
 	authCfg.OID4VPClientID = oid4vpClientID
@@ -408,19 +408,23 @@ func main() {
 	// The dcs-ecdh key is a required dependency: a startup wrap/unwrap self-test
 	// proves the served did.json keyAgreement key and the HSM key agree.
 	ecdhLabel := hsm.KeyLabelECDH()
-	keyAgreementPub, err := didDocument.KeyAgreementPublicKey(ecdhLabel)
+	keyAgreementMethod, err := didDocument.OwnKeyAgreementMethod(ecdhLabel)
 	if err != nil {
 		log.Fatalf(ctx, err, "did.json carries no usable keyAgreement method for %s", ecdhLabel)
+	}
+	keyAgreementPub, err := keyAgreementMethod.ECPublicKey()
+	if err != nil {
+		log.Fatalf(ctx, err, "did.json keyAgreement method %s carries no usable P-256 key", keyAgreementMethod.ID)
 	}
 	hsmAgreement := envelope.HSMKeyAgreement(ecdhLabel)
 	if testCEK, err := envelope.NewCEK(); err != nil {
 		log.Fatalf(ctx, err, "could not draw CEK for the key-agreement self-test")
-	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementPub); err != nil {
+	} else if wrapped, err := envelope.Wrap(testCEK, keyAgreementMethod.ID, keyAgreementPub); err != nil {
 		log.Fatalf(ctx, err, "could not wrap the self-test CEK to the %s key", ecdhLabel)
 	} else if unwrapped, err := envelope.Unwrap(wrapped, hsmAgreement); err != nil || !bytes.Equal(unwrapped, testCEK) {
 		log.Fatalf(ctx, err, "HSM key %s cannot unwrap what did.json's keyAgreement key wraps — key mismatch or missing derive capability", ecdhLabel)
 	}
-	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementPub)
+	artifactStore := artifactstore.New(ipfsAPIClient, &artifactstore.PostgresCEKRepo{DB: db}, hsmAgreement, did, keyAgreementMethod.ID, keyAgreementPub)
 
 	// Startup config integrity verification (DCS-NFR-SEC-04): hash the
 	// security-critical mounted config files, enforce any operator pins, and
@@ -651,7 +655,22 @@ func main() {
 		log.Fatalf(ctx, err, "status list service not reachable at %s", statusListServiceURL)
 	}
 	statusListTenantID := os.Getenv("STATUSLIST_TENANT_ID") // defaults to "default" when empty
-	statusListPublisher := provenance.NewOCMWStatusListPublisher(statusListServiceURL, issuerDID, statusListTenantID)
+	// The list new revocation entries are allocated in. It only moves when list
+	// 1 fills up, and then only after the operator has created the successor in
+	// the statuslist-service and registered it in status_list_cursors —
+	// allocation hard-fails on an unregistered list rather than handing out an
+	// entry nothing serves.
+	statusListID := provenance.DefaultListID
+	if raw := strings.TrimSpace(os.Getenv("STATUSLIST_LIST_ID")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			log.Fatalf(ctx, err, "STATUSLIST_LIST_ID must be a positive list id, got %q", raw)
+		}
+		statusListID = parsed
+	}
+	statusListPublisher := provenance.NewOCMWStatusListPublisher(
+		statusListServiceURL, issuerDID, statusListTenantID,
+		provenance.NewPostgresStatusListAllocator(db, statusListID))
 	go (&statuspublication.Worker{DB: db, Publisher: statusListPublisher}).Run(ctx)
 
 	// Initialize pdf-core client (PDF rendering + C2PA provenance microservice).
@@ -673,12 +692,18 @@ func main() {
 		PDFCore:   pdfCoreClient,
 	}
 
-	// Build and sign this instance's federation agreement credential once at
-	// startup (ADR-19): issuer = this instance's own DID, termsOfUse names the
-	// embedded federation rules document by its public policy URL and hash.
+	// This instance's federation agreement credential (ADR-19): issuer = this
+	// instance's own DID, termsOfUse names the embedded federation rules document
+	// by its public policy URL and hash. Minted on first fetch and re-minted
+	// before its bounded validUntil lapses, so a long-running process never
+	// publishes an expired one.
 	rulesPolicyURL := federation.RulesPolicyURL(os.Getenv("DCS_PUBLIC_URL"))
-	agreementCredential, err := federation.BuildAgreementCredential(ctx, vcSigner, issuerDID, rulesPolicyURL)
-	if err != nil {
+	agreementCredential := &federation.CredentialIssuer{
+		Signer:    vcSigner,
+		IssuerDID: issuerDID,
+		RulesURL:  rulesPolicyURL,
+	}
+	if _, err := agreementCredential.Current(ctx); err != nil {
 		log.Fatalf(ctx, err, "failed to build federation agreement credential")
 	}
 
@@ -749,10 +774,15 @@ func main() {
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did)
+		// The credentials this instance issued verify against its own published
+		// document without a round trip; a peer's lifecycle or signing-summary
+		// credential — carried inside a verbatim-stored inbound PDF — resolves to
+		// the peer's did:web.
+		credentialVerifier := &provenance.CredentialVerifier{Own: didDocument}
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, auditExecutorClient, workflowGateCoordinator)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, requestHostname, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService
@@ -813,7 +843,9 @@ func main() {
 			DeploymentRepo: cweDeploymentRepo,
 			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
+			PeerSigs:       &syncRepo,
 		},
+		LocalPeer: did,
 	}
 	go func() {
 		if err := deploySub.Start(deploySubClient); err != nil {

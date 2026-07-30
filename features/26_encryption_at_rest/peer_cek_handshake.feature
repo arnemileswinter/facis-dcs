@@ -4,6 +4,12 @@
 # HSM, re-wraps to its own key, persists, and stores the inbound PDF
 # encrypted under that same CEK — adoption is idempotent across re-ships.
 #
+# The wrap NAMES the key it was made for (`wrapped_cek.kid`, the recipient's own
+# keyAgreement verification method), so the sender resolves a key the receiver
+# published instead of assuming it published exactly one, and the receiver
+# refuses a wrap addressed to any other key. A byte-identical export on both
+# sides is therefore also the proof that the named key was the right one.
+#
 # The observable proof both instances hold a usable CEK for the same
 # contract is behavioral, not DB-level: each instance must decrypt its OWN
 # stored copy back to the exact shipped bytes (the verbatim-inbound-PDF rule

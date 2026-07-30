@@ -49,6 +49,17 @@ var validStates = map[ContractState]bool{
 	Expired:     true,
 }
 
+// All returns every contract state, in lifecycle order — so a consumer that
+// classifies states (which of them freeze the PDF artifact, say) derives its
+// answer from the enum instead of restating it and silently missing a state
+// added later.
+func All() []ContractState {
+	return []ContractState{
+		Draft, Offered, Rejected, Withdrawn, Negotiation, Submitted,
+		Reviewed, Approved, Signed, Active, Revoked, Terminated, Expired,
+	}
+}
+
 func NewContractState(s string) (ContractState, error) {
 	ts := ContractState(strings.ToUpper(s))
 	if !ts.IsValid() {

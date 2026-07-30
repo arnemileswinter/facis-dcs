@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,31 +20,42 @@ import (
 // status list (Status List 2021/2023 format) with ≤ 5 minute update latency.
 type StatusListPublisher interface {
 	// PublishStatus updates the contract status in the status list.
-	// Returns the status list URI and any error.
+	// Returns the entry the contract's credentials must advertise — the same
+	// entry a revocation flips — and any error.
 	PublishStatus(
 		ctx context.Context,
 		contractID string,
 		status string, // "active", "suspended", "terminated", "expired", etc.
 		reason string,
 		effectiveAt time.Time,
-	) (statusListURI string, err error)
+	) (entry CredentialStatusRef, err error)
 
 	// RevokeStatus marks a contract as revoked in the status list.
-	RevokeStatus(ctx context.Context, contractID string) (statusListURI string, err error)
+	RevokeStatus(ctx context.Context, contractID string) (entry CredentialStatusRef, err error)
 }
 
 // listSize is the number of entries in a standard 16 KB bitstring status list (2^17).
+// It is the size the statuslist-service is deployed with; the bound an
+// allocation is actually held to lives per list in status_list_cursors.
 const listSize = 131072
 
-// defaultListID is the list used for contract revocation (1-indexed).
-const defaultListID = 1
+// DefaultListID is the list contract revocation entries were allocated in
+// before any rollover (1-indexed), and the one migration 20260734 registers.
+const DefaultListID = 1
+
+// statusListEntryType is the credentialStatus.type a contract VC advertises: a
+// token status list, which is what the XFSC statuslist-service serves (see
+// QueryStatusListStatus for the format and its LSB-first bit order).
+const statusListEntryType = "TokenStatusList"
 
 // OCMWStatusListPublisher is a client for the XFSC statuslist-service.
-// It calls POST /v1/tenants/{tenantID}/status/revoke/{listID}/{index} to revoke entries.
-// The status list VC is available at GET /v1/tenants/{tenantID}/status/{listID}.
+// It calls POST /v1/tenants/{tenantID}/status/{listID}/revoke/{index} to revoke entries.
+// The status list is available at GET /v1/tenants/{tenantID}/status/{listID}.
 //
-// Indices are derived deterministically from the contractID SHA-256 so no
-// per-contract allocation table is required.
+// Which entry a contract owns is not derivable from the contract id: it is
+// allocated once and read back from the allocator every time, so the entry a
+// credential advertises and the entry a revocation flips cannot drift apart,
+// and no two contracts can end up sharing one.
 type OCMWStatusListPublisher struct {
 	// ServiceURL is the statuslist-service root endpoint (e.g., http://statuslist:8080).
 	ServiceURL string
@@ -57,12 +66,16 @@ type OCMWStatusListPublisher struct {
 	// TenantID is the tenant identifier in the statuslist-service path (default "default").
 	TenantID string
 
+	entries *StatusListAllocator
+
 	client *http.Client
 }
 
 // NewOCMWStatusListPublisher creates a status list publisher that calls the
 // XFSC statuslist-service HTTP API.  tenantID may be empty, defaulting to "default".
-func NewOCMWStatusListPublisher(serviceURL, issuerDID, tenantID string) *OCMWStatusListPublisher {
+// entries must not be nil: without it a contract has no revocation entry, and
+// guessing one is the defect this parameter exists to remove.
+func NewOCMWStatusListPublisher(serviceURL, issuerDID, tenantID string, entries *StatusListAllocator) *OCMWStatusListPublisher {
 	if tenantID == "" {
 		tenantID = "default"
 	}
@@ -70,21 +83,28 @@ func NewOCMWStatusListPublisher(serviceURL, issuerDID, tenantID string) *OCMWSta
 		ServiceURL: serviceURL,
 		IssuerDID:  issuerDID,
 		TenantID:   tenantID,
+		entries:    entries,
 		client:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// statusListURI returns the URL at which the status list VC can be fetched.
-func (p *OCMWStatusListPublisher) statusListURI() string {
-	return fmt.Sprintf("%s/v1/tenants/%s/status/%d", p.ServiceURL, p.TenantID, defaultListID)
+// statusListURI returns the URL at which the status list holding entry can be fetched.
+func (p *OCMWStatusListPublisher) statusListURI(entry StatusListEntry) string {
+	return fmt.Sprintf("%s/v1/tenants/%s/status/%d", p.ServiceURL, p.TenantID, entry.ListID)
 }
 
-// StatusListIndex returns the bitstring position for contractID.
-// Uses the first 4 bytes of SHA-256(contractID) modulo listSize so the
-// index is deterministic without requiring a per-contract allocation table.
-func StatusListIndex(contractID string) uint32 {
-	h := sha256.Sum256([]byte(contractID))
-	return binary.BigEndian.Uint32(h[:4]) % listSize
+// entryFor returns the contract's allocated status list entry as the reference
+// a credential advertises.
+func (p *OCMWStatusListPublisher) entryFor(ctx context.Context, contractID string) (StatusListEntry, CredentialStatusRef, error) {
+	if p.entries == nil {
+		return StatusListEntry{}, CredentialStatusRef{},
+			fmt.Errorf("status list publisher has no entry allocator: required to place %s in the status list", contractID)
+	}
+	entry, err := p.entries.Allocate(ctx, contractID)
+	if err != nil {
+		return StatusListEntry{}, CredentialStatusRef{}, err
+	}
+	return entry, CredentialStatusRef{StatusListCredential: p.statusListURI(entry), Index: entry.Index}, nil
 }
 
 // revokeResponse is the JSON shape returned by the statuslist-service revoke endpoint.
@@ -95,14 +115,14 @@ type revokeResponse struct {
 	Status   string `json:"status"`
 }
 
-// setRevoked calls POST /{tenantID}/status/{listID}/revoke/{index}.
+// setRevoked calls POST /{tenantID}/status/{listID}/revoke/{index} for the
+// contract's allocated entry — the same entry its credentials advertise.
 // ServiceURL must be non-empty; an empty URL is a hard failure (DCS hard-failure policy).
-func (p *OCMWStatusListPublisher) setRevoked(ctx context.Context, contractID string) error {
+func (p *OCMWStatusListPublisher) setRevoked(ctx context.Context, contractID string, entry StatusListEntry) error {
 	if p.ServiceURL == "" {
 		return fmt.Errorf("status list ServiceURL must not be empty: required for revocation of %s", contractID)
 	}
-	index := StatusListIndex(contractID)
-	url := fmt.Sprintf("%s/v1/tenants/%s/status/%d/revoke/%d", p.ServiceURL, p.TenantID, defaultListID, index)
+	url := fmt.Sprintf("%s/v1/tenants/%s/status/%d/revoke/%d", p.ServiceURL, p.TenantID, entry.ListID, entry.Index)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(nil))
 	if err != nil {
@@ -144,15 +164,20 @@ func (p *OCMWStatusListPublisher) PublishStatus(
 	status string,
 	reason string,
 	effectiveAt time.Time,
-) (statusListURI string, err error) {
+) (CredentialStatusRef, error) {
+	entry, ref, err := p.entryFor(ctx, contractID)
+	if err != nil {
+		return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
+	}
+
 	switch strings.ToLower(status) {
 	case "terminated", "expired", "replaced", "suspended":
-		if err := p.setRevoked(ctx, contractID); err != nil {
-			return "", fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
+		if err := p.setRevoked(ctx, contractID, entry); err != nil {
+			return CredentialStatusRef{}, fmt.Errorf("publish status %s for %s: %w", status, contractID, err)
 		}
 	}
 	// active, draft, approved, amended — default state = not revoked, no action required.
-	return p.statusListURI(), nil
+	return ref, nil
 }
 
 // statusListResponse is the JSON shape actually returned by the deployed XFSC
@@ -273,38 +298,56 @@ func decodeStatusListBase64(s string) ([]byte, error) {
 }
 
 // RevokeStatus marks the contract as revoked in the status list (DCS-OR-C2PA-005).
-func (p *OCMWStatusListPublisher) RevokeStatus(ctx context.Context, contractID string) (statusListURI string, err error) {
-	if err := p.setRevoked(ctx, contractID); err != nil {
-		return "", fmt.Errorf("revoke %s: %w", contractID, err)
+func (p *OCMWStatusListPublisher) RevokeStatus(ctx context.Context, contractID string) (CredentialStatusRef, error) {
+	entry, ref, err := p.entryFor(ctx, contractID)
+	if err != nil {
+		return CredentialStatusRef{}, fmt.Errorf("revoke %s: %w", contractID, err)
 	}
-	return p.statusListURI(), nil
+	if err := p.setRevoked(ctx, contractID, entry); err != nil {
+		return CredentialStatusRef{}, fmt.Errorf("revoke %s: %w", contractID, err)
+	}
+	return ref, nil
 }
 
-// ExtractCredentialStatusFields parses statusListCredential and statusListIndex
-// from the credentialStatus object embedded in vcBytes.
-func ExtractCredentialStatusFields(vcBytes []byte) (statusListCredential string, index uint32, ok bool) {
+// CredentialStatusRef locates one credential's entry in a status list.
+type CredentialStatusRef struct {
+	StatusListCredential string
+	Index                uint32
+}
+
+// ExtractCredentialStatus reads the revocation entry a VC advertises.
+//
+// Three outcomes, and the difference between the last two is the whole point of
+// the signature: a VC carrying no credentialStatus has nothing to check
+// (present=false); a VC that advertises one this build cannot read is a VC whose
+// revocation state is UNKNOWN (err), which the caller must report as a finding.
+// One "not ok" for both made an unreadable entry indistinguishable from an
+// absent one, so a caller skipped the revocation check silently — a fail-open on
+// a malformed or unsupported entry, which is exactly the entry an attacker
+// controls.
+func ExtractCredentialStatus(vcBytes []byte) (ref CredentialStatusRef, present bool, err error) {
 	var vcObj map[string]interface{}
 	if err := json.Unmarshal(vcBytes, &vcObj); err != nil {
-		return "", 0, false
+		return CredentialStatusRef{}, true, fmt.Errorf("credential is not readable JSON: %w", err)
 	}
 	csRaw, exists := vcObj["credentialStatus"]
-	if !exists {
-		return "", 0, false
+	if !exists || csRaw == nil {
+		return CredentialStatusRef{}, false, nil
 	}
 	cs, ok := csRaw.(map[string]interface{})
 	if !ok {
-		return "", 0, false
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus is not an object")
 	}
 	cred, _ := cs["statusListCredential"].(string)
 	indexStr, _ := cs["statusListIndex"].(string)
-	if cred == "" || indexStr == "" {
-		return "", 0, false
+	if strings.TrimSpace(cred) == "" || strings.TrimSpace(indexStr) == "" {
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus names no statusListCredential and statusListIndex")
 	}
-	idx, err := strconv.ParseUint(indexStr, 10, 32)
-	if err != nil {
-		return "", 0, false
+	idx, parseErr := strconv.ParseUint(strings.TrimSpace(indexStr), 10, 32)
+	if parseErr != nil {
+		return CredentialStatusRef{}, true, fmt.Errorf("credentialStatus statusListIndex %q is not an index", indexStr)
 	}
-	return cred, uint32(idx), true
+	return CredentialStatusRef{StatusListCredential: cred, Index: uint32(idx)}, true, nil
 }
 
 // ExtractStatusListURI extracts the credentialStatus.id from the VC JSON.

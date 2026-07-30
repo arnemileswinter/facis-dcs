@@ -53,7 +53,7 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
   @REQ-fed-agreement-AC2 @DCS-IR-SI-12
   Scenario: The agreement credential's signature verifies against the instance's own published VC key
     Given I fetch this instance's own agreement credential
-    Then the credential's proof verifies against the second verificationMethod key published in this instance's own did.json
+    Then the credential's proof verifies against the key it names, which this instance publishes for assertions and not for authentication
 
   # ---------------------------------------------------------------------
   # AC3: both instances of the same build agree — same rules hash, and an
@@ -309,3 +309,36 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     And the default trust-PDP Node-RED flow is wired on both instances
     When the initiator on instance A creates and offers a contract with instance B as counterparty
     Then the contract appears on instance B in state OFFERED within a few seconds
+
+  # ---------------------------------------------------------------------
+  # DCS-NFR-BR-03 (@two-instance): a contract lacking its required
+  # signatures must not proceed to deployment or execution — including
+  # across the federation, where each party's signature row stays in its own
+  # database and the signature fields are named for the PARTIES (create.go
+  # seedSignatureFields). Both instances designate a target BEFORE signing,
+  # so the auto-deploy subscriber (DCS-FR-CWE-06) has a destination and its
+  # own run of the gate is observable: an ungated deployment would be
+  # dispatched to the ORCE contract-target flow and its acknowledgement
+  # would move the contract to ACTIVE.
+  #
+  # The counterparty's field is satisfied by the JAdES that peer ships with
+  # its own signed copy (DCS-FR-SM-02, verified on receipt against the
+  # peer's published assertion key) — the evidence in the AC above — and by
+  # nothing else, so half-signed refuses and countersigned proceeds.
+  # ---------------------------------------------------------------------
+
+  @DCS-NFR-BR-03 @DCS-FR-SM-07 @DCS-FR-CWE-06 @two-instance
+  Scenario: A federated contract deploys only once both parties have signed
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    And instance A points the cross-instance contract at its own target system
+    And instance A applies a ceremony-backed signature to the contract
+    Then a manual deployment of the cross-instance contract on instance A is rejected because signing is incomplete
+    And the cross-instance contract on instance A does not activate while the counterparty has not signed
+    When instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance B points the cross-instance contract at its own target system
+    And instance B applies a ceremony-backed signature to the contract
+    Then the cross-instance contract on instance B activates automatically once both parties have signed
+    And a manual deployment of the cross-instance contract on instance A is accepted once the counterparty has countersigned

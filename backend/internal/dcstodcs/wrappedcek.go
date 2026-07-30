@@ -11,6 +11,7 @@ import (
 func WireWrappedCEK(w *envelope.WrappedCEK) *dcstodcs.DCSToDCSWrappedCEK {
 	return &dcstodcs.DCSToDCSWrappedCEK{
 		Alg: w.Alg,
+		Kid: w.KID,
 		Epk: &dcstodcs.DCSToDCSEphemeralPublicKey{
 			Kty: w.EPK.Kty,
 			Crv: w.EPK.Crv,
@@ -29,6 +30,7 @@ func EnvelopeWrappedCEK(w *dcstodcs.DCSToDCSWrappedCEK) (*envelope.WrappedCEK, e
 	}
 	return &envelope.WrappedCEK{
 		Alg: w.Alg,
+		KID: w.Kid,
 		EPK: envelope.EphemeralPublicKey{
 			Kty: w.Epk.Kty,
 			Crv: w.Epk.Crv,

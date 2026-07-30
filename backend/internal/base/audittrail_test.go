@@ -81,7 +81,7 @@ func newTestArtifactStore(t *testing.T) (*artifactstore.Store, *memoryCEKRepo) {
 		t.Fatalf("generate key: %v", err)
 	}
 	repo := &memoryCEKRepo{}
-	return artifactstore.New(nil, repo, softwareKeyAgreement{priv: priv}, "did:web:test.local", &priv.PublicKey), repo
+	return artifactstore.New(nil, repo, softwareKeyAgreement{priv: priv}, "did:web:test.local", "did:web:test.local#dcs-ecdh", &priv.PublicKey), repo
 }
 
 // storedEntryBytes builds the stored form of an audit entry the way

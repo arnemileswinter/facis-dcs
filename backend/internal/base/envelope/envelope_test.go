@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+// testMethodID stands for the recipient's keyAgreement verification method a
+// wrap names.
+const testMethodID = "did:web:recipient.local#dcs-ecdh"
+
 // softwareKeyAgreement is the test-only counterpart of the HSM: it derives
 // the ECDH shared secret from an in-memory static private key.
 type softwareKeyAgreement struct{ priv *ecdsa.PrivateKey }
@@ -46,7 +50,7 @@ func TestWrapUnwrapRoundtrip(t *testing.T) {
 	recipient := newRecipient(t)
 	cek := mustNewCEK(t)
 
-	w, err := Wrap(cek, &recipient.PublicKey)
+	w, err := Wrap(cek, testMethodID, &recipient.PublicKey)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
@@ -74,7 +78,7 @@ func TestUnwrapWithWrongKeyFails(t *testing.T) {
 	other := newRecipient(t)
 	cek := mustNewCEK(t)
 
-	w, err := Wrap(cek, &recipient.PublicKey)
+	w, err := Wrap(cek, testMethodID, &recipient.PublicKey)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
@@ -87,7 +91,7 @@ func TestUnwrapTamperedWrappedFails(t *testing.T) {
 	recipient := newRecipient(t)
 	cek := mustNewCEK(t)
 
-	w, err := Wrap(cek, &recipient.PublicKey)
+	w, err := Wrap(cek, testMethodID, &recipient.PublicKey)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
@@ -99,7 +103,7 @@ func TestUnwrapTamperedWrappedFails(t *testing.T) {
 
 func TestUnwrapRejectsForeignAlg(t *testing.T) {
 	recipient := newRecipient(t)
-	w, err := Wrap(mustNewCEK(t), &recipient.PublicKey)
+	w, err := Wrap(mustNewCEK(t), testMethodID, &recipient.PublicKey)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
@@ -173,10 +177,10 @@ func TestDecryptTruncatedBlobFails(t *testing.T) {
 
 func TestWrapRejectsBadInputs(t *testing.T) {
 	recipient := newRecipient(t)
-	if _, err := Wrap([]byte("short"), &recipient.PublicKey); err == nil {
+	if _, err := Wrap([]byte("short"), testMethodID, &recipient.PublicKey); err == nil {
 		t.Fatal("Wrap accepted a short cek")
 	}
-	if _, err := Wrap(mustNewCEK(t), nil); err == nil {
+	if _, err := Wrap(mustNewCEK(t), testMethodID, nil); err == nil {
 		t.Fatal("Wrap accepted a nil recipient key")
 	}
 }

@@ -67,16 +67,11 @@ func appendRevision(t *testing.T, pdf []byte, objs map[int]string) []byte {
 // objectBody returns the body of the latest definition of object id.
 func objectBody(t *testing.T, pdf []byte, id int) string {
 	t.Helper()
-	off := findLastObjectHeaderOffset(pdf, id)
-	if off < 0 {
+	start, end, ok := lastObjectBody(pdf, id)
+	if !ok {
 		t.Fatalf("object %d not found", id)
 	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", id))
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		t.Fatalf("object %d end not found", id)
-	}
-	return string(pdf[start : start+end])
+	return string(pdf[start:end])
 }
 
 // firstPageAndContentObjID returns the object ids of the first page and of the
@@ -322,21 +317,24 @@ func TestMatchPageContentRefusesARevisionThatSupersedesPageContent(t *testing.T)
 	signed := appendPAdESRevision(t, prepared, "Signature1")
 
 	_, contentID := firstPageAndContentObjID(t, signed)
-	original := objectBody(t, signed, contentID)
+	content, err := extractStreamContentByObjID(signed, contentID)
+	if err != nil {
+		t.Fatalf("extract page content stream: %v", err)
+	}
+	original := string(content)
 	tampered := strings.Replace(original, "(Original clause for claim verification.) Tj",
 		"(Substituted clause the signatory never prepared.) Tj", 1)
 	if tampered == original {
 		t.Fatal("test setup: clause literal not found in the page content stream")
 	}
-	body := tampered[strings.Index(tampered, "stream\n")+len("stream\n") : strings.LastIndex(tampered, "\nendstream")]
 	submitted := appendRevision(t, signed, map[int]string{
-		contentID: fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body),
+		contentID: fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(tampered), tampered),
 	})
 
 	if !bytes.HasPrefix(submitted, prepared) {
 		t.Fatal("the attack is append-only: the append-only check alone cannot see it")
 	}
-	err := MatchPageContent(submitted, prepared)
+	err = MatchPageContent(submitted, prepared)
 	if err == nil {
 		t.Fatal("a revision superseding page content must be refused")
 	}

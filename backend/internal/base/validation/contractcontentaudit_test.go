@@ -16,16 +16,31 @@ import (
 // seeds itself with (ADR-8) — installed process-wide in TestMain
 // (documentdata_test.go) so tests exercise the real goRDFlib SHACL engine
 // (ADR-9) end to end without needing a live database.
+// hubShapesEntryName is semantichub.ShapesName — the hub entry the canonical
+// DCS shapes live under, and the name every produced document's own
+// sh:shapesGraph anchor carries.
+const hubShapesEntryName = "facis-dcs"
+
+// clauseCatalogEntryName is semantichub.ClauseCatalogName — envelope
+// vocabulary the canonical entry carries with it, resolvable by name as well.
+const clauseCatalogEntryName = "clause-catalog"
+
 type fixtureShapeSource struct {
-	shapesTTL        string
-	profileYAML      string
-	contextJSON      string
-	ontologyTTL      string
+	shapesTTL string
+	// catalogTTL is the clause catalog; as on both production sources, the
+	// canonical entry resolves to the canonical shapes WITH the catalog.
+	catalogTTL  string
+	profileYAML string
+	contextJSON string
+	ontologyTTL string
+	// libraries stands in for registered hub shapes libraries, by hub entry
+	// name — resolvable only by a document that declares them.
+	libraries        map[string]string
 	externalContexts map[string]string
 }
 
-func (f fixtureShapeSource) ActiveShapes(context.Context) (string, int, error) {
-	return f.shapesTTL, 1, nil
+func (f fixtureShapeSource) CanonicalShapesName() string {
+	return hubShapesEntryName
 }
 
 func (f fixtureShapeSource) ActiveProfile(context.Context) (string, int, error) {
@@ -36,8 +51,23 @@ func (f fixtureShapeSource) ActiveContext(context.Context) (string, int, error) 
 	return f.contextJSON, 1, nil
 }
 
-func (f fixtureShapeSource) ShapesAt(_ context.Context, _ int) (string, error) {
-	return f.shapesTTL, nil
+func (f fixtureShapeSource) ShapesAt(_ context.Context, name string, version int) (string, int, error) {
+	if version <= 0 {
+		version = 1
+	}
+	if library, ok := f.libraries[name]; ok {
+		return library, version, nil
+	}
+	if name == clauseCatalogEntryName && f.catalogTTL != "" {
+		return f.catalogTTL, version, nil
+	}
+	if name == hubShapesEntryName {
+		if f.catalogTTL != "" {
+			return f.shapesTTL + "\n\n" + f.catalogTTL, version, nil
+		}
+		return f.shapesTTL, version, nil
+	}
+	return "", 0, fmt.Errorf("shapes %q is not registered", name)
 }
 
 func (f fixtureShapeSource) ContextAt(_ context.Context, _ int) (string, error) {

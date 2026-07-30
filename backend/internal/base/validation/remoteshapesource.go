@@ -21,12 +21,12 @@ type RemoteShapeSource struct {
 	// (semantichub.AnchorURL), so the caller supplies the origin the
 	// contract was actually received from.
 	BaseURL string
-	// ShapesName/ProfileName/ContextName/OntologyName name the remote
-	// hub's schema entries (mirrors semantichub.ShapesName etc. — the DCS
-	// ontology is shared, so these are the same well-known names on every
-	// instance).
-	ShapesName, ProfileName, ContextName, OntologyName string
-	HTTPClient                                         *http.Client
+	// ShapesName/ProfileName/ContextName/OntologyName/ClauseCatalogName name
+	// the remote hub's schema entries (mirrors semantichub.ShapesName etc. —
+	// the DCS ontology is shared, so these are the same well-known names on
+	// every instance).
+	ShapesName, ProfileName, ContextName, OntologyName, ClauseCatalogName string
+	HTTPClient                                                            *http.Client
 }
 
 const remoteShapeSourceTimeout = 15 * time.Second
@@ -38,8 +38,8 @@ func (r RemoteShapeSource) httpClient() *http.Client {
 	return &http.Client{Timeout: remoteShapeSourceTimeout}
 }
 
-func (r RemoteShapeSource) ActiveShapes(ctx context.Context) (string, int, error) {
-	return r.retrieve(ctx, r.ShapesName, "shapes", 0)
+func (r RemoteShapeSource) CanonicalShapesName() string {
+	return r.ShapesName
 }
 
 func (r RemoteShapeSource) ActiveProfile(ctx context.Context) (string, int, error) {
@@ -50,9 +50,23 @@ func (r RemoteShapeSource) ActiveContext(ctx context.Context) (string, int, erro
 	return r.retrieve(ctx, r.ContextName, "context", 0)
 }
 
-func (r RemoteShapeSource) ShapesAt(ctx context.Context, version int) (string, error) {
-	content, _, err := r.retrieve(ctx, r.ShapesName, "shapes", version)
-	return content, err
+// ShapesAt fetches one shapes graph the received document declares from the
+// originator's hub. As on the local source, the canonical entry travels with
+// the originator's clause catalog; a registered library resolves alone, so
+// both sides evaluate the graphs the document names (ADR-23).
+func (r RemoteShapeSource) ShapesAt(ctx context.Context, name string, version int) (string, int, error) {
+	content, resolved, err := r.retrieve(ctx, name, "shapes", version)
+	if err != nil {
+		return "", 0, err
+	}
+	if name != r.ShapesName {
+		return content, resolved, nil
+	}
+	catalog, _, err := r.retrieve(ctx, r.ClauseCatalogName, "shapes", 0)
+	if err != nil {
+		return "", 0, err
+	}
+	return content + "\n\n" + catalog, resolved, nil
 }
 
 func (r RemoteShapeSource) ContextAt(ctx context.Context, version int) (string, error) {
@@ -115,11 +129,12 @@ func VerifyAgainstOriginatorHub(ctx context.Context, contractDocument any, origi
 		return nil, fmt.Errorf("decode contract document: %w", err)
 	}
 	remote := RemoteShapeSource{
-		BaseURL:      originatorBaseURL,
-		ShapesName:   "facis-dcs",
-		ProfileName:  "facis.sla.basic",
-		ContextName:  "facis-dcs",
-		OntologyName: "facis-sla",
+		BaseURL:           originatorBaseURL,
+		ShapesName:        "facis-dcs",
+		ProfileName:       "facis.sla.basic",
+		ContextName:       "facis-dcs",
+		OntologyName:      "facis-sla",
+		ClauseCatalogName: "clause-catalog",
 	}
 	findings, _, err := validateAgainstShapeSource(ctx, contract, remote)
 	return findings, err

@@ -103,15 +103,12 @@ type signatureManagementsrvc struct {
 	// signer the login flow uses. A wallet verifies either against the SAN the
 	// client identifier names.
 	RequestSigner oid4vprequest.Signer
-	// OID4VPClientID is the x509_san_dns client identifier the pending-ceremony
-	// (PID/PoA presentation) request object declares, and therefore the
-	// audience the presented KB-JWTs must be bound to.
+	// OID4VPClientID is the prefixed x509_san_dns client identifier BOTH request
+	// objects a ceremony publishes declare — the pending PID/PoA presentation
+	// request and the Document-Retrieval request — and therefore the audience the
+	// presented KB-JWTs must be bound to. One ceremony is reached through one
+	// request_uri, so it must name one verifier.
 	OID4VPClientID string
-	// DocRetrievalClientID is the bare DNS hostname the Document-Retrieval
-	// request object declares. That request carries the scheme in its own
-	// client_id_scheme claim (the EUDI walletdriven-signer encoding), so the
-	// identifier is the DNS name alone — equal to the signing certificate's SAN.
-	DocRetrievalClientID string
 	// PublicAPIBase is the externally-resolvable API base the request object's
 	// request_uri, document_locations, and response_uri are built from.
 	PublicAPIBase string
@@ -127,6 +124,10 @@ type signatureManagementsrvc struct {
 	// presentations at the ceremony callback. Same trust anchors the auth login
 	// and PID-verify flows use.
 	Trust *oid4vp.TrustConfig
+	// Credentials verifies a credential read out of a stored PDF — a signing
+	// summary, a lifecycle credential — against the key its issuer publishes for
+	// assertions, before anything it claims is used.
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
@@ -135,31 +136,36 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	artifacts *artifactstore.Store, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, workflowGate *workflowgate.Coordinator,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
-	docRetrievalClientID string,
-	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
+	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig,
+	credentials *provenance.CredentialVerifier) signaturemanagement.Service {
 
+	// Without it every embedded signing summary would be unverifiable, and the
+	// compliance viewer would have nothing it is allowed to report.
+	if credentials == nil {
+		panic("CredentialVerifier is required to verify embedded signing evidence")
+	}
 	service := &signatureManagementsrvc{
-		JWTAuthenticator:     jwtAuth,
-		DB:                   db,
-		CRepo:                cRepo,
-		CeremonyRepo:         ceremonyRepo,
-		PDFCore:              pdfCore,
-		ATrailReader:         auditTrailReader,
-		VCSigner:             vcSigner,
-		VCIssuer:             vcIssuer,
-		IssuerDID:            issuerDID,
-		Artifacts:            artifacts,
-		ArchiveRepo:          archiveRepo,
-		ArchiveNotary:        archiveNotary,
-		ArchiveTSA:           archiveTSA,
-		WorkflowGate:         workflowGate,
-		RequestSigner:        requestSigner,
-		OID4VPClientID:       oid4vpClientID,
-		PublicAPIBase:        publicAPIBase,
-		DocRetrievalClientID: docRetrievalClientID,
-		PIDDCQLQuery:         pidDCQLQuery,
-		DCQLQuery:            dcqlQuery,
-		Trust:                trust,
+		JWTAuthenticator: jwtAuth,
+		DB:               db,
+		CRepo:            cRepo,
+		CeremonyRepo:     ceremonyRepo,
+		PDFCore:          pdfCore,
+		ATrailReader:     auditTrailReader,
+		VCSigner:         vcSigner,
+		VCIssuer:         vcIssuer,
+		IssuerDID:        issuerDID,
+		Artifacts:        artifacts,
+		ArchiveRepo:      archiveRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
+		WorkflowGate:     workflowGate,
+		RequestSigner:    requestSigner,
+		OID4VPClientID:   oid4vpClientID,
+		PublicAPIBase:    publicAPIBase,
+		PIDDCQLQuery:     pidDCQLQuery,
+		DCQLQuery:        dcqlQuery,
+		Trust:            trust,
+		Credentials:      credentials,
 	}
 	if workflowGate != nil {
 		workflowGate.SetReviewContinuation("signature", service.resumeReviewedSignatureGate)
@@ -339,9 +345,10 @@ func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemana
 		UserRoles:  middleware.GetUserRoles(ctx),
 	}
 	handler := query.SignatureVerifier{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 	_, err = handler.Handle(ctx, qry)
 	if err != nil {
@@ -458,20 +465,23 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 	if req.CeremonyID != nil {
 		ceremonyID = *req.CeremonyID
 	}
-	if _, _, err := s.WorkflowGate.Execute(ctx, workflowgate.Input{
-		Gate: "signature", ContractDID: req.Did,
-		Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
-		Continuation: map[string]any{
-			"did": req.Did, "signer_did": req.SignerDid, "field_name": fieldName,
-			"ceremony_id": ceremonyID, "credential_type": credentialType,
-			"requested_by":    middleware.GetParticipantID(ctx),
-			"holder_did":      middleware.GetHolderDID(ctx),
-			"user_roles":      workflowRoles(ctx),
-			"signed_pdf":      req.SignedPdf,
-			"jades_signature": jadesSignature,
-		},
-	}); err != nil {
-		return nil, err
+
+	if s.WorkflowGate != nil {
+		if _, _, err := s.WorkflowGate.Execute(ctx, workflowgate.Input{
+			Gate: "signature", ContractDID: req.Did,
+			Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
+			Continuation: map[string]any{
+				"did": req.Did, "signer_did": req.SignerDid, "field_name": fieldName,
+				"ceremony_id": ceremonyID, "credential_type": credentialType,
+				"requested_by":    middleware.GetParticipantID(ctx),
+				"holder_did":      middleware.GetHolderDID(ctx),
+				"user_roles":      workflowRoles(ctx),
+				"signed_pdf":      req.SignedPdf,
+				"jades_signature": jadesSignature,
+			},
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	handler := s.newApplier()
@@ -529,9 +539,10 @@ func (s *signatureManagementsrvc) Validate(ctx context.Context, req *signaturema
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 	queryHandler := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)
@@ -636,8 +647,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		UserRoles: middleware.GetUserRoles(ctx),
 	}
 	queryHandler := command.ComplianceValidator{
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		DB:           s.DB,
+		CRepo:        s.CRepo,
+		CeremonyRepo: s.CeremonyRepo,
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)
@@ -662,9 +674,10 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	defer cancel()
 
 	validator := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 	validation, err := validator.Handle(ctx, query.ValidateQry{
 		DID:         req.Did,

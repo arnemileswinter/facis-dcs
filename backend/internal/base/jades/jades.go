@@ -65,12 +65,16 @@ func BuildContractPayload(did string, contractVersion int, contractData []byte) 
 // Sign produces a JAdES baseline-B compact JWS over payload using the DID
 // document's HSM-backed P-256 key and its x5c certificate chain.
 func Sign(d *identity.DIDDocument, payload []byte) (string, error) {
-	if len(d.VerificationMethod) == 0 {
-		return "", errors.New("jades: DID document has no verification method")
+	// The chain that travels is the one belonging to the key that signs, which
+	// the document publishes for this instance's signer — not whichever method
+	// happens to come first.
+	method := d.SigningMethod()
+	if method == nil {
+		return "", errors.New("jades: DID document is not bound to a signer")
 	}
-	x5c := d.VerificationMethod[0].PublicKeyJWK.X5C
+	x5c := method.PublicKeyJWK.X5C
 	if len(x5c) == 0 {
-		return "", errors.New("jades: DID document carries no x5c certificate chain")
+		return "", fmt.Errorf("jades: verification method %q carries no x5c certificate chain", method.ID)
 	}
 
 	header := protectedHeader{

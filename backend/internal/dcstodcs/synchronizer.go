@@ -331,15 +331,22 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		// the receiver adopts it only when it has none yet, so repeats are
 		// idempotent. A peer without a resolvable keyAgreement key cannot
 		// receive the CEK and the ship hard-fails into the retry queue.
+		//
+		// The wrap carries the id of the method it was made for, so a peer that
+		// publishes several key-agreement keys knows which one to unwrap with.
 		remoteDIDDocument, err := identity.FetchDIDDocument(peer)
 		if err != nil {
 			return fmt.Errorf("fetch did document of peer %s: %w", peer, err)
 		}
-		peerKeyAgreement, err := remoteDIDDocument.SoleKeyAgreementPublicKey()
+		peerKeyAgreement, err := remoteDIDDocument.PeerKeyAgreementMethod()
 		if err != nil {
 			return fmt.Errorf("resolve keyAgreement key of peer %s: %w", peer, err)
 		}
-		wrappedCEK, err := s.Artifacts.WrapForPeer(ctx, artifactstore.ContractScope(did), peer, peerKeyAgreement)
+		peerKeyAgreementPub, err := peerKeyAgreement.ECPublicKey()
+		if err != nil {
+			return fmt.Errorf("keyAgreement key %q of peer %s: %w", peerKeyAgreement.ID, peer, err)
+		}
+		wrappedCEK, err := s.Artifacts.WrapForPeer(ctx, artifactstore.ContractScope(did), peer, peerKeyAgreement.ID, peerKeyAgreementPub)
 		if err != nil {
 			return fmt.Errorf("wrap contract cek of %s for peer %s: %w", did, peer, err)
 		}

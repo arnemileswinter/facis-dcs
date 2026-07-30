@@ -394,7 +394,7 @@ var SMSignatureRequestPublishResponse = Type("SMSignatureRequestPublishResponse"
 	Description("The published OID4VP Document-Retrieval request as QR/deep-link data (ADR-12). The wallet fetches the request object at request_uri, fetches the to-be-signed document it references, signs it with the signatory's own key, and posts the signed document back to the request object's response_uri.")
 
 	Attribute("ceremony_id", String, "Identifier of the ceremony")
-	Attribute("client_id", String, "x509_san_dns client_id of the DCS relying party the request object is bound to")
+	Attribute("client_id", String, "OpenID4VP client identifier of the DCS relying party the request object is bound to, prefix included (x509_san_dns:<dns-name>)")
 	Attribute("request_uri", String, "HTTPS URL the wallet fetches the signed OID4VP request object (JAR) from")
 	Attribute("wallet_uri", String, "openid4vp:// deep link (request-by-reference) the signer's wallet opens")
 	Attribute("nonce", String, "Fresh nonce bound into the request object")

@@ -171,16 +171,24 @@ func (c *TrustConfig) jwksFromDIDWeb(iss string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("did document at %s identifies itself as %q, not %q", url, doc.ID, iss)
 	}
 
+	// Both sides of the comparison are resolved against the document id: a
+	// relationship entry (and a verification method's own id) may be a relative
+	// DID URL such as "#key-1", which names the same key as the absolute form,
+	// and comparing the two spellings as strings authorizes nothing.
 	assertion := map[string]bool{}
 	for _, entry := range doc.AssertionMethod {
+		var id string
 		switch v := entry.(type) {
 		case string:
-			assertion[v] = true
+			id = v
 		case map[string]any:
-			if id, ok := v["id"].(string); ok {
-				assertion[id] = true
-			}
+			id, _ = v["id"].(string)
 		}
+		resolved, err := identity.ResolveMethodID(doc.ID, id)
+		if err != nil {
+			continue
+		}
+		assertion[resolved] = true
 	}
 	if len(assertion) == 0 {
 		return nil, fmt.Errorf("did document for %s lists no assertionMethod, so none of its keys may make assertions", iss)
@@ -188,14 +196,15 @@ func (c *TrustConfig) jwksFromDIDWeb(iss string) (json.RawMessage, error) {
 
 	keys := make([]sdjwt.JWK, 0, len(doc.VerificationMethod))
 	for _, vm := range doc.VerificationMethod {
-		if vm.PublicKeyJWK.X == "" || !assertion[vm.ID] {
+		methodID, err := identity.ResolveMethodID(doc.ID, vm.ID)
+		if err != nil || vm.PublicKeyJWK.X == "" || !assertion[methodID] {
 			continue
 		}
 		key := vm.PublicKeyJWK
 		// The credential names the verification method in its kid, so carry the
 		// id across or nothing matches it.
 		if key.Kid == "" {
-			key.Kid = vm.ID
+			key.Kid = methodID
 		}
 		keys = append(keys, key)
 	}

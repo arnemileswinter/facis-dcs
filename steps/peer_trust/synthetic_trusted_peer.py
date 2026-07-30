@@ -15,9 +15,9 @@ Mirroring this instance's did.json (the trick the other orce routes use to keep
 the challenge-response genuine) cannot be extended to a peer that passes layer
 3a: the gate requires the credential's issuer to resolve to the SAME target the
 credential was fetched from (trustgate.verifyAgreementCredential) and its proof
-to reference that document's own `#dcs-vc` key. A mirrored did.json carries
-THIS instance's id and VC key, so the credential would have to be signed with
-this instance's HSM-held VC key and issued by this instance — which is exactly
+to name a key that document publishes as an assertionMethod. A mirrored did.json
+carries THIS instance's id and keys, so the credential would have to be signed
+with this instance's HSM-held key and issued by this instance — which is exactly
 what the issuer check refuses to accept from another host.
 
 So this peer is a genuinely separate authority with key material of its own:
@@ -32,10 +32,10 @@ credential stops doing that the day backend/internal/base/federation/rules.md
 changes. The hash is therefore read from the instance's own published
 credential at scenario time.
 
-The eIDAS layer (layer 1) accepts this identity because the certificate in the
-did.json's first verificationMethod is issued for this peer's own hostname and
-matches its own JWK; chain validation and the qualified-certificate statement
-only apply where DCS_FORCE_EIDAS_CERT is on, which no dev/CI stack sets (see
+The eIDAS layer (layer 1) accepts this identity because the certificate of the
+key that ANSWERS the challenge is issued for this peer's own hostname and matches
+that key's own JWK; chain validation and the qualified-certificate statement only
+apply where DCS_FORCE_EIDAS_CERT is on, which no dev/CI stack sets (see
 cmd/dcs/main.go). The challenge-response (layer 2) is signed here with the
 matching private key, so it verifies genuinely rather than by mirroring.
 """
@@ -60,12 +60,13 @@ from steps.peer_trust.dcs_agreement_credential_steps import (
 )
 from steps.support.api_client import agreement_credential_url
 
-# The verification method the receiving instance looks the peer's VC key up
-# under is <peer did>#<its OWN hsm.KeyLabelVC()> (trustgate.
-# vcVerificationMethodID), i.e. the DCS_HSM_KEY_VC of the instance under test —
-# "dcs-vc" unless a deployment overrides it.
-VC_KEY_LABEL = os.getenv("BDD_TRUST_VC_KEY_LABEL", "dcs-vc")
-SIGNING_KEY_LABEL = "dev-key-1"
+# Deliberately NOT the key labels the instance under test uses for itself
+# ("dev-key-1", DCS_HSM_KEY_VC/"dcs-vc"): a peer names its own keys, and the
+# receiver has to resolve them from what this document publishes them FOR —
+# the credential's proof names its key, the challenge-response is answered by an
+# authentication key — rather than from its own naming convention.
+VC_KEY_LABEL = os.getenv("BDD_TRUST_VC_KEY_LABEL", "peer-credential-key")
+SIGNING_KEY_LABEL = "peer-identity-key"
 
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -146,6 +147,13 @@ def _self_signed_certificate(key, hostname: str) -> x509.Certificate:
 
 
 def _did_document(did: str, signing_certificate, signing_key, vc_key) -> dict:
+    """A conformant document that shares none of this deployment's habits: the
+    credential key comes FIRST (verificationMethod order carries no meaning in
+    DID Core, so no consumer may rely on the identity key being entry zero), the
+    relationships name their keys with relative DID URLs (permitted, and what a
+    consumer comparing raw strings fails on), and the identity key is published
+    under `authentication` — the relationship a challenge-response actually
+    needs — while the credential key is only allowed to assert."""
     return {
         "@context": [
             "https://www.w3.org/ns/did/v1",
@@ -154,6 +162,12 @@ def _did_document(did: str, signing_certificate, signing_key, vc_key) -> dict:
         "id": did,
         "verificationMethod": [
             {
+                "id": f"{did}#{VC_KEY_LABEL}",
+                "type": "JsonWebKey2020",
+                "controller": did,
+                "publicKeyJwk": _public_jwk(vc_key.public_key(), VC_KEY_LABEL),
+            },
+            {
                 "id": f"{did}#{SIGNING_KEY_LABEL}",
                 "type": "JsonWebKey2020",
                 "controller": did,
@@ -161,14 +175,9 @@ def _did_document(did: str, signing_certificate, signing_key, vc_key) -> dict:
                     signing_key.public_key(), SIGNING_KEY_LABEL, signing_certificate
                 ),
             },
-            {
-                "id": f"{did}#{VC_KEY_LABEL}",
-                "type": "JsonWebKey2020",
-                "controller": did,
-                "publicKeyJwk": _public_jwk(vc_key.public_key(), VC_KEY_LABEL),
-            },
         ],
-        "assertionMethod": [f"{did}#{SIGNING_KEY_LABEL}", f"{did}#{VC_KEY_LABEL}"],
+        "authentication": [f"#{SIGNING_KEY_LABEL}"],
+        "assertionMethod": [f"#{SIGNING_KEY_LABEL}", f"#{VC_KEY_LABEL}"],
     }
 
 
@@ -202,7 +211,13 @@ def _agreement_credential(did: str, rules_hash: str, vc_key) -> dict:
     termsOfUse terms are covered by the signature rather than dropped as
     unmapped), same termsOfUse shape, and the rules hash of the instance the
     credential is going to be presented to."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    minted = datetime.now(timezone.utc).replace(microsecond=0)
+    now = minted.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # The gate requires a bounded validUntil and refuses a window longer than
+    # federation.MaxAgreementCredentialLifetime, so a credential without one — or
+    # with an open-ended one — is refused before the PDP is ever consulted, which
+    # is not what an AC7/AC8/AC9 scenario is about. An hour outlives any scenario.
+    valid_until = (minted + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     credential = {
         "@context": [
             "https://www.w3.org/ns/credentials/v2",
@@ -218,6 +233,7 @@ def _agreement_credential(did: str, rules_hash: str, vc_key) -> dict:
         "type": ["VerifiableCredential", "FederationAgreementCredential"],
         "issuer": did,
         "validFrom": now,
+        "validUntil": valid_until,
         "credentialSubject": {"id": did},
         "termsOfUse": {
             "type": "TrustFrameworkPolicy",

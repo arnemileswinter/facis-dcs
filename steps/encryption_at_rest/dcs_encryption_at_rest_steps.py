@@ -282,21 +282,21 @@ def step_then_key_agreement_relation(context, fragment):
     context.key_agreement_vm_id = key_agreement[0]
 
 
-@then("that key-agreement verification method is a P-256 JsonWebKey2020 appended after the existing verification methods")
+@then("that key-agreement verification method is a P-256 JsonWebKey2020 published under its own id")
 def step_then_key_agreement_vm_shape(context):
     vms = context.did_document.get("verificationMethod")
     assert isinstance(vms, list) and len(vms) >= 3, (
-        f"expected at least three verificationMethod entries (dev-key-1, VC key, "
+        f"expected at least three verificationMethod entries (identity key, VC key, "
         f"key-agreement key), got: {len(vms) if isinstance(vms, list) else vms!r}"
     )
-    # Appended, never reordered: several backend paths use
-    # VerificationMethod[0] unconditionally.
-    vm = vms[-1]
-    assert vm.get("id") == context.key_agreement_vm_id, (
-        f"the keyAgreement verification method must be APPENDED as the last "
-        f"entry, but the last entry is {vm.get('id')!r} (expected "
-        f"{context.key_agreement_vm_id!r})"
+    # Found by the id the keyAgreement relation names, NOT by position: the order
+    # of verificationMethod carries no meaning, so nothing may depend on it.
+    matching = [vm for vm in vms if vm.get("id") == context.key_agreement_vm_id]
+    assert len(matching) == 1, (
+        f"expected exactly one verificationMethod with id "
+        f"{context.key_agreement_vm_id!r}, got {len(matching)}"
     )
+    vm = matching[0]
     assert vm.get("type") == "JsonWebKey2020", f"unexpected VM type: {vm.get('type')!r}"
     jwk = vm.get("publicKeyJwk") or {}
     assert jwk.get("kty") == "EC" and jwk.get("crv") == "P-256", (
@@ -306,15 +306,47 @@ def step_then_key_agreement_vm_shape(context):
     assert "d" not in jwk, "did.json must publish the PUBLIC key only — the JWK carries a private 'd' component"
 
 
-@then('the first verification method keeps the fragment "{fragment}"')
-def step_then_first_vm_unchanged(context, fragment):
-    vms = context.did_document.get("verificationMethod")
-    assert isinstance(vms, list) and vms, "did.json has no verificationMethod list"
-    first_id = str(vms[0].get("id", ""))
-    assert first_id.endswith(f"#{fragment}"), (
-        f"VerificationMethod[0] must stay #{fragment} (unconditional consumers: "
-        f"eIDAS cert check, challenge verify), got: {first_id!r}"
+def _relationship_ids(doc, relationship):
+    """The method ids a relationship names, absolute or relative — DID Core
+    permits both spellings for the same key."""
+    ids = []
+    for entry in doc.get(relationship) or []:
+        method_id = entry.get("id") if isinstance(entry, dict) else entry
+        if not isinstance(method_id, str):
+            continue
+        ids.append(f"{doc.get('id')}{method_id}" if method_id.startswith("#") else method_id)
+    return ids
+
+
+@then("the key-agreement method appears in no other verification relationship")
+def step_then_key_agreement_only(context):
+    doc = context.did_document
+    for relationship in ("authentication", "assertionMethod", "capabilityInvocation", "capabilityDelegation"):
+        assert context.key_agreement_vm_id not in _relationship_ids(doc, relationship), (
+            f"the CEK wrap key {context.key_agreement_vm_id!r} is also published under "
+            f"{relationship!r} — a key published for encryption must not be usable to "
+            f"verify a signature"
+        )
+
+
+@then("the DID document publishes its identity key for authentication")
+def step_then_authentication_published(context):
+    doc = context.did_document
+    authentication = _relationship_ids(doc, "authentication")
+    assert authentication, (
+        "did.json names no authentication method, so the key answering a peer's "
+        f"challenge-response is published for nothing: {doc.get('authentication')!r}"
     )
+    # The authenticating key must be a published method carrying a certificate
+    # chain: the counterparty validates the chain of the key that answers, so the
+    # two have to be the same method.
+    by_id = {vm.get("id"): vm for vm in doc.get("verificationMethod") or []}
+    for method_id in authentication:
+        vm = by_id.get(method_id)
+        assert vm is not None, f"authentication names {method_id!r}, which is not a published verificationMethod"
+        assert (vm.get("publicKeyJwk") or {}).get("x5c"), (
+            f"the authentication key {method_id!r} carries no x5c chain for the peer to validate"
+        )
 
 
 # ---------------------------------------------------------------------------
