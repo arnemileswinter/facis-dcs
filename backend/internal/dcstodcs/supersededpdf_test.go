@@ -71,3 +71,35 @@ func TestShipProceedsWhenNoPayloadHashWasEverRecorded(t *testing.T) {
 func TestSupersededCheckHashesAContractWithoutDataLikeTheRegenerator(t *testing.T) {
 	require.Equal(t, regeneratorHash(""), contractDataHash(&db.Contract{}))
 }
+
+// Deferring is only safe while something is guaranteed to re-render: the
+// lifecycle event that asked for a regeneration is delivered at most once, so a
+// regeneration lost to a transient pdf-core or artifact-store failure leaves a
+// stored PDF that this gate refuses for good. The background regenerator's
+// retry sweep is what makes it converge — its work-list query
+// (PostgresContractRepo.ReadDIDsNeedingRegeneration) selects exactly the
+// contracts this gate refuses, so the two must state the same condition. This
+// pins the gate's side of it: every arm below is one the query also tests.
+func TestEveryConditionTheGateDefersOnIsOneTheRetrySweepSelects(t *testing.T) {
+	jsonld := `{"dcs:documentStructure":{}}`
+	stale := regeneratorHash(`{"older":"document"}`)
+
+	for _, tc := range []struct {
+		name     string
+		pdfState *db.ContractPDFState
+		defers   bool
+	}{
+		// pdf_payload_hash <> encode(sha256(contract_data), 'hex')
+		{"a render the document moved past", &db.ContractPDFState{IPFSCID: "Qm", C2PAState: "draft", PayloadHash: stale}, true},
+		// the same predicate, satisfied
+		{"a render of the current document", &db.ContractPDFState{IPFSCID: "Qm", C2PAState: "draft", PayloadHash: regeneratorHash(jsonld)}, false},
+		// COALESCE(pdf_c2pa_state, '') IN ('', 'draft')
+		{"a frozen artifact hashed at signing", &db.ContractPDFState{IPFSCID: "Qm", C2PAState: "active", PayloadHash: stale}, false},
+		// COALESCE(pdf_payload_hash, '') <> ''
+		{"a PDF predating payload-hash recording", &db.ContractPDFState{IPFSCID: "Qm", C2PAState: "draft"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.defers, holdsSupersededPDF(tc.pdfState, contractWithData(t, jsonld)))
+		})
+	}
+}
