@@ -6,6 +6,7 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { useScrollStore } from '@core/store/scroll'
 import { contractStory, toBannerActions } from '@core/workflow-story'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
+import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -199,6 +200,14 @@ function buildChangeRequest(): ContractChangeRequest {
 
 const negotiateContractChange = async () => {
   if (!contract.value || !editedContract.value || !issuer.value) return
+  // Same gate the forward-to-approval path applies: a counter-offer breaking the
+  // contract's machine-readable policy is refused at approval anyway, so it is
+  // reported here — naming the constraint — instead of shipping to the peer.
+  if (!verificationResult.value.isValid) {
+    verificationResult.value.errors.forEach((error) => errorStore.add(error.message))
+    contractEditorUiStore.setActiveTab('content')
+    return
+  }
   isSubmitting.value = true
   try {
     const response = await contractWorkflowService.negotiate({
@@ -564,7 +573,10 @@ const exportPDF = async () => {
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body gap-5">
-                    <div ref="template-preview-content">
+                    <!-- Both editors sit inside the ref: a redline highlight is
+                         applied to the inputs found under it, and an object
+                         leaf is as redlinable as an inline placeholder. -->
+                    <div ref="template-preview-content" class="space-y-5">
                       <TemplatePreview
                         :layout="dcsDraftStore.layout"
                         :blocks="dcsDraftStore.blocks"
@@ -573,6 +585,15 @@ const exportPDF = async () => {
                         :verification-result="verificationResult"
                         :set-semantic-condition-value="setSemanticConditionValue"
                       />
+                      <template v-if="dcsDraftStore.contractData.length">
+                        <div class="divider text-xs text-base-content/40">semantic data objects</div>
+                        <DataObjectsEditor
+                          mode="contract"
+                          :editable="!!setSemanticConditionValue"
+                          :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                          :set-semantic-condition-value="setSemanticConditionValue ?? undefined"
+                        />
+                      </template>
                     </div>
                   </div>
                 </div>

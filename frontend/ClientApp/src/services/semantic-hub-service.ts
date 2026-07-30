@@ -74,8 +74,19 @@ export interface RegisterSchemaPayload {
   media_type: string
   /** Inline content; omit when source_url is given. */
   content?: string
-  /** Fetch the schema from this URL (http/https, follows redirects) instead of inline content. */
+  /**
+   * Fetch the schema from this URL (http/https, follows redirects) instead of
+   * inline content. A DCS hub anchor (/semantic/shapes/{name}?version=N) is
+   * unwrapped to the document it serves.
+   */
   source_url?: string
+  /**
+   * Register at exactly this version instead of the next one — how a shape
+   * library another instance published is installed here under the number
+   * that instance assigned it, so a template pinning ?version=N resolves the
+   * same graph on both hubs (ADR-8). Rejected when the version already exists.
+   */
+  version?: number
   activate: boolean
 }
 
