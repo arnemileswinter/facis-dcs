@@ -1,6 +1,11 @@
 image:
   repository: ipfs/kubo
-  tag: "latest"
+  # Pinned deliberately. A mutable tag meant a node could change version between
+  # two pulls of the same release, and an IPFS node that stops accepting writes
+  # takes signing down with it: the regenerator holds the per-contract lock
+  # across its store write, so a stalled pin surfaces as "PDF is still being
+  # regenerated" on the signing path.
+  tag: "v0.32.1"
   pullPolicy: IfNotPresent
 
 service:
