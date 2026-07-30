@@ -150,6 +150,12 @@ export interface OdrlConstraint {
    * enforcement.
    */
   'odrl:rightOperand'?: JsonLdTypedValue | JsonLdReference | (JsonLdTypedValue | JsonLdReference)[]
+  /**
+   * The unit the boundary is measured in (ODRL IM §2.5), an IRI: a currency
+   * concept for a payment amount, a countable unit for a count. Without it a
+   * downstream target system cannot tell what the number denominates.
+   */
+  'odrl:unit'?: JsonLdReference
 }
 
 /**
@@ -183,6 +189,11 @@ export interface OdrlDuty {
   '@id'?: string
   '@type': 'odrl:Duty'
   'odrl:action': JsonLdReference | JsonLdReference[]
+  /** The clause node this duty is backed by. A nested duty is an odrl:Duty like
+   *  any other, so it owes prose too; it is authored inside the clause its
+   *  enclosing rule cites, and cites the same block (set on assembly, once the
+   *  clause block has an IRI). */
+  'dcs:prose'?: JsonLdReference
   'odrl:constraint'?: OdrlConstraintNode[]
   'odrl:consequence'?: OdrlDuty[]
 }

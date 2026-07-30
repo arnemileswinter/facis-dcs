@@ -35,6 +35,9 @@ export interface AtomicDraft {
   rightSource: string
   value: string
   values: OperandDraftValue[]
+  /** '' = no unit; otherwise the IRI of the unit the boundary is measured in
+   *  (odrl:unit, e.g. a currency concept). */
+  unit: string
 }
 
 export interface GroupDraft {
@@ -50,7 +53,7 @@ export function isGroupDraft(node: ConstraintNodeDraft): node is GroupDraft {
 }
 
 export function newAtomic(leftOperand: string, operator: string): AtomicDraft {
-  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [] }
+  return { kind: 'atomic', leftOperand, operator, rightSource: '', value: '', values: [], unit: '' }
 }
 
 export function newGroup(): GroupDraft {
@@ -102,6 +105,8 @@ function buildAtomic(atomic: AtomicDraft): OdrlConstraint {
   }
   const right = atomic.rightSource ? { '@id': atomic.rightSource } : fixedRightOperand(atomic)
   if (right !== undefined) constraint['odrl:rightOperand'] = right
+  const unit = atomic.unit.trim()
+  if (unit) constraint['odrl:unit'] = { '@id': unit }
   return constraint
 }
 
@@ -151,6 +156,7 @@ function operandLabel(value: OperandDraftValue): string {
 
 function readAtomic(constraint: OdrlConstraint): AtomicDraft {
   const right = constraint['odrl:rightOperand']
+  const unit = constraint['odrl:unit']?.['@id'] ?? ''
   if (right && '@id' in right) {
     return {
       kind: 'atomic',
@@ -159,6 +165,7 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
       rightSource: right['@id'],
       value: '',
       values: [],
+      unit,
     }
   }
   const values = Array.isArray(right) ? right.map((item) => ({ ...item })) : []
@@ -174,6 +181,7 @@ function readAtomic(constraint: OdrlConstraint): AtomicDraft {
     rightSource: '',
     value,
     values: values.length ? values : right && '@value' in right ? [{ ...right }] : [],
+    unit,
   }
 }
 
