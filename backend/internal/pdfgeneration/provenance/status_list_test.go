@@ -71,11 +71,11 @@ func TestOCMWStatusListPublisher_PublishStatus_TerminalStatesCallRevoke(t *testi
 			}))
 			defer srv.Close()
 
-			p := NewOCMWStatusListPublisher(srv.URL, "did:example:issuer", "default")
-			uri, err := p.PublishStatus(context.Background(), "did:example:contract1", state, "test reason", time.Now())
+			p := newTestPublisher(srv.URL, "default")
+			ref, err := p.PublishStatus(context.Background(), "did:example:contract1", state, "test reason", time.Now())
 			require.NoError(t, err, "state %q should not error", state)
 			assert.True(t, revokeCalled, "state %q must POST to /revoke/ endpoint", state)
-			assert.Contains(t, uri, "/v1/tenants/")
+			assert.Contains(t, ref.StatusListCredential, "/v1/tenants/")
 		})
 	}
 }
@@ -94,7 +94,7 @@ func TestOCMWStatusListPublisher_PublishStatus_NonTerminalStatesDoNotRevoke(t *t
 			}))
 			defer srv.Close()
 
-			p := NewOCMWStatusListPublisher(srv.URL, "did:example:issuer", "default")
+			p := newTestPublisher(srv.URL, "default")
 			_, err := p.PublishStatus(context.Background(), "did:example:contract1", state, "", time.Now())
 			require.NoError(t, err)
 			assert.False(t, revokeCalled, "state %q must NOT call /revoke/ endpoint", state)
@@ -117,11 +117,11 @@ func TestOCMWStatusListPublisher_RevokeStatus_CallsCorrectPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewOCMWStatusListPublisher(srv.URL, "did:example:issuer", "default")
-	uri, err := p.RevokeStatus(context.Background(), "did:example:contractX")
+	p := newTestPublisher(srv.URL, "default")
+	ref, err := p.RevokeStatus(context.Background(), "did:example:contractX")
 	require.NoError(t, err)
 	assert.Contains(t, capturedPath, "/v1/tenants/default/status/1/revoke/", "revoke path must contain tenant and list ID")
-	assert.Contains(t, uri, "/v1/tenants/default/status/1", "returned URI must point to status list endpoint")
+	assert.Contains(t, ref.StatusListCredential, "/v1/tenants/default/status/1", "returned URI must point to status list endpoint")
 }
 
 // TestOCMWStatusListPublisher_RevokeStatus_PropagatesHTTPError verifies that
@@ -133,7 +133,7 @@ func TestOCMWStatusListPublisher_RevokeStatus_PropagatesHTTPError(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	p := NewOCMWStatusListPublisher(srv.URL, "did:example:issuer", "default")
+	p := newTestPublisher(srv.URL, "default")
 	_, err := p.RevokeStatus(context.Background(), "did:example:contract1")
 	require.Error(t, err, "HTTP 500 from status list must propagate as error")
 	assert.Contains(t, err.Error(), "statuslist-service revoke returned 500")
@@ -143,7 +143,7 @@ func TestOCMWStatusListPublisher_RevokeStatus_PropagatesHTTPError(t *testing.T) 
 // publisher with no URL configured returns an error for terminal states.
 // Empty ServiceURL is a hard failure per project policy (DCS hard-fail policy).
 func TestOCMWStatusListPublisher_EmptyServiceURL_HardFails(t *testing.T) {
-	p := NewOCMWStatusListPublisher("", "did:example:issuer", "")
+	p := newTestPublisher("", "")
 	_, err := p.PublishStatus(context.Background(), "did:example:c1", "terminated", "", time.Now())
 	require.Error(t, err, "empty ServiceURL must hard-fail for terminal states (revocation is mandatory)")
 	assert.Contains(t, err.Error(), "ServiceURL must not be empty")
@@ -163,34 +163,40 @@ func TestOCMWStatusListPublisher_DefaultTenant(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewOCMWStatusListPublisher(srv.URL, "did:example:issuer", "") // empty tenant
+	p := newTestPublisher(srv.URL, "") // empty tenant
 	_, err := p.RevokeStatus(context.Background(), "contract-abc")
 	require.NoError(t, err)
 	assert.Contains(t, capturedPath, "/default/", "empty tenantID must default to 'default'")
 }
 
-// TestDeriveIndex_DeterministicAndInBounds verifies that the same contractID
-// always produces the same index and that the index is within listSize bounds.
-func TestStatusListIndex_DeterministicAndInBounds(t *testing.T) {
-	id := "did:example:contract123"
-	idx1 := StatusListIndex(id)
-	idx2 := StatusListIndex(id)
-	assert.Equal(t, idx1, idx2, "StatusListIndex must be deterministic for the same input")
-	assert.Less(t, idx1, uint32(listSize), "index must be within [0, listSize)")
-}
+// TestPublishedEntryIsTheEntryTheRevokeCallFlips: the reference a credential
+// carries and the bit a revocation sets are read from the same allocation, so a
+// verifier that follows the credential lands on the bit that was flipped.
+func TestPublishedEntryIsTheEntryTheRevokeCallFlips(t *testing.T) {
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
 
-// TestStatusListIndex_DifferentIDsDifferentIndices is a collision-sanity check.
-func TestStatusListIndex_DifferentIDsDifferentIndices(t *testing.T) {
-	idx1 := StatusListIndex("did:example:contract-a")
-	idx2 := StatusListIndex("did:example:contract-b")
-	assert.NotEqual(t, idx1, idx2, "distinct contract IDs should map to distinct indices")
+	p := newTestPublisher(srv.URL, "default")
+	advertised, err := p.PublishStatus(context.Background(), "did:example:contract-flip", "active", "", time.Now())
+	require.NoError(t, err)
+
+	revoked, err := p.RevokeStatus(context.Background(), "did:example:contract-flip")
+	require.NoError(t, err)
+
+	assert.Equal(t, advertised, revoked)
+	assert.True(t, strings.HasSuffix(capturedPath, fmt.Sprintf("/revoke/%d", advertised.Index)),
+		"revoke POST %s must name the advertised entry %d", capturedPath, advertised.Index)
 }
 
 // TestStatusListURI_Format verifies the URI returned by statusListURI matches
 // the expected XFSC statuslist-service path format.
 func TestStatusListURI_Format(t *testing.T) {
-	p := NewOCMWStatusListPublisher("http://statuslist:8080", "did:example:issuer", "acme")
-	uri := p.statusListURI()
+	p := newTestPublisher("http://statuslist:8080", "acme")
+	uri := p.statusListURI(StatusListEntry{ListID: DefaultListID})
 	assert.Equal(t, "http://statuslist:8080/v1/tenants/acme/status/1", uri)
 }
 
@@ -198,8 +204,7 @@ func TestStatusListURI_Format(t *testing.T) {
 // the bitstring bit at the contract's index is 0, against the ACTUAL XFSC
 // statuslist-service response shape ({"list", "listId", "tenantId"}, gzip, LSB).
 func TestQueryStatusListStatus_ActiveBitNotSet(t *testing.T) {
-	contractID := "did:example:contract-active"
-	idx := StatusListIndex(contractID)
+	const idx = uint32(4711)
 
 	body := makeXFSCStatusListResponse(int(listSize/8), idx, false /* not revoked */)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,8 +225,7 @@ func TestQueryStatusListStatus_ActiveBitNotSet(t *testing.T) {
 // the bit at the contract's index is 1, against the ACTUAL XFSC
 // statuslist-service response shape ({"list", "listId", "tenantId"}, gzip, LSB).
 func TestQueryStatusListStatus_RevokedBitSet(t *testing.T) {
-	contractID := "did:example:contract-revoked"
-	idx := StatusListIndex(contractID)
+	const idx = uint32(88123)
 
 	body := makeXFSCStatusListResponse(int(listSize/8), idx, true /* revoked */)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

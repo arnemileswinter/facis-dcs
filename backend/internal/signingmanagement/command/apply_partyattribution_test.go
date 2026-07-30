@@ -211,9 +211,12 @@ func TestComplianceReadsTheAttributionTheSigningFlowWrites(t *testing.T) {
 
 	attributed, err := recordSignatory(sealed, responsible, signerA, instanceA, instanceA)
 	require.NoError(t, err)
-	require.Empty(t, poaComplianceFindings(attributed))
+	findings, judged := poaComplianceFindings(attributed)
+	require.Empty(t, findings)
+	require.True(t, judged[instanceA], "the viewer must report having judged the party the document attributes")
 
 	misauthorized, err := recordSignatory(sealed, responsible, signerA, "did:web:some-other-org.example", instanceA)
 	require.NoError(t, err)
-	require.Len(t, poaComplianceFindings(misauthorized), 1)
+	findings, _ = poaComplianceFindings(misauthorized)
+	require.Len(t, findings, 1)
 }

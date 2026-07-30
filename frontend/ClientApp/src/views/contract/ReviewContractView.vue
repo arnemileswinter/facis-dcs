@@ -60,7 +60,9 @@ const isAuditingAuthorized = computed(
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
-const story = computed(() => contractStory(contract.value?.state))
+const story = computed(() =>
+  contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
+)
 
 const verificationResult = computed(() => {
   return verifySemanticValue(

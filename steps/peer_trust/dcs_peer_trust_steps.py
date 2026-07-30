@@ -93,6 +93,7 @@ from datetime import datetime, timezone
 import requests as _requests
 from behave import given, then, when
 
+from steps.contract_deployment.dcs_contract_deployment_steps import BDD_TARGET_NAME as _SEEDED_TARGET_NAME
 from steps.peer_trust.synthetic_trusted_peer import publish_trusted_peer
 from steps.support.api_client import (
     contract_create_url,
@@ -1388,10 +1389,20 @@ def step_then_provenance_on_b(context):
 
 
 def _instance_target_id(context, base_url: str) -> str:
-    """Register (idempotently, by name) the shipped ORCE contract-target flow on
-    ONE named instance and return its id there. The single-instance helper
-    caches one id on the context, which is wrong across two instances: a target
-    registered on A does not exist on B."""
+    """The SEEDED registry entry for the shipped ORCE contract-target flow on ONE
+    named instance (values.bdd.yml / values.bdd2.yml contractTargets), by name.
+
+    Not registered here on the fly. A target registered through the API holds no
+    credential until one is issued for it, and authorizeCaller refuses a callback
+    from a target with no credential (ADR-27) — a target this suite invented
+    could dispatch but never acknowledge, so its contract would stay SIGNED. The
+    seeded entry carries the oauth_client_id its instance's Hydra and
+    systemClients both declare, which is what lets the acknowledgement land.
+
+    Resolved per instance: the single-instance helper caches one id on the
+    context, which is wrong across two instances — a target registered on A does
+    not exist on B, and the two entries point the flow's callback at different
+    deployments."""
     cache = getattr(context, "peer_target_ids", None)
     if cache is None:
         cache = {}
@@ -1403,24 +1414,16 @@ def _instance_target_id(context, base_url: str) -> str:
         f"{base_url}/contract/targets", headers=admin_h, timeout=context.http_timeout_seconds
     )
     assert listed.status_code == 200, f"could not list contract targets on {base_url}: {listed.text}"
-    for entry in listed.json() or []:
-        if entry.get("name") == "BDD ORCE Target":
+    entries = listed.json() or []
+    for entry in entries:
+        if entry.get("name") == _SEEDED_TARGET_NAME:
             cache[base_url] = entry["id"]
             return entry["id"]
-    created = post_json(
-        context,
-        f"{base_url}/contract/targets",
-        {
-            "name": "BDD ORCE Target",
-            "url": os.getenv("BDD_CONTRACT_TARGET_URL", "http://dcs-orce:1880/contract-target/deploy"),
-            "description": "Shipped ORCE contract-target flow used by the BDD suite.",
-            "enabled": True,
-        },
-        headers=admin_h,
+    raise AssertionError(
+        f"{base_url} has no seeded contract target {_SEEDED_TARGET_NAME!r} — deploy this instance with a "
+        f"contractTargets entry carrying an oauth_client_id, or its deployments can never be acknowledged. "
+        f"Registered: {[e.get('name') for e in entries]}"
     )
-    assert created.status_code == 200, f"could not register the contract target on {base_url}: {created.text}"
-    cache[base_url] = created.json()["id"]
-    return cache[base_url]
 
 
 def _cross_instance_contract(context, base_url: str):

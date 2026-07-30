@@ -44,7 +44,7 @@ func EmbedSigningEvidence(pdfBytes, evidence []byte) ([]byte, error) {
 	// Supersede the catalog in this same incremental update, exactly as the
 	// lifecycle-VC attachment does.
 	const catalogObjID = 1
-	patchedCatalog, err := catalogWithEvidenceAssociated(pdfBytes, catalogObjID, specObjID)
+	patchedCatalog, err := catalogWithAssociatedFile(pdfBytes, catalogObjID, specObjID, signingEvidenceFileName)
 	if err != nil {
 		return nil, fmt.Errorf("embed evidence: associate attachment with the document: %w", err)
 	}
@@ -118,23 +118,3 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 	return append([]byte(nil), pdfBytes[streamStart:streamEnd]...), true, nil
 }
 
-// catalogWithEvidenceAssociated returns the document catalog's dictionary with
-// the signing-evidence filespec added to the /AF array and the /EmbeddedFiles
-// name tree, so the attachment is a properly listed associated file
-// (ISO 19005-3 clause 6.8). Mirrors catalogWithVCAssociated for the evidence
-// attachment.
-func catalogWithEvidenceAssociated(pdf []byte, objID, specObjID int) ([]byte, error) {
-	start, end, ok := lastObjectBody(pdf, objID)
-	if !ok {
-		return nil, fmt.Errorf("catalog object %d not found", objID)
-	}
-	dict := append([]byte(nil), pdf[start:end]...)
-	ref := []byte(fmt.Sprintf("%d 0 R", specObjID))
-	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], ref) {
-		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(ref)+"]"))
-	}
-	if ef := catalogEFRE.FindSubmatchIndex(dict); ef != nil && !bytes.Contains(dict[ef[4]:ef[5]], []byte(signingEvidenceFileName)) {
-		dict = catalogEFRE.ReplaceAll(dict, []byte("${1}${2} ("+signingEvidenceFileName+") "+string(ref)+"${3}"))
-	}
-	return dict, nil
-}

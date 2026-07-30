@@ -309,6 +309,11 @@ statuslistService:
     tenantIDs:
       - credential
       - c2pa
+      # Instance B shares this service but not this instance's database, and a
+      # revocation entry is allocated out of that database (migration 20260734).
+      # Two instances allocating into one list would hand the same bit to two
+      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
+      - c2pa2
 
 statusListLocalhostProxy:
   enabled: true

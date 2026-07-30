@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -17,6 +18,35 @@ import (
 // ErrNoChanges is returned by UpdatePDF when the new payload is semantically
 // identical to the current embedded one and no VC attachment is present.
 var ErrNoChanges = errors.New("no changes: payloads are semantically identical")
+
+// lifecycleVCFileName is the attachment filename under which a contract's
+// current lifecycle credential is embedded.
+const lifecycleVCFileName = "contract-lifecycle-vc.json"
+
+// lifecycleStatusFromVC returns the lifecycle state an incremental update
+// records in its dcs.lifecycle assertion: the state asserted by the credential
+// the same update attaches. That credential is what the caller knows and what
+// the eventual PAdES signature commits to, so it is what the provenance chain
+// must say — hardcoding "amended" on every hop left a signed contract's chain
+// reading draft -> amended -> amended while the credential beside it said
+// "active", so the artifact and /pdf/verify's DB-derived lifecycle_status could
+// disagree with nothing able to notice (ADR-13 requires the federation state to
+// be derivable from the artifact alone).
+//
+// A hop that attaches no credential, or one naming no status, records no
+// lifecycle event: it is a content amendment, and "amended" is the whole truth
+// about it.
+func lifecycleStatusFromVC(vcBytes []byte) string {
+	var vc struct {
+		CredentialSubject struct {
+			Status string `json:"status"`
+		} `json:"credentialSubject"`
+	}
+	if err := json.Unmarshal(vcBytes, &vc); err != nil || vc.CredentialSubject.Status == "" {
+		return lifecycleStatusAmended
+	}
+	return vc.CredentialSubject.Status
+}
 
 // DiffNQuads returns the N-Quads present in newPayload but not oldPayload (added)
 // and those present in oldPayload but not newPayload (removed).
@@ -325,7 +355,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	// requires membership in the document /AF array and /EmbeddedFiles tree.
 	var patchedCatalog []byte
 	if vcBytes != nil {
-		patchedCatalog, err = catalogWithVCAssociated(oldPDF, rootObjID, vcSpecObjID)
+		patchedCatalog, err = catalogWithAssociatedFile(oldPDF, rootObjID, vcSpecObjID, lifecycleVCFileName)
 		if err != nil {
 			return nil, fmt.Errorf("associate lifecycle VC in catalog: %w", err)
 		}
@@ -343,7 +373,7 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 	var result []byte
 
 	for range 6 {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabel(hardBindingHash), manifestDoc.ContractID, manifestHashHex, hardBindingHash, exclusions, compiledAt, remoteManifestURL)
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, updateManifestLabel(hardBindingHash), manifestDoc.ContractID, manifestHashHex, lifecycleStatusFromVC(vcBytes), hardBindingHash, exclusions, compiledAt, remoteManifestURL)
 		if err != nil {
 			return nil, fmt.Errorf("render update manifest: %w", err)
 		}
@@ -389,25 +419,51 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // appended with IDs beyond the existing maximum so originals are unreachable
 // via the updated xref chain but their bytes remain intact for signature
 // verification.
-// catalogWithVCAssociated reads the document catalog (objID) from pdf and returns
-// its dictionary bytes with the lifecycle-VC filespec (vcSpecObjID) added to the
-// /AF array and the /EmbeddedFiles name tree, so the attached VC is a properly
-// listed associated file (ISO 19005-3 clause 6.8). Returns the dict without the
-// object header/trailer, to be re-emitted as a superseded object.
-func catalogWithVCAssociated(pdf []byte, objID, vcSpecObjID int) ([]byte, error) {
+// catalogWithAssociatedFile reads the document catalog (objID) from pdf and
+// returns its dictionary bytes with the filespec specObjID listed as the
+// associated file called fileName: appended to the /AF array and resolvable
+// under fileName in the /EmbeddedFiles name tree, which is what ISO 19005-3
+// clause 6.8 requires of an attachment carrying /AFRelationship. Returns the
+// dict without the object header/trailer, to be re-emitted as a superseded
+// object.
+//
+// A document accumulates one filespec per attachment: a contract is amended
+// under its "draft" lifecycle credential, then stamped "active" under a fresh
+// one just before signing. /AF grows — every revision's attachment stays
+// reachable — but a name tree holds exactly one entry per name, so that entry
+// must be re-pointed at the current filespec. Leaving the first one in place is
+// what made every reader that resolves an attachment BY NAME (pypdf, Acrobat's
+// attachment panel, a wallet) report "draft" for a signed contract; only the
+// backend was spared, because ExtractEmbeddedVC scans for the last filespec
+// instead of asking the name tree.
+func catalogWithAssociatedFile(pdf []byte, objID, specObjID int, fileName string) ([]byte, error) {
 	start, end, ok := lastObjectBody(pdf, objID)
 	if !ok {
 		return nil, fmt.Errorf("catalog object %d not found", objID)
 	}
 	dict := append([]byte(nil), pdf[start:end]...)
-	vcRef := []byte(fmt.Sprintf("%d 0 R", vcSpecObjID))
-	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], vcRef) {
-		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(vcRef)+"]"))
+	ref := []byte(fmt.Sprintf("%d 0 R", specObjID))
+	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], ref) {
+		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(ref)+"]"))
 	}
-	if ef := catalogEFRE.FindSubmatchIndex(dict); ef != nil && !bytes.Contains(dict[ef[4]:ef[5]], []byte("contract-lifecycle-vc.json")) {
-		dict = catalogEFRE.ReplaceAll(dict, []byte("${1}${2} (contract-lifecycle-vc.json) "+string(vcRef)+"${3}"))
+	ef := catalogEFRE.FindSubmatchIndex(dict)
+	if ef == nil {
+		return dict, nil
 	}
-	return dict, nil
+	names := dict[ef[4]:ef[5]]
+	entry := []byte("(" + fileName + ") " + string(ref))
+	if existing := nameTreeEntryRE(fileName).FindIndex(names); existing != nil {
+		names = append(append(append([]byte(nil), names[:existing[0]]...), entry...), names[existing[1]:]...)
+	} else {
+		names = append(append(append([]byte(nil), names...), ' '), entry...)
+	}
+	return append(dict[:ef[4]:ef[4]], append(names, dict[ef[5]:]...)...), nil
+}
+
+// nameTreeEntryRE matches one /EmbeddedFiles name-tree entry — the key string
+// followed by the filespec reference it resolves to.
+func nameTreeEntryRE(fileName string) *regexp.Regexp {
+	return regexp.MustCompile(regexp.QuoteMeta("("+fileName+")") + `\s*\d+ 0 R`)
 }
 
 var (

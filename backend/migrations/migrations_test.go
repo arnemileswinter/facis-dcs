@@ -38,6 +38,54 @@ func TestOneSignedSignaturePerFieldIsEnforcedByAUniqueIndex(t *testing.T) {
 	}
 }
 
+// A status list entry is a contract's revocation bit, so two contracts holding
+// one entry means terminating either revokes both. The allocation table is what
+// stops that, and it only stops it if the slot index is UNIQUE and PARTIAL:
+// unique so two allocations cannot meet, partial because assignments inherited
+// from the retired hash scheme may already collide and the migration preserves
+// them rather than failing on the deployments that have the problem.
+func TestAllocatedStatusListEntriesAreUniquePerSlot(t *testing.T) {
+	statement := regexp.MustCompile(
+		`(?is)CREATE\s+UNIQUE\s+INDEX[^;]*?ON\s+status_list_entries\s*\(\s*list_id\s*,\s*entry_index\s*\)([^;]*);`)
+
+	found := ""
+	for name, sql := range migrationSQL(t) {
+		if m := statement.FindStringSubmatch(sql); m != nil {
+			found = name + ": " + m[1]
+			break
+		}
+	}
+	if found == "" {
+		t.Fatal("no unique index on status_list_entries (list_id, entry_index): two contracts can be allocated one revocation bit")
+	}
+	if !strings.Contains(found, "WHERE") || !strings.Contains(found, "'allocated'") {
+		t.Errorf("the unique index is not restricted to allocated rows, so a deployment whose inherited hash indices already collide cannot migrate: %s", found)
+	}
+}
+
+// Contracts that predate the allocation table have credentials in the wild
+// advertising a hash-derived entry. The backfill is what keeps those credentials
+// resolvable — without it every existing contract would be handed a fresh entry
+// and its issued credentials would point at a bit nothing updates.
+func TestExistingSubjectsKeepTheirInheritedStatusListEntry(t *testing.T) {
+	backfill := regexp.MustCompile(`(?is)INSERT\s+INTO\s+status_list_entries[^;]*?FROM\s+(contracts|contract_templates)[^;]*;`)
+
+	sources := map[string]bool{}
+	for _, sql := range migrationSQL(t) {
+		for _, m := range backfill.FindAllStringSubmatch(sql, -1) {
+			if !strings.Contains(m[0], "sha256") {
+				t.Errorf("the backfill does not reproduce the retired index expression, so it moves existing contracts off the entry their credentials name: %s", m[0])
+			}
+			sources[m[1]] = true
+		}
+	}
+	for _, table := range []string{"contracts", "contract_templates"} {
+		if !sources[table] {
+			t.Errorf("no status_list_entries backfill from %s: its existing subjects would be reallocated", table)
+		}
+	}
+}
+
 // migrationSQL returns the contents of every embedded migration file.
 func migrationSQL(t *testing.T) map[string]string {
 	t.Helper()

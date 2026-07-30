@@ -701,6 +701,12 @@ function canonicalizeLayout(layout: DcsLayoutNode[]): DcsLayoutNode[] {
 
 export interface ContractDocumentInput {
   documentId: string
+  /**
+   * The document as the server handed it out. The editor rebuilds the contract
+   * from its own state, so anything it does not model is absent from what it
+   * rebuilds — the server-owned fields are carried over from here.
+   */
+  storedDocument?: DcsContractData
   name?: string
   description?: string
   blocks: DcsBlock[]
@@ -713,11 +719,27 @@ export interface ContractDocumentInput {
   derivedFromTemplate?: DcsContractData['derivedFromTemplate']
 }
 
+/**
+ * Fields of a contract document the server owns and the client only carries.
+ * The editor cannot reproduce them, so rebuilding the document from editor
+ * state drops them — and posting that back discards data the server put there:
+ * the party nodes a signature is attributed to (with the signatory and Power of
+ * Attorney already recorded on them), the signature fields naming those
+ * parties, and the shapes graph the document is pinned to.
+ */
 export function buildContractDocument(input: ContractDocumentInput): DcsContractData {
-  return assembleCanonicalDocument({
-    ...input,
+  const { storedDocument, ...editorState } = input
+  const document = assembleCanonicalDocument({
+    ...editorState,
     documentType: 'dcs:Contract',
   }) as DcsContractData
+  if (!storedDocument) return document
+  if (storedDocument['dcs:parties'] !== undefined) document['dcs:parties'] = storedDocument['dcs:parties']
+  if (storedDocument['dcs:signatureFields'] !== undefined) {
+    document['dcs:signatureFields'] = storedDocument['dcs:signatureFields']
+  }
+  if (storedDocument['sh:shapesGraph'] !== undefined) document['sh:shapesGraph'] = storedDocument['sh:shapesGraph']
+  return document
 }
 
 export function getSemanticConditionsFromTemplateData(td: DcsDocumentData | undefined): SemanticCondition[] {

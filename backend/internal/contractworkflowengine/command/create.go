@@ -166,30 +166,15 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}
 
 	// Declare the two parties (origin + counterparty, ADR-13) as party nodes of
-	// the document itself. A signature is attributed to the party node its
-	// signature field names (signingmanagement/command/apply.go recordSignatory),
-	// and the Power of Attorney behind it is recorded there for the counterparty
-	// to verify (ADR-31) — with no node for the party, both have nowhere to land
-	// and the peer receives a signed contract that attributes its signature to
-	// nobody. Only role placeholders and read-authorization names reached
-	// dcs:parties before, neither of which a two-instance contract carries.
-	withParties, changed, err := SeedContractParties(*normalizedContractData, resp.GetParties())
+	// the document itself and seed the signature field that names each of them,
+	// so the genesis document carries the full signable structure. A signature
+	// field can only be materialized by a fresh render; seeding it here means
+	// every later render is a provenance-preserving amend of the stored PDF (or a
+	// verbatim carry-over of an inbound one) rather than a fresh render that
+	// would strip the C2PA chain and signatures (ADR-12/ADR-13).
+	seeded, changed, err := SeedPartiesAndSignatureFields(*normalizedContractData, resp.GetParties())
 	if err != nil {
-		return fmt.Errorf("could not seed contract parties: %w", err)
-	}
-	if changed {
-		normalizedContractData = &withParties
-	}
-
-	// Seed one AcroForm signature field per party (origin + counterparty) into the
-	// genesis document, so the very first render carries the full signable
-	// structure. A signature field can only be materialized by a fresh render;
-	// seeding it here means every later render is a provenance-preserving amend of
-	// the stored PDF (or a verbatim carry-over of an inbound one) rather than a
-	// fresh render that would strip the C2PA chain and signatures (ADR-12/ADR-13).
-	seeded, changed, err := SeedSignatureFields(*normalizedContractData, resp.GetParties())
-	if err != nil {
-		return fmt.Errorf("could not seed signature fields: %w", err)
+		return fmt.Errorf("could not seed contract parties and signature fields: %w", err)
 	}
 	if changed {
 		normalizedContractData = &seeded
@@ -291,6 +276,64 @@ func bindOriginatorParty(raw *datatype.JSON, originDID, role string) (*datatype.
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
 	}
 	return &encoded, nil
+}
+
+// SeedPartiesAndSignatureFields seeds a contract's party nodes and the
+// signature fields naming them in one step. The two are one structure and are
+// seeded together so they cannot drift apart: a signature is attributed to the
+// party node its signature field names (signingmanagement/command/apply.go
+// recordSignatory), and the Power of Attorney behind it is recorded there for
+// the counterparty to verify (ADR-31). A field whose party has no node
+// attributes to nobody, silently — the contract still signs, and the evidence
+// simply is not there.
+//
+// It is additive and idempotent, so it also RE-seeds: a client that rebuilds
+// the contract document from its own editor state and posts it back drops
+// whatever it does not model, and dcs:parties is the first casualty. Every
+// party the document already declares is left exactly as it stands, including
+// the dcs:hasSignatory / dcs:hasPowerOfAttorney an applied signature stamped on
+// it, so re-seeding never overwrites recorded attribution.
+func SeedPartiesAndSignatureFields(raw datatype.JSON, partyDIDs []string) (datatype.JSON, bool, error) {
+	withParties, partiesChanged, err := SeedContractParties(raw, partyDIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	seeded, fieldsChanged, err := SeedSignatureFields(withParties, partyDIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	return seeded, partiesChanged || fieldsChanged, nil
+}
+
+// reseedPartiesAndSignatureFields re-applies SeedPartiesAndSignatureFields to
+// the stored document and persists only a real addition. It is called from
+// every command that has just replaced the document wholesale with one a client
+// assembled (negotiate's redline, submit's submitted draft), which is where the
+// party nodes go missing.
+//
+// The party set is the workflow's record of who the parties are
+// (db.Responsible), so it is what must be present; the document is not pruned to
+// match it. A party node may already carry an applied signature, and dropping
+// one because the counterparty was re-assigned would erase that evidence.
+func reseedPartiesAndSignatureFields(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo, did string) error {
+	contract, err := cRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract for party and signature-field seeding: %w", err)
+	}
+	if contract.ContractData == nil || !contract.ContractData.IsNotNullValue() || contract.Responsible == nil {
+		return nil
+	}
+	seeded, changed, err := SeedPartiesAndSignatureFields(*contract.ContractData, contract.Responsible.GetParties())
+	if err != nil {
+		return fmt.Errorf("could not seed contract parties and signature fields: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	if err := cRepo.Update(ctx, tx, db.ContractUpdateData{DID: did, ContractData: &seeded}); err != nil {
+		return fmt.Errorf("could not persist seeded contract parties and signature fields: %w", err)
+	}
+	return nil
 }
 
 // SeedContractParties records one typed dcs:CompanyParty node per contract

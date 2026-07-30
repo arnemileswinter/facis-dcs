@@ -71,7 +71,9 @@ const isAuditingAuthorized = computed(
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
-const story = computed(() => contractStory(contract.value?.state))
+const story = computed(() =>
+  contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
+)
 
 const verificationResult = computed(() => {
   return verifySemanticValue(
@@ -125,6 +127,7 @@ function buildCurrentContractData(): ContractData | undefined {
     documentId:
       ((contract.value.contract_data as Record<string, unknown> | undefined)?.['@id'] as string | undefined) ??
       contract.value.did,
+    storedDocument: contract.value.contract_data,
     name: editedContract.value?.name ?? contract.value.name,
     description: editedContract.value?.description ?? contract.value.description,
     blocks: dcsDraftStore.blocks,

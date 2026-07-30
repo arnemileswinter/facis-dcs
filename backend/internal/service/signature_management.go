@@ -591,8 +591,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		UserRoles: middleware.GetUserRoles(ctx),
 	}
 	queryHandler := command.ComplianceValidator{
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		DB:           s.DB,
+		CRepo:        s.CRepo,
+		CeremonyRepo: s.CeremonyRepo,
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)

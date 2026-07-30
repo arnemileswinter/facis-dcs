@@ -114,7 +114,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// A first receipt is an inbound offer: this instance's intrinsic state
 		// starts at OFFERED (an offer on our table, awaiting our own review),
 		// which its local review/approval tasks then advance. The peer-facing
-		// extrinsic lifecycle (offered → accepted → executed) is inferred from
+		// extrinsic lifecycle (proposed → agreed → executed) is inferred from
 		// this plus the shipped PDF. A first receipt that already declares a
 		// revocation (this instance never saw the offer) lands directly in
 		// REVOKED — there is nothing left to review.
@@ -166,7 +166,10 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// cron, would then see a re-renderable draft and append a C2PA manifest
 		// onto the counterparty's signed bytes. The shipped bytes are in hand
 		// here, so the artifact answers for itself once, at the moment it is
-		// stored, instead of every lifecycle event afterwards having to ask.
+		// stored, instead of every lifecycle event afterwards having to ask. It is
+		// also this instance's record that the agreement is settled, which
+		// requireUnsettledAgreement reads to refuse a renegotiation of a document
+		// the peer already signed.
 		c2paState, err := provenance.ArtifactC2PAState(data.State, cmd.Pdf)
 		if err != nil {
 			return fmt.Errorf("could not map contract state to C2PA lifecycle: %w", err)

@@ -141,7 +141,9 @@ func AppendVerificationWitness(ctx context.Context, pdf []byte, payload []byte) 
 	exclusions := []c2paExclusion{}
 	var candidate []byte
 	for iteration := 0; iteration < 6; iteration++ {
-		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, hardBindingHash, exclusions, CanonicalCompiledAt, "")
+		// A verification witness names no contract, so it carries no lifecycle
+		// assertion at all — the status is unreachable, not merely unset.
+		updatedC2PA, err := renderVerificationManifestStore(ctx, originalC2PA, witnessManifestLabel(hardBindingHash), "", hashHex, lifecycleStatusAmended, hardBindingHash, exclusions, CanonicalCompiledAt, "")
 		if err != nil {
 			return nil, err
 		}

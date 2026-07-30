@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -651,7 +652,22 @@ func main() {
 		log.Fatalf(ctx, err, "status list service not reachable at %s", statusListServiceURL)
 	}
 	statusListTenantID := os.Getenv("STATUSLIST_TENANT_ID") // defaults to "default" when empty
-	statusListPublisher := provenance.NewOCMWStatusListPublisher(statusListServiceURL, issuerDID, statusListTenantID)
+	// The list new revocation entries are allocated in. It only moves when list
+	// 1 fills up, and then only after the operator has created the successor in
+	// the statuslist-service and registered it in status_list_cursors —
+	// allocation hard-fails on an unregistered list rather than handing out an
+	// entry nothing serves.
+	statusListID := provenance.DefaultListID
+	if raw := strings.TrimSpace(os.Getenv("STATUSLIST_LIST_ID")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			log.Fatalf(ctx, err, "STATUSLIST_LIST_ID must be a positive list id, got %q", raw)
+		}
+		statusListID = parsed
+	}
+	statusListPublisher := provenance.NewOCMWStatusListPublisher(
+		statusListServiceURL, issuerDID, statusListTenantID,
+		provenance.NewPostgresStatusListAllocator(db, statusListID))
 
 	// Initialize pdf-core client (PDF rendering + C2PA provenance microservice).
 	pdfCoreURL := os.Getenv("PDF_CORE_URL")

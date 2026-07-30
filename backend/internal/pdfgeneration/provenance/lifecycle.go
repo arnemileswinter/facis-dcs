@@ -7,9 +7,15 @@ import (
 	"time"
 )
 
-// LifecycleAssertion is the dcs.contract.lifecycle assertion carried in each C2PA
-// manifest (DCS-OR-C2PA-003). It records the contract's state at the time the
-// manifest was created so verifiers can reconstruct the full lifecycle history.
+// LifecycleAssertion is one contract lifecycle event (DCS-OR-C2PA-003): the
+// contract's state at the moment it was recorded, so verifiers can reconstruct
+// the full lifecycle history.
+//
+// It is the input to the lifecycle VC (IssueLifecycleVC) — the credential
+// attached to the artifact as contract-lifecycle-vc.json. The matching
+// dcs.lifecycle C2PA assertion is rendered by pdf-core from the same event and
+// is NOT built from this struct; the two carry the same field names but see
+// FileHash for the one place where the same name means two things.
 type LifecycleAssertion struct {
 	// Label identifies this assertion type.
 	Label string `json:"label"`
@@ -17,10 +23,19 @@ type LifecycleAssertion struct {
 	// ContractID is the contract's DID.
 	ContractID string `json:"contract_id"`
 
-	// FileHash is the SHA-256 of the protected PDF artifact bytes (hex-encoded)
-	// immediately before the current manifest append operation. This is the
-	// SRS-required binding field used in both lifecycle assertions and
-	// VC credentialSubject.file_hash.
+	// FileHash is the SHA-256 (hex-encoded) of the protected PDF artifact bytes
+	// as they stand immediately before the update that attaches this event's
+	// credential. It reaches the artifact as VC credentialSubject.file_hash, and
+	// a verifier reproduces it by truncating the artifact at that update and
+	// hashing the prefix — the incremental update leaves the earlier revision
+	// byte-for-byte intact.
+	//
+	// The C2PA dcs.lifecycle assertion's field of the same name is a DIFFERENT
+	// value: the SHA-256 of the embedded contract.jsonld. It has to be. That
+	// assertion sits inside the manifest that is embedded in the PDF, so it
+	// cannot hash the bytes it is part of; binding the whole document is the job
+	// of c2pa.hash.data, which hashes the file with the manifest range excluded.
+	// See pdf-core TestLifecycleAssertionFileHashIsTheEmbeddedPayloadHash.
 	FileHash string `json:"file_hash"`
 
 	// Status is the contract lifecycle state at assertion time
@@ -117,6 +132,15 @@ func MapCWEStateToC2PA(cweState string) (string, error) {
 // export/verify read paths and the background regenerator all gate on this.
 func IsFrozenC2PAState(c2paState string) bool {
 	return c2paState != "" && c2paState != "draft"
+}
+
+// ArtifactCarriesSignature reports whether a stored artifact's RECORDED C2PA
+// lifecycle state says the artifact itself holds a signature. ArtifactC2PAState
+// files a PAdES-carrying PDF as "active" whatever the local workflow state, so a
+// received copy whose own workflow is still OFFERED answers true here from the
+// moment the counterparty's signed bytes were stored — no re-parsing the PDF.
+func ArtifactCarriesSignature(c2paState string) bool {
+	return c2paState == "active"
 }
 
 // CarriesPAdESSignature reports whether pdf already holds a PAdES signature: a
