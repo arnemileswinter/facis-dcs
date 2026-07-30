@@ -478,6 +478,39 @@ ex:PaymentClauseShape
 }
 
 /**
+ * Publishes a SHACL shapes-graph entry into the instance's Semantic Hub through
+ * the dashboard UI (the Gaia-X case: an external shape enters a running
+ * instance without a rebuild), then confirms it resolves through the hub's
+ * public route and carries the expected shape.
+ *
+ * A domain vocabulary must be published on EVERY instance whose documents are
+ * modelled against it: a document declares the library it was authored under in
+ * its own sh:shapesGraph, and validation treats a declared graph the local hub
+ * cannot resolve as a hard failure (backend validation/shaclengine.go
+ * declaredShapes) — so a peer that never registered the library can neither
+ * validate the received document nor render its data objects.
+ */
+export async function publishHubShapesOn(
+  inst: Instance,
+  name: string,
+  ttl: string,
+  expectedContent: string,
+): Promise<void> {
+  await inst.gotoAs('Template Manager', '/ui/semantic-hub')
+  await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
+  await inst.page.getByLabel('Entry name').fill(name)
+  await inst.page.getByLabel('Entry kind').selectOption('shapes')
+  await inst.page.getByLabel('Entry content').fill(ttl)
+  await inst.page.getByRole('button', { name: 'Publish entry' }).click()
+  await expect(inst.page.getByRole('heading', { name })).toBeVisible()
+  await expect(inst.page.getByText('active').first()).toBeVisible()
+
+  const resolved = await inst.page.request.get(`${inst.apiBase}/semantic/shapes/${name}`)
+  expect(resolved.ok(), `published shape ${name} resolves on ${inst.origin}`).toBeTruthy()
+  expect(await resolved.text()).toContain(expectedContent)
+}
+
+/**
  * Stage 1 — publishes a brand-new, non-trivial SHACL shapes-graph entry into
  * the instance's Semantic Hub through the dashboard UI (the Gaia-X case: an
  * external shape enters the running instance without a rebuild), then confirms
@@ -485,18 +518,7 @@ ex:PaymentClauseShape
  * vocabulary rather than assuming a seeded fixture.
  */
 export async function publishShapeOnInstance(inst: Instance, name: string): Promise<void> {
-  await inst.gotoAs('Template Manager', '/ui/semantic-hub')
-  await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
-  await inst.page.getByLabel('Entry name').fill(name)
-  await inst.page.getByLabel('Entry kind').selectOption('shapes')
-  await inst.page.getByLabel('Entry content').fill(paymentShapeTtl(name))
-  await inst.page.getByRole('button', { name: 'Publish entry' }).click()
-  await expect(inst.page.getByRole('heading', { name })).toBeVisible()
-  await expect(inst.page.getByText('active').first()).toBeVisible()
-
-  const resolved = await inst.page.request.get(`${inst.apiBase}/semantic/shapes/${name}`)
-  expect(resolved.ok(), `published shape ${name} resolves on ${inst.origin}`).toBeTruthy()
-  expect(await resolved.text()).toContain('PaymentClauseShape')
+  await publishHubShapesOn(inst, name, paymentShapeTtl(name), 'PaymentClauseShape')
 }
 
 /**
@@ -668,6 +690,154 @@ export async function registerTemplateOn(inst: Instance, did: string, name: stri
   // it.
   await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await registered
+}
+
+/**
+ * Publishes a REGISTERED contract template to the Federated Catalogue — the
+ * Template Manager's "Publish" action (TemplateManagerActions), which only
+ * appears for a contract template in REGISTERED. Registering makes a template
+ * usable locally; publishing is what puts it in the catalogue another DCS
+ * browses.
+ */
+export async function publishTemplateOn(inst: Instance, did: string, name: string): Promise<void> {
+  await inst.gotoAs('Template Manager', `/ui/templates/view/${did}`)
+  await waitForTemplateLoadedOn(inst, name)
+  const published = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/publish') && r.request().method() === 'POST',
+    { timeout: 60_000 },
+  )
+  await inst.page.getByRole('button', { name: 'Publish', exact: true }).click()
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  const response = await published
+  expect(
+    response.ok(),
+    `publish template on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+}
+
+/**
+ * Takes a catalogue-published template into this instance's own repository
+ * through the real Template Catalogue UI: search the catalogue by name, open
+ * the entry, read its Preview, then Register + Confirm. Returns the DID the
+ * template got HERE — registering mints a local template (the view lands on
+ * /ui/templates/edit/{did}), which is a different DID from the publisher's.
+ */
+export async function registerCatalogueTemplateOn(inst: Instance, name: string): Promise<string> {
+  await inst.gotoAs('Template Manager', '/ui/catalogues/templates')
+
+  // The search filter defaults to DID; switch it to Name through its popover.
+  await inst.page.locator('#list-btn-search').click()
+  await inst.page.locator('#list-popover-search').getByText('Name', { exact: true }).click()
+  await inst.page.getByLabel('Search catalogue templates').fill(name)
+  await inst.page.getByRole('button', { name: 'Search', exact: true }).click()
+
+  const entry = inst.page.getByRole('listitem').filter({ hasText: name })
+  await expect(entry, `catalogue entry ${name} on ${inst.origin}`).toHaveCount(1, { timeout: 60_000 })
+  await entry.getByRole('link', { name: 'View' }).click()
+  await expect(inst.page).toHaveURL(/\/catalogues\/templates\/view\/.+version=/)
+
+  // The Preview tab renders the catalogue copy's own document — what a
+  // manager reads before taking someone else's template into their repository.
+  await inst.page.getByRole('tab', { name: 'Preview', exact: true }).click()
+
+  const register = inst.page.getByRole('button', { name: 'Register', exact: true })
+  await expect(register).toBeEnabled({ timeout: 60_000 })
+  const registered = inst.page.waitForResponse(
+    (r) => r.url().includes('/template/register') && r.request().method() === 'POST',
+    { timeout: 60_000 },
+  )
+  await register.click()
+  await inst.page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  const response = await registered
+  expect(
+    response.ok(),
+    `register catalogue template on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+
+  await expect(inst.page).toHaveURL(/\/templates\/edit\/.+/, { timeout: 60_000 })
+  const localDid = decodeURIComponent(new URL(inst.page.url()).pathname.split('/templates/edit/')[1] ?? '')
+  expect(localDid, `local DID of the registered catalogue template on ${inst.origin}`).toBeTruthy()
+  return localDid
+}
+
+/**
+ * Fills a DRAFT contract's negotiable values through the real Contract Content
+ * tab and saves them with "Update".
+ *
+ * Two kinds of input live there, and a contract carries both: the typed domain
+ * objects of dcs:contractData render one control per negotiable leaf in the
+ * data-objects editor (keyed by the leaf's property local name), while a field
+ * placed inline in clause prose renders a PreviewParamInput labelled with the
+ * field's own label. A data leaf constrained by sh:in renders a <select>, so
+ * the control is driven by its tag rather than assumed to be a text input.
+ */
+export async function fillContractValuesOn(
+  inst: Instance,
+  contractDid: string,
+  values: { dataLeaves?: Record<string, string>; inlineFields?: Record<string, string> },
+): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/edit/${contractDid}`)
+  await inst.page.getByRole('tab', { name: 'Contract Content' }).click()
+
+  for (const [property, value] of Object.entries(values.dataLeaves ?? {})) {
+    const control = inst.page.getByTestId(`fill-${property}`)
+    await expect(control, `negotiable leaf ${property} on ${inst.origin}`).toBeVisible({ timeout: 30_000 })
+    if ((await control.evaluate((el) => el.tagName)) === 'SELECT') await control.selectOption(value)
+    else await control.fill(value)
+  }
+  for (const [label, value] of Object.entries(values.inlineFields ?? {})) {
+    const input = inst.page.getByRole('textbox', { name: label }).first()
+    await expect(input, `inline field ${label} on ${inst.origin}`).toBeVisible({ timeout: 30_000 })
+    await input.fill(value)
+    await input.blur()
+  }
+
+  const updated = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/update') && r.request().method() === 'PUT',
+  )
+  await inst.page.getByRole('button', { name: 'Update', exact: true }).click()
+  const response = await updated
+  expect(
+    response.ok(),
+    `contract update on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
+}
+
+/**
+ * Asserts the DRAFT contract cannot be submitted while a filled value violates
+ * the contract's own ODRL policy: the Contract Creator clicks Submit, the
+ * editor's semantic verification (NewContractView verifySemanticValues) refuses
+ * before any request leaves the browser, and the refusal names the violated
+ * constraint in an alert. Asserting that NO /contract/submit was issued is what
+ * makes this a refusal rather than a message.
+ */
+export async function expectSubmitRefusedOn(inst: Instance, contractDid: string, reason: RegExp): Promise<void> {
+  await inst.gotoAs('Contract Creator', `/ui/contracts/edit/${contractDid}`)
+  // Verification runs over the values the editor has LOADED, so clicking Submit
+  // before the document arrived would refuse for "required but has no value"
+  // instead of the policy violation this asserts.
+  await inst.page.getByRole('tab', { name: 'Contract Content' }).click()
+  await expect(inst.page.getByTestId('data-objects-editor')).toBeVisible({ timeout: 30_000 })
+  const submitCalls: string[] = []
+  inst.page.on('request', (request) => {
+    if (request.url().includes('/contract/submit')) submitCalls.push(request.url())
+  })
+  await inst.page.getByRole('button', { name: 'Submit', exact: true }).click()
+  await expect(inst.page.getByRole('alert').filter({ hasText: reason })).toBeVisible({ timeout: 30_000 })
+  expect(submitCalls, `submit must not reach the DCS on ${inst.origin}`).toHaveLength(0)
+}
+
+/** The contract document as this instance holds it (the authenticated
+ *  retrieve-by-id the Contract Manager's views read). */
+export async function contractDocumentOn(inst: Instance, contractDid: string): Promise<Record<string, unknown>> {
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  expect(resp.ok(), `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
+  const body = (await resp.json()) as { contract_data?: Record<string, unknown> }
+  expect(body.contract_data, `contract ${contractDid} on ${inst.origin} carries no document`).toBeTruthy()
+  return body.contract_data!
 }
 
 /** The counterparty's own did:web, resolved from its origin-root DID document
@@ -851,6 +1021,41 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
   await inst.gotoAs('Contract Signer', '/ui/signing')
   await expect(inst.page.getByRole('heading', { name: /Signing/ })).toBeVisible()
   await expect(inst.page.getByRole('row').filter({ hasText: contractDid })).toHaveCount(0)
+}
+
+/**
+ * Accepts a change request the PEER proposed, on an instance whose own copy is
+ * still OFFERED — the receiving side of a counter-offer it did not open itself.
+ *
+ * acceptOpenDecisionsOn cannot serve here: it waits for the negotiate view's
+ * Submit button, which only renders in NEGOTIATION. A received redline does not
+ * move the peer's intrinsic state (receivepdf.go keeps `data.State =
+ * existing.State`; intrinsic state is each instance's own RBAC progress), so the
+ * copy stays OFFERED while the change request and its undecided decision are
+ * there to answer. The Active-negotiations list is state-independent, so this
+ * waits on that instead and answers the one proposal.
+ */
+export async function acceptPeerProposalOn(inst: Instance, contractDid: string): Promise<void> {
+  // The proposal reaches this instance over the asynchronous PDF exchange and
+  // the view does not poll, so re-open it until the round is listed.
+  const show = inst.page.getByRole('button', { name: 'Show' }).first()
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    if (await show.isVisible({ timeout: 20_000 }).catch(() => false)) break
+    expect(attempt, `no peer proposal listed on ${inst.origin} for ${contractDid}`).toBeLessThan(3)
+  }
+  await show.click()
+  const responded = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
+    { timeout: 30_000 },
+  )
+  await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+  await confirmModalOn(inst, 'Confirm')
+  const response = await responded
+  expect(
+    response.ok(),
+    `accept peer proposal on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+  ).toBeTruthy()
 }
 
 /**
