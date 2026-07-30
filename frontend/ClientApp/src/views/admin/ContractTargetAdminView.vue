@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import MachineCredentialDialog from '@/components/admin/MachineCredentialDialog.vue'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import type { ContractTarget, MachineCredential } from '@/models/responses/contract-response'
 
@@ -15,6 +16,8 @@ const targets = ref<ContractTarget[]>([])
 const loading = ref(false)
 const error = ref('')
 const saving = ref(false)
+const pendingRemovals = ref(new Set<string>())
+const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const issued = ref<MachineCredential | null>(null)
 const issuedTitle = ref('')
@@ -108,12 +111,22 @@ const issueCredential = async (target: ContractTarget) => {
 // target, so the message it returns is shown rather than swallowed: it names
 // how many contracts must be repointed first.
 const remove = async (target: ContractTarget) => {
+  if (pendingRemovals.value.has(target.id)) return
+  const result = await confirmationModal.value?.reveal({
+    message: `Remove target system “${target.name}”? Contracts that still designate it must be repointed first.`,
+  })
+  if (!result || result.isCanceled) return
+  pendingRemovals.value = new Set(pendingRemovals.value).add(target.id)
   error.value = ''
   try {
     await contractWorkflowService.deleteTarget(target.id)
     await load()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not remove the target system'
+  } finally {
+    const next = new Set(pendingRemovals.value)
+    next.delete(target.id)
+    pendingRemovals.value = next
   }
 }
 </script>
@@ -242,8 +255,13 @@ const remove = async (target: ContractTarget) => {
                   >
                     {{ target.oauth_client_id ? 'New secret' : 'Issue credential' }}
                   </button>
-                  <button class="btn btn-outline btn-xs btn-error" data-testid="target-delete" @click="remove(target)">
-                    Remove
+                  <button
+                    class="btn btn-outline btn-xs btn-error"
+                    data-testid="target-delete"
+                    :disabled="pendingRemovals.has(target.id)"
+                    @click="remove(target)"
+                  >
+                    {{ pendingRemovals.has(target.id) ? 'Removing…' : 'Remove' }}
                   </button>
                 </div>
               </td>
@@ -260,5 +278,6 @@ const remove = async (target: ContractTarget) => {
       :return-focus-to="credentialReturnFocus"
       @close="issued = null"
     />
+    <ConfirmationModal ref="confirmation-modal" />
   </div>
 </template>

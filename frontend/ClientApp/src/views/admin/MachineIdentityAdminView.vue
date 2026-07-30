@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import MachineCredentialDialog from '@/components/admin/MachineCredentialDialog.vue'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import type { MachineCredential, MachineIdentity } from '@/models/responses/contract-response'
 
@@ -27,6 +28,8 @@ const identities = ref<MachineIdentity[]>([])
 const loading = ref(false)
 const error = ref('')
 const saving = ref(false)
+const pendingRemovals = ref(new Set<string>())
+const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const editingId = ref<string | null>(null)
 const form = ref({ name: '', participant_did: '', description: '', roles: [] as string[], enabled: true })
@@ -124,12 +127,22 @@ const rotate = async (identity: MachineIdentity) => {
 }
 
 const remove = async (identity: MachineIdentity) => {
+  if (pendingRemovals.value.has(identity.id)) return
+  const result = await confirmationModal.value?.reveal({
+    message: `Remove system user “${identity.name}”? Its credentials will stop working and integrations using them will lose access.`,
+  })
+  if (!result || result.isCanceled) return
+  pendingRemovals.value = new Set(pendingRemovals.value).add(identity.id)
   error.value = ''
   try {
     await contractWorkflowService.deleteMachineIdentity(identity.id)
     await load()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not remove the system user'
+  } finally {
+    const next = new Set(pendingRemovals.value)
+    next.delete(identity.id)
+    pendingRemovals.value = next
   }
 }
 </script>
@@ -278,9 +291,10 @@ const remove = async (identity: MachineIdentity) => {
                   <button
                     class="btn btn-outline btn-xs btn-error"
                     data-testid="identity-delete"
+                    :disabled="pendingRemovals.has(identity.id)"
                     @click="remove(identity)"
                   >
-                    Remove
+                    {{ pendingRemovals.has(identity.id) ? 'Removing…' : 'Remove' }}
                   </button>
                 </div>
               </td>
@@ -297,5 +311,6 @@ const remove = async (identity: MachineIdentity) => {
       :return-focus-to="credentialReturnFocus"
       @close="issued = null"
     />
+    <ConfirmationModal ref="confirmation-modal" />
   </div>
 </template>

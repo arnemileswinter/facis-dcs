@@ -354,4 +354,52 @@ test.describe('admin UI accessibility hardening', () => {
     await expect(rotatedTargetDialog).toBeHidden()
     await expect(rotateTarget).toBeFocused()
   })
+
+  test('AC6 removals require a named confirmation, cancel is inert, and pending prevents duplicates', async ({
+    page,
+  }) => {
+    const cases = [
+      {
+        path: '/ui/admin/targets',
+        api: '**/contract/targets/target-1',
+        trigger: 'target-delete',
+        name: /remove target system “archive gateway”/i,
+      },
+      {
+        path: '/ui/admin/system-users',
+        api: '**/machine-identities/identity-1',
+        trigger: 'identity-delete',
+        name: /remove system user “erp integration”/i,
+      },
+    ]
+
+    for (const fixture of cases) {
+      let requests = 0
+      let releaseRequest = () => {}
+      const release = new Promise<void>((resolve) => {
+        releaseRequest = resolve
+      })
+      await page.route(fixture.api, async (route) => {
+        if (route.request().method() !== 'DELETE') return route.fallback()
+        requests += 1
+        await release
+        return json(route, {})
+      })
+      await page.goto(fixture.path)
+
+      await page.getByTestId(fixture.trigger).click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toContainText(fixture.name)
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+      expect(requests).toBe(0)
+
+      await page.getByTestId(fixture.trigger).click()
+      await dialog.getByTestId('confirmation-confirm').dblclick()
+      await expect(page.getByTestId(fixture.trigger)).toBeDisabled()
+      await expect.poll(() => requests).toBe(1)
+      releaseRequest()
+      await expect(page.getByTestId(fixture.trigger)).toBeEnabled()
+      await page.unroute(fixture.api)
+    }
+  })
 })
