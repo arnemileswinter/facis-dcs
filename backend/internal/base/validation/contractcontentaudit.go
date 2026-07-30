@@ -575,6 +575,9 @@ type odrlFieldInfo struct {
 	label    string
 	value    any
 	hasValue bool
+	// units are the distinct odrl:unit IRIs the document's constraints
+	// denominate this field's boundaries in (applyDeclaredUnits).
+	units []string
 }
 
 func contractFinding(ruleID, title, severity, message, path, ontologyTerm string) PolicyFinding {
