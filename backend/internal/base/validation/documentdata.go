@@ -1122,7 +1122,7 @@ func validateODRLRuleShape(rule map[string]any) error {
 	// A Permission may carry duties (ODRL IM §2.5): obligations the assignee
 	// must fulfil to exercise it. Each is a fragment — its own odrl:action (and
 	// optional constraints/consequence), inheriting the enclosing rule's
-	// parties, so it declares no assigner/assignee/target/prose of its own.
+	// parties, so it declares no assigner/assignee/target of its own.
 	if rawDuty, hasDuty := rule["odrl:duty"]; hasDuty {
 		if compactTerm(fmt.Sprint(rule["@type"])) != "Permission" {
 			return errors.New("odrl:duty may only be attached to a Permission (a duty nests under the rule it obliges); a policy-level Duty belongs under odrl:obligation")
@@ -1137,9 +1137,10 @@ func validateODRLRuleShape(rule map[string]any) error {
 }
 
 // validateODRLDutyFragment validates a Duty nested under a Permission (ODRL IM
-// §2.5). Unlike a top-level rule, a duty fragment inherits its parties from the
-// enclosing rule, so it needs only an odrl:action; its consequence is itself a
-// duty, validated the same way (recursively).
+// §2.5). A duty fragment inherits its parties from the enclosing rule, so it
+// needs an odrl:action and the prose backing every odrl:Duty owes (the hub's
+// dcs:OdrlDutyProseShape refuses a document at submit otherwise); its
+// consequence is itself a duty, validated the same way (recursively).
 func validateODRLDutyFragment(duty map[string]any) error {
 	if t := compactTerm(fmt.Sprint(duty["@type"])); t != "" && t != "Duty" {
 		return fmt.Errorf("a duty must be an odrl:Duty, got %v", duty["@type"])
@@ -1150,6 +1151,10 @@ func validateODRLDutyFragment(duty map[string]any) error {
 	}
 	if items, ok := action.([]any); ok && len(items) == 0 {
 		return errors.New("duty must declare at least one odrl:action")
+	}
+	prose, _ := duty["dcs:prose"].(map[string]any)
+	if proseID, _ := prose["@id"].(string); strings.TrimSpace(proseID) == "" {
+		return errors.New("duty is missing dcs:prose — a nested duty is a machine-readable rule too, so it must reference the human-readable clause it is backed by")
 	}
 	if rawConsequence, ok := duty["odrl:consequence"]; ok {
 		for index, consequence := range policyConstraints(rawConsequence) {

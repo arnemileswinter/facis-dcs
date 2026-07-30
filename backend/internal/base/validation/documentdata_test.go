@@ -289,6 +289,7 @@ func TestNormalizeTemplateDataAcceptsPermissionWithNestedDuty(t *testing.T) {
 		map[string]any{
 			"@type":       "odrl:Duty",
 			"odrl:action": map[string]any{"@id": "odrl:compensate"},
+			"dcs:prose":   map[string]any{"@id": "urn:uuid:block-clause-1"},
 			"odrl:constraint": []any{
 				map[string]any{
 					"@type":             "odrl:Constraint",
@@ -320,6 +321,7 @@ func TestNormalizeTemplateDataRejectsDutyConstraintOnUnknownField(t *testing.T) 
 		map[string]any{
 			"@type":       "odrl:Duty",
 			"odrl:action": map[string]any{"@id": "odrl:compensate"},
+			"dcs:prose":   map[string]any{"@id": "urn:uuid:block-clause-1"},
 			"odrl:constraint": []any{
 				map[string]any{
 					"@type":            "odrl:Constraint",

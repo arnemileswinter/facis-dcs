@@ -22,6 +22,7 @@ import {
   type JsonLdTypedValue,
   type OdrlConstraint,
   type OdrlConstraintNode,
+  type OdrlDuty,
   type OdrlRule,
   type OdrlSet,
   typedFieldFill,
@@ -464,7 +465,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         })
       }
       if (payload.rule) {
-        this.policies.push({ ...payload.rule, 'dcs:prose': { '@id': blockId } })
+        this.policies.push(bindRuleProse(payload.rule, blockId))
       }
     },
     addClause(payload: { title?: string; content: DcsContentSegment[] }): string {
@@ -863,6 +864,24 @@ function rewriteContractDataObject(
   return rewritten
 }
 
+/** Binds a rule and every duty nested in it — the duties themselves and their
+ *  consequences, each an odrl:Duty — to the clause block the rule was authored
+ *  in. The nested nodes are fragments of the same clause, so they are backed by
+ *  the same prose; a duty carrying none is refused by the hub shapes at submit. */
+function bindRuleProse(rule: OdrlRule, blockId: string): OdrlRule {
+  const bound: OdrlRule = { ...rule, 'dcs:prose': { '@id': blockId } }
+  if (bound['odrl:duty']) bound['odrl:duty'] = bound['odrl:duty'].map((duty) => bindDutyProse(duty, blockId))
+  return bound
+}
+
+function bindDutyProse(duty: OdrlDuty, blockId: string): OdrlDuty {
+  const bound: OdrlDuty = { ...duty, 'dcs:prose': { '@id': blockId } }
+  if (bound['odrl:consequence']) {
+    bound['odrl:consequence'] = bound['odrl:consequence'].map((consequence) => bindDutyProse(consequence, blockId))
+  }
+  return bound
+}
+
 /** Rewrites a rule's own @id plus every component-owned @id it references (prose, constraint operands, nested duties). */
 function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   const next: OdrlRule = { ...rule }
@@ -877,12 +896,10 @@ function remapRuleIds(rule: OdrlRule, idMap: Map<string, string>): OdrlRule {
   return next
 }
 
-function remapDutyIds(
-  duty: import('@/models/dcs-jsonld').OdrlDuty,
-  idMap: Map<string, string>,
-): import('@/models/dcs-jsonld').OdrlDuty {
+function remapDutyIds(duty: OdrlDuty, idMap: Map<string, string>): OdrlDuty {
   const next = { ...duty }
   if (next['@id']) next['@id'] = idMap.get(next['@id']) ?? next['@id']
+  if (next['dcs:prose']) next['dcs:prose'] = { '@id': idMap.get(next['dcs:prose']['@id']) ?? next['dcs:prose']['@id'] }
   if (next['odrl:constraint']) {
     next['odrl:constraint'] = next['odrl:constraint'].map((node) => remapConstraintIds(node, idMap))
   }
