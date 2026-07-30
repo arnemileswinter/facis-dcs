@@ -80,10 +80,17 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 	// Fetch PDF bytes and run MR/HR hash check (DCS-FR-CWE-04).
 	pdfBytes, err := h.CRepo.FetchContractPDFBytes(ctx, tx, cmd.DID)
 	if err != nil || len(pdfBytes) == 0 {
-		// No PDF yet — return match=false with sig count only.
+		// Without stored bytes no check ran at all, which is a different result
+		// from a check that ran and failed. match=false alone reads as the
+		// latter, so the reason is named.
+		finding := "No contract PDF stored yet — no integrity check was performed"
+		if err != nil {
+			finding = fmt.Sprintf("Contract PDF could not be read, so no integrity check was performed: %v", err)
+		}
 		return &SignatureVerifyResult{
 			Match:    false,
 			SigCount: sigCount,
+			Findings: []string{finding},
 		}, nil
 	}
 
