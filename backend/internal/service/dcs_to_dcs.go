@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/command"
 
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
@@ -30,7 +32,6 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 	"digital-contracting-service/internal/auth"
-	"digital-contracting-service/internal/auth/oid4vp"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -49,7 +50,7 @@ type dcsToDcssrvc struct {
 	Artifacts   *artifactstore.Store
 	PDFCore     *pdfcore.Client
 	TrustGate   trustgate.TrustGate
-	PoATrust    *oid4vp.TrustConfig
+	PoAGate     trustgate.CounterpartyPoAGate
 	Shredder    trustgate.ScopeShredder
 	Parties     trustgate.ContractParties
 	auth.JWTAuthenticator
@@ -60,7 +61,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, syncRepo db2.SyncRepository,
 	trustPool *identity.EUTrustPool,
 	didDocument identity.DIDDocument, artifacts *artifactstore.Store, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate,
-	shredder trustgate.ScopeShredder, poaTrust *oid4vp.TrustConfig) dcstodcs.Service {
+	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder) dcstodcs.Service {
 
 	return &dcsToDcssrvc{
 		JWTAuthenticator: jwtAuth,
@@ -77,7 +78,7 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		Artifacts:        artifacts,
 		PDFCore:          pdfCore,
 		TrustGate:        trustGate,
-		PoATrust:         poaTrust,
+		PoAGate:          poaGate,
 		Shredder:         shredder,
 		Parties:          &trustgate.DBContractParties{DB: db, CRepo: cRepo},
 	}
@@ -107,7 +108,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if req.FromPeerDid == localPeer {
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("shipping a contract PDF to the same peer is not allowed"))
 	}
 
@@ -170,17 +171,31 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
 		}
 		syncSignature = verified
-		evidence, revalidatedAt, err := s.verifyInboundPoAEvidence(ctx, req)
-		if err != nil {
-			s.recordPoARejection(ctx, req.ContractIri, req.FromPeerDid, err)
-			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: Power of Attorney evidence: %w", err))
+	}
+
+	// Counterparty Power of Attorney (ADR-31, UC-14): the peer ships the
+	// credential behind each signature it applied, and this instance verifies it
+	// against the contract the same ship carried — issuer trusted for `peer` and
+	// entitled to the organization, not revoked, held by the signatory recorded
+	// for that party. Present-but-unverifiable evidence refuses the exchange like
+	// any other trust-gate denial; absent evidence does not, so a peer that
+	// retains none still federates and the compliance viewer keeps reporting a
+	// party that signed without one.
+	shipped := trustgate.ShippedSignatures{
+		ResolveKey: func(methodID string) (*ecdsa.PublicKey, error) {
+			return trustgate.PeerAssertionKey(remoteDIDDocument, methodID)
+		},
+		VerifyVC: provenance.VerifyDataIntegrityProof,
+	}
+	if err := s.PoAGate.Check(req.FromPeerDid, req.ContractIri, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+		var gateErr *trustgate.GateError
+		if errors.As(err, &gateErr) {
+			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
+				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
+			}
 		}
-		raw, err := json.Marshal(evidence)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
-		}
-		syncSignature.PoAEvidence = raw
-		syncSignature.PoARevalidatedAt = &revalidatedAt
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
 	}
 
 	// The sender's declared contract state is informational except for
@@ -242,53 +257,6 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil
 }
 
-func (s *dcsToDcssrvc) verifyInboundPoAEvidence(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (*dcstodcs.DCSToDCSPoAEvidence, time.Time, error) {
-	e := req.PoaEvidence
-	if e == nil {
-		return nil, time.Time{}, fmt.Errorf("transferable PoA presentation and original nonce/audience are missing")
-	}
-	if e.Vct != "urn:dcs:poa:v1" {
-		return nil, time.Time{}, fmt.Errorf("vct %q is not urn:dcs:poa:v1", e.Vct)
-	}
-	if e.ContractID != req.ContractIri {
-		return nil, time.Time{}, fmt.Errorf("evidence binds contract %q, not %q", e.ContractID, req.ContractIri)
-	}
-	if e.Nonce == "" || e.Aud == "" {
-		return nil, time.Time{}, fmt.Errorf("original nonce and audience are required")
-	}
-	verified, err := oid4vp.NewVerifier(s.PoATrust).VerifyPoA(e.Presentation, oid4vp.PresentationContext{
-		Nonce: e.Nonce, ClientID: e.Aud,
-	})
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("cryptographic revalidation failed: %w", err)
-	}
-	if verified.SubjectDID != e.HolderDid {
-		return nil, time.Time{}, fmt.Errorf("holder sub %q does not match transported signer %q", verified.SubjectDID, e.HolderDid)
-	}
-	if verified.ParticipantDID != e.Organization {
-		return nil, time.Time{}, fmt.Errorf("issuer-authoritative organization %q does not match transported organization %q", verified.ParticipantDID, e.Organization)
-	}
-	if e.Organization != req.FromPeerDid || e.FieldName != req.FromPeerDid {
-		return nil, time.Time{}, fmt.Errorf("organization/field does not match signing contract party %q", req.FromPeerDid)
-	}
-	at := time.Now().UTC()
-	stamp := at.Format(time.RFC3339)
-	copy := *e
-	copy.RevalidatedAt = &stamp
-	return &copy, at, nil
-}
-
-func (s *dcsToDcssrvc) recordPoARejection(ctx context.Context, did, peer string, reason error) {
-	gateErr := &trustgate.GateError{
-		Kind:    trustgate.AgreementFailure,
-		PeerDID: peer,
-		Err:     fmt.Errorf("power of attorney verification failed: %w", reason),
-	}
-	if err := trustgate.RecordDenialIncident(ctx, s.DB, did, trustgate.Inbound, gateErr); err != nil {
-		log.Printf(ctx, "could not record Power of Attorney denial incident for %s: %v", did, err)
-	}
-}
-
 // Erase shreds this instance's wrapped CEKs for a contract on request of the
 // authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13): the peer
 // completed an archive deletion and erasure of a federated contract requires
@@ -313,7 +281,7 @@ func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContract
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	if req.FromPeerDid == localPeer {
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("requesting a contract erasure from the same peer is not allowed"))
 	}
 
@@ -414,23 +382,11 @@ func (s *dcsToDcssrvc) GetProvenance(ctx context.Context, p *dcstodcs.GetProvena
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
-	response := &dcstodcs.DCSToDCSSyncProvenanceResponse{
+	return &dcstodcs.DCSToDCSSyncProvenanceResponse{
 		Did:             sig.DID,
 		ContractVersion: sig.ContractVersion,
 		FromPeerDid:     sig.FromPeerDID,
 		JadesSignature:  sig.JadesSignature,
 		ReceivedAt:      sig.ReceivedAt.UTC().Format(time.RFC3339),
-	}
-	if len(sig.PoAEvidence) > 0 {
-		var evidence dcstodcs.DCSToDCSPoAEvidence
-		if err := json.Unmarshal(sig.PoAEvidence, &evidence); err != nil {
-			return nil, dcstodcs.MakeInternalError(fmt.Errorf("stored PoA evidence is invalid: %w", err))
-		}
-		if sig.PoARevalidatedAt != nil {
-			stamp := sig.PoARevalidatedAt.UTC().Format(time.RFC3339)
-			evidence.RevalidatedAt = &stamp
-		}
-		response.PoaEvidence = &evidence
-	}
-	return response, nil
+	}, nil
 }

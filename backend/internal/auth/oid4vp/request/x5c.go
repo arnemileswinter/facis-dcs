@@ -11,11 +11,13 @@ import (
 	"digital-contracting-service/internal/base/identity"
 )
 
-// X5CSigner signs OpenID4VP Document-Retrieval request objects (JAR) with the
-// DCS's own DID/hostname certificate chain in the header (x5c) rather than a
-// bare jwk. client_id_scheme=x509_san_dns requires this: a real wallet
-// resolves trust from the leaf certificate's SAN — which must equal
-// client_id — not from an out-of-band key lookup keyed by kid (docretrieval.go).
+// X5CSigner signs every OpenID4VP request object (JAR) this deployment issues
+// — login, PID, the signing ceremony's identity presentation and its
+// Document-Retrieval request — with the DCS's own DID/hostname certificate
+// chain in the header (x5c) rather than a bare jwk. The x509_san_dns client
+// identifier requires this: a real wallet resolves trust from the leaf
+// certificate's SAN — which must equal client_id — not from an out-of-band key
+// lookup keyed by kid, and a bare jwk anchors to nothing it knows.
 // It reuses the same HSM-backed key and eIDAS-shaped certificate chain
 // already published at /.well-known/did.json and used for DCS-to-DCS JAdES
 // sync (jades.Sign) — the DCS attesting as itself, never as a contracting party.
@@ -40,12 +42,22 @@ func NewX5CSigner(did *identity.DIDDocument) (*X5CSigner, error) {
 
 // ClientID returns the DNS hostname the signer's own certificate identifies
 // (VerifyEIDASCertificate already asserts the leaf matches it) — the
-// client_id an x509_san_dns request object must declare.
+// client_id an x509_san_dns request object must declare. The deployment's
+// hostname may carry a port; a dNSName SAN never does, so it is dropped here
+// rather than leaving every caller to remember.
 func (s *X5CSigner) ClientID() (string, error) {
 	if s == nil || s.did == nil {
 		return "", fmt.Errorf("x5c signer is not configured")
 	}
-	return s.did.GetHostname()
+	hostname, err := s.did.GetHostname()
+	if err != nil {
+		return "", err
+	}
+	dnsName := dnsNameOf(hostname)
+	if dnsName == "" {
+		return "", fmt.Errorf("did document hostname %q carries no dns name", hostname)
+	}
+	return dnsName, nil
 }
 
 // SignAuthorizationRequestJWT returns a compact oauth-authz-req+jwt signed by
@@ -78,22 +90,25 @@ const X509SANDNSClientPrefix = "x509_san_dns"
 // read as the "pre-registered" prefix, which means "you already know me out of
 // band" and is refused by any wallet that has no such prior arrangement.
 func X509SANDNSClientID(hostname string) string {
-	host := strings.TrimSpace(hostname)
-	// Strip any prefix first: what follows it is the name, and the prefix's own
-	// colon must not be mistaken for a port separator below.
-	host = strings.TrimPrefix(host, X509SANDNSClientPrefix+":")
-	if host == "" {
-		return ""
-	}
-	// A dNSName SAN holds a name, never a port, so an identifier carrying one
-	// can match no certificate. Deployments reached on a non-default port —
-	// dev and the test cluster — would otherwise claim a hostname their own
-	// certificate cannot back, and a wallet refuses exactly that.
-	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		host = host[:idx]
-	}
+	host := dnsNameOf(hostname)
 	if host == "" {
 		return ""
 	}
 	return X509SANDNSClientPrefix + ":" + host
+}
+
+// dnsNameOf reduces a hostname, or an already-rendered client identifier, to
+// the bare dNSName a certificate SAN can hold. A dNSName holds a name, never a
+// port, so an identifier carrying one can match no certificate: deployments
+// reached on a non-default port — dev and the test cluster — would otherwise
+// claim a hostname their own certificate cannot back, and a wallet refuses
+// exactly that.
+func dnsNameOf(hostname string) string {
+	// Strip any prefix first: what follows it is the name, and the prefix's own
+	// colon must not be mistaken for a port separator below.
+	host := strings.TrimPrefix(strings.TrimSpace(hostname), X509SANDNSClientPrefix+":")
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		host = host[:idx]
+	}
+	return host
 }

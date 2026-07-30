@@ -21,7 +21,7 @@ from steps.support.services.contract_service import ContractService
 from steps.template_management.contract_state_machine_steps import _advance_to_approved
 
 from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (
-    CEREMONY_AUD,
+    ceremony_aud,
     _build_pid_presentation,
     _complete_ceremony_via_presentation,
     _run_full_ceremony,
@@ -232,7 +232,7 @@ def step_when_pid_revoked_before_presentation(context, name):
     family_name = context.pid_presentations[name]["family_name"]
 
     presentation, issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-        given_name=given_name, family_name=family_name, aud=CEREMONY_AUD, nonce=nonce,
+        given_name=given_name, family_name=family_name, aud=ceremony_aud(context), nonce=nonce,
     )
     claims = decode_jwt_payload(split_sd_jwt(presentation)[0])
     idx_uri = credential_status_from_claims(claims)

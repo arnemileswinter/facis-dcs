@@ -180,7 +180,7 @@ watch(rule, (value) => emit('update:modelValue', value))
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
       <label class="form-control">
         <span class="label-text text-xs">Rule</span>
-        <select v-model="draft.type" class="select-bordered select select-sm">
+        <select id="draft-type-rule" v-model="draft.type" class="select-bordered select select-sm">
           <option v-for="rt in ODRL_RULE_TYPES" :key="rt.type" :value="rt.type">{{ rt.label }}</option>
         </select>
       </label>

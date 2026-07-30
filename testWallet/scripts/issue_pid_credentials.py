@@ -38,7 +38,7 @@ from dcs_wallet.keys import (
 from dcs_wallet.status_list import DEFAULT_SERVICE_BASE, DEFAULT_TENANT, build_credential_status
 
 DEFAULT_CREDENTIALS_DIR = WALLET_ROOT / "credentials"
-PID_VCT = "urn:eudi:pid:de:1"
+PID_VCT = "urn:dcs:pid:demo:v1"
 CREDENTIAL_IAT = 1719129600
 CREDENTIAL_EXP = 2145916800
 

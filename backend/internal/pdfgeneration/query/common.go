@@ -240,11 +240,10 @@ func evaluateLiveStatusCheck(
 // queryStatusWithPublicationBarrier preserves the separation between the
 // embedded lifecycle banner and the independently fetched live status list.
 // A terminal transition and its durable outbox entry commit atomically, while
-// the status-list worker publishes on its next (five-second) pass. Re-reading
-// only when that short consistency window is observable prevents a successful
-// termination response from being followed immediately by a stale "active"
-// verification result. The returned value always comes from the live status
-// service; lifecycle state is never substituted for credential status.
+// the status-list worker publishes on its next pass. Re-reading only when that
+// short consistency window is observable prevents a successful termination
+// response from being followed immediately by a stale "active" verification
+// result. The returned value always comes from the live status service.
 func queryStatusWithPublicationBarrier(
 	ctx context.Context,
 	lifecycleStatus string,

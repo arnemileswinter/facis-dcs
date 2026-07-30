@@ -11,6 +11,14 @@ import {
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob } from '@/utils/download-blob'
+import {
+  dssIndicator,
+  findingIndicator,
+  findingsVerdict,
+  signatureLevelBadgeClass as levelBadgeClass,
+  signatureLevelLabel,
+  signatureStatusIndicator,
+} from '@/utils/signature-verdict'
 
 // The Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26):
 // a tabbed dashboard over the signed contracts an Auditor / Compliance Officer /
@@ -148,35 +156,6 @@ async function loadAudit() {
 
 // --- Pass/fail derivation -------------------------------------------------
 
-interface Indicator {
-  label: string
-  cls: string
-}
-
-function dssIndicator(indication: string | undefined): Indicator {
-  switch ((indication ?? '').toUpperCase()) {
-    case 'TOTAL-PASSED':
-      return { label: 'PASSED', cls: 'badge-success' }
-    case 'INDETERMINATE':
-      return { label: 'INDETERMINATE', cls: 'badge-warning' }
-    case 'TOTAL-FAILED':
-      return { label: 'FAILED', cls: 'badge-error' }
-    default:
-      return { label: indication ?? 'Unknown', cls: 'badge-ghost' }
-  }
-}
-
-const FAILURE_KEYWORDS =
-  /(mismatch|drift detected|does not match|failed|could not|missing|no longer|power of attorney)/i
-
-function isFailureFinding(finding: string): boolean {
-  return FAILURE_KEYWORDS.test(finding)
-}
-
-function findingIndicator(finding: string): Indicator {
-  return isFailureFinding(finding) ? { label: 'FAIL', cls: 'badge-error' } : { label: 'PASS', cls: 'badge-success' }
-}
-
 // Prefer the freshest structured DSS report: the one just returned by the
 // Validate action, else the one loaded with the signature view.
 const activeDss = computed(() => validateResult.value?.dss ?? view.value?.dss ?? null)
@@ -185,22 +164,28 @@ const activeDss = computed(() => validateResult.value?.dss ?? view.value?.dss ??
 // action's result once it has run, else those loaded with the view.
 const integrityFindings = computed(() => validateResult.value?.findings ?? view.value?.integrity_findings ?? [])
 
-const integrityIntact = computed(() => {
-  const findings = integrityFindings.value
-  return findings.length > 0 && !findings.some(isFailureFinding)
+// "Intact" is a positive claim about every finding in the set, so an
+// undetermined one (a revocation state the status service could not answer)
+// withholds it exactly as a failure does.
+const integrityVerdict = computed(() => findingsVerdict(integrityFindings.value))
+
+const integritySummary = computed(() => {
+  switch (integrityVerdict.value) {
+    case 'pass':
+      return { label: 'Intact', cls: 'badge-success' }
+    case 'indeterminate':
+      return { label: 'Not determined', cls: 'badge-warning' }
+    default:
+      return { label: 'Issues found', cls: 'badge-error' }
+  }
 })
 
-function statusIndicator(status: string): Indicator {
-  return status.toUpperCase() === 'REVOKED'
-    ? { label: 'REVOKED', cls: 'badge-error' }
-    : { label: 'ACTIVE', cls: 'badge-success' }
+function statusIndicator(status: string) {
+  return signatureStatusIndicator(status)
 }
 
-// DCS-FR-SM-21: the signature level (SES/AES/QES) the signature actually
-// ACHIEVED — recorded from what DSS validated at submit (ADR-20), never
-// re-derived here.
 function signatureLevel(sig: SignatureViewItem): string {
-  return (sig.credential_type || 'AES').toUpperCase()
+  return signatureLevelLabel(sig.credential_type)
 }
 
 function requiredLevel(sig: SignatureViewItem): string {
@@ -216,17 +201,6 @@ function levelMeetsRequirement(sig: SignatureViewItem): boolean {
   const achieved = LEVEL_RANK[signatureLevel(sig)] ?? 0
   const required = LEVEL_RANK[requiredLevel(sig)] ?? 1
   return achieved >= required
-}
-
-function levelBadgeClass(level: string): string {
-  switch (level) {
-    case 'QES':
-      return 'badge-secondary'
-    case 'AES':
-      return 'badge-info'
-    default:
-      return 'badge-ghost'
-  }
 }
 
 // --- Report export --------------------------------------------------------
@@ -472,12 +446,8 @@ function exportPdf() {
               <div>
                 <div class="mb-1 flex items-center gap-2">
                   <h3 class="font-semibold">Cryptographic Integrity</h3>
-                  <span
-                    v-if="integrityFindings.length"
-                    class="badge"
-                    :class="integrityIntact ? 'badge-success' : 'badge-error'"
-                  >
-                    {{ integrityIntact ? 'Intact' : 'Issues found' }}
+                  <span v-if="integrityFindings.length" class="badge" :class="integritySummary.cls">
+                    {{ integritySummary.label }}
                   </span>
                 </div>
                 <ul v-if="integrityFindings.length" class="space-y-1 text-sm">

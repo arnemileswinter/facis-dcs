@@ -88,7 +88,7 @@ const { isManager } = useTemplatePermissions()
                 Clauses
               </h2>
               <ClauseEditor />
-              <div class="divider text-xs text-base-content/40">existing clauses</div>
+              <div class="divider text-xs text-base-content/70">existing clauses</div>
               <ClausesEditor />
             </div>
           </div>

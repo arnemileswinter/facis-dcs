@@ -33,6 +33,10 @@ pdfCore:
     pullPolicy: Never
 
 extraEnv:
+  # This stack trusts the issuer fixture committed to the repo. It has to
+  # declare that, so no deployment inherits it by omission.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
   - name: JWT_ALG_NONE_SUPPORTED
     value: "true"
   - name: AUTH_INSECURE_COOKIES
@@ -42,6 +46,11 @@ extraEnv:
   # endpoint at the same bootstrap 200-OK Node-RED flow.
   - name: DCS_TRUST_PDP_URL
     value: "http://dcs-orce:1880/trust-pdp"
+  # See values.bdd.yml: in-cluster synthetic peers publish did:web over plain
+  # http under non-loopback Service names, which the resolver permits only for
+  # hosts a deployment names.
+  - name: DCS_DIDWEB_INSECURE_HOSTS
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut): fast in
   # BDD/e2e so a deferred/failed peer PDF ship is re-attempted and delivered
   # within the scenarios' replication wait (see values.bdd.yml for the rationale).

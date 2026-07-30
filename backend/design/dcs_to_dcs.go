@@ -25,18 +25,14 @@ var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
 	Required("alg", "epk", "wrapped")
 })
 
-var DCSToDCSPoAEvidence = Type("DCSToDCSPoAEvidence", func() {
-	Description("Transferable urn:dcs:poa:v1 presentation and its original verified OID4VP context, bound to the signed contract, field and holder")
-	Attribute("presentation", String, "Verbatim SD-JWT+KB-JWT PoA presentation")
-	Attribute("nonce", String, "Original ceremony nonce verified by the sender")
-	Attribute("aud", String, "Original OID4VP audience verified by the sender")
-	Attribute("vct", String, "Credential type; must be urn:dcs:poa:v1")
-	Attribute("contract_id", String, "Contract IRI the evidence authorizes")
-	Attribute("field_name", String, "Signature field/represented party")
-	Attribute("holder_did", String, "Holder DID bound by sub and cnf.jwk")
-	Attribute("organization", String, "Issuer-authoritative represented organization")
-	Attribute("revalidated_at", String, "Receiver-side cryptographic revalidation timestamp; response only")
-	Required("presentation", "nonce", "aud", "vct", "contract_id", "field_name", "holder_did", "organization")
+var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {
+	Description("The Power of Attorney a signatory presented at the ceremony on the shipping instance, carried so the receiver can verify a counterparty's authority to sign instead of taking the contract's dcs:hasPowerOfAttorney claim on trust (ADR-31, UC-14). The receiver re-derives the party and its signatory from the shipped contract itself, so these fields are checked against it rather than believed.")
+
+	Attribute("party", String, "The party (organization) the credential authorizes, matching a dcs:parties node of the shipped contract")
+	Attribute("presentation", String, "The dc+sd-jwt Power of Attorney exactly as the signatory's wallet delivered it at the ceremony")
+	Attribute("summary", String, "The ContractSigningSummaryCredential the shipping instance issued for that signature (DCS-FR-SM-08), so the receiver can verify which party signed and by whom without taking the shipper's word for it. Carried here rather than read from the PDF: only the first signer's evidence survives embedding, and adding a second attachment would mutate an already-signed document")
+
+	Required("party", "presentation")
 })
 
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
@@ -51,7 +47,7 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
-	Attribute("poa_evidence", DCSToDCSPoAEvidence, "Required for a signed acceptance: the original holder-bound PoA presentation and nonce/audience context")
+	Attribute("signatory_poas", ArrayOf(DCSToDCSSignatoryPoA), "The Power of Attorney behind each signature the shipping instance applied, sent once the contract carries signatures. Present-but-unverifiable evidence is refused (ADR-31); absent evidence is accepted and left to the compliance viewer, so a peer that retains none can still federate")
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })
@@ -92,7 +88,6 @@ var DCSToDCSSyncProvenanceResponse = Type("DCSToDCSSyncProvenanceResponse", func
 	Attribute("from_peer_did", String, "The peer that signed the shipped contract")
 	Attribute("jades_signature", String, "The verified JAdES baseline-B compact JWS as received")
 	Attribute("received_at", String, "When the signed ship was accepted")
-	Attribute("poa_evidence", DCSToDCSPoAEvidence, "Receiver-revalidated PoA evidence and original OID4VP context")
 
 	Required("did", "contract_version", "from_peer_did", "jades_signature", "received_at")
 })

@@ -26,7 +26,10 @@ import { downloadBlob } from '@/utils/download-blob'
 // requested (ADR-20 SM-01). AES covers every contract that doesn't declare a
 // stricter requirement; a contract requiring QES needs a wallet/QTSP capable
 // of producing one, which this desktop-upload path does not orchestrate.
-const CREDENTIAL_TYPE = 'AES'
+// The level this ceremony TARGETS, sent with the prepare request. What the
+// signature actually achieved is determined server-side and reported in the
+// compliance view; this constant must never be presented as that result.
+const CREDENTIAL_TARGET = 'AES'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,7 +212,7 @@ async function applySignature() {
     const prepared = await signatureManagementService.prepareSignature(
       did.value,
       outcome.data.signerDid,
-      CREDENTIAL_TYPE,
+      CREDENTIAL_TARGET,
       signatureFieldName.value,
       outcome.data.ceremonyId,
     )
@@ -236,7 +239,7 @@ async function submitSigned(event: Event) {
     envelope.value = await signatureManagementService.submitSignature(
       did.value,
       pendingSignerDid.value,
-      CREDENTIAL_TYPE,
+      CREDENTIAL_TARGET,
       file,
       signatureFieldName.value,
       pendingCeremonyId.value,
@@ -435,7 +438,7 @@ async function validate() {
               </div>
               <p class="text-xs text-base-content/70">
                 Present your PID in the wallet ceremony. The DCS then builds the to-be-signed PDF (with your Power of
-                Attorney and the signing summary embedded, credential {{ CREDENTIAL_TYPE }}) and downloads it to your
+                Attorney and the signing summary embedded, targeting {{ CREDENTIAL_TARGET }}) and downloads it to your
                 device. The DCS holds no signing key — you sign the document yourself.
               </p>
               <div v-if="!isSigner" class="text-xs text-warning">
@@ -474,8 +477,9 @@ async function validate() {
                 <span v-if="signed" class="badge badge-sm badge-success">Uploaded</span>
               </div>
               <p class="text-xs text-base-content/70">
-                Once you have signed the downloaded PDF, upload it here. The DCS validates that you alone controlled the
-                signing key (sole control) and records the executed contract.
+                Once you have signed the downloaded PDF, upload it here. The DCS checks that the signing certificate
+                names the same person as your identity credential, and records the executed contract. That is evidence
+                towards sole control, not a determination of it.
               </p>
               <p v-if="!done.apply" class="text-xs text-base-content/70 italic">
                 Complete step 3 first to get the document to sign.

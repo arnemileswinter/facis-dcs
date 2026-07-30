@@ -141,6 +141,60 @@ paths:
                     $ref: '#/components/responses/UnsupportedMediaType'
                 "422":
                     $ref: '#/components/responses/UnprocessableEntity'
+    /verify/content-match:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Verify a PDF's human-readable content against a reference PDF
+            description: |
+                Compare a submitted PDF's visible page content against a reference PDF's, resolving
+                the LAST definition of every object on both sides. Neither side is re-rendered, so
+                this carries none of /verify/content's dependence on render determinism and answers a
+                different question: not whether the PDF renders its own embedded payload (which an
+                appended revision superseding both pages and attachment would still satisfy), but
+                whether it still renders the reference document. An appended revision that supersedes
+                a page content stream diverges; append-only signature, C2PA, evidence and timestamp
+                layers do not. Used to gate a wallet-submitted signed PDF against the bytes pinned at
+                prepare.
+            operationId: verifyContentMatch
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            required:
+                                - pdf
+                                - reference
+                            properties:
+                                pdf:
+                                    type: string
+                                    format: binary
+                                    description: Submitted PDF whose page content is checked
+                                reference:
+                                    type: string
+                                    format: binary
+                                    description: Reference PDF whose page content the submission must reproduce
+            responses:
+                "200":
+                    description: Content comparison result.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                required:
+                                    - match
+                                properties:
+                                    match:
+                                        type: boolean
+                                        description: True when every page content stream of the submission equals the reference's.
+                                    mismatch:
+                                        type: string
+                                        description: Which page diverged and a snippet of both sides, present only when match is false.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
     /update:
         post:
             tags:

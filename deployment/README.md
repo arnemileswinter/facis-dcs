@@ -9,7 +9,7 @@ An automated orchestration workspace that deploys a [Digital Contracting Service
 ## Overview
 
 The Digital Contracting Service (DCS) provides an open-source platform for creating, signing, and managing contracts digitally.
-Integrated with the European Digital Identity Wallet (EUDI), it guarantees that all digital transactions are secure, legally binding, and interoperable.
+It is designed for integration with the European Digital Identity Wallet (EUDI) ecosystem and targets eIDAS 2.0 Advanced Electronic Signatures. It is not certified, has not been conformance-tested against a production wallet or a qualified trust service provider, and claims no legal effect for the signatures it produces.
 
 Key components:
 - **Multi-Contract Signing** — multi-party contract execution within a single workflow

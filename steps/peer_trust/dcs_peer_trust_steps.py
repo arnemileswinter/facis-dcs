@@ -36,20 +36,27 @@ appending an arbitrary suffix to this instance's own DID — that names a
 document this instance does not serve, and PostPdf then fails at its very
 first step (FetchDIDDocument) long before any trust-gate layer runs.
 
-What DOES yield a self-resolving synthetic peer is percent-encoding: the
-resolver percent-decodes each component (`url.QueryUnescape` per part), so
-re-encoding one already-ASCII character of the host produces a DIFFERENT DID
-STRING that decodes to the SAME authority (see
+What DOES yield a self-resolving synthetic peer is letter case: DNS names are
+case-insensitive, so flipping the case of one host letter produces a DIFFERENT
+DID STRING that reaches the SAME authority (see
 `_self_resolving_peer_variant`). Such an identifier resolves to THIS SAME
 running instance's own `/.well-known/did.json`, its own
 `/.well-known/dcs-agreement-credential.json` and its own signing key, so
 layers 1/2 (challenge-response) and layer 3a (agreement credential: valid
 signature, issuer resolving to the same target, matching rules hash) all pass
-GENUINELY, leaving layer 3b — the PDP — as the only gate under test. Being a
-different string, it also does not trip PostPdf's separate same-peer guard
-(`req.FromPeerDid == localPeer`), which would otherwise reject
-self-simulated same-DID requests for an unrelated reason and make the test
-dishonest.
+GENUINELY, leaving layer 3b — the PDP — as the only gate under test.
+
+OUTBOUND ONLY. PostPdf's same-peer guard compares did:web identifiers by what
+they denote (`identity.SameDIDWeb`), so inbound this identity is exactly what
+that guard exists to refuse — "shipping a contract PDF to the same peer is not
+allowed", before any trust layer runs. It is used where the ship goes the other
+way (`step_given_local_contract_offered_to_peer`), which applies no such guard.
+Inbound scenarios take an orce route instead, which is genuinely another
+authority: the one in this module (`_orce_synthetic_peer_credentials`) 404s its
+agreement credential and so exercises a layer-3a REFUSAL, and the one in
+steps/peer_trust/synthetic_trusted_peer.py publishes a credential that verifies
+against the running build's rules hash and so leaves the PDP (layer 3b) as the
+only gate an inbound scenario still has to pass.
 
 Consequence: this identity is CONSTANT per instance rather than unique per
 scenario (uniqueness would require a distinguishing path segment, which is
@@ -59,11 +66,13 @@ peer — every assertion is scoped by the scenario's own contract DID, and
 direction), whose contract-DID component is already per-scenario unique.
 
 A peer with a MISSING credential (layer 3a fails) is simulated separately via
-the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), and one
-with a valid-but-wrong-hash credential via a second orce route
-(`_orce_mismatch_peer_credentials`) — this instance cannot be made to publish
-a broken credential about itself. A "signature-invalid" credential remains
-uncovered and is flagged as an open point at its scenario rather than faked.
+the orce synthetic-peer route (`_orce_synthetic_peer_credentials`), one with a
+valid-but-wrong-hash credential via a second orce route
+(`_orce_mismatch_peer_credentials`), and one whose credential actually verifies
+via a third (`synthetic_trusted_peer.publish_trusted_peer`) — this instance
+cannot be made to publish a broken credential about itself. A
+"signature-invalid" credential remains uncovered and is flagged as an open
+point at its scenario rather than faked.
 
 This technique is the natural single-instance extension of the self-peer
 simulation used by the contract-state-machine pack (see
@@ -84,6 +93,7 @@ from datetime import datetime, timezone
 import requests as _requests
 from behave import given, then, when
 
+from steps.peer_trust.synthetic_trusted_peer import publish_trusted_peer
 from steps.support.api_client import (
     contract_create_url,
     contract_offer_url,
@@ -137,38 +147,39 @@ def _own_identity(context):
 
 
 def _self_resolving_peer_variant(real_did: str) -> str:
-    """Re-encode one character of a did:web identifier's host component, so the
-    result is a DIFFERENT DID STRING that resolves to exactly the SAME target.
+    """Flip the case of one letter in a did:web identifier's host component, so
+    the result is a DIFFERENT DID STRING that resolves to exactly the SAME
+    target.
 
-    did:web resolution percent-decodes each colon-separated component
-    (identity.DIDWebPath -> url.QueryUnescape), so "%64cs.example%3A8080" and
-    "dcs.example%3A8080" denote one and the same authority. That is what makes
-    a single-instance synthetic peer possible at all now that path segments are
-    part of the identity (see module docstring): the peer's did.json,
-    agreement credential and rules hash are this instance's own real,
-    self-consistent ones, while the identifier is still not the instance's own
-    DID string and so clears PostPdf's same-peer guard.
+    DNS names are case-insensitive, so "Dcs-a.localhost%3A18080" and
+    "dcs-a.localhost%3A18080" reach one and the same host. That is what makes a
+    single-instance synthetic peer possible at all now that path segments are
+    part of the identity (see module docstring): the peer's did.json, agreement
+    credential and rules hash are this instance's own real, self-consistent
+    ones, while the identifier is still not the instance's own DID string and so
+    clears PostPdf's same-peer guard.
 
-    The first host character is the one re-encoded — always present (an empty
-    host is rejected by the resolver) and, for a hostname, always ASCII, so a
-    single %XX byte is a faithful encoding of it.
+    This used to re-encode a host character as %XX instead. The resolver now
+    accepts no percent-escape in the authority except %3A for the port, because
+    decoding arbitrary escapes there let an identifier smuggle a path separator
+    into the host — so the old trick names a host that is refused outright.
     """
     prefix = "did:web:"
     assert real_did.startswith(prefix), f"not a did:web identifier: {real_did}"
     rest = real_did[len(prefix):]
     host_encoded, _, suffix = rest.partition(":")
     assert host_encoded, f"did:web identifier has empty host component: {real_did}"
-    first = host_encoded[0]
-    assert first != "%", (
-        f"host component of {real_did} already starts with a percent-escape; re-encoding its "
-        "first character would corrupt that escape rather than rename it"
+
+    for index, char in enumerate(host_encoded):
+        if char.isascii() and char.isalpha():
+            flipped = char.upper() if char.islower() else char.lower()
+            variant_host = host_encoded[:index] + flipped + host_encoded[index + 1:]
+            return prefix + variant_host + (f":{suffix}" if suffix else "")
+
+    raise AssertionError(
+        f"host component of {real_did} carries no ASCII letter to vary; a synthetic peer "
+        "identity that resolves to this same instance cannot be derived from it"
     )
-    assert first.isascii(), (
-        f"host component of {real_did} starts with non-ASCII {first!r}; a single-byte %XX escape "
-        "would not faithfully encode it (expected an IDNA/ASCII hostname)"
-    )
-    variant_host = f"%{ord(first):02X}{host_encoded[1:]}"
-    return prefix + variant_host + (f":{suffix}" if suffix else "")
 
 
 def _synthetic_peer_credentials(context):
@@ -293,8 +304,28 @@ def step_given_peer_identity(context):
     3a) and the PDP (layer 3b), each exercised by its own dedicated Given
     step (this file's "...publishes no agreement credential..." below;
     steps/peer_trust/dcs_trust_pdp_steps.py's PDP-stub Givens)."""
-    synthetic_did, secret_value, secret_hash = _synthetic_peer_credentials(context)
+    # The orce route rather than a case-varied copy of this instance's own DID:
+    # a variant that differs only in spelling names the SAME host, which the
+    # same-peer guard now recognises and refuses ("shipping a contract PDF to the
+    # same peer is not allowed") before any trust layer runs. The orce
+    # synthetic-peer Service is a genuinely different authority that mirrors this
+    # instance's did.json, so the challenge-response stays honestly valid.
+    synthetic_did, secret_value, secret_hash = _orce_synthetic_peer_credentials(context)
     context.peer_from_did = synthetic_did
+    context.peer_secret_value = secret_value
+    context.peer_secret_hash = secret_hash
+
+
+@given("a cryptographically valid peer whose agreement credential this instance accepts")
+def step_given_peer_identity_with_accepted_credential(context):
+    """The only synthetic peer that gets PAST layer 3a (see
+    steps/peer_trust/synthetic_trusted_peer.py): its agreement credential is
+    issued by its own DID, signed with the VC key its own did.json publishes,
+    and names the federation rules hash the instance under test currently
+    publishes. Every scenario using this Given is therefore testing what its AC
+    names — the policy endpoint — and not the credential check in front of it."""
+    peer_did, secret_value, secret_hash = publish_trusted_peer(context)
+    context.peer_from_did = peer_did
     context.peer_secret_value = secret_value
     context.peer_secret_hash = secret_hash
 
@@ -334,6 +365,10 @@ def _post_pdf_payload(context, name: str) -> dict:
     backend/internal/service/dcs_to_dcs.go) shipped by the synthetic peer
     identity set up by a prior Given step."""
     did, _ = ContractService._contract_data(context, name)
+    # The interaction the PDP assertions are scoped to: the trust gate names
+    # this contract in its consult, so "was the policy endpoint consulted"
+    # can be answered for THIS ship rather than for any earlier one.
+    context.pdp_interaction_contract_did = did
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
     export = PDFService.export_contract_pdf(context, did, headers=manager_h)
     assert export.status_code == 200, (
@@ -380,14 +415,22 @@ def step_then_pdf_rejected_agreement_credential(context):
 
 @given('contract "{name}" exists locally, offered to a peer counterparty, created by this instance')
 def step_given_local_contract_offered_to_peer(context, name):
-    if not hasattr(context, "peer_from_did"):
-        step_given_peer_identity(context)
+    """The counterparty is the SELF-RESOLVING variant (_self_resolving_peer_variant),
+    not the orce route the inbound Given uses: the outbound gate is reached only
+    by a counterparty whose agreement credential VERIFIES, and the orce route
+    deliberately publishes none, so it would be refused by layer 3a
+    (AgreementFailure, which is retryable and does leave a sync_fails entry)
+    before the PDP under test is ever consulted. Resolving to this instance's own
+    did.json and credential makes layers 1/2/3a pass genuinely and leaves the PDP
+    as the only gate. Nothing on the outbound path applies the same-peer guard
+    that makes this identity unusable INBOUND (PostPdf, see step_given_peer_identity)."""
+    context.outbound_peer_did = _self_resolving_peer_variant(_own_identity(context)[0])
     t_did = ContractService._create_approved_template_for_contract(context)
     creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
     create_resp = post_json(
         context,
         contract_create_url(context),
-        {"template_did": t_did, "counterparty": context.peer_from_did},
+        {"template_did": t_did, "counterparty": context.outbound_peer_did},
         headers=creator_h,
     )
     assert create_resp.status_code == 200, create_resp.text
@@ -418,6 +461,7 @@ def step_when_ship_towards_peer(context, name):
     event -> DCSToDCSSynchronizer.shipContractPDF). This step just gives that
     asynchronous path time to run before Then-steps inspect its side effects
     (sync_fails row, PAC audit trail, PDP stub)."""
+    context.pdp_interaction_contract_did, _ = ContractService._contract_data(context, name)
     time.sleep(5)
 
 
@@ -873,7 +917,7 @@ def step_when_sign_cross_instance(context):
     # Reuses the real-signing pack's ceremony machinery verbatim — every URL
     # builder reads context.base_url, which _as_instance swaps to A.
     from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
-        CEREMONY_AUD,
+        ceremony_aud,
         _build_pid_presentation,
         _complete_ceremony_via_presentation,
         _fetch_pending_nonce,
@@ -903,7 +947,7 @@ def step_when_sign_cross_instance(context):
         given_name, family_name = "PeerRevocation", "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
             given_name=given_name, family_name=family_name,
-            aud=CEREMONY_AUD, nonce=nonce,
+            aud=ceremony_aud(context), nonce=nonce,
         )
         completion = _complete_ceremony_via_presentation(
             context, ceremony_id, presentation, subject_did, given_name, family_name,

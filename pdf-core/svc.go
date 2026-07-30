@@ -390,6 +390,61 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
+// verifyContentMatch compares a submitted PDF's visible page content against a
+// REFERENCE PDF's, resolving the LAST definition of every object on both sides.
+// Neither side is re-rendered — the reference is the exact document the caller
+// committed to — so this is free of the render determinism /verify/content
+// depends on, and it answers a different question: not "does this PDF render its
+// own embedded payload" (an attacker who supersedes both the pages and the
+// attachment passes that) but "does this PDF still render the document we
+// prepared". An appended revision that supersedes a page content stream diverges
+// here; append-only signature, C2PA, evidence and timestamp layers do not.
+func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
+	ct := r.Header.Get("Content-Type")
+	if err := checkMediaType(ct, "multipart/form-data"); err != nil {
+		writeError(w, err)
+		return
+	}
+	defer r.Body.Close()
+
+	_, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("invalid multipart content type: %w", err)))
+		return
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		writeError(w, errBadRequest(errors.New("multipart boundary missing from Content-Type")))
+		return
+	}
+	parts, err := readMultipartParts(r.Body, boundary)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	submitted, ok := parts["pdf"]
+	if !ok || len(submitted) == 0 {
+		writeError(w, errBadRequest(errors.New("pdf field required")))
+		return
+	}
+	reference, ok := parts["reference"]
+	if !ok || len(reference) == 0 {
+		writeError(w, errBadRequest(errors.New("reference field required")))
+		return
+	}
+
+	var mismatch string
+	if err := compiler.MatchPageContent(submitted, reference); err != nil {
+		mismatch = err.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(struct {
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch,omitempty"`
+	}{Match: mismatch == "", Mismatch: mismatch})
+}
+
 // isVCProofStructurallyValid returns true when the VC JSON contains a
 // recognisable proof field, without performing cryptographic verification.
 func isVCProofStructurallyValid(vcBytes []byte) bool {
@@ -741,7 +796,7 @@ func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, err
 		}
 		name := part.FormName()
 		var limit int64 = 8 << 20
-		if name == "pdf" {
+		if name == "pdf" || name == "reference" {
 			limit = 32 << 20
 		}
 		data, err := io.ReadAll(io.LimitReader(part, limit))

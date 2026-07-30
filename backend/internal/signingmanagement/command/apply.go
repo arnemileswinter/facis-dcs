@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"digital-contracting-service/internal/auth/oid4vp"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -35,7 +34,6 @@ import (
 	"digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
 	event2 "digital-contracting-service/internal/signingmanagement/event"
-	"digital-contracting-service/internal/signingmanagement/pidverify"
 
 	"github.com/digitorus/pkcs7"
 	"github.com/jmoiron/sqlx"
@@ -82,6 +80,25 @@ var ErrCeremonyConsumed = errors.New("ceremony signing request has already been 
 // bytes before the signatory's incremental PAdES update) is not byte-for-byte
 // the document pinned at prepare (ADR-20 TBS byte pinning).
 var ErrDocumentMismatch = errors.New("submitted document does not match the document prepared for signing")
+
+// ErrContentMismatch rejects a submitted PDF whose visible page content is no
+// longer the page content of the document pinned at prepare. Append-only
+// (ErrDocumentMismatch) and content-preserving are different properties: a PDF
+// incremental update may redefine ANY object, page content streams included, so
+// a submission can be a byte-prefix extension of the prepared document and still
+// display different contract text — with a /ByteRange over the whole file, so
+// the signature validates over the modified document.
+var ErrContentMismatch = errors.New("submitted document's visible content is not the content prepared for signing")
+
+// ErrPayloadMismatch rejects a submitted PDF whose embedded machine-readable
+// JSON-LD contract is no longer the payload attached to the document pinned at
+// prepare. It is deliberately distinct from ErrContentMismatch: the visible
+// pages and the embedded payload are two independent representations of the
+// same contract, and an incremental update can supersede the embedded-file
+// object alone — leaving every rendered page identical while replacing the
+// document that drives policy evaluation, catalogue publication and the peer's
+// copy of the contract.
+var ErrPayloadMismatch = errors.New("submitted document's machine-readable contract is not the payload prepared for signing")
 
 // ErrNonceMismatch rejects a submitted signature that does not echo the
 // ceremony's request nonce, cryptographically bound inside the JAdES
@@ -137,6 +154,75 @@ type ApplyCmd struct {
 // development testWallet, whose keys are shared files.
 type SignatureValidator interface {
 	ValidatePDF(ctx context.Context, pdf []byte, name string) (*dss.Report, error)
+}
+
+// ContentMatcher compares the visible page content of a submitted PDF against a
+// reference PDF, resolving the last definition of every object on both sides
+// (pdfcore.Client satisfies it). It re-renders nothing: both sides are documents
+// the caller already holds.
+type ContentMatcher interface {
+	MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error)
+}
+
+// assertPreparedContent refuses a submission whose visible pages are no longer
+// the prepared document's. The diagnostic the matcher returns names the page
+// that diverged and a snippet of both sides, so the refusal says WHAT changed
+// rather than that something did.
+func assertPreparedContent(ctx context.Context, matcher ContentMatcher, submitted, prepared []byte, fieldName string) error {
+	match, mismatch, err := matcher.MatchContent(ctx, submitted, prepared)
+	if err != nil {
+		return fmt.Errorf("could not content-match the submitted document against the document prepared for %q: %w", fieldName, err)
+	}
+	if !match {
+		return fmt.Errorf("%w: field %q: %s", ErrContentMismatch, fieldName, mismatch)
+	}
+	return nil
+}
+
+// PayloadExtractor returns the machine-readable JSON-LD contract attached to a
+// PDF, resolving the LAST definition of the embedded-file object as a reader
+// would (pdfcore.Client satisfies it). Like the content matcher it re-renders
+// nothing: both documents it is asked about are documents the caller holds.
+type PayloadExtractor interface {
+	ExtractPayload(ctx context.Context, pdf []byte) ([]byte, error)
+}
+
+// assertPreparedPayload refuses a submission whose embedded machine-readable
+// contract is no longer the one attached to the pinned prepared document.
+//
+// The reference is the PINNED PDF's OWN attachment, not the ceremony's pinned
+// JAdES payload. Those two are different documents by construction: the pinned
+// payload is a JCS-canonicalized envelope built from the contract data as it
+// stands at prepare, while the attachment is the raw JSON-LD the renderer
+// embedded verbatim — and the two legitimately diverge whenever prepare does
+// not re-amend the PDF (every signature after the first, and any contract whose
+// base PDF already carries a peer's PAdES signature). Comparing against the
+// pinned payload would refuse those valid submissions; comparing the two
+// documents' attachments asks exactly the question this gate exists for — did
+// the signatory return the machine-readable contract they were handed.
+//
+// The comparison is over SHA-256 of the extracted attachments rather than the
+// bytes themselves so the refusal can name both digests without echoing an
+// attacker-supplied document into the error and the audit log.
+func assertPreparedPayload(ctx context.Context, extractor PayloadExtractor, submitted, prepared []byte, fieldName string) error {
+	submittedPayload, err := extractor.ExtractPayload(ctx, submitted)
+	if err != nil {
+		return fmt.Errorf("could not read the machine-readable contract embedded in the document submitted for %q: %w", fieldName, err)
+	}
+	preparedPayload, err := extractor.ExtractPayload(ctx, prepared)
+	if err != nil {
+		return fmt.Errorf("could not read the machine-readable contract embedded in the document prepared for %q: %w", fieldName, err)
+	}
+	if len(submittedPayload) == 0 || len(preparedPayload) == 0 {
+		return fmt.Errorf("%w: field %q: the documents carry no machine-readable contract to compare", ErrPayloadMismatch, fieldName)
+	}
+	submittedSum := sha256.Sum256(submittedPayload)
+	preparedSum := sha256.Sum256(preparedPayload)
+	if submittedSum != preparedSum {
+		return fmt.Errorf("%w: field %q: submitted payload sha256 %s, prepared payload sha256 %s",
+			ErrPayloadMismatch, fieldName, hex.EncodeToString(submittedSum[:]), hex.EncodeToString(preparedSum[:]))
+	}
+	return nil
 }
 
 // Applier runs the signing command flow: prepare the to-be-signed document,
@@ -259,6 +345,9 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if h.Validator == nil {
 		return fmt.Errorf("a signature validator is required to accept an external signature")
 	}
+	if h.PDFCore == nil {
+		return fmt.Errorf("a pdf-core client is required to content-match an external signature against the prepared document")
+	}
 	if len(cmd.SignedPDF) == 0 {
 		return fmt.Errorf("no signed document was submitted")
 	}
@@ -322,6 +411,32 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// independently of whether the signature itself validates.
 	if !bytes.HasPrefix(cmd.SignedPDF, ceremony.PreparedPDF) {
 		return fmt.Errorf("%w: the submitted PDF's initial revision is not the document prepared for signing", ErrDocumentMismatch)
+	}
+
+	// Content pinning, the second half of the same guarantee: the prefix check
+	// above proves the submission only APPENDED, which is not the same as
+	// leaving the document unmodified — an appended revision may supersede a
+	// page content stream and change what the contract says while the signature
+	// covers the whole file and validates. Compare the visible pages of the
+	// submission against the visible pages of the PINNED prepared bytes, which
+	// resolves the LAST definition of every object, so a superseding revision
+	// diverges. Nothing is re-rendered: the reference is the exact document
+	// prepare committed to, so this carries none of the render-determinism
+	// fragility a fresh compile would (ADR-13).
+	if err := assertPreparedContent(ctx, h.PDFCore, cmd.SignedPDF, ceremony.PreparedPDF, ceremony.FieldName); err != nil {
+		return err
+	}
+
+	// Payload pinning, the machine-readable half of the same guarantee. The two
+	// checks above say nothing about the embedded JSON-LD: a revision that
+	// supersedes ONLY the embedded-file object leaves every rendered page
+	// byte-identical, so the content match passes, while the document that
+	// actually drives policy evaluation, catalogue publication and the peer's
+	// copy of the contract has been swapped under a signature covering the whole
+	// file. Compare the attachment a reader resolves in the submission against
+	// the attachment of the pinned prepared bytes — again re-rendering nothing.
+	if err := assertPreparedPayload(ctx, h.PDFCore, cmd.SignedPDF, ceremony.PreparedPDF, ceremony.FieldName); err != nil {
+		return err
 	}
 
 	report, err := h.Validator.ValidatePDF(ctx, cmd.SignedPDF, ceremony.FieldName)
@@ -630,9 +745,13 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				}
 				fieldCeremonies[f] = c
 			}
-			if _, ok := fieldCeremonies[ceremony.FieldName]; !ok {
-				fieldCeremonies[ceremony.FieldName] = ceremony
-			}
+			// The ceremony being consumed wins for its own field, unconditionally.
+			// The loop above resolves each field by FindVerifiedCeremonyByField,
+			// which returns the most recently verified ceremony — so when a field
+			// has been verified twice it overwrote the pinned one, and the summary
+			// was then retained against a ceremony that never signed. Its own row
+			// kept none, and the peer refused every ship of that contract.
+			fieldCeremonies[ceremony.FieldName] = ceremony
 			if len(missing) > 0 {
 				return nil, fmt.Errorf("%w: missing ceremonies for %v", ErrCeremoniesIncomplete, missing)
 			}
@@ -644,11 +763,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// contract document BEFORE the content hash and PDF are computed so the
 	// signed artefact and the machine-readable document are the same bytes.
 	if signedCount == 0 {
-		poaOrganization := ""
-		if ceremony.PoAOrganization != nil {
-			poaOrganization = *ceremony.PoAOrganization
-		}
-		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization)
+		sealed, err := sealAgreementForSigning(*data.ContractData, data.Responsible, cmd.SignerDID)
 		if err != nil {
 			return nil, fmt.Errorf("seal agreement for signing: %w", err)
 		}
@@ -657,6 +772,25 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		}
 		data.ContractData = &sealed
 	}
+
+	// EVERY signature records who signed for which party and under what
+	// authority — not only the first. Sealing is the acceptance act and happens
+	// once; attribution is per signature. Recording it only at the seal left
+	// every later signature's party carrying no authorization, while the
+	// credential behind it still shipped to the counterparty, which then found
+	// nothing in the contract to check it against and refused the exchange.
+	poaOrganization := ""
+	if ceremony.PoAOrganization != nil {
+		poaOrganization = *ceremony.PoAOrganization
+	}
+	attributed, err := recordSignatory(*data.ContractData, data.Responsible, cmd.SignerDID, poaOrganization, ceremony.FieldName)
+	if err != nil {
+		return nil, fmt.Errorf("record signatory: %w", err)
+	}
+	if err := h.CRepo.UpdateContractData(ctx, tx, cmd.DID, attributed); err != nil {
+		return nil, fmt.Errorf("persist signatory attribution: %w", err)
+	}
+	data.ContractData = &attributed
 
 	if err := validation.ValidateContractPolicySatisfaction(
 		*data.ContractData,
@@ -735,9 +869,8 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	basePDFSum := sha256.Sum256(basePDF)
 	basePDFHash := hex.EncodeToString(basePDFSum[:])
 
-	// Issue the signing-summary credential carrying the verified PoA
-	// presentation context, to be embedded before signing
-	// (embed-first-sign-second). PID disclosures remain excluded.
+	// Issue the signing-summary credential carrying the verbatim PID
+	// presentation, to be embedded before signing (embed-first-sign-second).
 	vpToken := ""
 	if ceremony.VpToken != nil {
 		vpToken = *ceremony.VpToken
@@ -746,7 +879,6 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	if ceremony.KbSdHash != nil {
 		kbSDHash = *ceremony.KbSdHash
 	}
-	poaPresentation := poaPresentationFromEnvelope(vpToken)
 	signedAt := time.Now().UTC()
 	var evidence []byte
 	switch {
@@ -761,15 +893,18 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			PDFHash:              basePDFHash,
 			CredentialType:       cmd.CredentialType,
 			KBSDHash:             kbSDHash,
-			PoAPresentation:      poaPresentation,
-			PoANonce:             ceremony.Nonce,
-			PoAAudience:          pidverify.Audience,
 			SignedAt:             signedAt,
 			SchemaVersion:        schemaVersion,
 			ValidationReportHash: validationReportHash,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("issue signing-summary VC: %w", err)
+		}
+		// Retained as well as embedded: the embedded copy cannot travel (only the
+		// last attachment survives, and a second one would mutate a signed PDF),
+		// so the peer gets this one on the wire.
+		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, evidence); err != nil {
+			return nil, err
 		}
 	case signedCount == 0 && !carriesPAdESSignature(basePDF):
 		// First signature on a multi-signer contract: embed EVERY declared
@@ -794,10 +929,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 			}
 			credentialType := cmd.CredentialType
 			if f != ceremony.FieldName {
-				// This is a placeholder, not the other signatory's actual
-				// level: their real credential_type is recorded when THEY
-				// apply their own ceremony, overwriting this entry.
-				credentialType = "AES"
+				// This field belongs to a signatory who has not signed yet, so
+				// this instance knows nothing about the level they will reach.
+				// Writing a placeholder here put an eIDAS level into an
+				// ISSUER-SIGNED credential, sealed inside a PAdES byte range
+				// that can never be corrected, attesting a signature that does
+				// not exist. An absent claim is honest; a guess is a false
+				// attestation.
+				credentialType = ""
 			}
 			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
 				ContractID:           cmd.DID,
@@ -808,9 +947,6 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				PDFHash:              basePDFHash,
 				CredentialType:       credentialType,
 				KBSDHash:             fieldKB,
-				PoAPresentation:      poaPresentationFromEnvelope(derefStr(c.VpToken)),
-				PoANonce:             c.Nonce,
-				PoAAudience:          pidverify.Audience,
 				SignedAt:             signedAt,
 				SchemaVersion:        schemaVersion,
 				ValidationReportHash: validationReportHash,
@@ -819,16 +955,49 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", f, err)
 			}
 			summaries = append(summaries, vc)
+			// Each field's summary is retained against the ceremony that produced
+			// it, so a later ship carries the same attestation the PDF embedded.
+			if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, c.ID, vc); err != nil {
+				return nil, err
+			}
 		}
 		evidence, err = json.Marshal(summaries)
 		if err != nil {
 			return nil, fmt.Errorf("encode signing-summary evidence bundle: %w", err)
 		}
 	default:
-		// Later signature on a multi-signer contract: its evidence is
-		// already embedded (see above); the signed document must not be
-		// mutated beyond the incremental signature itself.
+		// A later signature on a multi-signer contract embeds nothing. Adding a
+		// second evidence attachment here mutates a document that already carries
+		// a PAdES signature — diff analysis reads that as an unexplained
+		// modification and it breaks PDF/A-3 conformance — and pdf-core's
+		// extractor returns only the LAST attachment, so the countersigner's
+		// summary would hide the first signer's from every later ship, including
+		// the revocation one.
+		//
+		// The countersignature still needs an attestation the peer can verify.
+		// That belongs on the wire beside the Power of Attorney, not inside a
+		// signed artefact that must not change again — so it is issued and
+		// retained here, and shipped by the synchronizer.
 		evidence = nil
+		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+			ContractID:           cmd.DID,
+			SignerDID:            cmd.SignerDID,
+			CeremonyID:           ceremony.ID,
+			FieldName:            ceremony.FieldName,
+			ContentHash:          contentHash,
+			PDFHash:              basePDFHash,
+			CredentialType:       cmd.CredentialType,
+			KBSDHash:             kbSDHash,
+			SignedAt:             signedAt,
+			SchemaVersion:        schemaVersion,
+			ValidationReportHash: validationReportHash,
+		})
+		if vcErr != nil {
+			return nil, fmt.Errorf("issue signing-summary VC for field %q: %w", ceremony.FieldName, vcErr)
+		}
+		if err := h.CeremonyRepo.RecordSummaryVC(ctx, tx, ceremony.ID, vc); err != nil {
+			return nil, err
+		}
 	}
 
 	// The JAdES payload over the machine-readable JSON-LD, the counterpart to
@@ -855,18 +1024,6 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		contractVersion:        data.ContractVersion,
 		requiredCredentialType: requiredCredentialType,
 	}, nil
-}
-
-func poaPresentationFromEnvelope(vpToken string) string {
-	var envelope map[string][]string
-	if json.Unmarshal([]byte(vpToken), &envelope) != nil {
-		return ""
-	}
-	values := envelope[oid4vp.PoACredentialQueryID]
-	if len(values) != 1 {
-		return ""
-	}
-	return strings.TrimSpace(values[0])
 }
 
 // resolveCeremony finds the verified ceremony a signature command applies to.
@@ -1198,7 +1355,7 @@ func stampLifecycleForSigning(
 // verified DID — with the signing identity recorded as dcs:hasSignatory.
 // Binding only happens while exactly one placeholder remains open, so an
 // undeclared originator role never gets mislabeled as the counterparty.
-func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization string) (datatype.JSON, error) {
+func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, signerDID string) (datatype.JSON, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("decode contract data: %w", err)
@@ -1220,19 +1377,62 @@ func sealAgreementForSigning(raw datatype.JSON, responsible *db.Responsible, sig
 	if placeholder := singleOpenPartyPlaceholder(doc); placeholder != "" {
 		counterparty := counterpartyIdentity(responsible, signerDID)
 		replaceNodeIRI(doc, placeholder, counterparty)
+		mergePartyNodes(doc, counterparty)
 		if node := partyNodeByID(doc, counterparty); node != nil {
-			node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
 			node["odrl:function"] = map[string]any{"@id": "odrl:contractedParty"}
-			// The organization the signatory presented a Power of Attorney for at
-			// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
-			// counterparty's authorization is auditable on every instance.
-			if poaOrganization != "" {
-				node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
-			}
 		}
 	}
 
 	return datatype.NewJSON(doc)
+}
+
+// recordSignatory attributes one applied signature: who signed, for which
+// party, and under what authority. It runs for every signature, where sealing
+// runs once.
+//
+// The signatory belongs on the node of the party that SIGNED. Stamping it on
+// the counterparty's node coincides with the signer only when the accepting
+// counterparty signs first; when the originator does — which every two-instance
+// flow drives — it records the originator's signatory against the OTHER party,
+// and the Power of Attorney with it. A peer verifying the evidence behind that
+// signature then looks up the party the credential authorizes and finds a node
+// carrying neither.
+//
+// Auto-seeded signature fields are named for the signing instance's DID, so the
+// field name IS the party. An authored multi-signatory contract names its fields
+// freely and such a name identifies no party node; the fallback then attributes
+// the signature to the accepting counterparty, which is where it landed before.
+// That is not right — it is the same misattribution this fixes for the
+// two-instance case — but naming the signing party for a freely-named field
+// needs the field-to-party mapping the document does not carry.
+func recordSignatory(raw datatype.JSON, responsible *db.Responsible, signerDID, poaOrganization, signingParty string) (datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("decode contract data: %w", err)
+	}
+
+	node := signingPartyNode(doc, responsible, signerDID, signingParty)
+	if node == nil {
+		return raw, nil
+	}
+	node["dcs:hasSignatory"] = map[string]any{"@id": signerDID}
+	// The organization the signatory presented a Power of Attorney for at
+	// signing (UC-14, FR-SM-03); it travels with the contract to peers so a
+	// counterparty's authorization is auditable on every instance.
+	if poaOrganization != "" {
+		node["dcs:hasPowerOfAttorney"] = map[string]any{"@id": poaOrganization}
+	}
+
+	return datatype.NewJSON(doc)
+}
+
+func signingPartyNode(doc map[string]any, responsible *db.Responsible, signerDID, signingParty string) map[string]any {
+	if party := strings.TrimSpace(signingParty); party != "" {
+		if node := partyNodeByID(doc, party); node != nil {
+			return node
+		}
+	}
+	return partyNodeByID(doc, counterpartyIdentity(responsible, signerDID))
 }
 
 // counterpartyIdentity resolves who accepted the offer: the contract's
@@ -1274,6 +1474,40 @@ func singleOpenPartyPlaceholder(doc map[string]any) string {
 func strconvAtoiOK(s string) (int, bool) {
 	n, err := strconv.Atoi(s)
 	return n, err == nil
+}
+
+// mergePartyNodes folds every dcs:parties node carrying id into the first of
+// them and drops the rest. Binding a role placeholder to a party the document
+// already declares (the contract's counterparty, seeded at creation) leaves two
+// nodes under one IRI, and everything downstream reads the first one — so the
+// role the placeholder carried would be lost, or found, depending on order.
+// Properties already on the surviving node win.
+func mergePartyNodes(doc map[string]any, id string) {
+	nodes, _ := doc["dcs:parties"].([]any)
+	var kept map[string]any
+	merged := make([]any, 0, len(nodes))
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			merged = append(merged, rawNode)
+			continue
+		}
+		if iri, _ := node["@id"].(string); iri != id {
+			merged = append(merged, rawNode)
+			continue
+		}
+		if kept == nil {
+			kept = node
+			merged = append(merged, rawNode)
+			continue
+		}
+		for key, value := range node {
+			if _, present := kept[key]; !present {
+				kept[key] = value
+			}
+		}
+	}
+	doc["dcs:parties"] = merged
 }
 
 func partyNodeByID(doc map[string]any, id string) map[string]any {

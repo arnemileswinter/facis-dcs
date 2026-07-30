@@ -111,7 +111,7 @@ export function templateStory(
       return story(
         'DELETED',
         'This template was deleted',
-        'Deleted — it is no longer part of the working repository. Its history remains in the tamper-proof audit trail.',
+        'Deleted — it is no longer part of the working repository. Its history remains in the tamper-evident audit trail.',
       )
     case 'REGISTERED':
       return story(
@@ -249,7 +249,7 @@ export function contractStory(state: ContractState | null | undefined): Workflow
       return story(
         'EXPIRED',
         'This contract has expired',
-        'It reached the end of its agreed term. It remains archived with its complete, tamper-proof audit trail.',
+        'It reached the end of its agreed term. It remains archived with its complete, tamper-evident audit trail.',
       )
     default:
       return story(
