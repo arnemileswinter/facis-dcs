@@ -2,6 +2,7 @@
   "@context": "https://w3id.org/facis/dcs/context/v1",
   "@id": "did:web:example:template:sla-hosting",
   "@type": "dcs:ContractTemplate",
+  "_comment": "Readable @ids on purpose. The builder mints urn:uuid: rule ids and #block-<uuid> prose anchors; the shapes require an IRI, not a particular one, so this BDD fixture uses speaking fragments to stay legible to whoever debugs a failing scenario. Realism is proved elsewhere: the e2e authors through the UI and therefore exercises the real urn:uuid: form. Do not 'fix' these ids. Everything else here is the shape the authoring path emits -- see the header of backend/internal/base/validation/slahostingfixture_test.go.",
   "dcs:contractData": [
     {
       "@id": "did:web:example:template:sla-hosting#asset-hosting-environment",
@@ -784,7 +785,7 @@
               "@id": "odrl:lteq"
             },
             "odrl:rightOperand": {
-              "@type": "xsd:string",
+              "@type": "xsd:duration",
               "@value": "P14D"
             }
           }
@@ -830,7 +831,7 @@
               "@id": "odrl:lteq"
             },
             "odrl:rightOperand": {
-              "@type": "xsd:decimal",
+              "@type": "xsd:integer",
               "@value": "60"
             }
           }
@@ -1039,7 +1040,7 @@
                   "@id": "odrl:gteq"
                 },
                 "odrl:rightOperand": {
-                  "@type": "xsd:string",
+                  "@type": "xsd:duration",
                   "@value": "P5D"
                 }
               }
@@ -1160,7 +1161,7 @@
               "@id": "odrl:gt"
             },
             "odrl:rightOperand": {
-              "@type": "xsd:decimal",
+              "@type": "xsd:integer",
               "@value": "12"
             }
           }
