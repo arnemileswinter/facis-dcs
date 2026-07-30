@@ -73,6 +73,80 @@ func TestEveryTransactionThatRecordsASignatureTakesTheRegenerationLock(t *testin
 	}
 }
 
+// Taking the lock is only half the invariant; WHERE it is taken decides what
+// the whole suite costs. Held from the top of SubmitSignature it spans the DSS
+// round trips, and the background regenerator — which this contract's own
+// prepare() has just triggered — blocks on it for that entire window, on the
+// handler every other contract's regeneration is queued behind. That is a
+// measured three-fold BDD slowdown, not a theoretical one. The lock belongs
+// between the last read and the first write: after DSS has answered, before the
+// ceremony is consumed. This pins both edges.
+func TestSubmitSignatureTakesTheRegenerationLockBetweenValidationAndTheWrites(t *testing.T) {
+	body := functionBody(t, "apply.go", "SubmitSignature")
+
+	lock := lastCallPos(body, "acquireRegenerationLock")
+	validate := lastCallPos(body, "ValidatePDF")
+	consume := lastCallPos(body, "MarkCeremonyConsumed")
+	finalize := lastCallPos(body, "finalize")
+
+	for name, pos := range map[string]token.Pos{
+		"acquireRegenerationLock": lock, "ValidatePDF": validate,
+		"MarkCeremonyConsumed": consume, "finalize": finalize,
+	} {
+		if pos == token.NoPos {
+			t.Fatalf("SubmitSignature no longer calls %s: this test no longer checks what it claims", name)
+		}
+	}
+	if lock < validate {
+		t.Error("the regeneration lock is taken before DSS validation: the regenerator waits out every submitted signature's validation window")
+	}
+	if lock > consume || lock > finalize {
+		t.Error("the regeneration lock is taken after a write: the regenerator can read this transaction's pre-signature state and render over the signed PDF")
+	}
+}
+
+// functionBody parses one file of this package and returns the body of the
+// named top-level function.
+func functionBody(t *testing.T, file, name string) *ast.BlockStmt {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name && fn.Body != nil {
+			return fn.Body
+		}
+	}
+	t.Fatalf("%s declares no %s", file, name)
+	return nil
+}
+
+// lastCallPos returns the position of the last call to name in body, or
+// token.NoPos when it is never called.
+func lastCallPos(body *ast.BlockStmt, name string) token.Pos {
+	pos := token.NoPos
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var called string
+		switch fun := call.Fun.(type) {
+		case *ast.Ident:
+			called = fun.Name
+		case *ast.SelectorExpr:
+			called = fun.Sel.Name
+		}
+		if called == name && call.Pos() > pos {
+			pos = call.Pos()
+		}
+		return true
+	})
+	return pos
+}
+
 // packageCallGraph maps every function declared in this package to the names it
 // calls, closures included.
 func packageCallGraph(t *testing.T) map[string]map[string]bool {

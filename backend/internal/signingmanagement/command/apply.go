@@ -412,22 +412,6 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		}
 	}(tx)
 
-	// Hold the per-contract regeneration lock for the whole acceptance, on the
-	// same key prepare() and the background regenerator use. This is the
-	// transaction that WRITES the signature — SetSignedPDF, the signature row,
-	// the SIGNED state — and the regenerator's decision to leave a contract
-	// alone is read under that lock. Without it the two interleave: the sweep
-	// picks up an APPROVED contract with no stored CID, this transaction spends
-	// seconds in DSS validation, the regenerator takes the free lock, counts no
-	// signature, fresh-renders, and whichever UPDATE commits last owns
-	// pdf_ipfs_cid — an unsigned render over a signed one. Only one lock is ever
-	// taken per transaction, so waiting here cannot deadlock against prepare();
-	// a regenerator that outlasts the bounded wait surfaces as
-	// ErrRegenerationInFlight, a retry-later condition.
-	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
-		return err
-	}
-
 	// SubmitSignature is a pure validate-and-record step (ADR-20): it never
 	// re-runs prepare() — no re-sealing the agreement, no re-issuing the
 	// summary VC, no re-stamping the C2PA lifecycle. Everything it needs was
@@ -621,6 +605,30 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 				return fmt.Errorf("%w: JAdES carries no matching request nonce", ErrNonceMismatch)
 			}
 		}
+	}
+
+	// Everything above only read, to decide whether the submission is
+	// acceptable; everything below writes. The per-contract regeneration lock —
+	// the key prepare() and the background regenerator take — covers the write
+	// half, and is taken here, at the boundary.
+	//
+	// It covers the writes because the regenerator's decision to leave a
+	// contract alone reads the signature row and the PDF pointer written below,
+	// and it holds this lock from that read to its own commit: serialising the
+	// two writers settles the order either way round. The regenerator commits
+	// first and the signed CID lands after its render, or this transaction
+	// commits first and the regenerator then reads the signature and declines.
+	//
+	// It stops at the boundary because the DSS round trips above are seconds of
+	// external validation the regenerator has no stake in. Spanning them, this
+	// lock blocked the regeneration that this contract's own prepare() had just
+	// triggered — on the event handler every other contract's regeneration
+	// queues behind — for the whole validation window, which cost the BDD suite
+	// three times its runtime in stalled exports, stalled peer ships and
+	// ErrRegenerationInFlight. This is still the first lock the transaction
+	// takes, so the order that keeps it deadlock-free is unchanged.
+	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return err
 	}
 
 	// Atomic consumption (ADR-20): the guarded UPDATE ... WHERE consumed_at IS
