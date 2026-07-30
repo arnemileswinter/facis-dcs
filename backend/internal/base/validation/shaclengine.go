@@ -62,9 +62,8 @@ func validateAgainstHubShapes(ctx context.Context, contract map[string]any) ([]P
 }
 
 // validateAgainstShapeSource is validateAgainstHubShapes generalized over an
-// explicit ShapeSource — used directly (bypassing the process-wide
-// activeShapeSource) by VerifyAgainstOriginatorHub (Phase 4, DCS-to-DCS),
-// so a one-off remote-hub validation never mutates shared process state
+// explicit ShapeSource, so a caller can validate against a source other than
+// the process-wide activeShapeSource without mutating shared process state
 // under concurrent request handling.
 func validateAgainstShapeSource(ctx context.Context, contract map[string]any, source ShapeSource) ([]PolicyFinding, int, error) {
 	shapesTTL, shapesVersion, err := declaredShapes(ctx, contract, source)

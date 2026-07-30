@@ -377,21 +377,6 @@ paths:
                             schema:
                                 type: string
                                 format: binary
-    /ontology/dcs-pdf-core.owl:
-        get:
-            tags:
-                - dcspdfcore
-            summary: Serve OWL ontology
-            description: Serve the DCS-PDF-CORE OWL ontology definition as JSON-LD
-            operationId: ontologyOwl
-            responses:
-                "200":
-                    description: OK response.
-                    content:
-                        application/ld+json:
-                            schema:
-                                type: string
-                                format: binary
 components:
     schemas:
         Error:
