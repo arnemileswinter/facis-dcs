@@ -1,8 +1,13 @@
 {
-  "@context": "https://w3id.org/facis/dcs/context/v1",
+  "@context": {
+    "dcs": "https://w3id.org/facis/dcs/ontology/v1#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "sh": "http://www.w3.org/ns/shacl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
   "@id": "did:web:example:template:sla-hosting",
   "@type": "dcs:ContractTemplate",
-  "_comment": "Readable @ids on purpose. The builder mints urn:uuid: rule ids and #block-<uuid> prose anchors; the shapes require an IRI, not a particular one, so this BDD fixture uses speaking fragments to stay legible to whoever debugs a failing scenario. Realism is proved elsewhere: the e2e authors through the UI and therefore exercises the real urn:uuid: form. Do not 'fix' these ids. Everything else here is the shape the authoring path emits -- see the header of backend/internal/base/validation/slahostingfixture_test.go.",
+  "_comment": "Readable @ids on purpose. The builder mints urn:uuid: rule ids and #block-<uuid> prose anchors; the shapes require an IRI, not a particular one, so this BDD fixture uses speaking fragments to stay legible to whoever debugs a failing scenario. Realism is proved elsewhere: the e2e authors through the UI and therefore exercises the real urn:uuid: form. Do not 'fix' these ids. Everything else here is the shape the authoring path emits -- see the header of backend/internal/base/validation/slahostingfixture_test.go. The \"@context\" is a prefix map with no remote IRI, matching the templates every other step module posts (steps/support/services/template_service.py canonical_document_data) -- normalizeCanonicalContext prepends the hub's own served, host-absolute context URL to it (DCS_PUBLIC_URL). Naming https://w3id.org/facis/dcs/context/v1 here instead makes isHubContextAnchor treat the document as already anchored, so normalization returns early, the document keeps an IRI nothing serves, and pdf-core -- which expands over real HTTP rather than through the hub's hermetic loader -- 404s the render. The prefixes must be the hub context's own (enforceCanonicalOntologyIRIs rejects a redefinition).",
   "dcs:contractData": [
     {
       "@id": "did:web:example:template:sla-hosting#asset-hosting-environment",
