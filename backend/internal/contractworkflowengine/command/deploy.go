@@ -16,9 +16,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	db2 "digital-contracting-service/internal/dcstodcs/db"
 )
 
 // ErrSigningIncomplete rejects deployment of a multi-signer contract whose
@@ -75,6 +77,18 @@ type Deployer struct {
 	DeploymentRepo db.DeploymentRepo
 	TargetRepo     db.ContractTargetRepo
 	Target         ContractTargetClient
+	// PeerSigs supplies the counterparty signature evidence the multi-signer
+	// gate needs for a federated contract. Required: a deployer without it
+	// cannot tell a countersigned contract from a half-signed one.
+	PeerSigs PeerSignatures
+}
+
+// PeerSignatures reads the cross-instance signature artifact a peer ships with
+// its own signed copy of a contract (DCS-FR-SM-02): a JAdES over the contract
+// payload, verified against the peer's published assertion key before it is
+// stored (internal/service/dcs_to_dcs.go verifyShippedJades).
+type PeerSignatures interface {
+	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db2.SyncSignature, error)
 }
 
 func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, error) {
@@ -109,29 +123,14 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 			if err != nil {
 				return nil, fmt.Errorf("could not read signed signature fields: %w", err)
 			}
-			signed := make(map[string]bool, len(signedFields))
-			for _, f := range signedFields {
-				signed[f] = true
+			if h.PeerSigs == nil {
+				return nil, fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", cmd.DID)
 			}
-			var missing []string
-			for _, f := range required {
-				if signed[f] {
-					continue
-				}
-				// A counterparty signs in ITS deployment and its signature record
-				// never reaches ours, so requiring it here means a federated
-				// contract can never be activated on either side. Activation is a
-				// local act on a local copy: this instance gates on its OWN slot,
-				// while the peer's signature is carried by the artifact we
-				// received and content-verified (the fatal /verify/content gate).
-				// Fields that are not a party DID — the single-instance
-				// multi-signer flow names them per signatory — are never skipped.
-				if isRemotePartyField(data.Responsible, cmd.LocalPeer, f) {
-					continue
-				}
-				missing = append(missing, f)
+			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, cmd.DID)
+			if err != nil {
+				return nil, fmt.Errorf("could not read the counterparty signature for %s: %w", cmd.DID, err)
 			}
-			if len(missing) > 0 {
+			if missing := unsignedSignatureFields(required, signedFields, data.Responsible, cmd.LocalPeer, peerSig); len(missing) > 0 {
 				return nil, fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
 			}
 		}
@@ -283,14 +282,62 @@ func hashDeploymentPayload(payload map[string]any) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// unsignedSignatureFields returns the declared signature fields this instance
+// holds no signature for, and so must refuse to deploy on (DCS-NFR-BR-03).
+//
+// A field is satisfied by a local SIGNED signature row, or — for a field naming
+// a counterparty — by the cross-instance signature that peer shipped. The
+// counterparty signs on ITS instance and that signature row never reaches ours,
+// so demanding a local row for it would make every federated contract
+// undeployable on both sides; accepting the field unconditionally, which is what
+// this replaced, let either party deploy a contract the other had never seen.
+// The peer's JAdES is the evidence in between: it is verified against that
+// peer's published assertion key on receipt, and a peer ships it only once its
+// own copy is SIGNED (dcstodcs/synchronizer.go jadesForSignedContract).
+//
+// Only the counterparty this instance actually holds a signature FROM is
+// satisfied that way, and only one such artifact is stored per contract
+// (contract_sync_signatures is keyed by contract), so this admits a two-party
+// contract and refuses any further remote party for want of evidence.
+//
+// A field that names no party of this contract — the single-instance
+// multi-signer flow names its fields per signatory — always needs a local
+// signature.
+func unsignedSignatureFields(required, signedLocally []string, resp *db.Responsible, localPeer string, peerSig *db2.SyncSignature) []string {
+	signed := make(map[string]bool, len(signedLocally))
+	for _, f := range signedLocally {
+		signed[f] = true
+	}
+
+	var missing []string
+	for _, f := range required {
+		if signed[f] {
+			continue
+		}
+		if isRemotePartyField(resp, localPeer, f) && peerSignedField(peerSig, f) {
+			continue
+		}
+		missing = append(missing, f)
+	}
+	return missing
+}
+
 // isRemotePartyField reports whether a declared signature field belongs to a
 // party other than this instance. Slots are named by the signing party's DID, so
-// a slot naming the counterparty is one whose signature is produced, recorded
-// and activated in the peer's own deployment. A field that is not a party DID is
-// never remote.
+// a slot naming the counterparty is one whose signature is produced and recorded
+// in the peer's own deployment. A field that is not a party DID is never remote.
 func isRemotePartyField(resp *db.Responsible, localPeer, field string) bool {
-	if resp == nil || localPeer == "" || field == "" || field == localPeer {
+	if resp == nil || localPeer == "" || field == "" || identity.SameDIDWeb(field, localPeer) {
 		return false
 	}
 	return field == resp.Creator || field == resp.Counterparty
+}
+
+// peerSignedField reports whether the stored cross-instance signature was
+// shipped by the party this field names.
+func peerSignedField(peerSig *db2.SyncSignature, field string) bool {
+	if peerSig == nil {
+		return false
+	}
+	return identity.SameDIDWeb(peerSig.FromPeerDID, field)
 }

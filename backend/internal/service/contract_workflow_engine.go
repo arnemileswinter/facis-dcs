@@ -1515,6 +1515,7 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		DeploymentRepo: s.DeploymentRepo,
 		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
 	}
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {

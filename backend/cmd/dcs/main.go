@@ -787,7 +787,9 @@ func main() {
 			DeploymentRepo: cweDeploymentRepo,
 			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
+			PeerSigs:       &syncRepo,
 		},
+		LocalPeer: did,
 	}
 	go func() {
 		if err := deploySub.Start(deploySubClient); err != nil {
