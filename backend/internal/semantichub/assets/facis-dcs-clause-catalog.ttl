@@ -11,6 +11,20 @@
 # of truth: authoring a clause type here changes both the generated form and
 # what's enforced. Versions independently of the canonical shapes
 # (kind="shapes", name="clause-catalog" vs. name="facis-dcs").
+#
+# This file is also the DECLARATION of the terms below — dcs:PaymentClause,
+# dcs:amount, dcs:currency, dcs:dueDays, dcs:invoiceReference. There is no
+# ontology to look them up in and there is deliberately not going to be one:
+# a property shape already carries the datatype, the permitted values, the
+# bounds, the name and the description, so a second declaration elsewhere
+# could only repeat it or contradict it. sh:name and sh:description are what
+# a reader and a generated form both read.
+#
+# These are also the only value constraints in the system that are enforced.
+# The dcs:pattern / dcs:minInclusive / dcs:allowedValue in
+# facis-sla-ontology.ttl drive form widgets and a client-side check; the
+# sh:pattern / sh:in / sh:minInclusive here are compared against submitted
+# values by the SHACL engine at offer, submit and sign.
 
 dcs:PaymentClauseShape
   a sh:NodeShape ;
