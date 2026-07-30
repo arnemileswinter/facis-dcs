@@ -18,6 +18,8 @@ import AuditView from './AuditView.vue'
 withDefaults(
   defineProps<{
     title: string
+    nameError?: string
+    descriptionError?: string
   }>(),
   {},
 )
@@ -74,7 +76,7 @@ const { isManager } = useTemplatePermissions()
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
-              <DetailsEditor />
+              <DetailsEditor :name-error="nameError" :description-error="descriptionError" />
             </div>
           </div>
         </div>

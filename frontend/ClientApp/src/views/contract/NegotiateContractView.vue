@@ -30,6 +30,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractData, SemanticConditionValue } from '@/models/contract-data'
@@ -158,7 +159,7 @@ const loadContract = async () => {
       await restoreNegotiationDraft()
     }
   } catch (err: unknown) {
-    console.error('Failed to load contract', err)
+    reportActionError(err, 'Load negotiation')
   }
 }
 
@@ -220,7 +221,7 @@ const negotiateContractChange = async () => {
       await loadContract()
     }
   } catch (err) {
-    console.error('Failed to submit change request', err)
+    reportActionError(err, 'Propose contract changes')
   } finally {
     isSubmitting.value = false
   }
@@ -243,7 +244,7 @@ const saveNegotiationDraft = async () => {
     draftSaved.value = true
     errorStore.add('Negotiation draft saved. It stays private until you propose it.', 'info')
   } catch (err) {
-    console.error('Failed to save negotiation draft', err)
+    reportActionError(err, 'Save negotiation draft')
   } finally {
     isSavingDraft.value = false
   }
@@ -257,7 +258,7 @@ const discardNegotiationDraft = async () => {
     draftSaved.value = false
     await loadContract()
   } catch (err) {
-    console.error('Failed to discard negotiation draft', err)
+    reportActionError(err, 'Discard negotiation draft')
   } finally {
     isSavingDraft.value = false
   }
@@ -285,7 +286,7 @@ async function restoreNegotiationDraft() {
       draftValues.forEach((value) => contractContentValuesStore.setSemanticConditionValue(value))
     }
   } catch (err) {
-    console.error('Failed to restore negotiation draft', err)
+    reportActionError(err, 'Restore negotiation draft')
   }
 }
 
@@ -307,7 +308,7 @@ const submitContract = async () => {
       }
     }
   } catch (err) {
-    console.error('Failed to submit', err)
+    reportActionError(err, 'Submit negotiated contract')
   } finally {
     isSubmitting.value = false
   }

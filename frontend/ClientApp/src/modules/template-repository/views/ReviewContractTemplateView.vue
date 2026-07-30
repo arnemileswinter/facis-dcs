@@ -15,6 +15,7 @@ import VerificationFindingsDialog from '@/components/VerificationFindingsDialog.
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
+import { reportActionError } from '@/utils/report-action-error'
 import type { PartialContractTemplate } from '@/models/contract-template'
 
 const router = useRouter()
@@ -66,7 +67,7 @@ watch(
         })
       })
       .catch((error: unknown) => {
-        console.error('Failed to load template for editing', error)
+        reportActionError(error, 'Load template review')
       })
   },
   { immediate: true },
@@ -77,7 +78,7 @@ const forwardToApproval = async (comment: string) => {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for submission')
+    reportActionError(new Error('The current template version is unavailable.'), 'Forward template')
     return
   }
   try {
@@ -93,7 +94,7 @@ const forwardToApproval = async (comment: string) => {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Submission failed', error)
+    reportActionError(error, 'Forward template')
   } finally {
     isSubmitting.value = false
   }
@@ -103,7 +104,7 @@ const returnToDraft = async () => {
   const did = draftStore.did
   const updatedAt = draftStore.updated_at
   if (!did || !updatedAt) {
-    console.error('Missing did or updated_at for rejection')
+    reportActionError(new Error('The current template version is unavailable.'), 'Return template to draft')
     return
   }
   try {
@@ -128,7 +129,7 @@ const returnToDraft = async () => {
     })
     await navStore.goToPreviousRoute()
   } catch (error) {
-    console.error('Rejection failed', error)
+    reportActionError(error, 'Return template to draft')
   } finally {
     isSubmitting.value = false
   }

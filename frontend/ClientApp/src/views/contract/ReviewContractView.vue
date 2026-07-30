@@ -22,6 +22,7 @@ import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -87,7 +88,7 @@ watch(
           applyContractDataToDraft(contract.value?.contract_data)
         }
       } catch (err: unknown) {
-        console.error('Failed to load contract', err)
+        reportActionError(err, 'Load contract review')
       }
     }
   },
@@ -117,7 +118,11 @@ const runLocalSemanticVerification = () => {
 const forwardToApproval = async (comment: string) => {
   const currentContract = contract.value
   if (!isReviewer.value || currentContract?.state !== ContractState.submitted || !currentContract.updated_at) {
-    throw new Error('Only a reviewer can forward a current submitted contract to approval')
+    reportActionError(
+      new Error('Only a reviewer can forward a current submitted contract to approval.'),
+      'Forward contract',
+    )
+    return
   }
   const response = await contractWorkflowService.submit({
     did: currentContract.did,
@@ -150,7 +155,7 @@ const returnToNegotiation = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
-    console.error('Failed to return to negotiation', err)
+    reportActionError(err, 'Return contract to negotiation')
   } finally {
     isSubmitting.value = false
   }
