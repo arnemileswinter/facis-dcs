@@ -420,8 +420,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("retrieve", func() {
 		Description("fetch contracts, recording an audit-trail entry for the read.")
 		Meta("dcs:requirements", "DCS-IR-SM-01")
-		Meta("dcs:ui", "Secure Contract Viewer", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Signer Authorization & PoA application")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -453,8 +451,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("retrieve_by_id", func() {
 		Description("fetch a contract and its signature envelope by DID, recording an audit-trail entry for the read.")
 		Meta("dcs:requirements", "DCS-IR-SM-01")
-		Meta("dcs:ui", "Secure Contract Viewer")
-		Meta("dcs:sm:components", "Signer Authorization & PoA application")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -480,8 +476,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("verify", func() {
 		Description("check contract integrity & envelope.")
 		Meta("dcs:requirements", "DCS-IR-SM-02")
-		Meta("dcs:ui", "Secure Contract Viewer")
-		Meta("dcs:sm:components", "Counterparty Authorization & PoA verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -505,7 +499,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("provenance", func() {
 		Description("The C2PA provenance chain embedded in the signed/exported contract PDF (DCS-OR-C2PA-008): one entry per manifest in the JUMBF store, oldest first, with its dcs.lifecycle assertion. Powers the Secure Contract Viewer's provenance display.")
 		Meta("dcs:requirements", "DCS-OR-C2PA-008")
-		Meta("dcs:ui", "Secure Contract Viewer")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
@@ -790,8 +783,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("validate", func() {
 		Description("validate the contract's applied signature(s) and return any compliance findings.")
 		Meta("dcs:requirements", "DCS-IR-SM-04", "DCS-IR-SM-05")
-		Meta("dcs:ui", "Secure Contract Viewer", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -815,8 +806,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("revoke", func() {
 		Description("revoke a signature.")
 		Meta("dcs:requirements", "DCS-IR-SM-06")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Timestamping")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -840,8 +829,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("audit", func() {
 		Description("retrieve compliance/audit logs.")
 		Meta("dcs:requirements", "DCS-IR-SM-08")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -866,8 +853,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("view", func() {
 		Description("Signature Compliance Viewer (DCS-FR-SM-26): per-signature signer identity, credential class/signature level, status, and timestamps, plus the contract's cryptographic integrity findings — the data behind the viewer UI.")
 		Meta("dcs:requirements", "DCS-FR-SM-26", "DCS-IR-SM-05")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
@@ -897,8 +882,6 @@ var _ = Service("SignatureManagement", func() {
 	Method("compliance", func() {
 		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: signature level SES/AES/QES, signature status, presence of active signed credentials) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
 		Meta("dcs:requirements", "DCS-IR-SM-07")
-		Meta("dcs:ui", "Signature Compliance Viewer")
-		Meta("dcs:sm:components", "Counterparty Contract Signature Verification")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")

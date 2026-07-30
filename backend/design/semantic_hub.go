@@ -74,7 +74,6 @@ var _ = Service("SemanticHub", func() {
 	Method("register", func() {
 		Description("Register a new version of a schema (context/shapes/profile). Versions are immutable and monotonic per name+kind; when activate is set the new version becomes the one all newly produced documents anchor to.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -109,7 +108,6 @@ var _ = Service("SemanticHub", func() {
 	Method("rollback", func() {
 		Description("Make a previously registered version the active one again (UC-02-08: schema versioning and rollback).")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Template Management Dashboard")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
@@ -292,7 +290,6 @@ var _ = Service("SemanticHub", func() {
 	Method("list", func() {
 		Description("List every (name, kind) entry the hub holds, with active/latest version summary. Public like retrieve: the hub's inventory is not more sensitive than its content.")
 		Meta("dcs:requirements", "DCS-FR-TR-03")
-		Meta("dcs:ui", "Semantic Hub Dashboard")
 		NoSecurity()
 
 		Result(ArrayOf(SemanticSchemaListEntry))
@@ -309,7 +306,6 @@ var _ = Service("SemanticHub", func() {
 	Method("clauses", func() {
 		Description("List the active clause catalog (DCS-FR-TR-03/TR-04, Phase 3, ADR-10): typed clause NodeShapes the template builder's palette generates a form from, pre-digested into a JSON form-schema server-side (each clause type's target class, label, and properties with their datatype/sh:in/min-max constraints) plus the raw SHACL Turtle for a future shacl-form-style client. Public, like resolve_context: a produced contract's typed clauses are validated against these same shapes (validateAgainstHubShapes), and an external verifier resolving sh:shapesGraph needs to read them too.")
 		Meta("dcs:requirements", "DCS-FR-TR-03", "DCS-FR-TR-04")
-		Meta("dcs:ui", "Template Management Dashboard")
 		NoSecurity()
 
 		Result(ClauseCatalogResponse)
