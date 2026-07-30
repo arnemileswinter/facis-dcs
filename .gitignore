@@ -54,5 +54,5 @@ tests/bdd/.coverage.*
 .claude/*
 docs/anforderung.md
 testWallet/keys/signing/
-.agents/skills/ui-improvement/SKILL.md
-.agents/skills/ui-improvement/agents/openai.yaml
+.agents/
+/AGENTS.md
