@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
 import {
   composeConstraintTree,
   type GroupDraft,
@@ -194,11 +194,13 @@ watch(rule, (value) => {
 
 // Only a modelValue this builder did not itself emit is an external one worth
 // reseeding from: an in-progress rule that momentarily reads incomplete emits
-// null too, and must keep the draft the user is still editing.
+// null too, and must keep the draft the user is still editing. A host holding
+// the rule in a ref hands it back wrapped in a reactive proxy, so the rule this
+// builder emitted is recognised by its raw target, not by the reference.
 watch(
   () => props.modelValue,
   (value) => {
-    if (value === lastEmitted) return
+    if (toRaw(value) === toRaw(lastEmitted)) return
     lastEmitted = value
     ruleId.value = value?.['@id'] ?? `urn:uuid:${crypto.randomUUID()}`
     Object.assign(draft, seed(value))

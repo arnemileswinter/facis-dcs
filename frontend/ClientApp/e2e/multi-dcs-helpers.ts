@@ -1059,6 +1059,35 @@ export async function acceptPeerProposalOn(inst: Instance, contractDid: string):
 }
 
 /**
+ * Opens an instance's negotiate view and waits for it to have loaded the
+ * contract: Submit only renders once contract.state is known, and the counts
+ * probed after it do NOT auto-wait — probing straight after navigation reported
+ * "no open decisions" while the fetch was still in flight, silently skipping the
+ * accept and leaving the round unresolvable.
+ *
+ * The navigation is repeated rather than waited on longer because the suite runs
+ * against a Vite dev server: a page load that loses its module requests
+ * mid-flight (net::ERR_NETWORK_CHANGED took out ~60 of them on the second
+ * instance in run 30573745114) leaves an app that never mounts, and no wait
+ * recovers a document that has already finished loading. A genuinely absent
+ * Submit still fails, on the same assertion.
+ */
+async function openNegotiateView(inst: Instance, contractDid: string): Promise<void> {
+  const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    const mounted = await submit
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (mounted) return
+  }
+  await expect(submit, `negotiate view never mounted on ${inst.origin} for ${contractDid}`).toBeVisible({
+    timeout: 30_000,
+  })
+}
+
+/**
  * Accepts every outstanding change request on this instance (NegotiationList
  * Show → Accept → /contract/respond) until none remain.
  *
@@ -1071,13 +1100,7 @@ export async function acceptPeerProposalOn(inst: Instance, contractDid: string):
  */
 export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
-    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-    // Wait for the contract to actually be loaded before probing for decisions.
-    // Submit only renders once contract.state is known, and isVisible() below
-    // does NOT auto-wait — probing straight after navigation reported "no open
-    // decisions" while the fetch was still in flight, silently skipping the
-    // accept and leaving the round unresolvable.
-    await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
+    await openNegotiateView(inst, contractDid)
     const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
     if (pending === 0) break
 
@@ -1086,8 +1109,7 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
     // by its own author), so it must be stepped over to reach the peer's.
     let accepted = false
     for (let i = 0; i < pending && !accepted; i++) {
-      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-      await expect(inst.page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible({ timeout: 30_000 })
+      await openNegotiateView(inst, contractDid)
       const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
       if (!(await showBtn.isVisible().catch(() => false))) continue
       await showBtn.click()
