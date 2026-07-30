@@ -37,11 +37,16 @@ class OrceAuditControlService:
                         json=payload,
                         timeout=context.http_timeout_seconds,
                     )
-                break
+                # Kubernetes marks the replacement pod ready before Node-RED
+                # has necessarily registered every flow route. A 404 directly
+                # after an ORCE restart is therefore a transient readiness
+                # state, just like a refused connection.
+                if response.status_code != 404 or time.monotonic() >= deadline:
+                    break
             except (requests.ConnectionError, requests.Timeout):
                 if time.monotonic() >= deadline:
                     raise
-                time.sleep(2)
+            time.sleep(2)
         assert response.status_code in (200, 204), (
             f"ORCE audit control endpoint {url} failed: "
             f"{response.status_code} {response.text}"
