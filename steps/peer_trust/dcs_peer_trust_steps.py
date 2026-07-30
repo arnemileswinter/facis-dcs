@@ -1471,49 +1471,123 @@ def step_when_designate_target_on_instance(context, label):
     _designate_target(context, base_url)
 
 
+# The counterparty identity instance B runs its own workflow under. A BDD
+# identity is only (roles, organization), and the participant it resolves to
+# (the organization — auth/oid4vp/verify.go sets ParticipantDID from it) is
+# what the open-decision check compares against: HasOpenNegotiationDecisions
+# excludes a pending decision on a change request the CALLER itself authored
+# and nobody else's, so the negotiate that opens the round and the submit that
+# closes it have to come from one and the same participant. A dedicated
+# organization keeps that pairing out of the suite-shared role tokens, whose
+# state other scenarios rely on.
+_B_COUNTERPARTY_ORG = "BDD Peer Trust Counterparty"
+
+# Contract Manager is the scope /contract/negotiate grants the responder of an
+# inbound offer (design/contract_workflow_engine.go); Contract Negotiator is
+# the local role submit.go's NEGOTIATION branch accepts. One token carries
+# both, so every call of the round is made by one participant.
+_B_COUNTERPARTY_ROLES = ["Contract Manager", "Contract Negotiator"]
+
+
+def _post_on_b_with_fresh_updated_at(context, path: str, payload: dict, headers: dict, what: str):
+    """POST a mutating contract command to instance B, reading updated_at from
+    B's OWN copy immediately beforehand. B's copy moves without B acting — the
+    peer's ships land on it asynchronously — so a value read earlier in the
+    step can already be behind the lost-update guard by the time the call is
+    made; a guard refusal is answered by re-reading rather than by failing the
+    scenario on a race it is not testing."""
+    c_did = context.cross_instance_contract_did
+    last = None
+    for _ in range(3):
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=headers)
+        assert retrieve.status_code == 200, f"could not read {c_did} on instance B: {retrieve.text}"
+        body = dict(payload, did=c_did, updated_at=retrieve.json().get("updated_at"))
+        last = post_json(context, f"{context.base_url_b}{path}", body, headers=headers)
+        if last.status_code == 200:
+            return last
+        if "updated elsewhere" not in last.text.lower():
+            break
+        time.sleep(2)
+    raise AssertionError(f"{what} failed on instance B: {last.status_code} {last.text}")
+
+
 @when("instance B drives its own copy of the contract to APPROVED through its own local workflow")
 def step_when_drive_to_approved_on_b(context):
-    """B received the contract as an inbound offer and runs its OWN workflow on
-    it (ADR-13), through its own local roles: OFFERED -> NEGOTIATION ->
-    SUBMITTED -> REVIEWED -> APPROVED, the same two-submit pattern A's own step
-    above uses."""
-    c_did = context.cross_instance_contract_did
-    with _as_instance(context, context.base_url_b):
-        manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_b)
-        for _ in range(2):
-            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=manager_h)
-            assert retrieve.status_code == 200, retrieve.text
-            resp = post_json(
-                context,
-                f"{context.base_url_b}/contract/submit",
-                {"did": c_did, "updated_at": retrieve.json().get("updated_at")},
-                headers=manager_h,
-            )
-            assert resp.status_code == 200, f"submit failed on instance B: {resp.status_code} {resp.text}"
+    """B holds an inbound OFFER, not a draft of its own, and runs its OWN
+    workflow on it (ADR-13): OFFERED -> NEGOTIATION -> SUBMITTED -> REVIEWED ->
+    APPROVED.
 
-        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_b)
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=reviewer_h)
-        assert retrieve.status_code == 200, retrieve.text
-        review_submit = post_json(
-            context,
-            f"{context.base_url_b}/contract/submit",
-            {"did": c_did, "updated_at": retrieve.json().get("updated_at"), "forward_to": "approval"},
-            headers=reviewer_h,
+    Leaving OFFERED is where B differs from A. /contract/submit is the
+    CREATOR's path — submit.go's DRAFT/OFFERED branch requires the caller to be
+    the contract's creator, and receivepdf.go records the ORIGIN peer as
+    CreatedBy on a received copy, so no local user of B can ever be it. The
+    responder's path is /contract/negotiate: transition.go declares the
+    Offered -> Negotiation edge for exactly this, and negotiate.go derives the
+    authority for an inbound offer (Origin != localPeer) from being the
+    designated counterparty rather than from a local negotiator task.
+
+    The change request is FREE TEXT on purpose. A structured redline is applied
+    to contract_data immediately and re-shipped as a fresh PDF (negotiate.go),
+    which would rewrite the document instance A has already signed — the very
+    thing this scenario measures. Free text decodes into no ChangeRequest, so
+    it is recorded for the negotiation audit trail and changes nothing.
+
+    From NEGOTIATION on, the received copy is fully equipped for B's own
+    workflow — receivepdf.go assigns B's peer DID to the reviewer, approver and
+    negotiator tasks — so the tail is the same submit / submit / review /
+    approve sequence instance A runs, and the one the two-instance Playwright
+    vertical drives through the UI (multi-dcs-helpers settleToApprovedOn).
+    """
+    with _as_instance(context, context.base_url_b):
+        counterparty_h = AuthService.get_headers_for_roles(
+            _B_COUNTERPARTY_ROLES,
+            api_base=context.base_url_b,
+            organization=_B_COUNTERPARTY_ORG,
         )
-        assert review_submit.status_code == 200, (
-            f"reviewer forward-to-approval failed on instance B: {review_submit.status_code} {review_submit.text}"
+        _post_on_b_with_fresh_updated_at(
+            context,
+            "/contract/negotiate",
+            {
+                "negotiated_by": AuthService.username_for_roles(_B_COUNTERPARTY_ROLES),
+                "change_request": "Reviewed on the counterparty side; the offer is accepted as it stands.",
+            },
+            counterparty_h,
+            "opening the negotiation on the received offer",
+        )
+
+        # Submit, from the participant that opened the round, until the round
+        # closes: the first submit closes B's negotiation task and folds the
+        # round into contract_version + 1, leaving the contract in NEGOTIATION;
+        # the next finds no negotiation against the new version and advances to
+        # SUBMITTED (submit.go's NEGOTIATION branch). Driving on the state
+        # rather than a fixed count keeps this right if a peer ship bumps the
+        # version in between and the first submit already finds nothing to
+        # merge — one submit too many would land in the reviewer's branch and
+        # be refused for the role.
+        for _ in range(4):
+            if _cross_instance_state(context, context.base_url_b) != "NEGOTIATION":
+                break
+            _post_on_b_with_fresh_updated_at(context, "/contract/submit", {}, counterparty_h, "submit")
+        state = _cross_instance_state(context, context.base_url_b)
+        assert state == "SUBMITTED", (
+            f"expected instance B's copy to close its negotiation round and reach SUBMITTED, got {state!r}"
+        )
+
+        # Review and approval are peer-scoped tasks (IsValidReviewer /
+        # IsValidApprover check the instance DID, not the participant), so the
+        # suite's shared role tokens are the right callers for them.
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_b)
+        _post_on_b_with_fresh_updated_at(
+            context,
+            "/contract/submit",
+            {"forward_to": "approval"},
+            reviewer_h,
+            "reviewer forward-to-approval",
         )
 
         approver_h = AuthService.get_headers_for_roles(["Contract Approver"], api_base=context.base_url_b)
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=approver_h)
-        assert retrieve.status_code == 200, retrieve.text
-        approve = post_json(
-            context,
-            f"{context.base_url_b}/contract/approve",
-            {"did": c_did, "updated_at": retrieve.json().get("updated_at")},
-            headers=approver_h,
-        )
-        assert approve.status_code == 200, f"approve failed on instance B: {approve.status_code} {approve.text}"
+        approve = _post_on_b_with_fresh_updated_at(context, "/contract/approve", {}, approver_h, "approve")
+        context.requests_response = approve
 
 
 @when("instance B applies a ceremony-backed signature to the contract")
