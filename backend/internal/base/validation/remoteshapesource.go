@@ -38,8 +38,8 @@ func (r RemoteShapeSource) httpClient() *http.Client {
 	return &http.Client{Timeout: remoteShapeSourceTimeout}
 }
 
-func (r RemoteShapeSource) ActiveShapes(ctx context.Context) (string, int, error) {
-	return r.ShapesAt(ctx, r.ShapesName, 0)
+func (r RemoteShapeSource) CanonicalShapesName() string {
+	return r.ShapesName
 }
 
 func (r RemoteShapeSource) ActiveProfile(ctx context.Context) (string, int, error) {

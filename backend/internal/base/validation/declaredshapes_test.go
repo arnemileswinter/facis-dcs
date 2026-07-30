@@ -43,10 +43,72 @@ func libraryShapeSource(t *testing.T) func() {
 	t.Helper()
 	return swapShapeSource(t, fixtureShapeSource{
 		shapesTTL:   mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-shapes.ttl"),
+		catalogTTL:  mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-clause-catalog.ttl"),
 		profileYAML: "id: t\nversion: t\nrules: []\n",
 		contextJSON: mustReadRepoFile("backend/internal/semantichub/assets/facis-dcs-context.jsonld"),
 		libraries:   map[string]string{"legal-shapes": legalLibraryShapes},
 	})
+}
+
+// A submitter does not choose its own gate. sh:shapesGraph is an ordinary
+// top-level key of client-submitted contract JSON-LD, so a document naming
+// only a registered library — or only the clause catalog — must not be
+// validated against that graph ALONE: the canonical DCS envelope shapes and
+// the catalog are resolved for every document whatever it declares, and a
+// declaration can only ADD.
+func TestDeclaringOtherGraphsCannotEscapeTheCanonicalShapes(t *testing.T) {
+	restore := libraryShapeSource(t)
+	defer restore()
+
+	escapes := map[string]any{
+		"the clause catalog alone":     map[string]any{"@id": hubShapesAnchor(clauseCatalogEntryName, 0)},
+		"a registered library alone":   map[string]any{"@id": hubShapesAnchor("legal-shapes", 3)},
+		"a library beside the catalog": []any{hubShapesAnchor("legal-shapes", 3), hubShapesAnchor(clauseCatalogEntryName, 0)},
+	}
+	for name, anchor := range escapes {
+		t.Run(name, func(t *testing.T) {
+			contract := canonicalAuditContract()
+			contract["sh:shapesGraph"] = anchor
+			// A canonical-shapes violation: dcs:metadata without a title.
+			contract["dcs:metadata"] = map[string]any{"@type": "dcs:ContractMetadata"}
+			// A clause-catalog violation: a negative payment amount.
+			contract["dcs:typedClause"] = map[string]any{
+				"@id":          "urn:uuid:payment-escape",
+				"@type":        "dcs:PaymentClause",
+				"dcs:amount":   map[string]any{"@value": -5, "@type": "xsd:integer"},
+				"dcs:currency": "EUR",
+			}
+
+			findings, err := AuditContractContent(context.Background(), contract, mapPolicy(true, false), ContractContentAuditMetadata{})
+			require.NoError(t, err)
+			requirePolicyFinding(t, findings, "title-MinCountConstraintComponent")
+			requirePolicyFinding(t, findings, "amount-MinInclusiveConstraintComponent")
+
+			require.ErrorContains(t, RequireHubConformance(context.Background(), contract), "title")
+		})
+	}
+}
+
+// The pin still holds where it is a pin and not an escape: the version a
+// document names for the CANONICAL graph is the version it is validated
+// against, and naming it twice at two versions is a contradiction, not a
+// choice the resolver makes silently.
+func TestCanonicalShapesVersionIsPinnedByTheDocument(t *testing.T) {
+	restore := libraryShapeSource(t)
+	defer restore()
+
+	contract := canonicalAuditContract()
+	contract["sh:shapesGraph"] = map[string]any{"@id": hubShapesAnchor(hubShapesEntryName, 7)}
+	findings, err := AuditContractContent(context.Background(), contract, mapPolicy(true, false), ContractContentAuditMetadata{})
+	require.NoError(t, err)
+	require.Empty(t, shaclOnlyFindings(findings))
+
+	contract["sh:shapesGraph"] = []any{
+		hubShapesAnchor(hubShapesEntryName, 7),
+		hubShapesAnchor(hubShapesEntryName, 2),
+	}
+	_, err = AuditContractContent(context.Background(), contract, mapPolicy(true, false), ContractContentAuditMetadata{})
+	require.ErrorContains(t, err, "two versions")
 }
 
 // The pin is a pin: a document is validated against the shapes graphs it
@@ -161,12 +223,40 @@ func TestNormalizationDeclaresTheLibraryGoverningADataObject(t *testing.T) {
 	require.Equal(t, map[string]any{"@id": SchemaSHACLShapesV1}, plainDoc["sh:shapesGraph"])
 }
 
-// Anchors are added, never rewritten (ADR-8): a document that already
-// declares the library keeps the version it was authored under, even when
-// the hub has since activated a newer one.
+// Anchors are added, never rewritten (ADR-8) — but "already declared" is name
+// AND version. A document arriving with an OLD version of the library
+// pre-declared does not thereby suppress the active anchor: it is validated
+// against both, so pre-declaring a laxer version cannot buy a laxer verdict.
+func TestNormalizationAddsTheActiveLibraryBesideAStalePreDeclaredVersion(t *testing.T) {
+	SetShapeLibraryAnchors(map[string]ShapeLibraryAnchor{
+		legalPersonClass: {Name: "legal-shapes", URL: hubShapesAnchor("legal-shapes", 5)},
+	})
+	t.Cleanup(func() { SetShapeLibraryAnchors(nil) })
+
+	document := templateWithDataObject(t, legalPersonNode())
+	document["sh:shapesGraph"] = []any{
+		map[string]any{"@id": hubShapesAnchor(hubShapesEntryName, 1)},
+		map[string]any{"@id": hubShapesAnchor("legal-shapes", 1)},
+	}
+	raw, err := datatype.NewJSON(document)
+	require.NoError(t, err)
+	normalized, err := NormalizeTemplateData(&raw)
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*normalized, &doc))
+	require.Equal(t, []any{
+		map[string]any{"@id": hubShapesAnchor(hubShapesEntryName, 1)},
+		map[string]any{"@id": hubShapesAnchor("legal-shapes", 1)},
+		map[string]any{"@id": hubShapesAnchor("legal-shapes", 5)},
+	}, doc["sh:shapesGraph"])
+}
+
+// The same library at the SAME version is declared once: re-normalizing a
+// document does not grow its anchor list.
 func TestNormalizationKeepsAnAlreadyDeclaredLibraryVersion(t *testing.T) {
 	SetShapeLibraryAnchors(map[string]ShapeLibraryAnchor{
-		legalPersonClass: {Name: "legal-shapes", URL: hubShapesAnchor("legal-shapes", 3)},
+		legalPersonClass: {Name: "legal-shapes", URL: hubShapesAnchor("legal-shapes", 1)},
 	})
 	t.Cleanup(func() { SetShapeLibraryAnchors(nil) })
 

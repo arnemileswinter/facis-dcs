@@ -35,8 +35,7 @@ func exclusionsEqual(a, b []c2paExclusion) bool {
 }
 
 func findObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
-	marker := []byte(fmt.Sprintf("%d 0 obj\n", objectID))
-	objPos := bytes.Index(pdf, marker)
+	objPos := findFirstObjectHeaderOffset(pdf, objectID)
 	if objPos < 0 {
 		return 0, 0, false
 	}
@@ -69,25 +68,6 @@ func findLastObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
 	}
 	streamEnd := streamStart + streamEndRel
 	return streamStart, streamEnd - streamStart, true
-}
-
-func findLastObjectHeaderOffset(pdf []byte, objID int) int {
-	headerAtStart := []byte(fmt.Sprintf("%d 0 obj\n", objID))
-	headerWithNewline := []byte(fmt.Sprintf("\n%d 0 obj\n", objID))
-	best := -1
-	if bytes.HasPrefix(pdf, headerAtStart) {
-		best = 0
-	}
-	searchFrom := 0
-	for {
-		rel := bytes.Index(pdf[searchFrom:], headerWithNewline)
-		if rel < 0 {
-			break
-		}
-		best = searchFrom + rel + 1
-		searchFrom = best + 1
-	}
-	return best
 }
 
 func sha256WithExclusions(data []byte, exclusions []c2paExclusion) [32]byte {

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
 
 // The retry pass has no event to work from — the one that first asked for the
@@ -41,6 +44,100 @@ func TestRetryOneSurvivesAFailedRegeneration(t *testing.T) {
 	s.retryOne("template", "did:template:1", func(context.Context, minimalCWEEvent) error {
 		return errors.New("artifact store unavailable")
 	})
+}
+
+// The retry sweep selects contracts by "no stored PDF" alone, and the
+// regeneration path's answer to a missing artifact is a FRESH render. For a
+// contract past signing — whose stored CID went missing because the
+// peer-receive transaction rolled back after the row committed — that render is
+// an UNSIGNED PDF, issued a new lifecycle VC and stamped as authoritative over
+// the counterparty's provenance, every sweep until it succeeds. A frozen
+// contract must never reach the fresh-render branch.
+func TestAFrozenContractWithoutAStoredPDFIsNeverFreshRendered(t *testing.T) {
+	frozen, err := frozenArtifactVerdict("did:contract:1", "SIGNED", "", "", "active")
+	if err == nil {
+		t.Fatal("a signed contract with no stored PDF must refuse regeneration, not fall through to a fresh render")
+	}
+	if frozen {
+		t.Fatal("the refusal must be reported as an error, not as nothing-to-do")
+	}
+
+	// The same contract WITH its signed artifact is simply left alone.
+	frozen, err = frozenArtifactVerdict("did:contract:1", "SIGNED", "bafy...", "active", "active")
+	if err != nil || !frozen {
+		t.Fatalf("a stored frozen artifact must be left untouched, got frozen=%t err=%v", frozen, err)
+	}
+
+	// A pre-signing contract still regenerates, with or without an artifact.
+	for _, storedCID := range []string{"", "bafy..."} {
+		frozen, err = frozenArtifactVerdict("did:contract:1", "DRAFT", storedCID, "draft", "draft")
+		if err != nil || frozen {
+			t.Fatalf("a draft contract must still regenerate (cid %q), got frozen=%t err=%v", storedCID, frozen, err)
+		}
+	}
+}
+
+// The sweep's work-list query excludes those states outright, so a frozen
+// contract does not even occupy a slot in the fixed-size batch.
+func TestTheSweepExcludesEveryFrozenContractState(t *testing.T) {
+	excluded := map[string]bool{}
+	for _, state := range frozenContractStates() {
+		excluded[state] = true
+	}
+
+	for _, state := range contractstate.All() {
+		c2paState, err := provenance.MapCWEStateToC2PA(state.String())
+		if err != nil {
+			t.Fatalf("state %s has no C2PA mapping: %v", state, err)
+		}
+		want := provenance.IsFrozenC2PAState(c2paState)
+		if got := excluded[state.String()]; got != want {
+			t.Errorf("state %s: excluded from the sweep = %t, want %t (C2PA state %q)", state, got, want, c2paState)
+		}
+	}
+	if !excluded[contractstate.Signed.String()] || excluded[contractstate.Draft.String()] {
+		t.Fatal("SIGNED must be excluded and DRAFT must not")
+	}
+}
+
+// 25 permanently unrenderable rows would otherwise fill the batch on every
+// tick forever and starve every recoverable failure behind them. A failing
+// entity backs off, and after its attempts are spent it drops out of the work
+// list entirely.
+func TestRetryBudgetBacksOffAndGivesUp(t *testing.T) {
+	budget := &retryBudget{}
+	budget.pace(time.Minute)
+	now := time.Now()
+
+	if !budget.ready("contract", "did:contract:1", now) {
+		t.Fatal("an entity with no failure history is attempted immediately")
+	}
+	budget.failed("contract", "did:contract:1", now)
+	if budget.ready("contract", "did:contract:1", now.Add(30*time.Second)) {
+		t.Fatal("a failed entity must wait out its backoff instead of being retried on the next tick")
+	}
+	if !budget.ready("contract", "did:contract:1", now.Add(2*time.Minute)) {
+		t.Fatal("the entity must be attempted again once its backoff has elapsed")
+	}
+
+	for attempt := 1; attempt < missingPDFRetryAttempts; attempt++ {
+		budget.failed("contract", "did:contract:1", now)
+	}
+	if budget.ready("contract", "did:contract:1", now.Add(24*time.Hour)) {
+		t.Fatal("an entity that has spent its attempts must not be attempted again")
+	}
+	if got := budget.exhausted("contract"); len(got) != 1 || got[0] != "did:contract:1" {
+		t.Fatalf("the exhausted entity must be excluded from the work-list query, got %v", got)
+	}
+	if got := budget.exhausted("template"); len(got) != 0 {
+		t.Fatalf("templates share no budget with contracts, got %v", got)
+	}
+
+	// A success clears the history: the next failure starts from a fresh budget.
+	budget.succeeded("contract", "did:contract:1")
+	if !budget.ready("contract", "did:contract:1", now) || len(budget.exhausted("contract")) != 0 {
+		t.Fatal("a successful regeneration must clear the entity's budget")
+	}
 }
 
 // The regeneration context carries a deadline, so a wedged pdf-core or artifact

@@ -21,8 +21,15 @@ import (
 // sh:shapesGraph anchor carries.
 const hubShapesEntryName = "facis-dcs"
 
+// clauseCatalogEntryName is semantichub.ClauseCatalogName — envelope
+// vocabulary the canonical entry carries with it, resolvable by name as well.
+const clauseCatalogEntryName = "clause-catalog"
+
 type fixtureShapeSource struct {
-	shapesTTL   string
+	shapesTTL string
+	// catalogTTL is the clause catalog; as on both production sources, the
+	// canonical entry resolves to the canonical shapes WITH the catalog.
+	catalogTTL  string
 	profileYAML string
 	contextJSON string
 	ontologyTTL string
@@ -32,8 +39,8 @@ type fixtureShapeSource struct {
 	externalContexts map[string]string
 }
 
-func (f fixtureShapeSource) ActiveShapes(context.Context) (string, int, error) {
-	return f.shapesTTL, 1, nil
+func (f fixtureShapeSource) CanonicalShapesName() string {
+	return hubShapesEntryName
 }
 
 func (f fixtureShapeSource) ActiveProfile(context.Context) (string, int, error) {
@@ -51,7 +58,13 @@ func (f fixtureShapeSource) ShapesAt(_ context.Context, name string, version int
 	if library, ok := f.libraries[name]; ok {
 		return library, version, nil
 	}
+	if name == clauseCatalogEntryName && f.catalogTTL != "" {
+		return f.catalogTTL, version, nil
+	}
 	if name == hubShapesEntryName {
+		if f.catalogTTL != "" {
+			return f.shapesTTL + "\n\n" + f.catalogTTL, version, nil
+		}
 		return f.shapesTTL, version, nil
 	}
 	return "", 0, fmt.Errorf("shapes %q is not registered", name)

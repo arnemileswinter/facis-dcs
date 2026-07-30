@@ -110,32 +110,47 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 	return mapShaclReport(report, shapesVersion), shapesVersion, nil
 }
 
-// declaredShapes resolves the shapes graphs a document declares into one
-// Turtle document, and the version of the first declared graph — the
-// canonical DCS shapes for every document this system produces, and so the
-// version findings and SHACL evidence are reported against.
+// declaredShapes resolves the shapes graphs a document is validated against
+// into one Turtle document, and the version of the canonical DCS envelope
+// graph — the version findings and SHACL evidence are reported against.
 //
-// A document is never validated against a shapes graph it does not name: an
-// undeclared library registered in the hub cannot change the verdict, which
-// is what makes the same document validate identically on every deployment
-// and years later. A graph the source cannot resolve is a hard failure, and
-// a document that declares nothing (an unanchored fixture, a hand-written
-// document) gets the canonical shapes at their active version — never a
-// registered library.
+// The canonical graph, and the clause catalog the source carries with it, is
+// ALWAYS resolved. sh:shapesGraph is an ordinary top-level key of
+// client-submitted contract JSON-LD, so a document naming only a registered
+// library (or only the catalog) would otherwise be checked by that graph
+// alone and escape dcs:CanonicalContractShape, dcs:ContractFieldShape and the
+// ODRL prose shapes entirely — the gate is not the document's to choose.
+//
+// What the document declares is opt-IN only: it adds registered libraries and
+// it pins the canonical graph's version. So an undeclared library registered
+// in the hub still cannot change the verdict — which is what makes the same
+// document validate identically on every deployment and years later — and a
+// graph the source cannot resolve is still a hard failure.
 func declaredShapes(ctx context.Context, contract map[string]any, source ShapeSource) (string, int, error) {
-	anchors := declaredShapesGraphs(contract)
-	if len(anchors) == 0 {
-		shapesTTL, version, err := source.ActiveShapes(ctx)
-		if err != nil {
-			return "", 0, fmt.Errorf("load active SHACL shapes: %w", err)
+	canonicalName := source.CanonicalShapesName()
+	canonical := shapesGraphAnchor{Name: canonicalName}
+	pinned := false
+	var libraries []shapesGraphAnchor
+	for _, anchor := range declaredShapesGraphs(contract) {
+		if anchor.Name != canonicalName {
+			libraries = append(libraries, anchor)
+			continue
 		}
-		return shapesTTL, version, nil
+		if pinned && anchor.Version != canonical.Version {
+			return "", 0, fmt.Errorf(
+				"document pins the canonical shapes graph %q at two versions (%d and %d)",
+				canonicalName, canonical.Version, anchor.Version)
+		}
+		canonical.Version = anchor.Version
+		pinned = true
 	}
-	// Each declared document carries its own @prefix headers, so the
+	graphs := append([]shapesGraphAnchor{canonical}, libraries...)
+
+	// Each resolved document carries its own @prefix headers, so the
 	// concatenation parses as one Turtle graph.
-	parts := make([]string, 0, len(anchors))
+	parts := make([]string, 0, len(graphs))
 	version := 0
-	for i, anchor := range anchors {
+	for i, anchor := range graphs {
 		content, resolved, err := source.ShapesAt(ctx, anchor.Name, anchor.Version)
 		if err != nil {
 			return "", 0, fmt.Errorf("load declared shapes graph %q (version %d): %w", anchor.Name, anchor.Version, err)

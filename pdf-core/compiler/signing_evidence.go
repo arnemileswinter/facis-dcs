@@ -111,7 +111,7 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("%s object id invalid: %w", signingEvidenceFileName, err)
 	}
-	objPos := bytes.LastIndex(pdfBytes, []byte(fmt.Sprintf("%d 0 obj", objID)))
+	objPos := findLastObjectHeaderOffset(pdfBytes, objID)
 	if objPos < 0 {
 		return nil, false, fmt.Errorf("%s object %d not found", signingEvidenceFileName, objID)
 	}
@@ -133,11 +133,10 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 // (ISO 19005-3 clause 6.8). Mirrors catalogWithVCAssociated for the evidence
 // attachment.
 func catalogWithEvidenceAssociated(pdf []byte, objID, specObjID int) ([]byte, error) {
-	off := findLastObjectHeaderOffset(pdf, objID)
-	if off < 0 {
+	start, ok := lastObjectBodyOffset(pdf, objID)
+	if !ok {
 		return nil, fmt.Errorf("catalog object %d not found", objID)
 	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", objID))
 	end := bytes.Index(pdf[start:], []byte("\nendobj"))
 	if end < 0 {
 		return nil, fmt.Errorf("catalog object %d end not found", objID)

@@ -285,7 +285,11 @@ type ContractRepo interface {
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)
 	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit contracts that
 	// have no PDF in the artifact store, oldest first — the work list of the
-	// background regenerator's retry pass.
-	ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int) ([]string, error)
+	// background regenerator's retry pass. Contracts in excludeStates (the
+	// states whose artifact is frozen, and which the regenerator may therefore
+	// never render) and contracts in excludeDIDs (attempts the caller has given
+	// up on) are left out, so a permanently stuck row cannot occupy the batch
+	// and starve the transient failures behind it.
+	ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeStates, excludeDIDs []string) ([]string, error)
 	UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data ContractPDFState) error
 }

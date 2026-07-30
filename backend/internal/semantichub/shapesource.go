@@ -21,10 +21,10 @@ type HubShapeSource struct {
 // which-version-is-active lookups stay live queries.
 var immutableContent sync.Map
 
-// ActiveShapes returns the canonical DCS envelope graph — the canonical
-// contract shapes at their active version, with the clause catalog.
-func (h HubShapeSource) ActiveShapes(ctx context.Context) (string, int, error) {
-	return h.ShapesAt(ctx, ShapesName, 0)
+// CanonicalShapesName is the hub entry the canonical DCS envelope shapes
+// live under — resolved for every document, whatever it declares.
+func (h HubShapeSource) CanonicalShapesName() string {
+	return ShapesName
 }
 
 func (h HubShapeSource) ActiveProfile(ctx context.Context) (string, int, error) {

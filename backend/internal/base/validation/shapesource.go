@@ -14,9 +14,10 @@ import (
 // produced documents against. HubShapeSource (internal/semantichub) is the
 // production implementation.
 type ShapeSource interface {
-	// ActiveShapes returns the SHACL shapes document (hub kind="shapes")
-	// currently active, and its version.
-	ActiveShapes(ctx context.Context) (content string, version int, err error)
+	// CanonicalShapesName is the hub entry name of the canonical DCS envelope
+	// shapes graph — the one graph every document is validated against
+	// whether or not it declares it (declaredShapes).
+	CanonicalShapesName() string
 	// ActiveProfile returns the validation profile document (hub
 	// kind="profile") currently active, and its version.
 	ActiveProfile(ctx context.Context) (content string, version int, err error)

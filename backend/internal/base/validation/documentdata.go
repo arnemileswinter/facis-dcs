@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -31,8 +32,13 @@ var (
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
 	// shapeLibraryAnchors maps a class targeted by an ACTIVE registered hub
-	// shapes library to that library's anchor (SetShapeLibraryAnchors).
-	shapeLibraryAnchors map[string]ShapeLibraryAnchor
+	// shapes library to that library's anchor (SetShapeLibraryAnchors). A hub
+	// activation replaces it from a request handler while normalization reads
+	// it on other request goroutines, so it is guarded — and only ever
+	// replaced wholesale, never mutated in place, which lets a reader take a
+	// snapshot under the read lock and walk it after releasing.
+	shapeLibraryAnchors   map[string]ShapeLibraryAnchor
+	shapeLibraryAnchorsMu sync.RWMutex
 )
 
 // ShapeLibraryAnchor is a registered hub SHACL library's name and the
@@ -47,7 +53,15 @@ type ShapeLibraryAnchor struct {
 // its own data objects are governed by (ADR-23). Re-installed on every hub
 // activation alongside SetSchemaAnchorRefs.
 func SetShapeLibraryAnchors(byTargetClass map[string]ShapeLibraryAnchor) {
+	shapeLibraryAnchorsMu.Lock()
+	defer shapeLibraryAnchorsMu.Unlock()
 	shapeLibraryAnchors = byTargetClass
+}
+
+func currentShapeLibraryAnchors() map[string]ShapeLibraryAnchor {
+	shapeLibraryAnchorsMu.RLock()
+	defer shapeLibraryAnchorsMu.RUnlock()
+	return shapeLibraryAnchors
 }
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
@@ -436,22 +450,31 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 // keeps every other registered library out of the verdict.
 //
 // A library the document already declares keeps the version it was authored
-// under: anchors are added, never rewritten (ADR-8).
+// under: anchors are added, never rewritten (ADR-8). "Already declared" is
+// name AND version, so a document that arrives pre-declaring an OLD version of
+// a library still gets the active anchor added: a submitter cannot pick which
+// version of a library governs its data by naming a laxer one first, and the
+// document ends up validated against both.
 func declareShapeLibraries(data documentData) {
-	if len(shapeLibraryAnchors) == 0 {
+	anchors := currentShapeLibraryAnchors()
+	if len(anchors) == 0 {
 		return
 	}
-	declared := map[string]bool{}
+	declared := map[shapesGraphAnchor]bool{}
 	for _, anchor := range declaredShapesGraphs(data) {
-		declared[anchor.Name] = true
+		declared[anchor] = true
 	}
 	var added []any
 	for _, class := range assertedTypeIRIs(data) {
-		anchor, governed := shapeLibraryAnchors[class]
-		if !governed || declared[anchor.Name] {
+		anchor, governed := anchors[class]
+		if !governed {
 			continue
 		}
-		declared[anchor.Name] = true
+		declaration := shapesGraphAnchor{Name: anchor.Name, Version: anchorVersion(anchor.URL)}
+		if declared[declaration] {
+			continue
+		}
+		declared[declaration] = true
 		added = append(added, map[string]any{"@id": anchor.URL})
 	}
 	if len(added) == 0 {

@@ -400,11 +400,10 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // listed associated file (ISO 19005-3 clause 6.8). Returns the dict without the
 // object header/trailer, to be re-emitted as a superseded object.
 func catalogWithVCAssociated(pdf []byte, objID, vcSpecObjID int) ([]byte, error) {
-	off := findLastObjectHeaderOffset(pdf, objID)
-	if off < 0 {
+	start, ok := lastObjectBodyOffset(pdf, objID)
+	if !ok {
 		return nil, fmt.Errorf("catalog object %d not found", objID)
 	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", objID))
 	end := bytes.Index(pdf[start:], []byte("\nendobj"))
 	if end < 0 {
 		return nil, fmt.Errorf("catalog object %d end not found", objID)
@@ -753,9 +752,8 @@ func ExtractEmbeddedVC(pdf []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object id invalid: %w", err)
 	}
-	// Use LastIndex so the most recent definition wins (incremental update semantics).
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
-	objPos := bytes.LastIndex(pdf, objMarker)
+	// The most recent definition wins (incremental update semantics).
+	objPos := findLastObjectHeaderOffset(pdf, objID)
 	if objPos < 0 {
 		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object %d not found", objID)
 	}

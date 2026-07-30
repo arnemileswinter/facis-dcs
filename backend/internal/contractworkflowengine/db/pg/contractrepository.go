@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
@@ -434,13 +435,17 @@ func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, di
 	return &state, nil
 }
 
-func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int) ([]string, error) {
+func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeStates, excludeDIDs []string) ([]string, error) {
 	var dids []string
+	// COALESCE: an empty Go slice binds as SQL NULL, and "state <> ALL (NULL)"
+	// is NULL — which would filter out every row and stall the sweep.
 	err := tx.SelectContext(ctx, &dids,
 		`SELECT did FROM contracts
-		 WHERE pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = ''
+		 WHERE (pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = '')
+		   AND state::text <> ALL (COALESCE($2::text[], '{}'))
+		   AND did <> ALL (COALESCE($3::text[], '{}'))
 		 ORDER BY created_at, did
-		 LIMIT $1`, limit,
+		 LIMIT $1`, limit, pq.Array(excludeStates), pq.Array(excludeDIDs),
 	)
 	if err != nil {
 		return nil, err

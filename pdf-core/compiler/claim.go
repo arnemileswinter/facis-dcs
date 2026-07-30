@@ -27,8 +27,9 @@ func StripEmbeddedJSONLD(pdf []byte) ([]byte, error) {
 }
 
 // findEmbeddedJSONLDStreamRange returns the byte offset and length of the
-// JSON-LD stream content inside the first definition of the embedded-file
-// object.  It is used by both StripEmbeddedJSONLD and the extraction helpers.
+// JSON-LD stream content inside the definition of the embedded-file object a
+// reader resolves — the last one, since an incremental update supersedes an
+// object by appending a new definition.
 func findEmbeddedJSONLDStreamRange(pdf []byte) (start, length int, err error) {
 	fileSpecPos := bytes.Index(pdf, []byte("/F (contract.jsonld)"))
 	if fileSpecPos < 0 {
@@ -49,8 +50,7 @@ func findEmbeddedJSONLDStreamRange(pdf []byte) (start, length int, err error) {
 		return 0, 0, fmt.Errorf("embedded JSON-LD object id invalid: %w", err)
 	}
 
-	objMarker := []byte(fmt.Sprintf("%d 0 obj", objID))
-	objPos := bytes.Index(pdf, objMarker)
+	objPos := findLastObjectHeaderOffset(pdf, objID)
 	if objPos < 0 {
 		return 0, 0, fmt.Errorf("embedded JSON-LD object not found")
 	}
