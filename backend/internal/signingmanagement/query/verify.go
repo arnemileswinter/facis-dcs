@@ -193,9 +193,30 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		findings = append(findings, fmt.Sprintf("Status list state: %s", status))
 	}
 
+	jsonldHash, basePDFHash := verifyDigests(verifyResult)
+
 	return &SignatureVerifyResult{
-		Match:    match,
-		Findings: findings,
-		SigCount: sigCount,
+		Match:       match,
+		Findings:    findings,
+		SigCount:    sigCount,
+		JsonldHash:  jsonldHash,
+		BasePdfHash: basePDFHash,
 	}, nil
+}
+
+// verifyDigests carries the digests pdf-core reached its verdict on onto the two
+// optional response fields: the embedded machine-readable payload and the
+// deterministic re-render produced from it. A digest pdf-core could not compute
+// stays absent rather than becoming a pointer to "" — an empty hash states
+// something about the artifact, where an absent one states that no digest was
+// taken. They are populated on a content mismatch too, where the re-render
+// digest is precisely what the stored bytes failed to match.
+func verifyDigests(result pdfcore.VerifyResult) (jsonldHash, basePDFHash *string) {
+	optional := func(digest string) *string {
+		if digest == "" {
+			return nil
+		}
+		return &digest
+	}
+	return optional(result.JSONLDHash), optional(result.BasePDFHash)
 }

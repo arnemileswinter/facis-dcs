@@ -285,7 +285,10 @@ type ContractRepo interface {
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)
 	// CountSignedSignatures returns how many committed (SIGNED) signatures the
 	// contract carries. A contract that carries one holds a PAdES-signed PDF
-	// that must never be re-rendered (DCS-FR-SM-16).
+	// that must never be re-rendered: a fresh render replaces the signed bytes
+	// outright. Appending to it is a different operation and is allowed —
+	// further signatures and the ADR-26 provenance re-anchor are both
+	// incremental updates (DCS-OR-C2PA-002, DCS-OR-C2PA-010).
 	CountSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
 	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit contracts that
 	// have no PDF in the artifact store, oldest first — the work list of the

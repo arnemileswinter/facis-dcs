@@ -1,5 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,9 +14,7 @@ import type { OdrlConstraint, OdrlLogicalConstraint, OdrlRule } from '@/models/d
 
 /**
  * Drives the contract builder's own code with the SLA hosting inputs and
- * captures what it emits. The emitted policy is written to
- * features/fixtures/sla_policy_from_builder.json — the fixture is what the
- * builder really produces, not a hand-written guess at it.
+ * asserts what it emits.
  */
 
 const TEMPLATE_IRI = 'did:web:example:template:sla-hosting'
@@ -289,9 +285,5 @@ describe('the assembled SLA template document', () => {
     // The store binds prose down the whole duty chain; the component does not.
     expect(assembledDuty['dcs:prose']).toEqual(assembled['dcs:prose'])
     expect(assembledDuty['odrl:consequence']?.[0]?.['dcs:prose']).toEqual(assembled['dcs:prose'])
-
-    const target = resolve(process.cwd(), '../../features/fixtures/sla_policy_from_builder.json')
-    mkdirSync(dirname(target), { recursive: true })
-    writeFileSync(target, `${JSON.stringify(document, null, 2)}\n`)
   })
 })

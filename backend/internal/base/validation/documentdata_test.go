@@ -282,7 +282,7 @@ func permissionWithDuty(t *testing.T, duty any) datatype.JSON {
 }
 
 // TestNormalizeTemplateDataAcceptsPermissionWithNestedDuty proves a Permission
-// may carry a nested Duty fragment (ODRL IM §2.5): its own action plus a
+// may carry a nested Duty fragment (ODRL IM §2.6.5): its own action plus a
 // constraint on an existing data field, no parties of its own.
 func TestNormalizeTemplateDataAcceptsPermissionWithNestedDuty(t *testing.T) {
 	valid := permissionWithDuty(t, []any{

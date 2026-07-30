@@ -17,7 +17,6 @@ import (
 // For XFSC signed status lists, look up the JWT iss claim—often the statuslist
 // tenant host URL signed by crypto-provider Vault transit, not the credential iss.
 type TrustConfig struct {
-	VCTs    []string                    `json:"vcts"`
 	Issuers map[string]TrustIssuerEntry `json:"issuers"`
 }
 

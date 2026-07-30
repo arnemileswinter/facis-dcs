@@ -9,10 +9,15 @@ import (
 	"strings"
 )
 
-// ShapeSource is the enforcement-time source for the SHACL shapes,
-// validation profile, and JSON-LD context AuditContractContent checks
-// produced documents against. HubShapeSource (internal/semantichub) is the
-// production implementation.
+// ShapeSource is the source for the SHACL shapes, validation profile, and
+// JSON-LD context AuditContractContent checks produced documents against.
+// HubShapeSource (internal/semantichub) is the production implementation.
+//
+// Only the shapes half is enforcement-time: RequireHubConformance blocks at
+// offer, submit and signing. The validation profile is NOT a gate on any
+// path — AuditContractContent's only non-test caller is the read-only
+// audit-trail query, so profile findings are reported, never blocking. Do not
+// read "EnforceValidationProfile" as a blocking switch.
 type ShapeSource interface {
 	// CanonicalShapesName is the hub entry name of the canonical DCS envelope
 	// shapes graph — the one graph every document is validated against

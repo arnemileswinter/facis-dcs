@@ -287,6 +287,10 @@ func Seed(ctx context.Context, db *sqlx.DB) error {
 // ActiveOntologyIRIs returns the prefix -> IRI map declared by the ACTIVE
 // context's @context object (only string-valued prefix entries). The
 // normalization layer enforces these on every produced document.
+//
+// Despite the name it reads the hub's kind="context" entry, not any ontology
+// asset: the served ontologies are never parsed here and nothing on this path
+// enforces them. Callers use it correctly; the name is the trap.
 func ActiveOntologyIRIs(ctx context.Context, db *sqlx.DB) (map[string]string, int, error) {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {

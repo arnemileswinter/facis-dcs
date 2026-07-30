@@ -962,7 +962,7 @@ func compactConstraintLeaves(constraint map[string]any) []map[string]any {
 }
 
 // dutyConstraints collects the constraint nodes carried by a rule's duties and,
-// recursively, their consequence duties (ODRL IM §2.5) — so a duty constraint
+// recursively, their consequence duties (ODRL IM §2.6.6) — so a duty constraint
 // referencing a nonexistent data field is caught wherever it nests.
 func dutyConstraints(raw any) []map[string]any {
 	out := []map[string]any{}
@@ -1119,7 +1119,7 @@ func validateODRLRuleShape(rule map[string]any) error {
 	if strings.TrimSpace(proseID) == "" {
 		return errors.New("rule is missing dcs:prose — every machine-readable rule must reference the human-readable clause it is backed by")
 	}
-	// A Permission may carry duties (ODRL IM §2.5): obligations the assignee
+	// A Permission may carry duties (ODRL IM §2.6.5): obligations the assignee
 	// must fulfil to exercise it. Each is a fragment — its own odrl:action (and
 	// optional constraints/consequence), inheriting the enclosing rule's
 	// parties, so it declares no assigner/assignee/target of its own.
@@ -1137,7 +1137,7 @@ func validateODRLRuleShape(rule map[string]any) error {
 }
 
 // validateODRLDutyFragment validates a Duty nested under a Permission (ODRL IM
-// §2.5). A duty fragment inherits its parties from the enclosing rule, so it
+// §2.6.5). A duty fragment inherits its parties from the enclosing rule, so it
 // needs an odrl:action and the prose backing every odrl:Duty owes (the hub's
 // dcs:OdrlDutyProseShape refuses a document at submit otherwise); its
 // consequence is itself a duty, validated the same way (recursively).

@@ -338,6 +338,14 @@ func auditConstraintBearingNode(ctx context.Context, ruleID string, node map[str
 		// ODRL context operands (spatial, dateTime, purpose, …) are evaluated
 		// at use-time by the execution environment against the access context
 		// it reports; the contract audit only records that they apply.
+		//
+		// "info" here means DEFERRED, not passed. Nothing in this deployment
+		// closes the loop: the only use-time channel is the KPI callback, which
+		// cannot see a constraint nested in a logical constraint or a duty, and
+		// the deployment payload deploy.go hands the target system carries an
+		// empty odrl:Set. The audit view buckets info with the passing
+		// severities and renders it green — do not take a green row here as
+		// evidence that the constraint was checked.
 		if isODRLContextOperand(operandID) {
 			finding := contractFinding(ruleID, ruleID, "info", fmt.Sprintf("ODRL policy %q constraint on %s is enforced at use-time", ruleID, shaclLocalName(operandID)), operandID, "")
 			applyODRLPolicyDetails(&finding, operandID, operator, nil, false, rightOperand)

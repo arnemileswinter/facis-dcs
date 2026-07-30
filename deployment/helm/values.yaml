@@ -100,10 +100,8 @@ archiveNotary:
   baseURL: ""
   notaryPath: "/archive/notary"
   auditLogPath: "/archive-audit-events.jsonl"
-  auditLogBearerToken: ""
-  auditLogBearerTokenSecretRef:
-    name: ""
-    key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  # The audit-log bearer token is NOT configured here: the wired source is
+  # global.archiveAuditToken / global.archiveAuditTokenSecretRef below.
 
 global:
   archiveAuditToken: ""
@@ -540,7 +538,6 @@ pdfCore:
     x5ChainPEM: ""
     # Set to use an existing Secret instead of auto-creating one from the inline values above.
     existingSecret: ""
-    existingSecretSignerKeyKey: "signer-key-pem"
     existingSecretX5ChainKey: "x5chain-pem"
 
 ipfs:

@@ -255,7 +255,8 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 // clearSyncFailWithIncident deletes any sync_fails retry entry for did and
 // records the terminal policy-endpoint denial incident in the same
-// transaction (ADR-19 AC10) — deduped per (did, peer, direction), since a
+// transaction (ADR-19 makes every trust-gate denial auditable through the
+// incident-report flow) — deduped per (did, peer, direction), since a
 // single offer's Offer and PDF_REGENERATED events each independently trigger
 // a ship attempt a few hundred ms apart and both can hit the same denial.
 func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, did string, gateErr *GateError) error {
