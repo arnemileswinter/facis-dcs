@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { formatNumberInput, normalizeNumberInput } from '@template-repository/utils/number-format'
 import { resolveValueOptions, type ValueOption } from '@template-repository/utils/value-option-catalog'
 import type { SemanticParameterType, SemanticValueConstraint } from '@template-repository/models/contract-template'
@@ -30,6 +30,8 @@ const selectClass = computed(
   () =>
     `w-32 ${placeholderBaseClass} text-sm leading-relaxed ${props.isInvalid ? 'border-error bg-error/5 text-error focus:border-error focus:bg-error/10' : ''}`,
 )
+
+const valueId = useId()
 
 watch(
   () => props.type,
@@ -132,6 +134,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
   <span class="tooltip tooltip-top inline-flex items-baseline" :data-tip="tipText">
     <select
       v-if="valueOptions.length && (type === 'string' || type === 'enum')"
+      :id="valueId"
       v-model="stringValue"
       :class="selectClass"
       :aria-label="label"
@@ -144,6 +147,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
     </select>
     <input
       v-else-if="type === 'string' || type === 'enum'"
+      :id="valueId"
       v-model="stringValue"
       type="text"
       :class="inputClass"
@@ -152,6 +156,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
     />
     <input
       v-else-if="type === 'integer'"
+      :id="valueId"
       v-model="numberValue"
       type="text"
       inputmode="numeric"
@@ -162,6 +167,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
     />
     <input
       v-else-if="type === 'decimal'"
+      :id="valueId"
       v-model="numberValue"
       type="text"
       inputmode="decimal"
@@ -171,6 +177,7 @@ function onIntegerKeyDown(event: KeyboardEvent) {
     />
     <input
       v-else-if="type === 'date'"
+      :id="valueId"
       v-model="dateValue"
       type="date"
       :class="inputClass"
