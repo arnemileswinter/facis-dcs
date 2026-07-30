@@ -111,20 +111,11 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("%s object id invalid: %w", signingEvidenceFileName, err)
 	}
-	objPos := findLastObjectHeaderOffset(pdfBytes, objID)
-	if objPos < 0 {
-		return nil, false, fmt.Errorf("%s object %d not found", signingEvidenceFileName, objID)
+	streamStart, streamEnd, ok := lastObjectStreamData(pdfBytes, objID)
+	if !ok {
+		return nil, false, fmt.Errorf("%s stream not found in object %d", signingEvidenceFileName, objID)
 	}
-	streamStart := bytes.Index(pdfBytes[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, false, fmt.Errorf("%s stream start not found", signingEvidenceFileName)
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdfBytes[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, false, fmt.Errorf("%s stream end not found", signingEvidenceFileName)
-	}
-	return append([]byte(nil), pdfBytes[streamStart:streamStart+streamEnd]...), true, nil
+	return append([]byte(nil), pdfBytes[streamStart:streamEnd]...), true, nil
 }
 
 // catalogWithEvidenceAssociated returns the document catalog's dictionary with
@@ -133,15 +124,11 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 // (ISO 19005-3 clause 6.8). Mirrors catalogWithVCAssociated for the evidence
 // attachment.
 func catalogWithEvidenceAssociated(pdf []byte, objID, specObjID int) ([]byte, error) {
-	start, ok := lastObjectBodyOffset(pdf, objID)
+	start, end, ok := lastObjectBody(pdf, objID)
 	if !ok {
 		return nil, fmt.Errorf("catalog object %d not found", objID)
 	}
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("catalog object %d end not found", objID)
-	}
-	dict := append([]byte(nil), pdf[start:start+end]...)
+	dict := append([]byte(nil), pdf[start:end]...)
 	ref := []byte(fmt.Sprintf("%d 0 R", specObjID))
 	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], ref) {
 		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(ref)+"]"))

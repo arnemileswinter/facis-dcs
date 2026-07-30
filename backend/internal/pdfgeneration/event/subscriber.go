@@ -21,7 +21,6 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
-	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
@@ -186,23 +185,14 @@ func (s *Subscriber) retryOne(kind, did string, regenerate func(context.Context,
 	s.retries.succeeded(kind, did)
 }
 
-// frozenContractStates are the contract states whose stored PDF is a signed
-// artifact. Such a contract is never a candidate for the retry sweep: the only
-// reason it appears in the work list is that its artifact is MISSING, and the
-// regenerator's answer to a missing artifact is a fresh render — an unsigned
-// PDF stamped as authoritative over the peer's provenance. Derived from the
-// C2PA mapping rather than restated, so a state added to the enum cannot be
-// silently omitted here.
-func frozenContractStates() []string {
-	var frozen []string
-	for _, state := range contractstate.All() {
-		c2paState, err := provenance.MapCWEStateToC2PA(state.String())
-		if err != nil || !provenance.IsFrozenC2PAState(c2paState) {
-			continue
-		}
-		frozen = append(frozen, state.String())
+// carriesSignature reports whether the contract holds a committed signature —
+// the thing that makes its stored PDF unrenderable.
+func (s *Subscriber) carriesSignature(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
+	count, err := s.CRepo.CountSignedSignatures(ctx, tx, did)
+	if err != nil {
+		return false, fmt.Errorf("count signatures on contract %s: %w", did, err)
 	}
-	return frozen
+	return count > 0, nil
 }
 
 func (s *Subscriber) entitiesMissingStoredPDF() ([]string, []string, error) {
@@ -220,7 +210,7 @@ func (s *Subscriber) entitiesMissingStoredPDF() ([]string, []string, error) {
 	}(tx)
 
 	contracts, err := s.CRepo.ReadDIDsMissingStoredPDF(ctx, tx, missingPDFRetryBatch,
-		frozenContractStates(), s.retries.exhausted("contract"))
+		s.retries.exhausted("contract"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("read contracts without a stored PDF: %w", err)
 	}
@@ -267,21 +257,40 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 // re-rendering here would replace the signed PDF with an unsigned one and
 // destroy the signature's /ByteRange. Returns true when there is nothing to do.
 //
-// Frozen is decided by the contract's own committed state as well as by the
-// stored artifact's, because the two disagree exactly where it is most
-// dangerous: a signed contract whose stored CID is empty (a peer-receive whose
-// transaction rolled back after the row committed) reads as "not frozen" on the
-// artifact alone, and the regeneration path's answer to a missing artifact is a
-// FRESH render — an unsigned PDF, issued a new lifecycle VC and stamped as
-// authoritative over the counterparty's provenance. There is nothing to render
-// from in that case; the artifact can only come back from its signed bytes.
-func frozenArtifactVerdict(did, contractState, storedCID, storedC2PAState, targetC2PAState string) (bool, error) {
-	if !provenance.IsFrozenC2PAState(storedC2PAState) && !provenance.IsFrozenC2PAState(targetC2PAState) {
+// What freezes an artifact is a SIGNATURE, not a state past "draft". The stored
+// artifact's own C2PA state says so directly — it was written by the signing
+// command. The target state does not: a contract reaches a frozen state without
+// ever being signed (DRAFT -> APPROVED -> terminate, or the expiry cron flipping
+// an unsigned contract to EXPIRED), and freezing on it would decline the FIRST
+// render into that state, leaving pdf_state behind the contract forever — an
+// export that polls to its deadline and answers "being regenerated" for good.
+// So the target state freezes only together with a committed signature, which
+// covers the case the stored artifact cannot: a signed contract whose stored CID
+// is empty (a peer-receive whose transaction rolled back after the row
+// committed) reads as "not frozen" on the artifact alone, and the regeneration
+// path's answer to a missing artifact is a FRESH render — an unsigned PDF, issued
+// a new lifecycle VC and stamped as authoritative over the counterparty's
+// provenance. There is nothing to render from in that case; the artifact can only
+// come back from its signed bytes.
+//
+// carriesSignature is consulted only when the answer can still change the
+// verdict, so an ordinary draft regeneration costs no extra query.
+func frozenArtifactVerdict(did, contractState, storedCID, storedC2PAState, targetC2PAState string,
+	carriesSignature func() (bool, error)) (bool, error) {
+	frozen := provenance.IsFrozenC2PAState(storedC2PAState)
+	if !frozen && provenance.IsFrozenC2PAState(targetC2PAState) {
+		signed, err := carriesSignature()
+		if err != nil {
+			return false, err
+		}
+		frozen = signed
+	}
+	if !frozen {
 		return false, nil
 	}
 	if storedCID == "" {
 		return false, fmt.Errorf(
-			"contract %s is in the post-signing state %q but holds no stored PDF: refusing to render one, a signed contract's artifact can only be restored from its signed bytes",
+			"contract %s carries a signature (state %q) but holds no stored PDF: refusing to render one, a signed contract's artifact can only be restored from its signed bytes",
 			did, contractState)
 	}
 	return true, nil
@@ -334,7 +343,8 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 		return fmt.Errorf("read PDF state for contract %s: %w", cweEvt.DID, err)
 	}
 
-	frozen, err := frozenArtifactVerdict(cweEvt.DID, string(contract.State), pdfState.IPFSCID, pdfState.C2PAState, c2paState)
+	frozen, err := frozenArtifactVerdict(cweEvt.DID, string(contract.State), pdfState.IPFSCID, pdfState.C2PAState, c2paState,
+		func() (bool, error) { return s.carriesSignature(ctx, tx, cweEvt.DID) })
 	if err != nil {
 		return err
 	}

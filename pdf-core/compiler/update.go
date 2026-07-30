@@ -142,16 +142,11 @@ func parseCurrentPagesKids(pdf []byte) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	pos := findLastObjectHeaderOffset(pdf, pagesID)
-	if pos < 0 {
-		return nil, fmt.Errorf("Pages object (%d 0 obj) not found", pagesID)
+	start, end, ok := lastObjectBody(pdf, pagesID)
+	if !ok {
+		return nil, fmt.Errorf("Pages object (%d) not found", pagesID)
 	}
-	end := bytes.Index(pdf[pos:], []byte("endobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("Pages object end not found")
-	}
-	objBytes := pdf[pos : pos+end]
-	kidsMatch := pdfKidsRE.Find(objBytes)
+	kidsMatch := pdfKidsRE.Find(pdf[start:end])
 	if kidsMatch == nil {
 		return nil, fmt.Errorf("/Kids not found in Pages object")
 	}
@@ -400,15 +395,11 @@ func updatePDF(ctx context.Context, oldPDF []byte, newPayload []byte, vcBytes []
 // listed associated file (ISO 19005-3 clause 6.8). Returns the dict without the
 // object header/trailer, to be re-emitted as a superseded object.
 func catalogWithVCAssociated(pdf []byte, objID, vcSpecObjID int) ([]byte, error) {
-	start, ok := lastObjectBodyOffset(pdf, objID)
+	start, end, ok := lastObjectBody(pdf, objID)
 	if !ok {
 		return nil, fmt.Errorf("catalog object %d not found", objID)
 	}
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		return nil, fmt.Errorf("catalog object %d end not found", objID)
-	}
-	dict := append([]byte(nil), pdf[start:start+end]...)
+	dict := append([]byte(nil), pdf[start:end]...)
 	vcRef := []byte(fmt.Sprintf("%d 0 R", vcSpecObjID))
 	if af := catalogAFRE.FindSubmatchIndex(dict); af != nil && !bytes.Contains(dict[af[2]:af[3]], vcRef) {
 		dict = catalogAFRE.ReplaceAll(dict, []byte("/AF [${1} "+string(vcRef)+"]"))
@@ -753,20 +744,11 @@ func ExtractEmbeddedVC(pdf []byte) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object id invalid: %w", err)
 	}
 	// The most recent definition wins (incremental update semantics).
-	objPos := findLastObjectHeaderOffset(pdf, objID)
-	if objPos < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json object %d not found", objID)
+	streamStart, streamEnd, ok := lastObjectStreamData(pdf, objID)
+	if !ok {
+		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream not found in object %d", objID)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream start not found")
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, false, fmt.Errorf("contract-lifecycle-vc.json stream end not found")
-	}
-	return append([]byte(nil), pdf[streamStart:streamStart+streamEnd]...), true, nil
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), true, nil
 }
 
 // incrementalUpdateMarker is the comment written as the very first line of
@@ -935,13 +917,11 @@ var pdfPagesRefRE = regexp.MustCompile(`/Pages\s+(\d+)\s+0\s+R`)
 func currentPagesObjID(pdf []byte) (int, error) {
 	catalogID, ok := currentRootObjID(pdf)
 	if ok {
-		if pos := findLastObjectHeaderOffset(pdf, catalogID); pos >= 0 {
-			if end := bytes.Index(pdf[pos:], []byte("endobj")); end > 0 {
-				if m := pdfPagesRefRE.FindSubmatch(pdf[pos : pos+end]); m != nil {
-					id, convErr := strconv.Atoi(string(m[1]))
-					if convErr == nil {
-						return id, nil
-					}
+		if start, end, found := lastObjectBody(pdf, catalogID); found {
+			if m := pdfPagesRefRE.FindSubmatch(pdf[start:end]); m != nil {
+				id, convErr := strconv.Atoi(string(m[1]))
+				if convErr == nil {
+					return id, nil
 				}
 			}
 		}

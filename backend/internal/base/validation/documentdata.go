@@ -19,6 +19,12 @@ import (
 // ("sh:shapesGraph"). Re-pointed at startup and on every hub activation
 // (SetSchemaAnchorRefs).
 //
+// All four are written together by one hub-activation request handler while
+// normalization and validation read them on other request goroutines, so they
+// share anchorsMu. The maps are only ever replaced wholesale, never mutated in
+// place, which lets a reader take a snapshot under the read lock and walk it
+// after releasing.
+//
 // No validation profile is stamped. The anchor named one hardcoded entry
 // whose rules are about the DCS envelope — a contract root and its party
 // roles — so claiming conformance to it said nothing about the vocabulary a
@@ -32,13 +38,9 @@ var (
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
 	// shapeLibraryAnchors maps a class targeted by an ACTIVE registered hub
-	// shapes library to that library's anchor (SetShapeLibraryAnchors). A hub
-	// activation replaces it from a request handler while normalization reads
-	// it on other request goroutines, so it is guarded — and only ever
-	// replaced wholesale, never mutated in place, which lets a reader take a
-	// snapshot under the read lock and walk it after releasing.
-	shapeLibraryAnchors   map[string]ShapeLibraryAnchor
-	shapeLibraryAnchorsMu sync.RWMutex
+	// shapes library to that library's anchor (SetShapeLibraryAnchors).
+	shapeLibraryAnchors map[string]ShapeLibraryAnchor
+	anchorsMu           sync.RWMutex
 )
 
 // ShapeLibraryAnchor is a registered hub SHACL library's name and the
@@ -53,20 +55,22 @@ type ShapeLibraryAnchor struct {
 // its own data objects are governed by (ADR-23). Re-installed on every hub
 // activation alongside SetSchemaAnchorRefs.
 func SetShapeLibraryAnchors(byTargetClass map[string]ShapeLibraryAnchor) {
-	shapeLibraryAnchorsMu.Lock()
-	defer shapeLibraryAnchorsMu.Unlock()
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	shapeLibraryAnchors = byTargetClass
 }
 
 func currentShapeLibraryAnchors() map[string]ShapeLibraryAnchor {
-	shapeLibraryAnchorsMu.RLock()
-	defer shapeLibraryAnchorsMu.RUnlock()
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
 	return shapeLibraryAnchors
 }
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
 // the Semantic Hub's served URLs.
 func SetSchemaAnchorRefs(contextRef, shapesRef string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	if contextRef != "" {
 		schemaRefJSONLDContext = contextRef
 	}
@@ -75,26 +79,47 @@ func SetSchemaAnchorRefs(contextRef, shapesRef string) {
 	}
 }
 
+func currentJSONLDContextRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefJSONLDContext
+}
+
+func currentSHACLShapesRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefSHACLShapes
+}
+
 // SetCanonicalOntologyIRIs installs the ACTIVE hub context's prefix -> IRI
 // map for enforcement during normalization.
 func SetCanonicalOntologyIRIs(iris map[string]string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	canonicalOntologyIRIs = iris
+}
+
+func currentCanonicalOntologyIRIs() map[string]string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return canonicalOntologyIRIs
 }
 
 // enforceCanonicalOntologyIRIs rejects documents whose @context redefines a
 // hub-declared prefix to a different IRI (DCS-FR-TR-03: templating and
 // contracting validate against the Semantic Hub's active schema).
 func enforceCanonicalOntologyIRIs(data documentData) error {
-	if len(canonicalOntologyIRIs) == 0 {
+	canonical := currentCanonicalOntologyIRIs()
+	if len(canonical) == 0 {
 		return nil
 	}
 	switch context := data["@context"].(type) {
 	case map[string]any:
-		return enforceCanonicalOntologyIRIMap(context)
+		return enforceCanonicalOntologyIRIMap(context, canonical)
 	case []any:
 		for _, entry := range context {
 			if inline, ok := entry.(map[string]any); ok {
-				if err := enforceCanonicalOntologyIRIMap(inline); err != nil {
+				if err := enforceCanonicalOntologyIRIMap(inline, canonical); err != nil {
 					return err
 				}
 			}
@@ -103,13 +128,13 @@ func enforceCanonicalOntologyIRIs(data documentData) error {
 	return nil
 }
 
-func enforceCanonicalOntologyIRIMap(context map[string]any) error {
+func enforceCanonicalOntologyIRIMap(context map[string]any, canonicalIRIs map[string]string) error {
 	for prefix, iri := range context {
 		supplied, ok := iri.(string)
 		if !ok {
 			continue
 		}
-		canonical, known := canonicalOntologyIRIs[prefix]
+		canonical, known := canonicalIRIs[prefix]
 		if known && supplied != canonical {
 			return fmt.Errorf(
 				"%w: document @context redefines prefix %q to %q, but the Semantic Hub's active context declares %q",
@@ -421,7 +446,7 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 	// Anchors are set once, at production time: a document keeps the hub
 	// versions it was authored under.
 	if _, exists := data["sh:shapesGraph"]; !exists {
-		data["sh:shapesGraph"] = map[string]any{"@id": schemaRefSHACLShapes}
+		data["sh:shapesGraph"] = map[string]any{"@id": currentSHACLShapesRef()}
 	}
 	declareShapeLibraries(data)
 	if _, ok := topLevelValue(data, "contractData").([]any); !ok {
@@ -561,23 +586,24 @@ func typeLayoutNodes(data documentData) {
 // it in JSON-LD array form. A document whose @context already carries a
 // URL entry keeps it.
 func normalizeCanonicalContext(data documentData) {
+	anchor := currentJSONLDContextRef()
 	switch context := data["@context"].(type) {
 	case string:
 		if isHubContextAnchor(context) {
 			return
 		}
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	case []any:
 		for _, entry := range context {
 			if url, ok := entry.(string); ok && isHubContextAnchor(url) {
 				return
 			}
 		}
-		data["@context"] = append([]any{schemaRefJSONLDContext}, context...)
+		data["@context"] = append([]any{anchor}, context...)
 	case map[string]any:
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	default:
-		data["@context"] = schemaRefJSONLDContext
+		data["@context"] = anchor
 	}
 }
 

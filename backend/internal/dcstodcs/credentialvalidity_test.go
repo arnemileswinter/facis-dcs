@@ -69,6 +69,22 @@ func TestRequireCredentialInForce_RefusesAWindowLongerThanTheFederationPermits(t
 	assert.Contains(t, err.Error(), "longer than")
 }
 
+// Omitting validFrom must not buy the peer an unbounded window: the credential
+// is then in force since always, so its remaining lifetime is measured from now
+// and the same federation bound applies.
+func TestRequireCredentialInForce_RefusesAnUnboundedWindowWithNoValidFrom(t *testing.T) {
+	credential := credentialWithWindow(`,"validUntil":"3000-01-01T00:00:00Z"`)
+	err := requireCredentialInForce(credential, validityNow)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "longer than")
+}
+
+// A short window with no start is still a short window.
+func TestRequireCredentialInForce_AcceptsABoundedWindowWithNoValidFrom(t *testing.T) {
+	credential := credentialWithWindow(fmt.Sprintf(`,"validUntil":%q`, rfc3339(validityNow.Add(time.Hour))))
+	require.NoError(t, requireCredentialInForce(credential, validityNow))
+}
+
 // Two independently operated instances have independently drifting clocks, so a
 // credential minted a moment ago must not read as not yet in force.
 func TestRequireCredentialInForce_ToleratesClockSkewAtBothEnds(t *testing.T) {

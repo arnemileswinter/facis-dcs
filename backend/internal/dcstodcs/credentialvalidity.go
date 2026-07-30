@@ -50,17 +50,24 @@ func requireCredentialInForce(raw json.RawMessage, now time.Time) error {
 	if until.IsZero() {
 		return fmt.Errorf("carries no validUntil, so it would never stop being accepted")
 	}
-	if !from.IsZero() {
+	// The window's length is measured from its start, or — when the peer omitted
+	// one, leaving the credential in force since always — from now. Skipping the
+	// bound for a missing validFrom would make omitting it the way to publish the
+	// year 3000, which is the very window the bound exists to refuse.
+	lifetimeFrom := from
+	if from.IsZero() {
+		lifetimeFrom = now
+	} else {
 		if until.Before(from) {
 			return fmt.Errorf("validUntil %s precedes validFrom %s", until.Format(time.RFC3339), from.Format(time.RFC3339))
 		}
 		if now.Add(credentialClockSkew).Before(from) {
 			return fmt.Errorf("is not in force before %s", from.Format(time.RFC3339))
 		}
-		if until.Sub(from) > federation.MaxAgreementCredentialLifetime {
-			return fmt.Errorf("claims a validity window of %s, longer than the %s the federation permits",
-				until.Sub(from), federation.MaxAgreementCredentialLifetime)
-		}
+	}
+	if until.Sub(lifetimeFrom) > federation.MaxAgreementCredentialLifetime {
+		return fmt.Errorf("claims a validity window of %s, longer than the %s the federation permits",
+			until.Sub(lifetimeFrom), federation.MaxAgreementCredentialLifetime)
 	}
 	if now.Add(-credentialClockSkew).After(until) {
 		return fmt.Errorf("expired at %s", until.Format(time.RFC3339))

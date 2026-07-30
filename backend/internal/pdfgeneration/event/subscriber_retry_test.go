@@ -5,9 +5,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
 
 // The retry pass has no event to work from — the one that first asked for the
@@ -54,7 +51,7 @@ func TestRetryOneSurvivesAFailedRegeneration(t *testing.T) {
 // the counterparty's provenance, every sweep until it succeeds. A frozen
 // contract must never reach the fresh-render branch.
 func TestAFrozenContractWithoutAStoredPDFIsNeverFreshRendered(t *testing.T) {
-	frozen, err := frozenArtifactVerdict("did:contract:1", "SIGNED", "", "", "active")
+	frozen, err := frozenArtifactVerdict("did:contract:1", "SIGNED", "", "", "active", signed)
 	if err == nil {
 		t.Fatal("a signed contract with no stored PDF must refuse regeneration, not fall through to a fresh render")
 	}
@@ -63,40 +60,62 @@ func TestAFrozenContractWithoutAStoredPDFIsNeverFreshRendered(t *testing.T) {
 	}
 
 	// The same contract WITH its signed artifact is simply left alone.
-	frozen, err = frozenArtifactVerdict("did:contract:1", "SIGNED", "bafy...", "active", "active")
+	frozen, err = frozenArtifactVerdict("did:contract:1", "SIGNED", "bafy...", "active", "active", signed)
 	if err != nil || !frozen {
 		t.Fatalf("a stored frozen artifact must be left untouched, got frozen=%t err=%v", frozen, err)
 	}
 
 	// A pre-signing contract still regenerates, with or without an artifact.
 	for _, storedCID := range []string{"", "bafy..."} {
-		frozen, err = frozenArtifactVerdict("did:contract:1", "DRAFT", storedCID, "draft", "draft")
+		frozen, err = frozenArtifactVerdict("did:contract:1", "DRAFT", storedCID, "draft", "draft", unsigned)
 		if err != nil || frozen {
 			t.Fatalf("a draft contract must still regenerate (cid %q), got frozen=%t err=%v", storedCID, frozen, err)
 		}
 	}
 }
 
-// The sweep's work-list query excludes those states outright, so a frozen
-// contract does not even occupy a slot in the fixed-size batch.
-func TestTheSweepExcludesEveryFrozenContractState(t *testing.T) {
-	excluded := map[string]bool{}
-	for _, state := range frozenContractStates() {
-		excluded[state] = true
-	}
+var (
+	signed   = func() (bool, error) { return true, nil }
+	unsigned = func() (bool, error) { return false, nil }
+)
 
-	for _, state := range contractstate.All() {
-		c2paState, err := provenance.MapCWEStateToC2PA(state.String())
+// A contract reaches a frozen C2PA state without ever being signed: the BDD
+// terminate path is DRAFT -> APPROVED -> terminate, and the expiry cron flips
+// unsigned contracts to EXPIRED. Freezing on the target state alone declines
+// the FIRST render into that state, so pdf_state never catches up with the
+// contract and ExportContractPdf — which serves only when the two agree —
+// polls to its deadline and answers "being regenerated" permanently.
+func TestAnUnsignedContractReachingAFrozenStateIsStillRendered(t *testing.T) {
+	for state, c2paState := range map[string]string{"TERMINATED": "terminated", "EXPIRED": "expired"} {
+		frozen, err := frozenArtifactVerdict("did:contract:1", state, "bafy...", "draft", c2paState, unsigned)
 		if err != nil {
-			t.Fatalf("state %s has no C2PA mapping: %v", state, err)
+			t.Fatalf("%s: an unsigned contract has nothing to refuse over: %v", state, err)
 		}
-		want := provenance.IsFrozenC2PAState(c2paState)
-		if got := excluded[state.String()]; got != want {
-			t.Errorf("state %s: excluded from the sweep = %t, want %t (C2PA state %q)", state, got, want, c2paState)
+		if frozen {
+			t.Fatalf("%s: an unsigned contract must render its first %q artifact, not be frozen out of it", state, c2paState)
 		}
 	}
-	if !excluded[contractstate.Signed.String()] || excluded[contractstate.Draft.String()] {
-		t.Fatal("SIGNED must be excluded and DRAFT must not")
+}
+
+// The counterpart the freeze exists for: the same transition on a contract that
+// IS signed leaves the signed bytes alone.
+func TestASignedContractReachingAFrozenStateIsNeverRendered(t *testing.T) {
+	frozen, err := frozenArtifactVerdict("did:contract:1", "TERMINATED", "bafy...", "draft", "terminated", signed)
+	if err != nil || !frozen {
+		t.Fatalf("a signed contract must never be re-rendered, got frozen=%t err=%v", frozen, err)
+	}
+}
+
+// The signature lookup is a DB query; a failure must stop the regeneration
+// rather than be read as "not signed" and fresh-render a signed contract.
+func TestAFailedSignatureLookupStopsTheRegeneration(t *testing.T) {
+	frozen, err := frozenArtifactVerdict("did:contract:1", "SIGNED", "bafy...", "draft", "active",
+		func() (bool, error) { return false, errors.New("database unavailable") })
+	if err == nil {
+		t.Fatal("an unanswerable signature lookup must propagate, not decide the verdict")
+	}
+	if frozen {
+		t.Fatal("the refusal must be reported as an error, not as nothing-to-do")
 	}
 }
 

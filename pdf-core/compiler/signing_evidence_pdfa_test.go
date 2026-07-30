@@ -26,15 +26,11 @@ func TestSigningEvidenceListedInCatalogAF(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	off := findLastObjectHeaderOffset(embedded, 1)
-	if off < 0 {
+	start, end, ok := lastObjectBody(embedded, 1)
+	if !ok {
 		t.Fatal("no superseded catalog (obj 1) after embedding signing evidence")
 	}
-	end := bytes.Index(embedded[off:], []byte("\nendobj"))
-	if end < 0 {
-		t.Fatal("superseded catalog has no endobj")
-	}
-	cat := embedded[off : off+end]
+	cat := embedded[start:end]
 
 	m := regexp.MustCompile(`/AF \[([^\]]*)\]`).FindSubmatch(cat)
 	if m == nil {

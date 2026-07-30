@@ -133,7 +133,7 @@ func anchorShapesName(iri string) (string, bool) {
 const hubContextAnchorPath = "/semantic/context/"
 
 func isHubContextAnchor(iri string) bool {
-	return strings.Contains(iri, hubContextAnchorPath) || iri == SchemaJSONLDContextV1 || iri == schemaRefJSONLDContext
+	return strings.Contains(iri, hubContextAnchorPath) || iri == SchemaJSONLDContextV1 || iri == currentJSONLDContextRef()
 }
 
 // pinnedHubContextVersion reads the hub context version pinned by the

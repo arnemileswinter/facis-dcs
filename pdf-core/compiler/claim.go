@@ -50,20 +50,11 @@ func findEmbeddedJSONLDStreamRange(pdf []byte) (start, length int, err error) {
 		return 0, 0, fmt.Errorf("embedded JSON-LD object id invalid: %w", err)
 	}
 
-	objPos := findLastObjectHeaderOffset(pdf, objID)
-	if objPos < 0 {
-		return 0, 0, fmt.Errorf("embedded JSON-LD object not found")
+	streamStart, streamEnd, ok := lastObjectStreamData(pdf, objID)
+	if !ok {
+		return 0, 0, fmt.Errorf("embedded JSON-LD stream not found in object %d", objID)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
-		return 0, 0, fmt.Errorf("embedded JSON-LD stream start not found")
-	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return 0, 0, fmt.Errorf("embedded JSON-LD stream end not found")
-	}
-	return streamStart, streamEnd, nil
+	return streamStart, streamEnd - streamStart, nil
 }
 
 // MatchPageContent verifies that the page content streams of candidate match
@@ -130,16 +121,11 @@ func extractPageContentStreams(pdf []byte) ([][]byte, error) {
 	}
 	streams := make([][]byte, 0, len(pageIDs))
 	for _, pageID := range pageIDs {
-		pos := findLastObjectHeaderOffset(pdf, pageID)
-		if pos < 0 {
+		dictStart, dictEnd, ok := lastObjectBody(pdf, pageID)
+		if !ok {
 			return nil, fmt.Errorf("page object %d not found", pageID)
 		}
-		end := bytes.Index(pdf[pos:], []byte("endobj"))
-		if end < 0 {
-			return nil, fmt.Errorf("page object %d end not found", pageID)
-		}
-		objBytes := pdf[pos : pos+end]
-		m := pdfContentsRefRE.FindSubmatch(objBytes)
+		m := pdfContentsRefRE.FindSubmatch(pdf[dictStart:dictEnd])
 		if len(m) < 2 {
 			return nil, fmt.Errorf("page object %d has no /Contents reference", pageID)
 		}
@@ -156,27 +142,17 @@ func extractPageContentStreams(pdf []byte) ([][]byte, error) {
 	return streams, nil
 }
 
-// extractStreamContentByObjID returns the raw bytes between stream\n and
-// \nendstream for the latest definition of the given object.
+// extractStreamContentByObjID returns the raw stream data of the definition of
+// the given object a reader resolves (see objectheader.go for what "resolves"
+// costs to get right).
 func extractStreamContentByObjID(pdf []byte, objID int) ([]byte, error) {
-	// Anchored on a line start: an unanchored search for "19 0 obj" also matches
-	// inside "100019 0 obj", so an appended revision could supersede this object
-	// with tampered content and carry a decoy whose id merely ENDS in these
-	// digits holding the original. The checker read the decoy while a conforming
-	// reader followed the xref to the tampered object — the gate reported a match
-	// on a document whose page had been replaced.
-	objPos := findLastObjectHeaderOffset(pdf, objID)
-	if objPos < 0 {
+	header, found := lastObjectHeader(pdf, objID)
+	if !found {
 		return nil, fmt.Errorf("object %d not found", objID)
 	}
-	streamStart := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStart < 0 {
+	streamStart, streamEnd, ok := objectStreamData(pdf, header)
+	if !ok {
 		return nil, fmt.Errorf("object %d has no stream", objID)
 	}
-	streamStart += objPos + len("stream\n")
-	streamEnd := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEnd < 0 {
-		return nil, fmt.Errorf("object %d stream end not found", objID)
-	}
-	return append([]byte(nil), pdf[streamStart:streamStart+streamEnd]...), nil
+	return append([]byte(nil), pdf[streamStart:streamEnd]...), nil
 }

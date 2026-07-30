@@ -34,40 +34,25 @@ func exclusionsEqual(a, b []c2paExclusion) bool {
 	return true
 }
 
+// findObjectStreamRange returns the offset and length of the stream data of
+// objectID's genesis definition — the C2PA exclusion window, which must name
+// the manifest's own bytes and no other object's.
 func findObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
-	objPos := findFirstObjectHeaderOffset(pdf, objectID)
-	if objPos < 0 {
+	start, end, ok := firstObjectStreamData(pdf, objectID)
+	if !ok {
 		return 0, 0, false
 	}
-	streamStartRel := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStartRel < 0 {
-		return 0, 0, false
-	}
-	streamStart := objPos + streamStartRel + len("stream\n")
-	streamEndRel := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEndRel < 0 {
-		return 0, 0, false
-	}
-	streamEnd := streamStart + streamEndRel
-	return streamStart, streamEnd - streamStart, true
+	return start, end - start, true
 }
 
+// findLastObjectStreamRange is findObjectStreamRange for the definition a
+// reader resolves, after an incremental update has superseded the manifest.
 func findLastObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
-	objPos := findLastObjectHeaderOffset(pdf, objectID)
-	if objPos < 0 {
+	start, end, ok := lastObjectStreamData(pdf, objectID)
+	if !ok {
 		return 0, 0, false
 	}
-	streamStartRel := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStartRel < 0 {
-		return 0, 0, false
-	}
-	streamStart := objPos + streamStartRel + len("stream\n")
-	streamEndRel := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEndRel < 0 {
-		return 0, 0, false
-	}
-	streamEnd := streamStart + streamEndRel
-	return streamStart, streamEnd - streamStart, true
+	return start, end - start, true
 }
 
 func sha256WithExclusions(data []byte, exclusions []c2paExclusion) [32]byte {

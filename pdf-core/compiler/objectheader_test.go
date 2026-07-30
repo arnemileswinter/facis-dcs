@@ -17,15 +17,17 @@ func TestObjectHeaderLookupIsNotFooledByAnIDSuffix(t *testing.T) {
 		"19 0 obj\n<< >>\nstream\nORIGINAL\nendstream\nendobj\n" +
 		"100019 0 obj\n<< >>\nstream\nDECOY\nendstream\nendobj\n")
 
-	if got := findLastObjectHeaderOffset(pdf, 19); got != 9 {
-		t.Errorf("last header for 19 resolved to %d, not the real definition at 9", got)
+	last, ok := lastObjectHeader(pdf, 19)
+	if !ok || last.start != 9 {
+		t.Errorf("last header for 19 resolved to %d, not the real definition at 9", last.start)
 	}
-	if got := findFirstObjectHeaderOffset(pdf, 19); got != 9 {
-		t.Errorf("first header for 19 resolved to %d, not 9", got)
+	first, ok := firstObjectHeader(pdf, 19)
+	if !ok || first.start != 9 {
+		t.Errorf("first header for 19 resolved to %d, not 9", first.start)
 	}
 	// The decoy is still findable by its own id.
-	if got := findLastObjectHeaderOffset(pdf, 100019); got <= 9 {
-		t.Errorf("object 100019 resolved to %d, which is not its own definition", got)
+	if decoy, ok := lastObjectHeader(pdf, 100019); !ok || decoy.start <= 9 {
+		t.Errorf("object 100019 resolved to %d, which is not its own definition", decoy.start)
 	}
 
 	content, err := extractStreamContentByObjID(pdf, 19)
@@ -93,19 +95,16 @@ func decoyPDF(fileName string, objID int, real, decoy string, decoyFirst, crlfHe
 func TestObjectHeaderLookupAcceptsACRLFHeader(t *testing.T) {
 	pdf := []byte("%PDF-1.7\n19 0 obj\nFIRST\nendobj\r\n19 0 obj\r\nCURRENT\nendobj\n")
 
-	offsets := objectHeaderOffsets(pdf, 19)
-	if len(offsets) != 2 {
-		t.Fatalf("object 19 is defined twice (LF then CRLF), got %d header offsets", len(offsets))
+	headers := objectHeaders(pdf, 19)
+	if len(headers) != 2 {
+		t.Fatalf("object 19 is defined twice (LF then CRLF), got %d headers", len(headers))
 	}
-	if last := findLastObjectHeaderOffset(pdf, 19); last != offsets[1] {
-		t.Fatalf("the CRLF definition at %d must win, got %d", offsets[1], last)
+	last, ok := lastObjectHeader(pdf, 19)
+	if !ok || last.start != headers[1].start {
+		t.Fatalf("the CRLF definition at %d must win, got %d", headers[1].start, last.start)
 	}
-	body, ok := lastObjectBodyOffset(pdf, 19)
-	if !ok {
-		t.Fatal("object 19 has a body")
-	}
-	if !bytes.HasPrefix(pdf[body:], []byte("CURRENT")) {
-		t.Fatalf("the body must start past the CRLF closing the header, got %q", pdf[body:])
+	if !bytes.HasPrefix(pdf[last.body:], []byte("CURRENT")) {
+		t.Fatalf("the body must start past the CRLF closing the header, got %q", pdf[last.body:])
 	}
 }
 

@@ -435,17 +435,29 @@ func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, di
 	return &state, nil
 }
 
-func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeStates, excludeDIDs []string) ([]string, error) {
+func (r *PostgresContractRepo) CountSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM contract_signatures WHERE contract_did = $1 AND status = 'SIGNED'`, did)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *PostgresContractRepo) ReadDIDsMissingStoredPDF(ctx context.Context, tx *sqlx.Tx, limit int, excludeDIDs []string) ([]string, error) {
 	var dids []string
-	// COALESCE: an empty Go slice binds as SQL NULL, and "state <> ALL (NULL)"
+	// COALESCE: an empty Go slice binds as SQL NULL, and "did <> ALL (NULL)"
 	// is NULL — which would filter out every row and stall the sweep.
 	err := tx.SelectContext(ctx, &dids,
-		`SELECT did FROM contracts
-		 WHERE (pdf_ipfs_cid IS NULL OR pdf_ipfs_cid = '')
-		   AND state::text <> ALL (COALESCE($2::text[], '{}'))
-		   AND did <> ALL (COALESCE($3::text[], '{}'))
-		 ORDER BY created_at, did
-		 LIMIT $1`, limit, pq.Array(excludeStates), pq.Array(excludeDIDs),
+		`SELECT c.did FROM contracts c
+		 WHERE (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
+		   AND NOT EXISTS (
+		       SELECT 1 FROM contract_signatures s
+		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')
+		   AND c.did <> ALL (COALESCE($2::text[], '{}'))
+		 ORDER BY c.created_at, c.did
+		 LIMIT $1`, limit, pq.Array(excludeDIDs),
 	)
 	if err != nil {
 		return nil, err

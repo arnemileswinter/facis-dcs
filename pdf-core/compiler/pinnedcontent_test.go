@@ -67,16 +67,11 @@ func appendRevision(t *testing.T, pdf []byte, objs map[int]string) []byte {
 // objectBody returns the body of the latest definition of object id.
 func objectBody(t *testing.T, pdf []byte, id int) string {
 	t.Helper()
-	off := findLastObjectHeaderOffset(pdf, id)
-	if off < 0 {
+	start, end, ok := lastObjectBody(pdf, id)
+	if !ok {
 		t.Fatalf("object %d not found", id)
 	}
-	start := off + len(fmt.Sprintf("%d 0 obj\n", id))
-	end := bytes.Index(pdf[start:], []byte("\nendobj"))
-	if end < 0 {
-		t.Fatalf("object %d end not found", id)
-	}
-	return string(pdf[start : start+end])
+	return string(pdf[start:end])
 }
 
 // firstPageAndContentObjID returns the object ids of the first page and of the
