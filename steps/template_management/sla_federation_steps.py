@@ -29,10 +29,25 @@ The only fixture knowledge baked in is _FIELD_FILL_DEFAULTS: a plausible
 negotiated value per field, keyed by the field @id's FRAGMENT (the part after
 '#'), which survives the rebase contract creation applies to every template
 node IRI (validation.rebaseIDText: `<templateID>#field-x` -> `<contractID>
-#field-x`). An unknown fragment falls back to a datatype default, and every
-fill is checked against the literal ODRL constraints that bind it, so a
-fixture that grows a field this table does not know still fails loudly and
-specifically rather than mysteriously at the approval gate.
+#field-x`). A value the field's own dcs:valueConstraint does not admit is
+replaced by one it does, an unknown fragment falls back to a datatype default,
+and every fill is checked against both that declared constraint and the
+literal ODRL constraints that bind it, so a fixture that grows a field this
+table does not know still fails loudly and specifically rather than
+mysteriously at the submission gate.
+
+Domain library
+--------------
+The template declares TWO shapes graphs: the canonical DCS envelope, which
+every instance seeds at startup, and `facis-sla-hosting`, the hosting domain —
+the asset classes in a kind="shapes" entry and the flat commercial fields in a
+kind="ontology" one. That library is published at RUNTIME, never seeded
+(features/fixtures/facis-sla-hosting-{shapes,ontology}.ttl), because importing
+a vocabulary is exactly the seam a second domain enters DCS through. Nothing
+resolves a declared shapes graph until a document is submitted, so an instance
+that has not installed it authors and imports the template happily and then
+refuses the contract drawn from it — which is why _install_sla_domain_library
+runs on every instance this pack touches, before anything is authored on it.
 
 Identity
 --------
@@ -47,6 +62,18 @@ organization for that participant, keeping this pack's negotiation rounds out
 of the suite-shared role tokens whose state other scenarios depend on. This is
 the same reasoning (and the same shape) as
 steps/peer_trust/dcs_peer_trust_steps.py's _B_COUNTERPARTY_ORG.
+
+That dedicated organization is also why the create names its parties. Read
+authorization matches the caller's organization against the creating one and
+against the organizations the document declares under dcs:parties — the create
+request's `parties` list (query/contract/querybyid.go CallerMayReadContract).
+Instance B is the ORIGINATOR here, so its copy gets no relief from the
+received-copy rule that lets instance A's reviewer and approver read theirs,
+and its readers are two organizations rather than one: the negotiating
+participant above, and the suite-shared one the reviewer, the approver, the
+manager and the peer-trust signing steps this pack reuses all present. Naming
+both is what a real creator does for every organization entitled to see the
+contract.
 """
 
 import json
@@ -100,6 +127,17 @@ def _as_instance(context, base_url):
 # steps/template_management/<this file>.py -> repository root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FIXTURE_PATH = _REPO_ROOT / "features" / "fixtures" / "sla_hosting_template.jsonld"
+
+# The hosting domain the template declares in sh:shapesGraph, published to the
+# hub at runtime (see the module docstring). The version is pinned rather than
+# assigned: the document names ?version=1, and ADR-8 has that number resolve
+# the same graph on every hub that holds it.
+_SLA_LIBRARY_NAME = "facis-sla-hosting"
+_SLA_LIBRARY_VERSION = 1
+_SLA_LIBRARY_ENTRIES = (
+    ("shapes", _REPO_ROOT / "features" / "fixtures" / "facis-sla-hosting-shapes.ttl"),
+    ("ontology", _REPO_ROOT / "features" / "fixtures" / "facis-sla-hosting-ontology.ttl"),
+)
 
 
 def _fixture() -> dict:
@@ -284,9 +322,9 @@ def _rules_constraining_field(document: dict, field_id: str) -> list:
 # what the two parties would actually agree; the constraint check below proves
 # they clear the template's own floors rather than assuming it.
 _FIELD_FILL_DEFAULTS = {
-    "field-governing-law": "German law, exclusive venue Hamburg",
+    "field-governing-law": "DE",
     "field-provisioned-nodes": "8",
-    "field-node-class": "general-purpose-8vcpu-32gb",
+    "field-node-class": "GENERAL_PURPOSE",
     "field-service-region": "EMEA",
     "field-contract-end-date": (date.today() + timedelta(days=365)).isoformat(),
     "field-service-credit-rate": "5.0",
@@ -356,12 +394,58 @@ def _as_number(raw):
         return None
 
 
+def _declared_constraint(field: dict) -> dict:
+    """The field's own dcs:valueConstraint — the enum, bounds and pattern the
+    hub vocabulary it was picked from declares, carried on the field itself."""
+    constraint = field.get("dcs:valueConstraint")
+    return constraint if isinstance(constraint, dict) else {}
+
+
+def _allowed_values(field: dict) -> list:
+    return [str(value) for value in (_declared_constraint(field).get("allowedValues") or []) if str(value)]
+
+
 def _fill_value(field: dict) -> str:
+    """The value to negotiate into a field: the table's, when the field's own
+    declared constraint admits it, and otherwise one the constraint does admit.
+
+    Deriving rather than trusting the table is what keeps a fixture whose
+    vocabulary tightens — an enum gaining a value, a bound moving — from
+    failing at the submission gate under a SHACL message about a shapes graph
+    instead of here."""
     fragment = _fragment(str(field.get("@id", "")))
-    if fragment in _FIELD_FILL_DEFAULTS:
-        return _FIELD_FILL_DEFAULTS[fragment]
+    preferred = _FIELD_FILL_DEFAULTS.get(fragment)
+    allowed = _allowed_values(field)
+    if allowed:
+        return preferred if preferred in allowed else allowed[0]
+    if preferred is not None:
+        return _within_declared_bounds(field, preferred)
     datatype = _local(str(field.get("dcs:datatype") or "xsd:string"))
-    return _DATATYPE_FALLBACKS.get(datatype, f"BDD SLA {fragment}")
+    fallback = _DATATYPE_FALLBACKS.get(datatype)
+    if fallback is None:
+        return f"BDD SLA {fragment}"
+    return _within_declared_bounds(field, fallback)
+
+
+def _within_declared_bounds(field: dict, value: str) -> str:
+    """`value` clamped into the field's declared numeric bounds; returned
+    verbatim when the field declares none, the value is not a number, or it
+    already lies inside them."""
+    constraint = _declared_constraint(field)
+    number = _as_number(value)
+    if number is None:
+        return value
+    clamped = number
+    minimum, maximum = _as_number(constraint.get("min")), _as_number(constraint.get("max"))
+    if minimum is not None and clamped < minimum:
+        clamped = minimum
+    if maximum is not None and clamped > maximum:
+        clamped = maximum
+    if clamped == number:
+        return value
+    if _local(str(field.get("dcs:datatype") or "")) in ("integer", "int", "long"):
+        return str(int(clamped))
+    return str(clamped)
 
 
 def _fill_open_fields(document: dict) -> int:
@@ -377,6 +461,40 @@ def _fill_open_fields(document: dict) -> int:
         }
         filled += 1
     return filled
+
+
+def _assert_declared_constraints_satisfied(document: dict):
+    """Check every filled field against its OWN dcs:valueConstraint — the enum
+    and the bounds the hub vocabulary declares, which the same shapes graph
+    enforces at the submission gate (ADR-23).
+
+    Diagnosis, like the ODRL check below: a value the vocabulary does not admit
+    fails here naming the field and the enum, rather than arriving as a SHACL
+    report about a shapes graph three steps later."""
+    for field in _contract_fields(document):
+        value = _literal_value(field.get("dcs:value"))
+        if value in (None, ""):
+            continue
+        identity = field.get("@id")
+        allowed = _allowed_values(field)
+        assert not allowed or str(value) in allowed, (
+            f"the value filled into contract field {identity!r} ({value!r}) is not one the field's "
+            f"own declared vocabulary admits ({allowed}) — the SLA fill table in "
+            "steps/template_management/sla_federation_steps.py needs one that is"
+        )
+        constraint = _declared_constraint(field)
+        number = _as_number(value)
+        minimum, maximum = _as_number(constraint.get("min")), _as_number(constraint.get("max"))
+        if number is None:
+            continue
+        assert minimum is None or number >= minimum, (
+            f"the value filled into contract field {identity!r} ({number}) is below the minimum "
+            f"{minimum} the field itself declares"
+        )
+        assert maximum is None or number <= maximum, (
+            f"the value filled into contract field {identity!r} ({number}) is above the maximum "
+            f"{maximum} the field itself declares"
+        )
 
 
 def _assert_literal_constraints_satisfied(document: dict):
@@ -439,6 +557,15 @@ _PARTY_ORG = {
     "A": "BDD SLA Federation Provider",
     "B": "BDD SLA Federation Customer",
 }
+
+# The organizations named as parties when the contract is created — the
+# organizations entitled to read it. On a real instance this is one company:
+# the creator, the reviewer and the approver are colleagues, and one
+# organization claim covers them all. A BDD identity is (roles, organization),
+# so here they are two — the negotiating participant's dedicated one and the
+# suite-shared one every other role token presents — and both are declared,
+# because a company that reads the contract is a company the creator declares.
+_READING_ORGANIZATIONS = [_PARTY_ORG["B"], AuthService.DEFAULT_ORGANIZATION]
 
 
 def _base(context, label: str) -> str:
@@ -567,6 +694,54 @@ def _shapes_anchor_identity(document: dict) -> list:
     return sorted(identities)
 
 
+def _install_sla_domain_library(context, base_url: str):
+    """Publish the hosting domain to `base_url`'s Semantic Hub: the shapes
+    graph the template declares in sh:shapesGraph and the ontology its flat
+    commercial fields come from, both under _SLA_LIBRARY_NAME at the version
+    the document pins.
+
+    Idempotent, and it has to be: hub versions are immutable rows in a
+    run-durable database, so the second scenario of the pack — and every later
+    CI run against the same instance — finds version 1 already there and
+    installs nothing.
+    """
+    headers = AuthService.get_headers_for_roles(
+        ["Template Manager"], api_base=base_url, timeout=context.http_timeout_seconds
+    )
+    for kind, path in _SLA_LIBRARY_ENTRIES:
+        assert path.is_file(), (
+            f"the SLA hosting {kind} fixture is missing at {path} — the template declares "
+            f"{_SLA_LIBRARY_NAME} in sh:shapesGraph and no contract drawn from it can be "
+            "submitted until that library is published"
+        )
+        installed = _requests.get(
+            f"{base_url}/semantic/schema/retrieve",
+            params={"name": _SLA_LIBRARY_NAME, "kind": kind, "version": _SLA_LIBRARY_VERSION},
+            timeout=context.http_timeout_seconds,
+        )
+        if installed.status_code == 200:
+            continue
+        resp = post_json(
+            context,
+            f"{base_url}/semantic/schema/register",
+            {
+                "name": _SLA_LIBRARY_NAME,
+                "kind": kind,
+                "media_type": "text/turtle",
+                "content": path.read_text(encoding="utf-8"),
+                "version": _SLA_LIBRARY_VERSION,
+                "activate": True,
+            },
+            headers=headers,
+        )
+        # A concurrent install of the same immutable version is the outcome
+        # this wanted anyway; anything else is a real failure.
+        assert resp.status_code == 200 or "already registered" in resp.text.lower(), (
+            f"publishing the SLA hosting {kind} library to {base_url} failed: "
+            f"{resp.status_code} {resp.text}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Given / When — authoring and publishing on instance A
 # ---------------------------------------------------------------------------
@@ -638,6 +813,7 @@ def step_given_sla_template_registered_on_a(context):
     # fixed name would collide with every previous run's entry and make the
     # search assertion meaningless.
     name = f"Managed Kubernetes Hosting SLA {int(time.time())}"
+    _install_sla_domain_library(context, _base(context, "A"))
     fixture = _fixture()
     metadata = _get(fixture, "metadata") or {}
     description = metadata.get("dcs:description") or "Federated SLA demonstrator template"
@@ -753,6 +929,11 @@ def step_then_catalogue_entry_carries_odrl_and_pin(context):
 @step("instance B registers the catalogued SLA template into its own repository")
 def step_when_b_registers_catalogued_template(context):
     sla = _sla(context)
+    # Content crosses the catalogue; the vocabulary it is written against does
+    # not. Instance B installs the same library under the same version before
+    # taking the template on, or the contract it later draws from it names a
+    # shapes graph its own hub cannot resolve.
+    _install_sla_domain_library(context, _base(context, "B"))
     manager_h = _headers(context, "B", ["Template Manager"])
     with _as_instance(context, _base(context, "B")):
         resp = post_json(
@@ -879,7 +1060,16 @@ def step_when_b_instantiates_contract(context):
         resp = post_json(
             context,
             contract_create_url(context),
-            {"template_did": _template_did(context, "B"), "counterparty": context.peer_did_a},
+            {
+                "template_did": _template_did(context, "B"),
+                "counterparty": context.peer_did_a,
+                # Who may READ this contract on instance B (see the module
+                # docstring): the negotiating participant's own organization
+                # and the one every other role token here presents. B is the
+                # originator, so nothing else grants its reviewer, approver or
+                # signer access to the copy they are asked to act on.
+                "parties": _READING_ORGANIZATIONS,
+            },
             headers=party_h,
         )
     assert resp.status_code == 200, (
@@ -907,6 +1097,7 @@ def step_when_b_fills_fields(context):
         document = body.get("contract_data")
         filled = _fill_open_fields(document)
         assert filled, "the SLA contract already carried a value for every field — nothing to negotiate"
+        _assert_declared_constraints_satisfied(document)
         _assert_literal_constraints_satisfied(document)
         with _as_instance(context, _base(context, "B")):
             resp = put_json(
@@ -1237,6 +1428,7 @@ def step_given_single_instance_sla_contract(context, name):
     resolves a contract by."""
     from steps.support.services.contract_service import ContractService  # noqa: PLC0415
 
+    _install_sla_domain_library(context, context.base_url)
     creator_h = AuthService.get_headers_for_roles(["Template Creator"])
     resp = post_json(
         context,
@@ -1271,6 +1463,7 @@ def step_given_single_instance_sla_contract(context, name):
     assert retrieve.status_code == 200, retrieve.text
     document = retrieve.json().get("contract_data")
     _fill_open_fields(document)
+    _assert_declared_constraints_satisfied(document)
     _assert_literal_constraints_satisfied(document)
     update = put_json(
         context,
