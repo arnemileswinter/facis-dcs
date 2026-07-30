@@ -87,6 +87,11 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
     Then the SLA contract is in state OFFERED on instance B
     And the SLA contract appears on instance A in state OFFERED within a few seconds
     And instance A's copy of the SLA contract carries the identical ODRL Offer
+    # What crossed must be the contract that was offered, not a render of it
+    # taken before the fields were filled: the PDF the peer adopts as its copy
+    # carries the document (ADR-13), so an offer whose PDF lags its own
+    # contract_data would hand instance A a contract with 13 open fields.
+    And all 13 contract fields of the SLA contract carry a value on instance A
 
   # ---------------------------------------------------------------------
   # THE LOAD-BEARING SCENARIO.
