@@ -488,7 +488,7 @@ const routes: RouteRecordRaw[] = [
       icon: LockClosedIcon,
       requiresAuth: true,
       title: 'DCS - Key Inventory',
-      order: 11,
+      order: 13,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },
@@ -590,7 +590,7 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((to) => {
+router.afterEach((to) => {
   const scrollStore = useScrollStore()
   if (to.matched.some((r) => r.path.includes(':'))) {
     scrollStore.addGutter()
@@ -599,7 +599,7 @@ router.beforeEach((to) => {
   }
 })
 
-router.beforeEach((_, from) => {
+router.afterEach((_, from) => {
   const navStore = useNavStore()
   navStore.previousRoute = from
 })
