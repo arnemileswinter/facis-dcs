@@ -35,6 +35,14 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // actually perform.
 const pdfSignatureNotAvailable = "not_available"
 
+// Failure classes reported in PDFVerifyResult.Discrepancy.
+const (
+	discrepancyNone         = ""
+	discrepancyHashMismatch = "content_hash_mismatch"
+	discrepancyNotAuthentic = "artifact_not_authentic"
+	discrepancyFailed       = "verification_failed"
+)
+
 // stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-004) for the
 // given contract state into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It performs no IPFS storage or DB
@@ -130,6 +138,23 @@ func appendAndCache(
 	return updatedPDF, nil
 }
 
+// tamperedVerifyResult is the verdict for an artifact that failed
+// authenticated decryption. Every check reports negative rather than absent:
+// the stored bytes are not the ones this instance sealed, so nothing about
+// them verifies, and the hashes stay empty because there is no trustworthy
+// content to hash.
+func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
+	return &pdfgen.PDFVerifyResult{
+		Match:              false,
+		C2paManifestFound:  false,
+		C2paSignatureValid: false,
+		VcProofValid:       false,
+		LifecycleStatus:    ptrToString(lifecycleStatus),
+		PdfSignatureStatus: pdfSignatureNotAvailable,
+		Discrepancy:        ptrToString(discrepancyNotAuthentic),
+	}
+}
+
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
@@ -139,15 +164,32 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 	}
 	c2paSignatureValid := verifyErr == nil
 
+	// pdf-core answers 409 specifically for "manifest present, content hash
+	// comparison failed" — the genuine MR/HR discrepancy — which is a different
+	// finding from a manifest that is missing or a call that never landed.
+	discrepancy := discrepancyNone
+	switch {
+	case verifyErr == nil:
+	case c2paManifestFound:
+		discrepancy = discrepancyHashMismatch
+	default:
+		discrepancy = discrepancyFailed
+	}
+
+	// An unreachable status service means the revocation state is UNKNOWN. Left
+	// empty it reads as "nothing to report", so a revoked contract verified
+	// clean for the duration of an outage.
 	statusListURI := ""
 	statusListStatus := ""
 	if result.VCProofValid && len(result.VCBytes) > 0 {
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
 		if cred, idx, ok := provenance.ExtractCredentialStatusFields(result.VCBytes); ok {
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			if status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx); err == nil {
-				statusListStatus = status
+			status, err := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
+			if err != nil {
+				status = "UNKNOWN (status service unreachable)"
 			}
+			statusListStatus = status
 		}
 	}
 
@@ -164,6 +206,7 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client, li
 		// no cryptographic PAdES re-verification, so it honestly reports
 		// "not_available" rather than faking a passed PDF-signature verification.
 		PdfSignatureStatus: pdfSignatureNotAvailable,
+		Discrepancy:        ptrToString(discrepancy),
 	}, nil
 }
 

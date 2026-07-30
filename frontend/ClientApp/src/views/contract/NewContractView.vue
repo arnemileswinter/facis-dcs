@@ -79,7 +79,9 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
 })
 
-const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
+const tabs = computed(() =>
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft).filter((tab) => tab.id !== 'audit'),
+)
 
 const story = computed(() => contractStory(contract.value?.state))
 

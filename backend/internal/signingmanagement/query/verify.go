@@ -93,11 +93,19 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 
 	// Query live revocation state from the XFSC status list (DCS-OR-C2PA-006).
 	// VC bytes are returned directly by pdf-core — no PDF byte scanning required.
+	// An unreachable status service is an UNKNOWN revocation state, not an
+	// absent one. Swallowing the error left statusListStatus empty, the finding
+	// was never appended, and a revoked contract came back clean for as long as
+	// the outage lasted.
 	statusListStatus := ""
 	if verifyResult.VCProofValid && len(verifyResult.VCBytes) > 0 {
 		if cred, idx, ok := provenance.ExtractCredentialStatusFields(verifyResult.VCBytes); ok {
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			if status, statusErr := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx); statusErr == nil {
+			status, statusErr := provenance.QueryStatusListStatus(ctx, httpClient, cred, idx)
+			switch {
+			case statusErr != nil:
+				statusListStatus = "UNKNOWN (status service unreachable)"
+			default:
 				statusListStatus = status
 			}
 		}

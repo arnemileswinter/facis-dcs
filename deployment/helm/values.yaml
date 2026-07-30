@@ -266,7 +266,13 @@ pkcs11:
     image:
       repository: ""
       tag: ""
-      pullPolicy: IfNotPresent
+      # Empty so the job follows image.pullPolicy. The provisioning script and
+      # the gendid tool it runs ship inside the application image, so pinning
+      # this to IfNotPresent while the application pulls Always lets a node's
+      # cached copy of a mutable tag provision an older key set than the
+      # application expects — the backend then exits at startup on a key the
+      # provisioner never created.
+      pullPolicy: ""
 
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.

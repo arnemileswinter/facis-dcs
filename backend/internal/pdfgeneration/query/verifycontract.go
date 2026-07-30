@@ -89,6 +89,9 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 		}
 
 		pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
 		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch frozen signed contract PDF %s from IPFS for verify: %w", qry.DID, err)
 		}
@@ -105,6 +108,9 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 		}
 
 		pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), pdfState.IPFSCID)
+		if artifactstore.IsTampered(err) {
+			return tamperedVerifyResult(currentC2PAState), nil
+		}
 		if err != nil || len(pdf) == 0 {
 			return nil, fmt.Errorf("fetch cached contract PDF %s from IPFS for verify append: %w", qry.DID, err)
 		}
@@ -135,6 +141,9 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 	}
 
 	pdf, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(qry.DID), latestCID)
+	if artifactstore.IsTampered(err) {
+		return tamperedVerifyResult(currentC2PAState), nil
+	}
 	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch contract PDF %s from IPFS for verify: %w", qry.DID, err)
 	}

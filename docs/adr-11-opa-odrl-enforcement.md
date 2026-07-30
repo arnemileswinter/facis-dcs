@@ -173,3 +173,42 @@ revised — the gate is the trigger to switch, not an assumption that it works.
 - The value-inlining unification (`dcs:parameterValue` on the field) is a
   prerequisite that stands independently of the engine: it is the clean
   "state of the world" both this OPA path and the prior evaluator read.
+
+## Extension (2026-07-29): issuer trust authorization
+
+The same engine now decides issuer trust (ADR-31). `IssuerTrusted` and
+`IssuerMayAttest` evaluate `internal/auth/oid4vp/policy/trust.rego` instead of
+the `if` statements that used to hold those rules.
+
+**The line: discovery and verification stay in Go, authorization is policy.**
+Chain validation to a trust anchor, the leaf identifying its issuer, signature
+and holder binding, revocation, and mechanism dispatch are typed, tested Go —
+OPA has crypto builtins, but reimplementing those rules in a policy language
+would trade tests for configurability nobody asked for. What moved is the part a
+deployment actually changes: which issuers it trusts, for what, and on whose
+behalf.
+
+Three properties this buys:
+
+- The rules are auditable as data. "Which issuers may grant a session here" is a
+  file an operator reads, not control flow they infer.
+- A denial explains itself. The policy emits `reasons`, surfaced in the error a
+  caller reports; the previous booleans said only "no".
+- Adding a distinction no longer means adding an enum value. The overloaded
+  `peer` purpose — one grant meaning both "may authorize a signature here" and
+  "may attest a counterparty's authority" — is separable by writing two rules
+  rather than by changing the trust schema and every consumer of it.
+
+The trust document travels as evaluation **input**, not as a bound data
+document. Bound data is a snapshot taken at first evaluation, so a configuration
+changed afterwards would go on being judged against what it said at startup,
+and nothing would report the difference.
+
+`OID4VP_TRUST_POLICY_PATH` replaces the embedded policy for a deployment whose
+authorization rules differ. A policy that cannot be loaded or evaluated
+**denies** — treating a broken policy as permissive would turn a configuration
+mistake into silent trust.
+
+The policy has tests of its own (`policy/trust_test.rego`). They run under
+`opa test backend/internal/auth/oid4vp/policy` and, so they cannot rot quietly,
+inside `go test` as well, which means CI runs them with no new tooling.

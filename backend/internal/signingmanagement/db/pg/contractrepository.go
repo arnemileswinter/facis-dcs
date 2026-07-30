@@ -290,7 +290,13 @@ func (r *PostgresContractRepo) CollectValidationFindings(ctx context.Context, tx
 	}
 
 	pdfBytes, fetchErr := r.FetchContractPDFBytes(ctx, tx, did)
-	if fetchErr != nil {
+	if artifactstore.IsTampered(fetchErr) {
+		// The embedded signing evidence lives inside the stored PDF, so bytes
+		// that fail authenticated decryption invalidate the evidence itself —
+		// report that, not a fetch problem.
+		findings = append(findings,
+			"Embedded signing evidence is invalid: the stored contract PDF failed authenticated decryption, so it was altered or substituted at rest")
+	} else if fetchErr != nil {
 		findings = append(findings, fmt.Sprintf("Could not fetch contract PDF for integrity check: %v", fetchErr))
 	} else if len(pdfBytes) == 0 {
 		findings = append(findings, "No contract PDF available for MR/HR integrity check")

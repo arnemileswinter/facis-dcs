@@ -188,3 +188,8 @@ ipfsDocumentManager:
 
 route:
   basePath: "/api"
+
+extraEnv:
+  # This stack trusts the issuer fixture committed to the repo.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"

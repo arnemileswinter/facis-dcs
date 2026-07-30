@@ -31,7 +31,7 @@ SIGNING_CEREMONY_REQUEST_RE = re.compile(
     re.I,
 )
 
-PID_VCT_VALUES = {"urn:eudi:pid:de:1", "urn:eudi:eaa:loyalty-card:1"}
+PID_VCT_VALUES = {"urn:dcs:pid:demo:v1", "urn:eudi:eaa:loyalty-card:1"}
 POA_VCT = "urn:dcs:poa:v1"
 
 WALLET_VP_FORMATS_SUPPORTED = {

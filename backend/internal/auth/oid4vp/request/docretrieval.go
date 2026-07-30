@@ -60,8 +60,9 @@ type DocRetrievalParams struct {
 // would previously have rejected this request for are closed: signer here is
 // an X5CSigner carrying the DCS's own DID/hostname x5c chain in the JAR
 // header (not a bare jwk), and callers pass a DNS-named client_id equal to
-// that certificate's SAN — the same hostname the response_uri is built from
-// (service.signatureManagementsrvc.DocRetrievalSigner/DocRetrievalClientID).
+// that certificate's SAN — the hostname the response_uri is built from
+// (service.signatureManagementsrvc.RequestSigner/DocRetrievalClientID),
+// without the port a dNSName SAN cannot carry.
 // Structurally x509_san_dns-conformant; still never exercised against an
 // actual EUDI wallet implementation, only the project's own testWallet stand-in.
 func BuildDocumentRetrievalJWT(signer Signer, params DocRetrievalParams) (string, error) {

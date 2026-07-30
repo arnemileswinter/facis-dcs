@@ -135,7 +135,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		// seed one AcroForm signature field per party — origin and counterparty
 		// (dcs:signatoryName == the party's DCS instance DID) — which prepare
 		// renders and the signatory's wallet signs (ADR-13).
-		seeded, changed, err := seedSignatureFields(*contractData, existing.Responsible.GetParties())
+		seeded, changed, err := SeedSignatureFields(*contractData, existing.Responsible.GetParties())
 		if err != nil {
 			return fmt.Errorf("could not seed signature fields: %w", err)
 		}

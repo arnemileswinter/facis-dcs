@@ -38,6 +38,10 @@ type GateFailureKind int
 const (
 	AgreementFailure GateFailureKind = iota
 	PolicyFailure
+	// PoAFailure is a counterparty whose shipped Power-of-Attorney evidence
+	// does not verify (ADR-31). Inbound only, and terminal: the peer must ship
+	// evidence that verifies, which no retry of the same ship will produce.
+	PoAFailure
 )
 
 // GateError is returned by TrustGate.Check on any rejection, naming which of
@@ -287,7 +291,7 @@ func fetchAgreementCredential(peerDID string) (json.RawMessage, error) {
 		return nil, err
 	}
 	var lastErr error
-	for _, scheme := range []string{"https", "http"} {
+	for _, scheme := range identity.DIDWebSchemes(host) {
 		url := identity.DIDWebBaseURL(scheme, host, segments) + "/.well-known/dcs-agreement-credential.json"
 		body, err := fetchAgreementCredentialFromURL(url)
 		if err == nil {
