@@ -236,7 +236,7 @@ func shaclResultSeverity(result shacl.ValidationResult) string {
 	case shacl.SHWarning.Value():
 		return "warning"
 	case shacl.SHInfo.Value():
-		return "info"
+		return SeverityInfo
 	case "":
 		return "error"
 	default:

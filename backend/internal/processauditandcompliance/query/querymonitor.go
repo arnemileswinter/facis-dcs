@@ -37,14 +37,14 @@ const RiskTypeMissingApproval = "MISSING_APPROVAL"
 // being monitored (DCS-FR-PACM-02).
 const RiskTypeUnauthorizedAccess = "UNAUTHORIZED_ACCESS"
 
-// RiskTypeUnderperformance flags a contract already in force whose own ODRL
-// policies are no longer satisfied by the values reported against it — a
-// missed delivery target, a breached service level, a financial term not met
-// (DCS-FR-CWE-31: "Alerts MUST be raised for underperformance or missed
-// targets"). Unlike the approval-time gate, which REFUSES to approve a
-// contract whose terms are already violated, this is monitoring of a contract
-// in force: the violation is reported, not blocked, because the contract
-// exists and the breach is a fact to be recorded and acted on.
+// RiskTypeUnderperformance flags a contract already in force whose executing
+// target system reported one of its ODRL rules as violated — a missed delivery
+// target, a breached service level, a financial term not met (DCS-FR-CWE-31:
+// "Alerts MUST be raised for underperformance or missed targets"). Unlike the
+// approval-time gate, which REFUSES to approve a contract whose terms are
+// already violated, this is monitoring of a contract in force: the violation is
+// reported, not blocked, because the contract exists and the breach is a fact to
+// be recorded and acted on.
 const RiskTypeUnderperformance = "CONTRACT_UNDERPERFORMANCE"
 
 // RiskTypeDeploymentFailed flags a deployment the Contract Target System never
@@ -299,34 +299,42 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	return &MonitorResult{CheckedAt: checkedAt, Risks: risks}, nil
 }
 
-// underperformanceRisks reads back the KPI values the contract TARGET reported
-// over the deployment callback channel and flags every one already marked as
-// violating its contract's obligations. It deliberately does not re-evaluate
-// anything: callback.go evaluates each reported value against the contract's
-// own ODRL when it arrives (validation.EvaluateKPIViolation) and persists the
-// verdict, so the monitor reports the same judgement rather than forming a
-// second, possibly divergent one.
+// underperformanceRisks reads back the KPI reports the contract TARGET sent
+// over the deployment callback channel and flags every one the target itself
+// classified as violated (ADR-33). It deliberately does not re-evaluate
+// anything: the target executes and observes the contract, callback.go persists
+// the verdict it reported, and the monitor states that judgement rather than
+// forming a second, possibly divergent one. A report classified not_evaluated
+// raises nothing — it is neither a breach nor compliance.
 //
-// Reading reported values is the whole point: the inline values carried on the
-// contract's fields cannot change once it is in force, and a contract already
-// violating them could never have been approved — so evaluating those would
-// produce an alert that never fires.
+// Reading reported verdicts is the whole point: the inline values carried on
+// the contract's fields cannot change once it is in force, and a contract
+// already violating them could never have been approved — so evaluating those
+// would produce an alert that never fires.
 func (h *ComplianceMonitor) underperformanceRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
-	const violatingKPIQuery = `
-        SELECT COALESCE(did, '') AS did,
-               COALESCE(metric, '') AS metric,
-               COALESCE(value, '') AS value,
-               observed_at
-        FROM contract_kpis
-        WHERE violation = true
-        ORDER BY observed_at, id
-    `
 	var reported []violatingKPI
-	if err := tx.SelectContext(ctx, &reported, violatingKPIQuery); err != nil {
+	if err := tx.SelectContext(ctx, &reported, violatingKPIQuery, breachVerdict); err != nil {
 		return nil, fmt.Errorf("could not read violating KPI reports: %w", err)
 	}
 	return underperformanceRisksFromKPIs(reported, checkedAt), nil
 }
+
+// breachVerdict is the only one of the three reported verdicts the sweep acts
+// on. A "satisfied" report needs no alert, and a "not_evaluated" one is a rule
+// nobody judged: the sweep raises nothing for it and asserts nothing about it
+// either, which is not the same as counting it compliant.
+const breachVerdict = cwedb.KPIVerdictViolated
+
+const violatingKPIQuery = `
+        SELECT COALESCE(did, '') AS did,
+               COALESCE(metric, '') AS metric,
+               COALESCE(value, '') AS value,
+               COALESCE(rule_id, '') AS rule_id,
+               observed_at
+        FROM contract_kpis
+        WHERE verdict = $1
+        ORDER BY observed_at, id
+    `
 
 // deploymentFailureRisks reads back the dispatches already recorded as failed.
 // Like the underperformance alert it reports a persisted outcome rather than
@@ -386,30 +394,40 @@ func deploymentFailureRisksFrom(failed []failedDispatch, checkedAt time.Time) []
 	return risks
 }
 
-// violatingKPI is one persisted target-reported KPI already judged to breach
-// its contract's obligations.
+// violatingKPI is one persisted KPI report the target system classified as
+// violated, together with the @id of the ODRL rule it concluded about
+// (ADR-33). RuleID is empty only for rows written outside the callback, which
+// refuses a stated verdict that names no rule.
 type violatingKPI struct {
 	DID        string    `db:"did"`
 	Metric     string    `db:"metric"`
 	Value      string    `db:"value"`
+	RuleID     string    `db:"rule_id"`
 	ObservedAt time.Time `db:"observed_at"`
 }
 
 // underperformanceRisksFromKPIs maps violating KPI reports to compliance risks.
-// The detail names the metric and the value observed: an alert that only says
-// "underperforming" tells an operator something is wrong without telling them
-// what missed, or by how much.
+// The detail names the metric, the value observed and the rule breached: an
+// alert that only says "underperforming" tells an operator something is wrong
+// without telling them what missed, or against which term of the contract.
+//
+// Naming the rule also separates two breaches of different rules on the same
+// metric into two findings, because the register keys on a hash of this text.
 func underperformanceRisksFromKPIs(reported []violatingKPI, checkedAt time.Time) []event2.ComplianceRisk {
 	risks := make([]event2.ComplianceRisk, 0, len(reported))
 	for _, kpi := range reported {
 		if strings.TrimSpace(kpi.DID) == "" {
 			continue
 		}
+		breached := "the contract's agreed obligation"
+		if strings.TrimSpace(kpi.RuleID) != "" {
+			breached = fmt.Sprintf("ODRL rule %s", kpi.RuleID)
+		}
 		risks = append(risks, event2.ComplianceRisk{
 			DID:      kpi.DID,
 			RiskType: RiskTypeUnderperformance,
-			Detail: fmt.Sprintf("reported KPI %q = %q violates the contract's agreed obligation (observed %s)",
-				kpi.Metric, kpi.Value, kpi.ObservedAt.UTC().Format(time.RFC3339)),
+			Detail: fmt.Sprintf("target system reported KPI %q = %q as violating %s (observed %s)",
+				kpi.Metric, kpi.Value, breached, kpi.ObservedAt.UTC().Format(time.RFC3339)),
 			DetectedAt: checkedAt,
 		})
 	}

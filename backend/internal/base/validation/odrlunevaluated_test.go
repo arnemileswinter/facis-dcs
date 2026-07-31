@@ -98,7 +98,7 @@ func TestAuditContractSurfacesAConstraintUnitNothingChecks(t *testing.T) {
 	// value with no unit, so a warning here would make the workflow gate REVIEW
 	// every contract that denominates a boundary at all — which is every correct
 	// use of odrl:unit. Only an unagreed negotiated unit is the author's to fix.
-	require.True(t, hasFindingSeverity(findings, ruleID, "info"),
+	require.True(t, hasFindingSeverity(findings, ruleID, SeverityDeferred),
 		"a boundary denominated in a unit nothing compares against must be reported as unchecked")
 	require.False(t, hasFindingSeverity(findings, ruleID, "warning"),
 		"a declared unit is a property of the field model, not a contract defect to review")

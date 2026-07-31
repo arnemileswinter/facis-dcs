@@ -302,19 +302,32 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 	return runID, false, snapshot.UpdatedAt, nil
 }
 
+// resultFromLocal summarises the DCS-local evaluation for the gate request and
+// the run record. A deferred finding (ADR-33) neither blocks nor asks for a
+// human decision — its verdict belongs to the target system that executes the
+// contract, and demanding review would refuse every contract carrying a context
+// operand or a duty. It does, however, stop the run reading as PASSED: what the
+// DCS checked is not all there was to check.
 func resultFromLocal(findings []validation.PolicyFinding) string {
 	result := "PASSED"
 	for _, finding := range findings {
 		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
-		case "error", "critical", "blocking", "violation":
+		case validation.SeverityError, "critical", "blocking", "violation":
 			return "BLOCKED"
-		case "warning", "warn", "review":
+		case validation.SeverityWarning, "warn", "review":
 			result = "REVIEW"
+		case validation.SeverityDeferred:
+			if result == "PASSED" {
+				result = "NOT_EVALUATED"
+			}
 		}
 	}
 	return result
 }
 
+// resultStatus combines the local summary with the executor's. NOT_EVALUATED is
+// deliberately absent: an unobserved rule is not a reason to hold the workflow,
+// only a reason not to claim the gate verified it.
 func resultStatus(local string, response Response) string {
 	status := "SUCCESS"
 	if local == "REVIEW" || response.Result == "REVIEW" {

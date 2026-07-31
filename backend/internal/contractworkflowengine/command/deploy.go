@@ -296,6 +296,57 @@ func deploymentPolicy(contractDocument map[string]any, correlationID string) map
 	return policy
 }
 
+// nestedRuleProperties are the rule slots a rule may itself carry: a duty
+// attached to a permission, and the consequence of a breached duty. Both travel
+// inside the rule they hang off, so the target can conclude about them too.
+var nestedRuleProperties = [...]string{"odrl:duty", "odrl:consequence"}
+
+// deployedRuleIDs collects the @id of every ODRL rule the deployment envelope
+// hands the target — the buckets deploymentPolicy copies, plus the duties and
+// consequences nested inside them. A reported verdict names one of these; an
+// @id outside the set is a conclusion the DCS cannot attribute to a term of
+// this contract (ADR-33).
+func deployedRuleIDs(contractDocument map[string]any) map[string]bool {
+	ids := map[string]bool{}
+	policies, ok := contractDocument["dcs:policies"].(map[string]any)
+	if !ok {
+		return ids
+	}
+	for _, property := range odrlRuleProperties {
+		collectRuleIDs(policies[property], ids)
+	}
+	return ids
+}
+
+func collectRuleIDs(rules any, ids map[string]bool) {
+	for _, rule := range ruleNodes(rules) {
+		if id, ok := rule["@id"].(string); ok && strings.TrimSpace(id) != "" {
+			ids[strings.TrimSpace(id)] = true
+		}
+		for _, property := range nestedRuleProperties {
+			collectRuleIDs(rule[property], ids)
+		}
+	}
+}
+
+// ruleNodes reads a rule slot, which JSON-LD lets hold either a single node or
+// an array of them.
+func ruleNodes(raw any) []map[string]any {
+	switch value := raw.(type) {
+	case map[string]any:
+		return []map[string]any{value}
+	case []any:
+		nodes := make([]map[string]any, 0, len(value))
+		for _, item := range value {
+			if node, ok := item.(map[string]any); ok {
+				nodes = append(nodes, node)
+			}
+		}
+		return nodes
+	}
+	return nil
+}
+
 // hashDeploymentPayload computes the payload's canonical content hash:
 // recursively key-sorted (Go marshals maps sorted), compact, WITHOUT HTML
 // escaping — so a receiving target system can reproduce it from the parsed

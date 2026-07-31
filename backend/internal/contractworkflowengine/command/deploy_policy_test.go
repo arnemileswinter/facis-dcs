@@ -49,3 +49,50 @@ func TestDeploymentPolicyOfAContractWithoutRulesIsAnEmptySet(t *testing.T) {
 		}
 	}
 }
+
+// The rule @id is what makes a reported verdict traceable back to the exact
+// term it concludes about (ADR-33), so it has to survive the handover
+// unchanged, and the set the callback resolves a report against has to be the
+// set the target was actually handed.
+func TestDeployedRuleIdentifiersTravelVerbatim(t *testing.T) {
+	contract := map[string]any{
+		"dcs:policies": map[string]any{
+			"@id":   "urn:uuid:policy-set",
+			"@type": "odrl:Agreement",
+			"odrl:obligation": []any{map[string]any{
+				"@id": "urn:uuid:policy-availability", "@type": "odrl:Duty",
+			}},
+			"odrl:permission": []any{map[string]any{
+				"@id": "urn:uuid:policy-use", "@type": "odrl:Permission",
+				"odrl:duty": []any{map[string]any{"@id": "urn:uuid:policy-compensate"}},
+			}},
+			"odrl:prohibition": []any{map[string]any{
+				"@id": "urn:uuid:policy-resell", "@type": "odrl:Prohibition",
+				"odrl:consequence": map[string]any{"@id": "urn:uuid:policy-terminate"},
+			}},
+		},
+	}
+
+	policy := deploymentPolicy(contract, "corr-3")
+	obligations, _ := policy["odrl:obligation"].([]any)
+	rule, _ := obligations[0].(map[string]any)
+	if rule["@id"] != "urn:uuid:policy-availability" {
+		t.Fatalf("the deployed rule lost its @id: %#v", rule)
+	}
+
+	ids := deployedRuleIDs(contract)
+	for _, id := range []string{
+		"urn:uuid:policy-availability",
+		"urn:uuid:policy-use",
+		"urn:uuid:policy-compensate",
+		"urn:uuid:policy-resell",
+		"urn:uuid:policy-terminate",
+	} {
+		if !ids[id] {
+			t.Fatalf("a verdict about %s would be refused, though the rule was deployed", id)
+		}
+	}
+	if ids["urn:uuid:policy-set"] {
+		t.Fatal("the enclosing policy set is not a rule a verdict can be attributed to")
+	}
+}

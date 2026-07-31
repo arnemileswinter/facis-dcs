@@ -198,11 +198,12 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
   # ---------------------------------------------------------------------
   # The same authored SLA in operation, on one instance and with no Federated
   # Catalogue involved. The parties committed 99.9% availability; the target
-  # system reports a measured 98.2%. The reported metric IS the committed
-  # availability field's node IRI, which is how the KPI binds to the ODRL
-  # constraint that governs it (DCS-FR-CWE-09) — and DCS-FR-CWE-31 requires
-  # more than recording the breach, so the compliance monitor an officer
-  # actually watches must surface it as well.
+  # system measures 98.2% and concludes that this breaches the availability
+  # duty, naming that rule's @id as it travelled to it in the deployment
+  # envelope (ADR-33) — one term out of the nine this SLA carries, which is
+  # what makes the recorded verdict traceable. DCS-FR-CWE-31 requires more
+  # than recording the breach, so the compliance monitor an officer actually
+  # watches must surface it as well.
   # ---------------------------------------------------------------------
 
   @DCS-FR-CWE-09 @DCS-FR-CWE-31 @DCS-FR-PACM-03 @DCS-FR-UC-06-1
@@ -214,9 +215,9 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
     And an authorized user deploys contract "Federated SLA Operation" to the configured contract target
     And get http 200:Success code
     And the contract target acknowledges the deployment of contract "Federated SLA Operation"
-    When the target reports an availability KPI value "98.2" for contract "Federated SLA Operation"
+    When the target reports an availability KPI value "98.2" for contract "Federated SLA Operation", concluding "violated" on the deployed availability rule
     Then get http 200:Success code
-    And the contract detail for "Federated SLA Operation" shows a KPI violation flag for its committed availability
+    And the contract detail for "Federated SLA Operation" records the availability KPI as "violated" against the deployed availability rule
     When the Compliance Officer requests continuous monitoring
     Then get http 200:Success code
     And the monitoring sweep flags contract "Federated SLA Operation" with a "CONTRACT_UNDERPERFORMANCE" compliance risk

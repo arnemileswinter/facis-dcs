@@ -344,7 +344,14 @@ def step_result_metadata(context):
     assert isinstance(findings, list), body
     for finding in findings:
         assert finding.get("rule_id"), finding
-        assert finding.get("result") in ("PASSED", "FAILED", "REVIEW"), finding
+        # NOT_EVALUATED is the fourth verdict (ADR-33): a rule carried into the
+        # audit that nobody reached a conclusion about.
+        assert finding.get("result") in (
+            "PASSED",
+            "FAILED",
+            "REVIEW",
+            "NOT_EVALUATED",
+        ), finding
         assert finding.get("reason") and finding.get("severity"), finding
         assert isinstance(finding.get("evidence_refs"), list), finding
     context.persisted_audit_id = body.get("audit_id")

@@ -323,7 +323,7 @@ func TestAuditContractContentAcceptsValidJurisdiction(t *testing.T) {
 	findings, err := AuditContractContent(context.Background(), contract, emptyPolicy(), ContractContentAuditMetadata{})
 	require.NoError(t, err)
 
-	require.True(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-COUNTRY", "info"))
+	require.True(t, hasFindingSeverity(findings, "FACIS-CONTRACT-STATIC-COUNTRY", SeveritySatisfied))
 }
 
 func TestAuditContractContentLoadsDefaultPolicyDocument(t *testing.T) {
@@ -473,8 +473,8 @@ func TestAuditContractContentAcceptsCanonicalContractODRLValues(t *testing.T) {
 	findings, err := AuditContractContent(context.Background(), contract, emptyPolicy(), ContractContentAuditMetadata{})
 	require.NoError(t, err)
 
-	require.True(t, hasFindingSeverity(findings, "urn:uuid:policy-country", "info"))
-	require.True(t, hasFindingSeverity(findings, "urn:uuid:policy-postal-code", "info"))
+	require.True(t, hasFindingSeverity(findings, "urn:uuid:policy-country", SeveritySatisfied))
+	require.True(t, hasFindingSeverity(findings, "urn:uuid:policy-postal-code", SeveritySatisfied))
 	for _, finding := range findings {
 		require.NotEqual(t, "error", finding.Severity, finding.Message)
 	}
@@ -577,8 +577,8 @@ func TestAuditContractContentReadsCanonicalRuntimeValuesByParameterName(t *testi
 		},
 	})
 
-	require.True(t, hasFindingSeverity(findings, "jurisdiction-allowed", "info"))
-	require.True(t, hasFindingSeverity(findings, "availability-minimum", "info"))
+	require.True(t, hasFindingSeverity(findings, "jurisdiction-allowed", SeveritySatisfied))
+	require.True(t, hasFindingSeverity(findings, "availability-minimum", SeveritySatisfied))
 	availabilityFinding := requirePolicyFinding(t, findings, "availability-minimum")
 	require.Equal(t, "gte", availabilityFinding.Operator)
 	require.Equal(t, 99.5, availabilityFinding.ActualValue)
@@ -951,7 +951,8 @@ func TestAuditContractEvaluatesNestedDuty(t *testing.T) {
 	for _, finding := range findings {
 		require.NotEqual(t, "error", finding.Severity, finding.Message)
 	}
-	require.True(t, hasFindingSeverity(findings, "FACIS-PERMISSION-WITH-DUTY", "info"), "duty recorded as use-time obligation")
+	require.True(t, hasFindingSeverity(findings, "FACIS-PERMISSION-WITH-DUTY", SeverityDeferred),
+		"a duty the DCS cannot observe is deferred, not reported as a passing check")
 
 	// 500 < 1000 → the duty obligation is unmet → the duty is flagged.
 	bad := odrlContract(fieldID, "payment", "amount", []any{permission()}, float64(500))
@@ -1122,6 +1123,11 @@ func TestAuditContractAcceptsTempoSpatialAccessPolicy(t *testing.T) {
 	require.NotNil(t, temporal, "dateTime context constraint audited")
 	require.Contains(t, fmt.Sprint(spatial.ExpectedValue), "DE", "negotiated region boundary resolved to the filled value")
 	require.Equal(t, "lte", temporal.Operator)
+
+	// The access context these constrain is observed by the executing target
+	// system, not by this audit, so neither may be reported as satisfied.
+	require.Equal(t, SeverityDeferred, spatial.Severity, spatial.Message)
+	require.Equal(t, SeverityDeferred, temporal.Severity, temporal.Message)
 }
 
 // A fill serialized as a typed {"@value"} lexical must evaluate numerically:

@@ -232,6 +232,27 @@ func TestHTTPClientRequiresCompleteConfiguration(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A deferred finding is a rule the target system decides at use-time (ADR-33).
+// It must not hold the workflow — a context operand would then refuse every
+// contract that uses one — and it must not let the run read as PASSED either.
+func TestLocalResultSeparatesDeferredFromPassed(t *testing.T) {
+	finding := func(severity string) validation.PolicyFinding {
+		return validation.PolicyFinding{RuleID: "FACIS-RULE", Severity: severity}
+	}
+
+	require.Equal(t, "PASSED", resultFromLocal([]validation.PolicyFinding{finding(validation.SeveritySatisfied)}))
+	require.Equal(t, "NOT_EVALUATED", resultFromLocal([]validation.PolicyFinding{
+		finding(validation.SeveritySatisfied), finding(validation.SeverityDeferred),
+	}))
+	require.Equal(t, "REVIEW", resultFromLocal([]validation.PolicyFinding{
+		finding(validation.SeverityDeferred), finding(validation.SeverityWarning),
+	}))
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{
+		finding(validation.SeverityDeferred), finding(validation.SeverityError),
+	}))
+	require.Equal(t, "SUCCESS", resultStatus("NOT_EVALUATED", Response{Result: "PASSED", Findings: []Finding{}}))
+}
+
 func TestResultPrecedence(t *testing.T) {
 	require.Equal(t, "SUCCESS", resultStatus("PASSED", Response{Result: "PASSED", Findings: []Finding{}}))
 	require.Equal(t, "REVIEW", resultStatus("REVIEW", Response{Result: "PASSED", Findings: []Finding{}}))
