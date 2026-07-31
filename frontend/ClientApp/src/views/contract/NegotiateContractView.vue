@@ -31,6 +31,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { activeNegotiations } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
@@ -454,19 +455,9 @@ const currentContractData = computed<ContractData | undefined>(() => {
   return buildCurrentContractData()
 })
 
-const hasActiveNegotiations = computed(() => {
-  // A negotiation needs surfacing while it still carries an undecided decision
-  // (that decision blocks Submit) OR it targets the current version. Keying on
-  // the version alone hid the list once a counter's immediate redline bumped the
-  // contract version, deadlocking the round: Submit disabled, no list to resolve.
-  return (
-    contract.value?.negotiations?.some(
-      (negotiation) =>
-        negotiation.contract_version === contract.value?.contract_version ||
-        negotiation.negotiation_decisions.some((decision) => !decision.decision),
-    ) ?? false
-  )
-})
+// Same predicate NegotiationList renders from, so the section never appears
+// around an empty list.
+const hasActiveNegotiations = computed(() => activeNegotiations(contract.value).length > 0)
 
 const { download: downloadExport, exporting } = useDocumentExport()
 
