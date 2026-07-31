@@ -684,6 +684,14 @@ func main() {
 	if err != nil {
 		log.Fatalf(ctx, err, "%s must point at this deployment's certificate chain: the status list it serves carries it", issuerX5ChainPathEnv)
 	}
+	// The same chain in its PEM form, for pdf-core. pdf-core keeps no signing
+	// material: it prepares the COSE Sig_structures, this process signs them with
+	// the dcs-c2pa key, and the certificate naming that key travels with each
+	// request rather than being configured into a renderer several instances share.
+	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv))
+	if err != nil {
+		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
+	}
 	statusListSigner := &provenance.StatusListSigner{
 		Issuer:      statusListIssuerURL,
 		ListURI:     statusListURI,
@@ -706,7 +714,7 @@ func main() {
 	}
 	pdfCoreClient := pdfcore.NewWithAuthority(pdfCoreURL, func(sigStructure []byte) ([]byte, error) {
 		return hsm.SignES256(c2paSigner, sigStructure)
-	}, issuerDID)
+	}, issuerDID).WithSigningChain(issuerX5ChainPEM)
 
 	smCRepo := smrepo.PostgresContractRepo{
 		Artifacts: artifactStore,

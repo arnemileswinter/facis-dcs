@@ -100,13 +100,6 @@ Pakete, `backend/design/`), `pdf-core/`, `frontend/ClientApp/src/`,
   `StripEmbeddedJSONLD` nur von Tests/BDD-Steps als Tamper-Fixture. Als
   bewusste Test-API markieren oder Tests umstellen und entfernen.
   Risiko: niedrig.
-- **`deployment/helm/templates/pdf-core-signing-secret.yaml` —
-  `signer-key-pem`:** der Secret-Eintrag wird von keinem Template gemountet
-  und von pdf-core nicht gelesen (pdf-core ist keyless; konsumiert wird nur
-  die x5chain). Leftover des früheren In-Process-Signers; Secret-Feld und
-  `pdfCore.signing.signerKeyPEM`-Values-Pfad sind Kandidaten für eine
-  Chart-Bereinigung (Deployment-Löschungen in diesem Durchgang tabu).
-  Risiko: niedrig.
 - **Frontend — nur intern genutzte Exporte:** u. a.
   `hydra-login-guard.ts` (`bindLoginChallengeOnce`, `loginChallengeFromURL`,
   `stripHydraChallengeQuery`), diverse nur als Rückgabetyp dienende

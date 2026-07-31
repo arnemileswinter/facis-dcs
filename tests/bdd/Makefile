@@ -82,7 +82,6 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 # What run_bdd_helm runs against the live stack: bdd (behave, default) or e2e
 # (Playwright). See run_e2e_kind_ci.
 RUN_MODE ?= bdd
-CERT_CHAIN_SECRET ?= $(DCS_SERVICE)-hsm-c2pa-x5chain
 COREDNS_REWRITE_SCRIPT ?= scripts/kind_coredns_rewrite.sh
 ORCE_PERSISTENCE_SCRIPT ?= scripts/ensure_orce_persistence.sh
 
@@ -95,7 +94,6 @@ DCS_SERVICE_B ?= $(HELM_RELEASE_B)-digital-contracting-service
 DCS_DEPLOYMENT_B ?= $(DCS_SERVICE_B)
 BDD_PUBLIC_ORIGIN_B ?= http://dcs-b.localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL_B ?= $(BDD_PUBLIC_ORIGIN_B)$(DCS_API_BASE_PATH)
-CERT_CHAIN_SECRET_B ?= $(DCS_SERVICE_B)-hsm-c2pa-x5chain
 # Mirrors BDD_HELM_SET, but for instance B's own Hydra/route pointed at the
 # dcs-b.localhost origin instead of dcs's plain localhost origin.
 BDD_HELM_SET_B := \
@@ -348,17 +346,6 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@# freshly-built workloads so the run tests the image that was built.
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT)" deployment/"$(DCS_DEPLOYMENT)"-pdf-core 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT)" --timeout "$(HELM_TIMEOUT)"; then \
@@ -417,17 +404,6 @@ kind_deploy_b: kind_deploy
 		$(KIND_HELM_SET)
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout restart \
 		deployment/"$(DCS_DEPLOYMENT_B)" 2>/dev/null || true
-	@echo "Waiting for cert chain secret $(CERT_CHAIN_SECRET_B) (created by post-install hook)..."
-	@deadline=$$(( $$(date +%s) + 1200 )); \
-	until "$(KUBECTL_BIN)" get secret "$(CERT_CHAIN_SECRET_B)" -n "$(KIND_NAMESPACE)" >/dev/null 2>&1; do \
-		if [ $$(date +%s) -gt $$deadline ]; then \
-			echo "Timed out waiting for $(CERT_CHAIN_SECRET_B)"; \
-			"$(KUBECTL_BIN)" get pods -n "$(KIND_NAMESPACE)" -l app.kubernetes.io/instance=$(HELM_RELEASE_B) -o wide || true; \
-			"$(KUBECTL_BIN)" get events -n "$(KIND_NAMESPACE)" --sort-by=.lastTimestamp || true; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
 	@echo "Waiting for DCS deployment (instance B) to become available..."
 	@if ! "$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
 		deployment/"$(DCS_DEPLOYMENT_B)" --timeout "$(HELM_TIMEOUT)"; then \

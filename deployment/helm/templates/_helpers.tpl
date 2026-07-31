@@ -115,19 +115,6 @@ token and the identifier its certificate leaf must name.
 {{- end }}
 
 {{/*
-Where pdf-core reads the C2PA x5chain from: the projected Secret when the
-provisioning hook publishes one, otherwise the file the hook leaves on the
-shared token volume.
-*/}}
-{{- define "digital-contracting-service.pdfCoreX5ChainPath" -}}
-{{- if .Values.pkcs11.provisioning.publishSecrets -}}
-{{- printf "/x5chain/%s" (include "digital-contracting-service.pdfCoreX5ChainSecretKey" .) -}}
-{{- else -}}
-{{- printf "%s/c2pa-x5chain.pem" .Values.pkcs11.provisioning.tokenDir -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Resolve PostgreSQL host (explicit override or in-chart default).
 */}}
 {{- define "digital-contracting-service.postgresqlHost" -}}
@@ -302,14 +289,6 @@ Auto-created by the chart when pkcs11.pinSecretRef.name is unset.
 {{- end }}
 
 {{/*
-Name of the Secret the provisioning job writes the C2PA x5chain PEM into and
-that pdf-core mounts. SoftHSM2 is a software token for dev/staging/CI only.
-*/}}
-{{- define "digital-contracting-service.hsmX5ChainSecretName" -}}
-{{- printf "%s-hsm-c2pa-x5chain" (include "digital-contracting-service.fullname" .) -}}
-{{- end }}
-
-{{/*
 Normalize the vendored fc-service route path (leading slash, no trailing slash).
 */}}
 {{- define "digital-contracting-service.fcserviceRoutePath" -}}
@@ -326,41 +305,6 @@ PDF-Core internal service URL — auto-wired when pdfCore.enabled=true.
 {{- .Values.pdfCore.url -}}
 {{- else if .Values.pdfCore.enabled -}}
 {{- printf "http://%s-pdf-core:%v" (include "digital-contracting-service.fullname" .) .Values.pdfCore.service.port -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Name of the Secret that holds the pdf-core C2PA signing material.
-*/}}
-{{- define "digital-contracting-service.pdfCoreSigningSecretName" -}}
-{{- default (printf "%s-pdf-core-signing" (include "digital-contracting-service.fullname" .)) .Values.pdfCore.signing.existingSecret -}}
-{{- end }}
-
-{{/*
-Name of the Secret that holds the x5chain PEM for pdf-core C2PA signing.
-When pkcs11.provisioning is enabled the chain is derived from the SoftHSM2
-dcs-c2pa token key by the provisioning job; otherwise the inline dev secret.
-*/}}
-{{- define "digital-contracting-service.pdfCoreX5ChainSecretName" -}}
-{{- if .Values.pdfCore.signing.existingSecret -}}
-{{- .Values.pdfCore.signing.existingSecret -}}
-{{- else if .Values.pkcs11.provisioning.enabled -}}
-{{- include "digital-contracting-service.hsmX5ChainSecretName" . -}}
-{{- else -}}
-{{- include "digital-contracting-service.pdfCoreSigningSecretName" . -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Key within the x5chain Secret for pdf-core C2PA signing.
-*/}}
-{{- define "digital-contracting-service.pdfCoreX5ChainSecretKey" -}}
-{{- if and (not .Values.pdfCore.signing.existingSecret) .Values.pkcs11.provisioning.enabled -}}
-{{- "x5chain-pem" -}}
-{{- else if .Values.pdfCore.signing.existingSecretX5ChainKey -}}
-{{- .Values.pdfCore.signing.existingSecretX5ChainKey -}}
-{{- else -}}
-{{- "x5chain-pem" -}}
 {{- end -}}
 {{- end }}
 

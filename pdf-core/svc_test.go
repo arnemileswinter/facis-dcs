@@ -179,6 +179,7 @@ func doRequest(method, path string, body io.Reader, contentType string) *httptes
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	req.Header.Set(signingChainHeader, base64.StdEncoding.EncodeToString(testMainX5ChainPEM))
 	rec := httptest.NewRecorder()
 	newServer().ServeHTTP(rec, req)
 	return rec

@@ -67,8 +67,8 @@ What this command does:
 1. Runs Helm dependency update and upgrade using `deployment/helm/values.dev.yml`
 2. Creates `backend/.env` from `backend/.env.dev1` if missing
 3. Provisions a local SoftHSM2 token with the five DCS keys and issues the
-   C2PA/PAdES x5chains for pdf-core (`scripts/hsm-provision.sh`,
-   `scripts/c2pa-cert-provision.sh`)
+   C2PA/PAdES x5chains the backend signs and publishes under
+   (`scripts/hsm-provision.sh`, `scripts/c2pa-cert-provision.sh`)
 4. Starts frontend Vite dev server
 5. Starts backend with air hot reload
 
@@ -292,10 +292,8 @@ than passing silently.
   namespace`.
 - **Restricted RBAC.** If the installer may not create `roles`/`rolebindings`,
   set `pkcs11.provisioning.publishSecrets=false`. The provisioning hook then
-  writes `did.json` and the x5chain to the shared token volume instead of
-  publishing Secrets, and needs no API access at all. In that mode pdf-core is
-  pinned to the backend's node to co-mount a `ReadWriteOnce` volume; declare
-  `persistence.accessModes: ["ReadWriteMany"]` to lift the pinning. The ORCE TSA
+  writes `did.json` to the shared token volume instead of publishing a Secret,
+  and needs no API access at all. The ORCE TSA
   hook still publishes its own Secret, so also set
   `orce.localTSA.autoProvision=false` and pre-create that Secret — its key and
   certificate are self-signed and depend on nothing in-cluster.
@@ -558,9 +556,12 @@ Every DCS private key lives in a PKCS#11 token (DCS-IR-HI-01). For dev, staging
 and CI the chart co-deploys a SoftHSM2 software token and provisions it in-cluster
 (`pkcs11.provisioning.enabled=true`): a hook Job runs `scripts/hsm-provision.sh`
 (token + five ECDSA P-256 keys) and `scripts/c2pa-cert-provision.sh` (the C2PA
-x5chain bound to the `dcs-c2pa` key), publishing the x5chain as a Secret that
-pdf-core mounts. The backend waits for the token via an initContainer, then
-opens it using `PKCS11_MODULE_PATH` / `PKCS11_TOKEN_LABEL` / `PKCS11_PIN`.
+x5chain bound to the `dcs-c2pa` key), leaving the chain on the shared token
+volume. The backend waits for the token via an initContainer, then opens it
+using `PKCS11_MODULE_PATH` / `PKCS11_TOKEN_LABEL` / `PKCS11_PIN`, and reads the
+chain from `signing.issuerX5ChainPath`. pdf-core is configured with no signing
+material: the backend sends the chain with each render request in the
+`X-DCS-C2PA-X5Chain` header.
 
 SoftHSM2 is a software token and is NOT a production HSM. For production set
 `pkcs11.provisioning.enabled=false` and point `pkcs11` at a real external PKCS#11

@@ -119,8 +119,8 @@ func TestExtractSigningChainReturnsTheEmbeddedLeaf(t *testing.T) {
 	if len(got) != len(peerChain) || !bytes.Equal(got[0], peerChain[0]) {
 		t.Error("ExtractSigningChain did not return the leaf the manifest was signed under")
 	}
-	if bytes.Equal(got[0], mustSigningMaterial().certChainDER[0]) {
-		t.Error("peer-compiled PDF must not carry this process's configured leaf")
+	if bytes.Equal(got[0], testC2PAChain[0]) {
+		t.Error("peer-compiled PDF must not carry this instance's own leaf")
 	}
 }
 

@@ -259,19 +259,14 @@ pkcs11:
     key: "PKCS11_PIN"
   provisioning:
     enabled: true
-    # Publish the provisioned did.json and C2PA x5chain as Secrets via the
-    # Kubernetes API, which requires the job to carry its own ServiceAccount +
-    # Role + RoleBinding.
+    # Publish the provisioned did.json as a Secret via the Kubernetes API, which
+    # requires the job to carry its own ServiceAccount + Role + RoleBinding.
     #
     # Set false on clusters that do not grant the installer rbac.authorization
     # (a common on-prem namespace restriction — the install otherwise fails on
     # "cannot create resource roles"). The job then writes nothing to the API:
-    # every artifact stays on the shared token volume it already writes them to,
-    # the backend reads DCS_DID from there, and pdf-core mounts the same volume
-    # read-only for the x5chain. That co-mount is why pdf-core is pinned to the
-    # backend's node in this mode — a ReadWriteOnce volume admits multiple pods
-    # only on one node. Supply persistence.accessModes: ["ReadWriteMany"] to
-    # drop the pinning.
+    # every artifact stays on the shared token volume it already writes them to
+    # and the backend reads DCS_DID from there.
     publishSecrets: true
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
@@ -574,20 +569,10 @@ pdfCore:
   # pdf-core at startup). Default: auto-derived from the pdf-core service URL,
   # keeping it consistent with the contextIRI default above.
   ontologyBaseURL: ""
-  signing:
-    # No default key/cert ships in this chart (clean-product sweep freeze-day
-    # grep gate: no PEM private key material in committed values files). This
-    # path only matters when pkcs11.provisioning.enabled=false (SoftHSM2/PKCS#11
-    # provisioning is the default and does not use these values at all — see
-    # pdf-core-signing-secret.yaml's render guard). If you disable PKCS11
-    # provisioning, either set existingSecret below, or supply signerKeyPEM +
-    # x5ChainPEM explicitly via --set-file / a values overlay that is NOT
-    # committed to the chart.
-    signerKeyPEM: ""
-    x5ChainPEM: ""
-    # Set to use an existing Secret instead of auto-creating one from the inline values above.
-    existingSecret: ""
-    existingSecretX5ChainKey: "x5chain-pem"
+  # pdf-core holds no signing material. The backend signs the COSE
+  # Sig_structures with its PKCS#11 dcs-c2pa key and sends the matching
+  # certificate chain per request in the X-DCS-C2PA-X5Chain header, so this
+  # chart configures no key, cert or Secret for pdf-core.
 
 ipfs:
   enabled: false
