@@ -1,5 +1,12 @@
 # ADR-33: The target system reports verdicts, the DCS records them
 
+Status: Accepted (2026-07-31). Supersedes the second of the two enforcement
+moments [ADR-11](adr-11-opa-odrl-enforcement.md) established: the execution /
+KPI-monitoring moment, whose call site was `EvaluateKPIViolation`. ADR-11's
+first moment — server-side evaluation of a contract's own declared values
+before a signature is admitted — stands unchanged, as does the OPA/Rego
+evaluator it selected.
+
 ## Context
 
 `DCS-FR-CWE-31` requires reported KPI values to be checked against the
@@ -33,13 +40,32 @@ structural:
 - **The SRS puts execution there.** §1.2 names the target system as the point
   of "automated runtime enforcement"; the glossary defines a Contract Target
   System as "an external system that receives and executes deployed contracts";
-  feature 4.5 states that it "ensures contract enforcement in target systems".
-  `DCS-IR-SI-05` specifies the interface as carrying "status queries and event
-  callbacks" — observations flowing back, not facts flowing in to be judged.
+  §4.13 (UC-13 External System Contract Execution) states that it "ensures
+  contract enforcement in target systems". `DCS-IR-SI-05` specifies the
+  interface as carrying "status queries and event callbacks" — observations
+  flowing back, not facts flowing in to be judged.
+
+  `DCS-FR-CWE-09` is the requirement that reads against this, and it is quoted
+  here in full because half of it is easy to miss: the system MUST monitor
+  obligations and flag SLA violations, and **"Compliance rules MUST be
+  enforced throughout the contract lifecycle."** Read alone that sentence puts
+  enforcement on the DCS. It is satisfied by the enforcement moment ADR-11
+  established and this ADR keeps: the DCS refuses to approve or admit a
+  signature on a contract whose own declared values violate its own rules
+  (`approve.go`, `apply.go`). What the DCS cannot enforce is a rule whose
+  inputs arrive after execution begins, and §4.13 assigns exactly those to
+  the target system. The lifecycle is covered by both components, not by one.
 
 A system that reports "compliant" for an obligation it silently could not
 evaluate is worse than one that reports nothing: the green row is read as
 evidence.
+
+How far that already goes is worth stating: `EvaluateKPIViolation` binds a
+reported metric to a contract-data node `@id`, and no shipped producer sends
+one — only the BDD harness and the Playwright spec do. The shipped target flow
+reports its own activation latency, which binds to nothing. In production the
+DCS-derived KPI verdict has therefore only ever returned `false`. Every KPI row
+in a running deployment is a green row for a check that never ran.
 
 ## Decision
 
@@ -92,6 +118,25 @@ The audit view must stop rendering a deferred finding in the passing bucket.
 `odrlexpanded.go` already records that "info" means DEFERRED, not passed; under
 this ADR that distinction becomes load-bearing rather than advisory, because a
 deferred constraint is precisely one whose verdict belongs upstream.
+
+That is not a re-colouring. `info` is currently emitted for a *satisfied*
+constraint as well as a deferred one, so the severity has to be split into two
+tokens before any view changes — otherwise every satisfied constraint turns
+amber across the audit view, the CSV and the exported PDF, which count `info`
+as passed. The split reaches the external executor vocabulary too, which offers
+only PASSED / FAILED / REVIEW and has no value for "not evaluated". This is the
+largest piece of work the ADR implies, not an afterthought to it.
+
+The verdict field, the deletion of `EvaluateKPIViolation` and the scenarios
+that exercise it land as ONE change. Accepting a verdict while still deriving
+one is the dual path the project's greenfield rule forbids, and the alternative
+— recording every verdict-less report as not evaluated while the old tests still
+assert a derived flag — breaks those tests on the same commit either way.
+
+Until the target system reports verdicts, nothing produces a KPI breach at all:
+the shipped ORCE flow evaluates nothing, so `CONTRACT_UNDERPERFORMANCE` stops
+being raised on the day this lands. That is a true statement of what the system
+knows, replacing a false one, but it is visible and should not surprise anyone.
 
 A target system that reports nothing leaves the contract unobserved, and the
 DCS says exactly that. It does not infer compliance from silence — which is
