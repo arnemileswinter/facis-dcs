@@ -207,10 +207,12 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
 
-    // Mutual agreement first: the ping-pong ended with A's 15000 counter, so B
-    // still owes a decision on it. That undecided record replicates to A's copy
-    // too, and any open decision disables Submit — so A cannot consolidate until
-    // B has accepted. This IS the settle handshake, not test scaffolding.
+    // Clears whatever B still owes a decision on before it settles. Only B's
+    // OWN 10000 counter is listed here: a change request is recorded on the
+    // instance that proposed it and never crosses the boundary (ADR-13 ships
+    // documents, not negotiation rows), so A's 15000 counter reached B as the
+    // document B now holds, not as something to accept. The settle handshake
+    // itself is the mutual approve + settlement ship asserted below.
     await acceptOpenDecisionsOn(b, contractDid)
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI

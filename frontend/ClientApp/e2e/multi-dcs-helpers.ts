@@ -999,17 +999,28 @@ export async function expectSubmitRefusedOn(inst: Instance, contractDid: string,
   expect(submitCalls, `submit must not reach the DCS on ${inst.origin}`).toHaveLength(0)
 }
 
-/** The contract document as this instance holds it (the authenticated
- *  retrieve-by-id the Contract Manager's views read). */
-export async function contractDocumentOn(inst: Instance, contractDid: string): Promise<Record<string, unknown>> {
+/** The contract record as this instance holds it (the authenticated
+ *  retrieve-by-id the Contract Manager's views read): its document plus the
+ *  negotiation rounds this instance itself recorded. */
+async function contractRecordOn(inst: Instance, contractDid: string): Promise<ContractRecord> {
   const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
   const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
     headers: auth,
   })
   expect(resp.ok(), `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()}`).toBeTruthy()
-  const body = (await resp.json()) as { contract_data?: Record<string, unknown> }
+  const body = (await resp.json()) as ContractRecord
   expect(body.contract_data, `contract ${contractDid} on ${inst.origin} carries no document`).toBeTruthy()
-  return body.contract_data!
+  return body
+}
+
+interface ContractRecord {
+  contract_data?: Record<string, unknown>
+  negotiations?: Array<{ created_by?: string }>
+}
+
+/** The contract document as this instance holds it. */
+export async function contractDocumentOn(inst: Instance, contractDid: string): Promise<Record<string, unknown>> {
+  return (await contractRecordOn(inst, contractDid)).contract_data!
 }
 
 /** The counterparty's own did:web, resolved from its origin-root DID document
@@ -1273,38 +1284,51 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 }
 
 /**
- * Accepts a change request the PEER proposed, on an instance whose own copy is
- * still OFFERED — the receiving side of a counter-offer it did not open itself.
+ * Waits for a counter-offer the PEER proposed to reach this instance's own copy
+ * of the contract, and returns the document it landed as.
  *
- * acceptOpenDecisionsOn cannot serve here: it waits for the negotiate view's
- * Submit button, which only renders in NEGOTIATION. A received redline does not
- * move the peer's intrinsic state (receivepdf.go keeps `data.State =
- * existing.State`; intrinsic state is each instance's own RBAC progress), so the
- * copy stays OFFERED while the change request and its undecided decision are
- * there to answer. The Active-negotiations list is state-independent, so this
- * waits on that instead and answers the one proposal.
+ * A redline crosses as the DOCUMENT, not as a change request: the proposing
+ * instance applies it to its own contract_data and ships the re-rendered PDF,
+ * and the receiver adopts that document verbatim (ADR-13 §1/§2 — the PDF is the
+ * wire format, and "the counterparty receives it as a proposal"). Negotiation
+ * rows and their decisions are local to the instance that recorded them and are
+ * not replicated — the peer sync that used to carry them was deleted with the
+ * single-writer-origin model. So the receiving side has no change request to
+ * answer, and no Show/Accept entry in its Active negotiations; under ADR-13 §3
+ * agreeing to the terms on the table is SETTLEMENT (a ship of the same version
+ * stamped `agreed`), which the two-instance vertical covers.
+ *
+ * The ship is asynchronous and the views do not poll, so this reads the
+ * authenticated retrieve until the redlined value is the one this instance
+ * holds. It then asserts this instance lists no round at all, which pins that
+ * boundary — so it serves only an instance that has proposed nothing itself.
  */
-export async function acceptPeerProposalOn(inst: Instance, contractDid: string): Promise<void> {
-  // The proposal reaches this instance over the asynchronous PDF exchange and
-  // the view does not poll, so re-open it until the round is listed.
-  const show = inst.page.getByRole('button', { name: 'Show' }).first()
-  for (let attempt = 0; attempt < 4; attempt++) {
-    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-    if (await show.isVisible({ timeout: 20_000 }).catch(() => false)) break
-    expect(attempt, `no peer proposal listed on ${inst.origin} for ${contractDid}`).toBeLessThan(3)
+export async function awaitPeerRedlineOn(
+  inst: Instance,
+  contractDid: string,
+  opts: { label: string; value: string },
+): Promise<Record<string, unknown>> {
+  let record: ContractRecord = {}
+  let held = ''
+  for (let attempt = 0; attempt < 12; attempt++) {
+    record = await contractRecordOn(inst, contractDid)
+    const fields = (record.contract_data?.['dcs:contractFields'] ?? []) as Array<Record<string, unknown>>
+    held = JSON.stringify(fields.find((field) => field['dcs:label'] === opts.label)?.['dcs:value'] ?? null)
+    if (held.includes(opts.value)) break
+    await inst.page.waitForTimeout(5_000)
   }
-  await show.click()
-  const responded = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
-    { timeout: 30_000 },
+  expect(held, `the peer's redline of ${opts.label} never reached ${inst.origin} for ${contractDid}`).toContain(
+    opts.value,
   )
-  await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-  await confirmModalOn(inst, 'Confirm')
-  const response = await responded
+  // The boundary the document crossed alone: the receiver records no round of
+  // its own for a counter it did not propose. Asserting it here is what makes a
+  // later change to that rule surface as this stage failing rather than as a
+  // responder view silently offering an Accept nothing ships.
   expect(
-    response.ok(),
-    `accept peer proposal on ${inst.origin}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
-  ).toBeTruthy()
+    record.negotiations ?? [],
+    `${inst.origin} lists a change request for a counter-offer it did not propose`,
+  ).toHaveLength(0)
+  return record.contract_data!
 }
 
 /**
