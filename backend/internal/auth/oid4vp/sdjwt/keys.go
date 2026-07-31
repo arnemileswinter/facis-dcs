@@ -121,6 +121,16 @@ func ResolveIssuerVerificationKey(cfg TrustConfig, token *jwt.Token) (any, error
 // PID now resolves through ResolveIssuerVerificationKey like everything else, so
 // it inherits the trust and purpose checks instead of bypassing them.
 
+// VerificationKeyFromX5C resolves a verification key from a JWS x5c header for
+// a caller outside this package. A status list is signed by the same issuer as
+// the credential whose status it carries, so it is verified the same way and
+// under the same anchors — including the leaf-identifies-issuer binding, without
+// which any certificate under any configured anchor could sign any issuer's
+// status list.
+func VerificationKeyFromX5C(raw any, roots *x509.CertPool, iss string) (any, error) {
+	return verificationKeyFromX5C(raw, roots, iss)
+}
+
 // verificationKeyFromX5C parses the full x5c chain (leaf first, per RFC 7517
 // §4.7), verifies leaf -> intermediates -> roots, and returns the leaf's
 // public key. roots being nil (no trust anchors configured) is refused, not

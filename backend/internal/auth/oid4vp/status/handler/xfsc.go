@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/codec"
 	"digital-contracting-service/internal/auth/oid4vp/status/envelope"
@@ -146,7 +147,22 @@ func (h *XFSC) verifyStatusListJWT(body []byte) (envelope.VerifiedJWT, error) {
 	if h.Trust == nil {
 		return envelope.VerifiedJWT{}, status.ErrStatusTrustNotConfigured
 	}
-	verified, err := envelope.VerifyES256JWT(body, func(issuer string, _ *jwt.Token) (*ecdsa.PublicKey, error) {
+	verified, err := envelope.VerifyES256JWT(body, func(issuer string, token *jwt.Token) (*ecdsa.PublicKey, error) {
+		// An issuer that publishes its key by certificate chain has no bundled
+		// JWKS to resolve, so its status list is verified from the chain the
+		// token itself carries — against the same anchors and the same
+		// leaf-identifies-issuer binding the credential is held to.
+		if raw, ok := token.Header["x5c"]; ok {
+			key, err := sdjwt.VerificationKeyFromX5C(raw, h.Trust.X5CRoots, issuer)
+			if err != nil {
+				return nil, err
+			}
+			ecKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return nil, fmt.Errorf("status list x5c leaf key is %T, not ECDSA", key)
+			}
+			return ecKey, nil
+		}
 		return h.Trust.ResolveECDSAPublicKey(issuer)
 	})
 	if err != nil {
