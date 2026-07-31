@@ -235,7 +235,7 @@ func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash
 	//   1 -> -7   (alg=ES256)
 	//   33 -> [certDer]  (x5chain per RFC 9360)
 	// plus empty unprotected map, detached payload and a real signature over claim bytes.
-	protected := buildCoseProtectedHeadersWithX5Chain()
+	protected := buildCoseProtectedHeadersWithX5Chain(ctx)
 	sig, err := signClaimSigStructure(ctx, protected, claimPayload)
 	if err != nil {
 		return nil, err
@@ -324,7 +324,7 @@ func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string,
 	claimPayload := renderVerificationClaimCBOR(payloadHash, updateLabel, hardBindingURI, hardBindingAssertionHash[:], ingredientURI, ingredientHash[:], actionsURI, actionsHash[:], lifecycleURI, lifecycleHash[:], remoteManifestsURI, remoteManifestsHash[:])
 	claimBox := renderJUMBFSuperbox(c2paClmUUID, 0x03, "c2pa.claim.v2", [][]byte{renderBMFFBox("cbor", claimPayload)})
 
-	protected := buildCoseProtectedHeadersWithX5Chain()
+	protected := buildCoseProtectedHeadersWithX5Chain(ctx)
 	sig, err := signClaimSigStructure(ctx, protected, claimPayload)
 	if err != nil {
 		return nil, err
@@ -626,10 +626,13 @@ func renderRemoteManifestsAssertionCBOR(url string) []byte {
 	)
 }
 
-func buildCoseProtectedHeadersWithX5Chain() []byte {
-	material := mustSigningMaterial()
-	chainItems := make([][]byte, 0, len(material.certChainDER))
-	for _, certDER := range material.certChainDER {
+func buildCoseProtectedHeadersWithX5Chain(ctx context.Context) []byte {
+	chain, fromContext := signingChainFromContext(ctx)
+	if !fromContext {
+		chain = mustSigningMaterial().certChainDER
+	}
+	chainItems := make([][]byte, 0, len(chain))
+	for _, certDER := range chain {
 		chainItems = append(chainItems, cborBytes(certDER))
 	}
 
@@ -951,6 +954,45 @@ func extractLifecycleFields(c2paBytes []byte, manifestIdx int) (map[string]strin
 		return nil, fmt.Errorf("decode lifecycle CBOR: %w", err)
 	}
 	return fields, nil
+}
+
+// extractManifestX5Chain returns the DER certificate chain (leaf first) that the
+// manifest at manifestIdx (0-based) of c2paBytes carries in its COSE_Sign1
+// protected headers. A recompile must reproduce it from the document itself: the
+// leaf belongs to the DCS instance that signed that manifest, which for a
+// contract received from a federation peer is not the instance verifying it, and
+// the chain is embedded in the signed bytes rather than derived from the payload.
+func extractManifestX5Chain(c2paBytes []byte, manifestIdx int) ([][]byte, error) {
+	manifestBoxes, err := extractTopLevelManifestBoxes(c2paBytes)
+	if err != nil {
+		return nil, fmt.Errorf("extract manifests: %w", err)
+	}
+	if manifestIdx >= len(manifestBoxes) {
+		return nil, fmt.Errorf("manifest index %d out of range (%d manifests)", manifestIdx, len(manifestBoxes))
+	}
+	signatureBox, err := extractLabeledChildJUMBFBox(manifestBoxes[manifestIdx], "c2pa.signature")
+	if err != nil {
+		return nil, fmt.Errorf("find claim signature: %w", err)
+	}
+	coseSign1, err := jumbfCBORPayload(signatureBox)
+	if err != nil {
+		return nil, fmt.Errorf("read claim signature: %w", err)
+	}
+	protected, _, err := decodeCOSESign1(coseSign1)
+	if err != nil {
+		return nil, fmt.Errorf("decode COSE_Sign1: %w", err)
+	}
+	return coseX5Chain(protected)
+}
+
+// ExtractSigningChain returns the x5chain of a PDF's genesis manifest, for a
+// verifier that must recompile the base under the leaf that signed it.
+func ExtractSigningChain(pdf []byte) ([][]byte, error) {
+	c2paBytes, err := extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
+	if err != nil {
+		return nil, fmt.Errorf("extract C2PA: %w", err)
+	}
+	return extractManifestX5Chain(c2paBytes, 0)
 }
 
 // extractLifecycleAuthority returns the DID of the instance that asserted the

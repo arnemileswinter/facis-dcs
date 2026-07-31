@@ -388,7 +388,14 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, errBadRequest(fmt.Errorf("extract lifecycle authority: %w", err)))
 			return
 		}
-		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
+		chain, err := compiler.ExtractSigningChain(raw)
+		if err != nil {
+			writeError(w, errBadRequest(fmt.Errorf("extract signing chain: %w", err)))
+			return
+		}
+		verifyCtx := compiler.WithSigningChain(
+			compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority),
+			chain)
 		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
 		if err != nil {
 			writeError(w, errUnprocessableEntity(err).withDigests(verifyDigests{JSONLDHash: sha256Hex(payload)}))

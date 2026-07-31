@@ -173,26 +173,15 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	findings := make([]string, 0, 4)
-	switch {
-	case !c2paManifestFound:
-		findings = append(findings, "C2PA manifest not found")
-	case c2paSignatureStatus == provenance.CheckInvalid:
-		findings = append(findings, fmt.Sprintf("C2PA signature invalid: %s", verifyResult.C2PASignatureError))
-	case c2paSignatureStatus == provenance.CheckNotAvailable:
-		findings = append(findings, "C2PA signature check not available")
-	}
-	switch vcProofStatus {
-	case provenance.CheckNotAvailable:
-		findings = append(findings, "Contract lifecycle credential missing from the PDF")
-	case provenance.CheckIndeterminate:
-		findings = append(findings, fmt.Sprintf("Contract lifecycle credential proof is indeterminate: %v", vcProofErr))
-	case provenance.CheckInvalid:
-		findings = append(findings, fmt.Sprintf("Contract lifecycle credential proof invalid: %v", vcProofErr))
-	}
-	if status := strings.TrimSpace(statusListStatus); status != "" {
-		findings = append(findings, fmt.Sprintf("Status list state: %s", status))
-	}
+	findings := verifyFindings(verifyFindingInputs{
+		VerifyErr:           verifyErr,
+		C2PAManifestFound:   c2paManifestFound,
+		C2PASignatureStatus: c2paSignatureStatus,
+		C2PASignatureError:  verifyResult.C2PASignatureError,
+		VCProofStatus:       vcProofStatus,
+		VCProofErr:          vcProofErr,
+		StatusListStatus:    statusListStatus,
+	})
 
 	jsonldHash, basePDFHash := verifyDigests(verifyResult)
 
@@ -203,6 +192,56 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		JsonldHash:  jsonldHash,
 		BasePdfHash: basePDFHash,
 	}, nil
+}
+
+// verifyFindingInputs is what the verify report is assembled from: pdf-core's
+// outcome plus the checks this instance ran on what pdf-core returned.
+type verifyFindingInputs struct {
+	VerifyErr           error
+	C2PAManifestFound   bool
+	C2PASignatureStatus string
+	C2PASignatureError  string
+	VCProofStatus       string
+	VCProofErr          error
+	StatusListStatus    string
+}
+
+// verifyFindings renders the human-readable reasons the viewer shows beside the
+// verdict. A finding must be something a check established. When pdf-core
+// refused the document, the checks that would have run on its response did not
+// run, and their inputs are absent for that reason alone — reporting that
+// absence as a property of the document turns one refusal into a list of
+// fabricated defects.
+func verifyFindings(in verifyFindingInputs) []string {
+	findings := make([]string, 0, 5)
+	// pdf-core's own reason for refusing. Without it the caller got match=false
+	// and a set of secondary findings that were all consequences of that refusal,
+	// with nothing naming what the refusal was.
+	if in.VerifyErr != nil {
+		findings = append(findings, fmt.Sprintf("Integrity check did not complete: %v", in.VerifyErr))
+	}
+	switch {
+	case !in.C2PAManifestFound:
+		findings = append(findings, "C2PA manifest not found")
+	case in.C2PASignatureStatus == provenance.CheckInvalid:
+		findings = append(findings, fmt.Sprintf("C2PA signature invalid: %s", in.C2PASignatureError))
+	case in.C2PASignatureStatus == provenance.CheckNotAvailable:
+		findings = append(findings, "C2PA signature check not available")
+	}
+	switch in.VCProofStatus {
+	case provenance.CheckNotAvailable:
+		if in.VerifyErr == nil {
+			findings = append(findings, "Contract lifecycle credential missing from the PDF")
+		}
+	case provenance.CheckIndeterminate:
+		findings = append(findings, fmt.Sprintf("Contract lifecycle credential proof is indeterminate: %v", in.VCProofErr))
+	case provenance.CheckInvalid:
+		findings = append(findings, fmt.Sprintf("Contract lifecycle credential proof invalid: %v", in.VCProofErr))
+	}
+	if status := strings.TrimSpace(in.StatusListStatus); status != "" {
+		findings = append(findings, fmt.Sprintf("Status list state: %s", status))
+	}
+	return findings
 }
 
 // verifyDigests carries the digests pdf-core reached its verdict on onto the two

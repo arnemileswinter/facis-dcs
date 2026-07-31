@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 )
@@ -12,7 +13,7 @@ var coseAlgES256 = []byte{0x01, 0x26}
 var coseAlgEdDSA = []byte{0x01, 0x27}
 
 func TestCOSEProtectedHeaderDeclaresES256(t *testing.T) {
-	header := buildCoseProtectedHeadersWithX5Chain()
+	header := buildCoseProtectedHeadersWithX5Chain(context.Background())
 	if !bytes.Contains(header, coseAlgES256) {
 		t.Fatalf("protected header does not declare alg ES256(-7): % x", header)
 	}
