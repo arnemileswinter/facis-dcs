@@ -531,7 +531,17 @@ def step_then_audit_bodies_erased(context):
         entries = _pac_audit_entries(
             context, context.base_url_a, "CONTRACT_WORKFLOW_ENGINE", did
         )
-        timeline = [e for e in entries if str(e.get("kind", "TIMELINE")).upper() != "CHECK"]
+        # The "contracts" scope answers with the workflow-engine trail PLUS the
+        # PAC access trail anchored on the same DID, and each poll's own
+        # POST /pac/audit appends one such access record. Those are new events
+        # written after the shred, not contract bodies it was meant to erase —
+        # counting them makes this loop chase its own tail forever.
+        timeline = [
+            e
+            for e in entries
+            if str(e.get("kind", "TIMELINE")).upper() != "CHECK"
+            and str(e.get("component", "")).upper() != "PROCESS_AUDIT_AND_COMPLIANCE"
+        ]
         if timeline:
             not_erased = [
                 e for e in timeline if e.get("event_data") != {"erased": True}

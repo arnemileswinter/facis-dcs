@@ -197,6 +197,7 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 			RetrievedBy: middleware.GetParticipantID(ctx),
 			HolderDID:   middleware.GetHolderDID(ctx),
 			UserRoles:   middleware.GetUserRoles(ctx),
+			DID:         qry.DID,
 		}
 		contractContentTrailHandler := qry2.ContractContentTrailAuditor{
 			DB:    s.DB,

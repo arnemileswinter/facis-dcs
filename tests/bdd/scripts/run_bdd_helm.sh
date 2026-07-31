@@ -423,10 +423,17 @@ export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs s
 # Canonical bdd-executor integration requires the package in the active environment.
 python -c 'import eu.xfsc.bdd.core' >/dev/null
 
-# Isolated-stack features (clean-DB assumptions, component restarts) run in
-# their dedicated targets, not the shared full-suite stack. Callers that DO
-# provide the isolation (run_bdd_audit_kind_once) override ARG_BDD_TAGS.
-EXTRA_ARGS=(${ARG_BDD_TAGS---tags=-isolated_stack})
+# @isolated_stack scenarios arrange their own isolation (own namespace, own
+# Helm release) inside the same cluster, so they belong in the sequential
+# full-suite pass. The suite therefore runs unfiltered by default; a caller
+# that wants a subset (run_bdd_audit_kind_once) passes ARG_BDD_TAGS.
+# Note ARG_BDD_TAGS arrives from the Makefile recipe as set-but-empty, so the
+# test must be on emptiness, not on being unset.
+EXTRA_ARGS=()
+if [[ -n "${ARG_BDD_TAGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  EXTRA_ARGS+=(${ARG_BDD_TAGS})
+fi
 if [[ -n "${ARG_BDD:-}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_ARGS+=(${ARG_BDD})

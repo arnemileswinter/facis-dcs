@@ -451,6 +451,25 @@ def step_then_fresh_catalogue_operations_used_no_retry(context):
     )
 
 
+def _ensure_legacy_commit_present():
+    """Make LEGACY_CHART_COMMIT's tree readable by `git archive`.
+
+    CI checks out at depth 1, so a commit this far back is a ref this clone has
+    never fetched and `git archive` fails with "not a tree object". Deepen just
+    that one commit rather than the whole history.
+    """
+    if _run(["git", "cat-file", "-e", f"{LEGACY_CHART_COMMIT}^{{tree}}"], timeout=30).returncode == 0:
+        return
+    fetched = _run(
+        ["git", "fetch", "--no-tags", "--depth=1", "origin", LEGACY_CHART_COMMIT],
+        timeout=300,
+    )
+    _assert_success(
+        fetched,
+        f"deepening the shallow clone to reach Neo4j legacy chart commit {LEGACY_CHART_COMMIT}",
+    )
+
+
 @given("an isolated namespace contains the old Neo4j-based development installation")
 def step_given_legacy_neo4j_install(context):
     _create_isolated_namespace(context)
@@ -458,6 +477,7 @@ def step_given_legacy_neo4j_install(context):
     legacy_root = Path(tempfile.mkdtemp(prefix="facis-dcs-legacy-chart-"))
     context.add_cleanup(lambda: shutil.rmtree(legacy_root, ignore_errors=True))
     archive_path = legacy_root / "legacy-chart.tar"
+    _ensure_legacy_commit_present()
     archive = _run(
         [
             "git",
