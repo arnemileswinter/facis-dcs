@@ -2,8 +2,8 @@
 
 Als Template Reviewer prüfen Sie eingereichte Vorlagen fachlich und formal,
 bevor sie zur Freigabe weitergehen. Die fachliche Verifikation gegen die
-hinterlegten Regelwerke führt das System dabei zwingend selbst aus — sie ist
-kein optionaler Zusatzschritt, den man überspringen könnte.
+hinterlegten Regelwerke führt das System dabei zwingend selbst aus;
+überspringen lässt sie sich nicht.
 
 **Voraussetzungen:** Sie sind mit der Rolle Template Reviewer angemeldet. In
 der Seitennavigation sehen Sie **Templates** und **Review Tasks**.
@@ -16,7 +16,7 @@ der Seitennavigation sehen Sie **Templates** und **Review Tasks**.
 
 Die Liste zeigt alle offenen Prüfaufgaben mit Vorlagenname, Version und
 Erstellungsdatum. Rechts kennzeichnet ein Abzeichen die Art der Aufgabe
-(**Template Task**) und daneben ihr Zustand (**OPEN**) — dieselbe Liste führt
+(**Template Task**) und daneben ihr Zustand (**OPEN**). Dieselbe Liste führt
 für einen Contract Reviewer auch die Vertragsaufgaben. Über Suchfeld,
 **Filter** und **Sort by** grenzen Sie die Liste ein. **View** öffnet die
 Prüfansicht.
@@ -39,40 +39,39 @@ einen Hinweis auf den nächsten Schritt.
    Vorlage als neuer Entwurf; für eine in Prüfung befindliche Vorlage
    gesperrt).
 
-Eine eigene Schaltfläche zum Verifizieren gibt es nicht: Die Verifikation ist
+Eine eigene Schaltfläche zum Verifizieren gibt es nicht. Die Verifikation ist
 Teil von **Approve** und wird bei jedem Freigabeversuch genau einmal
 ausgeführt.
 
 ## Das Verifikationsergebnis
 
-Nach **Approve** öffnet sich der Dialog mit dem Verifikationsergebnis.
+Nach **Approve** öffnet sich der Dialog **Template verification**. Sein
+Untertitel nennt die Bedingung: „Approval is available only when verification
+returns no findings."
 
 ![Verifikationsergebnis](images/template-reviewer-verifikation.png)
 
-- **Keine Beanstandungen:** Der Dialog sagt das ausdrücklich
-  („Verification completed with no findings."). Unter **Approval comment
+- **Keine Beanstandungen:** Ein grüner Balken meldet „Verification completed
+  with no findings.". Unter **Approval comment
   (optional)** können Sie einen Kommentar für die freigebende Person
   hinterlassen; **Confirm approval** löst die Weiterleitung aus.
 - **Beanstandungen gefunden:** Der Dialog listet jede gefundene Abweichung
-  auf (z. B. „Missing semantic classification"). Eine Bestätigungsschaltfläche
-  gibt es dann nicht — die Vorlage kann nicht weitergeleitet werden. Schließen
-  Sie den Dialog, lassen Sie die Vorlage überarbeiten und starten Sie die
-  Freigabe erneut.
-- **Verifikation technisch fehlgeschlagen:** Der Dialog zeigt eine
-  Fehlermeldung und bietet **Retry** an. Die Vorlage wurde nicht
-  weitergeleitet.
+  auf (z. B. „Missing semantic classification") und fordert dazu auf, sie vor
+  einer erneuten Freigabe zu beheben. Eine Bestätigungsschaltfläche erscheint
+  dann nicht. Schließen Sie den Dialog, lassen Sie die Vorlage überarbeiten
+  und starten Sie die Freigabe erneut.
+- **Verifikation technisch fehlgeschlagen:** Der Dialog meldet
+  „Verification could not be completed. Retry the verification before
+  approving." und bietet **Retry** an. Die Vorlage wurde nicht weitergeleitet.
 
 **Cancel** und die Escape-Taste schließen den Dialog, ohne etwas zu
 übermitteln; die Schreibmarke kehrt anschließend auf **Approve** zurück.
 
-## Entscheidung mit Kommentar bestätigen
+## Eine Vorlage zurückweisen
 
-![Bestätigungsdialog](images/template-reviewer-kommentar-dialog.png)
-
-Der Bestätigungsdialog **Confirmation** fragt „Add decision note?" und nimmt
-unter **Decision Note** einen Kommentar auf. Erst **Submit** im Dialog führt
-die Aktion aus; **Cancel** bricht ab. Dieselbe Bestätigung erscheint bei der
-Freigabe durch den Template Approver.
+**Reject** öffnet den Dialog **Confirmation** mit der Frage „Add comment?".
+Der Kommentar ist freiwillig und geht zusammen mit der Rückgabe an den
+Template Creator. **Submit** führt die Rückgabe aus, **Cancel** bricht ab.
 
 Nach der Weiterleitung wechselt die Vorlage in den Status REVIEWED und
 erscheint beim Template Approver unter **Approval Tasks**.

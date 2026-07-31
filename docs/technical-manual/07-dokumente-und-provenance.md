@@ -1,4 +1,4 @@
-# 07 — Dokumente und Provenance
+# 07 Dokumente und Provenance
 
 Dieses Kapitel beschreibt, wie das DCS aus dem maschinenlesbaren Vertrag
 (JSON-LD) das menschenlesbare Vertragsdokument (PDF/A-3) erzeugt, warum
@@ -18,7 +18,7 @@ Repräsentation derselben Vereinbarung.
 | `pdf-core` | Eigenständiger, zustandsloser Dienst; alleiniger Eigentümer aller Byte-Arbeit am PDF: deterministisches Kompilieren, inkrementelle Amendments, Provenance-Re-Anchor, Extraktion des eingebetteten JSON-LD, C2PA-Einbettung, Re-Render- und Inhaltsvergleich. Das Backend parst nie selbst PDF-Bytes |
 | Backend / PDF-Generierung | Orchestriert: hört auf Lifecycle-Ereignisse, lässt pdf-core rendern bzw. amendieren, stellt Lifecycle-Credentials aus, legt das Ergebnis verschlüsselt ab und führt den PDF-Zustand je Vertrag/Vorlage (CID, Renderer-Version, C2PA-Zustand, Payload-Hash) |
 | Artefaktspeicher | Verschlüsselnde Schicht über IPFS: jedes Artefakt wird vor dem Schreiben verschlüsselt, jeder Lesevorgang entschlüsselt authentifiziert |
-| C2PA-Manifest-Dienst | Öffentlicher, unauthentifizierter Abruf des C2PA-Manifest-Stores eines Vertrags — das öffentliche Gegenstück zum DID-Dokument |
+| C2PA-Manifest-Dienst | Öffentlicher, unauthentifizierter Abruf des C2PA-Manifest-Stores eines Vertrags, das öffentliche Gegenstück zum DID-Dokument |
 | HSM (über das Backend) | Signiert die COSE-Struktur der C2PA-Manifeste und entpackt die Inhaltsschlüssel. pdf-core hält kein Schlüsselmaterial: Es baut die zu signierende Struktur, das Backend signiert |
 | Statuslist-Dienst | Wird bei der Verifikation für den Live-Widerrufsstatus der in den Manifesten eingebetteten Lifecycle-Credentials befragt |
 
@@ -28,13 +28,14 @@ pdf-core garantiert: **Dieselbe JSON-LD-Payload erzeugt immer
 byte-identischen Seiteninhalt.** Dafür sorgen mehrere bewusste
 Entscheidungen:
 
-- Der Render-Zeitpunkt ist eine feste Epoche, nicht die Wanduhr — die
+- Der Render-Zeitpunkt ist eine feste Epoche, nicht die Wanduhr. Die
   vertrauenswürdige Vertragszeit ist der Zeitstempel der PAdES-Signatur
-  (Kapitel 06), nicht das Rendering.
+  (Kapitel 06).
 - Die eingereichte Payload wird **verbatim** als Anhang in das
-  PDF/A-3-Dokument eingebettet — exakt die übermittelten Bytes, nie eine
-  re-kanonisierte Form. Der SHA-256 dieser Bytes ist die Content-Adresse
-  des Dokuments; jeder Prüfer kann ihn aus dem Anhang nachrechnen.
+  PDF/A-3-Dokument eingebettet, exakt die übermittelten Bytes und nie
+  eine re-kanonisierte Form. Der SHA-256 dieser Bytes ist die
+  Content-Adresse des Dokuments; jeder Prüfer kann ihn aus dem Anhang
+  nachrechnen.
 - Die Schrift ist im Dokument eingebettet (PDF/A-Konformität), Layout und
   Struktur (Tagged PDF, Outline) sind vollständig aus der Payload
   abgeleitet.
@@ -48,18 +49,18 @@ kompilieren, Seiteninhalte vergleichen.
 
 Der Compiler arbeitet auf dem kanonischen Vertragsmodell (Kapitel 03):
 
-- `dcs:documentStructure` beschreibt die menschenlesbare Struktur — ein
+- `dcs:documentStructure` beschreibt die menschenlesbare Struktur, einen
   Layout-Baum über geordnete Blöcke, dessen Reihenfolge über
   JSON-LD-Listen stabil ist.
 - `dcs:contractFields` ist die flache Liste der ausfüllbaren Felder.
   Klauseln, `dcs:contractData` und ODRL-Operanden referenzieren dieselben
-  Feld-IDs — Authoring, Rendering und Policy-Auswertung lösen ein Feld
+  Feld-IDs. Authoring, Rendering und Policy-Auswertung lösen ein Feld
   ausschließlich über seine `@id` auf, ohne Vorlagen-Schnappschuss.
 - `dcs:signatureFields` erzeugt AcroForm-Signaturfelder für die spätere
   PAdES-Signatur.
 - Semantische Zusatzdaten, die nicht Teil der Dokumentstruktur sind (etwa
   ODRL-Policies), werden nicht gerendert, aber unverändert im
-  eingebetteten JSON-LD mitgeführt — die Maschinenlesbarkeit geht beim
+  eingebetteten JSON-LD mitgeführt. Die Maschinenlesbarkeit geht beim
   Rendern nie verloren.
 
 Mehrfache Signaturen sind konstruktionsbedingt **sequenziell**: PDF/A-3
@@ -72,7 +73,7 @@ Bytes.
 ## 7.3 Der Rendering- und Provenance-Fluss
 
 PDFs entstehen nie auf Zuruf im Request-Pfad, sondern **ereignisgetrieben
-im Hintergrund**: Jedes Lifecycle-Ereignis eines Vertrags oder einer
+im Hintergrund**. Jedes Lifecycle-Ereignis eines Vertrags oder einer
 Vorlage (Anlegen, inhaltliche Änderung, Zustandswechsel,
 Verhandlungsschritt) läuft über den Event-Bus in den Regenerator. Der
 stellt für den neuen Zustand ein Lifecycle-Verifiable-Credential aus,
@@ -110,16 +111,16 @@ flowchart LR
 
 Der Export bedient sich immer aus diesem Bestand: Er liefert das aktuelle
 PDF und **wartet**, wenn nach der letzten Änderung noch eine Regeneration
-läuft — er gibt nie einen veralteten Stand und rendert nie selbst. Ein
+läuft. Er gibt nie einen veralteten Stand und rendert nie selbst. Ein
 bereits PAdES-signiertes PDF ist **eingefroren**: Es wird unverändert
 ausgeliefert, auch wenn der Lifecycle-Zustand danach weiterläuft. Die
 letzte Lifecycle-Assertion vor der Signatur wird bereits vor dem
-Signieren eingebettet, sodass die Signatur die Provenance mit abdeckt;
-die einzige Revision **nach** der Signatur ist der Provenance-Re-Anchor
+Signieren eingebettet, sodass die Signatur die Provenance mit abdeckt.
+Die einzige Revision **nach** der Signatur ist der Provenance-Re-Anchor
 der Signatur-Finalisierung (ADR-26, Kapitel 06): ein reines
 C2PA-Update-Manifest, dessen Hard-Binding die signierten Bytes abdeckt,
 angehängt als inkrementelles Update, das den Byte-Bereich der Signatur
-unberührt lässt. Danach mutiert nichts mehr — jede weitere Änderung
+unberührt lässt. Danach mutiert nichts mehr, denn jede weitere Änderung
 gälte standardkonformen PAdES-Validatoren als unerklärte Manipulation.
 
 ## 7.4 C2PA-Manifeste
@@ -128,7 +129,7 @@ Jede erzeugte PDF-Version trägt einen C2PA-Manifest-Store (JUMBF), der den
 gesamten sichtbaren Seiteninhalt abdeckt. Die Manifeste **stapeln** sich
 über den Lebenszyklus: Jeder Zustandswechsel hängt eine
 Lifecycle-Assertion an (Zustände wie `draft`, `active`, `amended`,
-`suspended`, `terminated`, `expired`, `replaced`), zusammen mit einem
+`suspended`, `terminated`, `expired`), zusammen mit einem
 Verifiable Credential der Instanz, das den Zustandswechsel, den
 Asset-Hash und den Zeitpunkt bezeugt und über eine Statusliste widerrufbar
 ist. Die COSE-Signatur jedes Manifests entsteht über den
@@ -139,16 +140,15 @@ pdf-core als öffentliches Material bereitgestellt.
 Ein signierter Vertrag trägt ein Manifest mehr als ein unsignierter: das
 Lifecycle-Manifest, auf das sich die Signatur festlegt, und das
 Re-Anchor-Manifest, das sich auf die Signatur festlegt (ADR-26). Die
-Kette liest sich in genau dieser Reihenfolge und sagt damit exakt, was
-geschehen ist.
+Kette liest sich in genau dieser Reihenfolge.
 
 Die Manifestkette ist öffentlich abrufbar: Der C2PA-Endpunkt liefert die
 rohen Manifest-Store-Bytes, auf Wunsch eine JSON-Aufzählung der Kette mit
 Manifest-Labels und Lifecycle-Assertions. Der Endpunkt ist bewusst
-unauthentifiziert — ein externer Prüfer muss die Herkunftskette eines
-signierten Vertrags ohne Konto auflösen können. Er ist damit zugleich
-der Grund, warum die Sichtbarkeit einer Kette an der Verfügbarkeit ihres
-Inhaltsschlüssels hängt (7.6).
+unauthentifiziert, denn ein externer Prüfer muss die Herkunftskette eines
+signierten Vertrags ohne Konto auflösen können. Damit hängt die
+Sichtbarkeit einer Kette zugleich an der Verfügbarkeit ihres
+Inhaltsschlüssels (7.6).
 
 Ausgeliefert wird die Provenance doppelt (ADR-4): eingebettet als JUMBF
 im PDF und über diesen Remote-Endpunkt.
@@ -169,23 +169,23 @@ Stellen erzwungen bzw. prüfbar gemacht:
    verlangt sie, dass dessen Seiteninhalt exakt der Re-Render seiner
    eigenen eingebetteten Payload ist. Der Vergleich betrachtet nur die
    Seiteninhalte, sodass legitime C2PA-, Signatur- und
-   Amendment-Schichten des Absenders nicht anschlagen — echte Divergenz
+   Amendment-Schichten des Absenders nicht anschlagen. Echte Divergenz
    zwischen Text und Daten führt zur Ablehnung.
 3. **Bei der Signaturannahme** (Kapitel 06): Das eingereichte Dokument
    wird gegen das vorbereitete inhaltlich verglichen.
 
 Damit ist keine Instanz auf die Aussage der ausstellenden Instanz
-angewiesen: Jede Partei rechnet die Übereinstimmung selbst nach.
+angewiesen. Jede Partei rechnet die Übereinstimmung selbst nach.
 
 Bei einem PDF mit angehängten Revisionen spielt die Verifikation jede
-Revision deterministisch nach — und unterscheidet dabei, **welche Art**
+Revision deterministisch nach und unterscheidet dabei, **welche Art**
 Revision sie vor sich hat: Eine Revision, die ein neues
 Lifecycle-Credential trägt, wird als Amendment reproduziert; eine
 Revision mit unveränderter Payload und ohne neues Credential ist der
 Provenance-Re-Anchor nach der Signatur und wird genauso reproduziert, wie
 sie erzeugt wurde. Ein signiertes PDF gilt daher nur dann als gut, wenn
 das einzige nach der Signatur Angehängte byte-genau die Provenance ist,
-die diese Instanz selbst produziert hat — die „nach der Signatur
+die diese Instanz selbst produziert hat. Die „nach der Signatur
 geändert"-Meldung der PDF-Reader wird nachgewiesen, nicht ignoriert.
 
 **Das Verifikationsergebnis ist bewusst ehrlich geschnitten.** Der
@@ -201,7 +201,7 @@ Kombinationen von Ja/Nein-Feldern erraten zu lassen (ADR-30):
 | Klasse | Bedeutung |
 | --- | --- |
 | `content_hash_mismatch` | Manifest vorhanden, aber der Inhalt weicht vom eingebetteten JSON-LD ab |
-| `artifact_not_authentic` | Die gespeicherten Bytes haben die authentifizierte Entschlüsselung nicht bestanden — sie sind nicht die, die diese Instanz geschrieben hat |
+| `artifact_not_authentic` | Die gespeicherten Bytes haben die authentifizierte Entschlüsselung nicht bestanden; sie sind nicht die, die diese Instanz geschrieben hat |
 | `verification_failed` | Eine andere Prüfung ist fehlgeschlagen |
 | *(leer)* | Die Prüfung ist bestanden |
 
@@ -221,8 +221,8 @@ publizierten Schlüsselvereinbarungs-Schlüssel; der passende private
 Schlüssel ist im PKCS#11-Token nicht extrahierbar. Auspacken erfordert
 also das HSM genau dieser Instanz. Bei jeder Vertragssendung an einen
 Peer reist zusätzlich eine für dessen publizierten Schlüssel gewickelte
-Kopie mit; der Empfänger übernimmt sie einmal — auspacken, gegen den
-eigenen Schlüssel neu wickeln — und ignoriert die Kopie bei allen
+Kopie mit. Der Empfänger übernimmt sie einmal, packt sie aus, wickelt sie
+gegen den eigenen Schlüssel neu und ignoriert die Kopie bei allen
 späteren Sendungen. Beide Instanzen halten danach denselben
 Inhaltsschlüssel, jede Kopie nur vom eigenen HSM zu öffnen.
 
@@ -230,23 +230,23 @@ Drei Folgen sind für das Verständnis wichtig:
 
 - **Manipulation am Speicher ist ein Prüfergebnis, kein Serverfehler
   (ADR-30).** Scheitert die authentifizierte Entschlüsselung, kann das
-  keine Schlüsselverwaltungsstörung sein — Schlüssel und Bereichsangabe
-  stammen aus dem eigenen Bestand. Es bedeutet, dass die gespeicherten
-  Bytes nicht die geschriebenen sind. Genau das ist die Antwort auf die
-  Frage „ist dieses Artefakt unversehrt?", und sie lautet „nein", nicht
-  „interner Fehler". Was genau verändert wurde, ist dabei nicht
-  ermittelbar: Klartext wird nie aus unauthentifiziertem Chiffrat
-  abgeleitet.
+  keine Schlüsselverwaltungsstörung sein, denn Schlüssel und
+  Bereichsangabe stammen aus dem eigenen Bestand. Es bedeutet, dass die
+  gespeicherten Bytes nicht die geschriebenen sind. Genau das ist die
+  Antwort auf die Frage „ist dieses Artefakt unversehrt?", und sie lautet
+  „nein". Was genau verändert wurde, ist dabei nicht ermittelbar:
+  Klartext wird nie aus unauthentifiziertem Chiffrat abgeleitet.
 - **CIDs zweier Instanzen unterscheiden sich** für denselben Vertrag,
   weil jede Seite dasselbe PDF unter eigenem Zufallswert verschlüsselt.
-  Das ist folgenlos — über die Peer-Schnittstelle wandert nie eine CID,
+  Das ist folgenlos: Über die Peer-Schnittstelle wandert nie eine CID,
   Verträge reisen als rohe Bytes, und jede Seite adressiert nur ihren
   eigenen Speicher.
 - **Löschung ist Schlüsselvernichtung.** Erasure zerstört die gewickelten
   Kopien und behält die Zeile als Zerstörungsnachweis (Kapitel 04 und
   09). Danach liefern Export, Verifikation und Bundle-Abruf dieses
-  Vertrags eine definierte „Inhalt gelöscht"-Antwort — als Nicht-gefunden,
-  nie als interner Fehler; Listen- und Metadatensichten arbeiten weiter.
+  Vertrags eine definierte „Inhalt gelöscht"-Antwort, als Nicht-gefunden
+  und nie als interner Fehler; Listen- und Metadatensichten arbeiten
+  weiter.
 
 **Bekannte Grenze.** Die Schlüsselvernichtung entfernt die
 Vertrags-Chiffrate nicht aus dem IPFS-Knoten; entfernt werden lediglich
@@ -274,9 +274,9 @@ pdf-core (intern, vom Backend angesprochen):
 
 | Endpunkt | Zweck |
 | --- | --- |
-| `POST /render` | JSON-LD → PDF/A-3 kompilieren |
+| `POST /render` | JSON-LD zu PDF/A-3 kompilieren |
 | `POST /render/amendment` | Bestehendes PDF inkrementell fortschreiben (neue Payload + Lifecycle-Credential) |
-| `POST /render/reanchor` | Reines Provenance-Update-Manifest über die aktuellen (signierten) Bytes anhängen — Payload unverändert, Signatur unberührt (ADR-26) |
+| `POST /render/reanchor` | Reines Provenance-Update-Manifest über die aktuellen (signierten) Bytes anhängen; Payload unverändert, Signatur unberührt (ADR-26) |
 | `POST /verify` | Re-Render-Verifikation gegen die eingebettete Payload |
 | `POST /verify/content` | Seiteninhalt gegen den Re-Render der eingebetteten Payload (Empfangsprüfung für Peer-PDFs) |
 | `POST /verify/content-match` | Seiteninhalt zweier vorliegender PDFs vergleichen (Signaturannahme) |
@@ -302,14 +302,14 @@ im [Deployment-Leitfaden](../deployment-guide.md) beschrieben.
   einen vorherigen Export existiert kein gespeichertes PDF, und die
   Verifikation schlägt mit entsprechender Meldung fehl. Ist der
   Lifecycle-Zustand seit dem letzten Stand fortgeschritten, regeneriert
-  die Verifikation transparent — ein Lese-Endpunkt mit Schreibpfad.
+  die Verifikation transparent, ein Lese-Endpunkt mit Schreibpfad.
 - **Verlorene Regenerationen holt ein Sweep nach.** Ein Lifecycle-Ereignis
   wird höchstens einmal zugestellt; scheitert die Regeneration, wäre die
   Entität sonst dauerhaft weder exportierbar noch verschiffbar. Ein
   periodischer Durchlauf sucht deshalb Entitäten, deren gespeichertes PDF
   nicht dem aktuellen Dokument entspricht, arbeitet sie in begrenzten
   Stapeln ab und wiederholt jede Entität nur begrenzt oft mit wachsendem
-  Abstand — so blockiert ein dauerhaft unrenderbarer Vertrag nicht die
+  Abstand. So blockiert ein dauerhaft unrenderbarer Vertrag nicht die
   heilbaren hinter ihm.
 - **IPFS ist eventual consistent.** Frisch geschriebene CIDs sind nicht
   immer sofort lesbar; der Client wiederholt Lesezugriffe mit Backoff.
@@ -317,7 +317,7 @@ im [Deployment-Leitfaden](../deployment-guide.md) beschrieben.
   eine referenzierte Komponente, antwortet der Export mit einer
   maschinenlesbaren Befundliste statt eines lückenhaften Archivs.
 - **Ein Amendment ohne inhaltliche Änderung** wird von pdf-core
-  abgelehnt — identischer Inhalt erzeugt keine neue Revision. Die
+  abgelehnt; identischer Inhalt erzeugt keine neue Revision. Die
   bewusste Ausnahme ist der Provenance-Re-Anchor nach der Signatur: Er
   trägt konstruktionsbedingt eine unveränderte Payload und läuft deshalb
   über einen eigenen Endpunkt.

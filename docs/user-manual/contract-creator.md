@@ -19,13 +19,14 @@ existiert mindestens eine registrierte Vertragsvorlage.
    Ansicht die Vorlage mit ihren Reitern **Details**, **Clauses**,
    **Builder**, **Data** und **Meta Data** zur Kontrolle. Rechts daneben
    ordnen Sie den neuen Vertrag über **Add to existing contract (optional)**
-   bei Bedarf einem bestehenden Vertrag als Untervertrag zu; **— none —**
-   bedeutet „eigenständiger Vertrag".
+   bei Bedarf einem bestehenden Vertrag als Untervertrag zu; der oberste
+   Eintrag der Liste („none") steht für einen eigenständigen Vertrag.
 2. **Create** **(2)** startet die Erstellung.
 
 Erscheint die gewünschte Vorlage nicht in der Auswahl, ist sie noch nicht
-registriert — Freigabe allein genügt nicht (siehe
-[Vorlagen verwalten](template-manager.md)).
+registriert; die Freigabe allein genügt dafür nicht (siehe
+[Vorlagen verwalten](template-manager.md)). Gibt es überhaupt keine
+verwendbare Vorlage, steht in der Auswahl „No templates available".
 
 ### Gegenpartei festlegen
 
@@ -37,7 +38,7 @@ Gegenseite:
 1. Tragen Sie unter **Counterparty did:web** die eindeutige Kennung der
    Partnerorganisation ein, wenn der Vertrag mit einem anderen DCS verhandelt
    werden soll. Lassen Sie das Feld leer, entsteht ein rein interner Vertrag
-   ohne Gegenseite — der Dialog sagt das ausdrücklich.
+   ohne Gegenseite; der Dialog weist darauf hin.
 2. **Apply** legt den Vertrag an; er startet im Status **DRAFT**. Prüfung,
    Freigabe und Verhandlung übernehmen stets die Rollen der eigenen
    Organisation. **Cancel** bricht die Vertragsanlage ab.
@@ -56,7 +57,7 @@ zum nächsten Schritt.
 
 1. Unter **Contract Content** sehen Sie das Vertragsdokument mit den
    Klauseltexten. Enthält die Vorlage ausfüllbare Platzhalter (z. B. einen
-   Zahlungsbetrag), erscheinen sie hier als Eingabefelder **(1)** — füllen Sie
+   Zahlungsbetrag), erscheinen sie hier als Eingabefelder **(1)**. Füllen Sie
    alle Pflichtfelder aus.
 2. **Update** **(2)** speichert den Entwurf, ohne den Status zu ändern.
 3. **Submit** **(3)** speichert und reicht den Vertrag in die interne Prüfung
@@ -81,12 +82,17 @@ Sie hier wie die übrigen Eingabefelder aus.
    und Änderungshistorie.
 
    **Wichtig:** Solange ein Pflichtfeld des Vertrags nicht ausgefüllt ist,
-   bleibt die Schaltfläche ausgegraut; ein Hinweis am Mauszeiger nennt das
-   fehlende Feld („required field … amount"). Ein Angebot muss vollständig
-   sein, bevor es das Haus verlässt. Nach dem Anbieten verschwindet die
-   Schaltfläche — ein Angebot wird genau einmal abgegeben.
+   bleibt die Schaltfläche ausgegraut. Ein Hinweis am Mauszeiger nennt die
+   fehlenden Felder beim Namen („Fill the required field(s) before offering to
+   the counterparty: …"). Ein Angebot muss vollständig sein, bevor es das Haus
+   verlässt. Nach dem Anbieten verschwindet die Schaltfläche; ein Angebot wird
+   genau einmal abgegeben.
 3. **Export PDF** **(3)** lädt das aktuelle Vertragsdokument als PDF herunter;
    **Export bundle** erzeugt ein Gesamtpaket des Vertrags.
+
+Sobald der Vertrag angeboten ist oder verhandelt wird, tritt in derselben
+Leiste die Schaltfläche **Negotiate** hinzu und führt direkt in die
+Verhandlungsansicht.
 
 ### Die maschinenlesbare Seite des Vertrags
 
@@ -100,17 +106,16 @@ Der aufgeklappte Bereich **(1)** zeigt unter **Contract payload (JSON-LD)**
 den vollständigen Vertragsinhalt, wie das System ihn speichert. Trägt der
 Vertrag ausfüllbare Felder, steht darüber zusätzlich eine Tabelle mit
 Bezeichnung (**Field**), Wert (**Value**) und technischer Kennung
-(**Identifier**) je Feld. Beide Darstellungen — Dokument und maschinenlesbare
-Ansicht — entstehen aus demselben Vertragsinhalt und können daher nicht
-voneinander abweichen. Die Kennungen benötigen Sie im Alltag nicht: Sie sind
-das, worauf automatische Prüfungen und später gemeldete Kennzahlen Bezug
-nehmen.
+(**Identifier**) je Feld. Dokument und maschinenlesbare Ansicht entstehen aus
+demselben Vertragsinhalt und können daher nicht voneinander abweichen. Die
+Kennungen benötigen Sie im Alltag nicht; auf sie beziehen sich automatische
+Prüfungen und später gemeldete Kennzahlen.
 
 ## Verhandeln
 
-Nach dem Einreichen (bzw. nach Änderungsvorschlägen der Gegenseite) findet die
-Verhandlung in der Ansicht **Negotiate Contract** statt — erreichbar über
-**Negotiation Tasks** oder direkt aus der Vertragsansicht.
+Nach dem Einreichen oder nach Änderungsvorschlägen der Gegenseite findet die
+Verhandlung in der Ansicht **Negotiate Contract** statt, erreichbar über
+**Negotiation Tasks** oder über **Negotiate** in der Vertragsansicht.
 
 ![Verhandlungsansicht](images/contract-creator-verhandlung.png)
 
@@ -126,12 +131,12 @@ Sie verhandelbare Werte.
    sind die Werte wiederhergestellt.
 2. **Change Proposal** **(2)** macht die Änderung verbindlich: Sie wird als
    Änderungsvorschlag an die Gegenseite übermittelt. Ein gespeicherter Entwurf
-   wird dabei aufgebraucht — danach gibt es nichts mehr zu verwerfen. Jede
-   angenommene Änderung erzeugt eine neue Version desselben Vertrags.
+   wird dabei aufgebraucht. Jede angenommene Änderung erzeugt eine neue
+   Version desselben Vertrags.
 3. **Submit** **(3)** schließt die Verhandlungsrunde ab und übergibt den
    geeinten Stand in die interne Prüfung. Die Schaltfläche ist gesperrt,
-   solange noch unbeantwortete Änderungsvorschläge offen sind — eine Einigung
-   erfordert, dass beide Seiten alle offenen Vorschläge entschieden haben.
+   solange noch unbeantwortete Änderungsvorschläge offen sind. Eine Einigung
+   setzt voraus, dass beide Seiten alle offenen Vorschläge entschieden haben.
 
 Solange ein privater Entwurf gespeichert ist, tritt in derselben Aktionsleiste
 zwischen **Save draft** und **Change Proposal** die Schaltfläche **Discard
@@ -141,22 +146,27 @@ sobald der Entwurf verworfen oder als Änderungsvorschlag übermittelt wurde.
 ### Auf Änderungsvorschläge antworten
 
 Offene Vorschläge der Gegenseite erscheinen in der Verhandlungsansicht als
-Liste. **Show** öffnet den Versionsvergleich des Vorschlags; dort nehmen Sie
-ihn mit **Accept** an oder lehnen ihn ab — jeweils mit Bestätigungsdialog, den
-Sie mit **Confirm** abschließen. Einen eigenen Vorschlag können Sie nicht
-selbst annehmen; er wartet auf die Entscheidung der Gegenseite.
+Liste. **Show** öffnet unter **Selected change proposal** den Vergleich: links
+der aktuelle Stand, rechts der vorgeschlagene, darunter die Unterschiede im
+Vertragsinhalt. **Hide** schließt den Vergleich wieder.
+
+Im geöffneten Vergleich stehen zwei Entscheidungen zur Wahl. **Accept**
+fragt „Accept this change request?" und wird mit **Confirm** ausgeführt.
+**Reject** verlangt im Dialog einen Ablehnungsgrund und wird mit **Submit**
+ausgeführt. Einen eigenen Vorschlag können Sie nicht selbst annehmen; er
+wartet auf die Entscheidung der Gegenseite.
 
 ![Verhandlungsaufgaben](images/contract-creator-verhandlungsaufgaben.png)
 
 Der Bereich **Negotiation Tasks** sammelt alle Verträge mit laufender
-Verhandlung als Aufgabenliste — je Eintrag Name, Version, Erstellungsdatum
+Verhandlung als Aufgabenliste, je Eintrag Name, Version, Erstellungsdatum
 und der Aufgabenzustand (**OPEN**). **View** öffnet die Verhandlungsansicht;
 Suchfeld, **Filter** und **Sort by** grenzen die Liste ein.
 
 ## Nach der Verhandlung
 
 Mit **Submit** wandert der Vertrag zur Prüfung (Contract Reviewer) und
-anschließend zur Freigabe (Contract Approver) — siehe die Kapitel
+anschließend zur Freigabe (Contract Approver), siehe die Kapitel
 [Verträge prüfen](contract-reviewer.md) und
 [Verträge freigeben](contract-approver.md). Verhandelt jede Seite mit einem
 eigenen DCS, durchläuft jede Organisation ihre eigene Prüfung und Freigabe;

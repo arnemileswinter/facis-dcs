@@ -1,4 +1,4 @@
-# 09 — Audit und Compliance
+# 09 Audit und Compliance
 
 Das DCS behandelt Nachvollziehbarkeit als kryptographische Eigenschaft,
 nicht als Log-Konvention: Jedes fachlich relevante Ereignis wird in einem
@@ -13,14 +13,14 @@ Policy-Enforcement über ODRL und OPA.
 
 | Komponente | Rolle |
 | --- | --- |
-| Fachkomponenten | Schreiben ihre Ereignisse transaktional in eine Outbox-Tabelle — im selben Datenbank-Commit wie die fachliche Zustandsänderung |
+| Fachkomponenten | Schreiben ihre Ereignisse transaktional in eine Outbox-Tabelle, im selben Datenbank-Commit wie die fachliche Zustandsänderung |
 | Outbox-Prozessor | Hintergrundprozess im Backend; publiziert Ereignisse auf dem Event-Bus und verankert audit-sichtbare Ereignisse als Audit-Einträge |
 | Artefaktspeicher über IPFS | Hält die Audit-Einträge und Checkpoints content-adressiert; die CIDs sind die eigentliche Autorität des Trails |
 | PostgreSQL | Index über den Trail: Kettenköpfe pro Ressource, Checkpoint-Tabellen, ausstehende Zeitstempel, Dead-Letter-Status, Risiko-Register, Workflow-Gate-Läufe |
 | TSA (RFC 3161, über einen ORCE-Flow) | Stellt den vertrauenswürdigen Zeitstempel über jede Checkpoint-Root aus |
-| ORCE — externer Notar | Holt periodisch den Checkpoint-Head ab und trägt ihn aus der Reichweite des Betreibers hinaus |
-| ORCE — Audit-Executor | Bewertet einen Audit-Abruf: Das DCS sammelt die Evidenz, der Executor bildet die Befunde |
-| ORCE — Workflow-Gate-Executor | Entscheidet vor jedem gate-pflichtigen Lebenszyklusübergang über den Vertragsschnappschuss (Kapitel 04) |
+| ORCE, externer Notar | Holt periodisch den Checkpoint-Head ab und trägt ihn aus der Reichweite des Betreibers hinaus |
+| ORCE, Audit-Executor | Bewertet einen Audit-Abruf: Das DCS sammelt die Evidenz, der Executor bildet die Befunde |
+| ORCE, Workflow-Gate-Executor | Entscheidet vor jedem gate-pflichtigen Lebenszyklusübergang über den Vertragsschnappschuss (Kapitel 04) |
 | OPA (eingebettet) | Wertet ODRL-Constraints als Rego-Policies aus; die Ergebnisse fließen als Policy-Findings in den Audit-Trail |
 | `pacmonitor` (CronJob) | Führt den Compliance-Sweep planmäßig aus, ohne dass jemand fragt (ADR-32) |
 | Process Audit & Compliance (API) | Audits, Reports, Monitoring, Incident-Reports, Checkpoint-Head und Inklusionsbeweise, Workflow-Gate-Läufe |
@@ -30,7 +30,7 @@ Policy-Enforcement über ODRL und OPA.
 ### Vom Ereignis zum verankerten Eintrag
 
 Jede fachliche Operation schreibt ihr Ereignis in dieselbe
-Datenbank-Transaktion wie die Zustandsänderung (Outbox-Muster) — ein
+Datenbank-Transaktion wie die Zustandsänderung (Outbox-Muster). Ein
 Ereignis kann daher nie verloren gehen, ohne dass auch die
 Zustandsänderung fehlt. Der Outbox-Prozessor arbeitet die Einträge
 anschließend in drei entkoppelten Schleifen ab:
@@ -38,13 +38,13 @@ anschließend in drei entkoppelten Schleifen ab:
 1. **Publizieren.** Ereignisse werden auf dem Event-Bus republiziert,
    damit Abonnenten (Webhooks, PDF-Generierung, Auto-Deployment)
    reagieren können. Diese Schleife ist bewusst vom Verankern getrennt
-   und läuft deutlich häufiger — Konsumenten brauchen nur die
+   und läuft deutlich häufiger: Konsumenten brauchen nur die
    Ereignis-Payload, nie einen Anker-Wert, und sollen nicht hinter
    TSA- und Speicher-Roundtrips warten.
 2. **Verankern.** Audit-sichtbare Ereignisse werden stapelweise als
    Audit-Einträge geschrieben und durch einen Merkle-Checkpoint
    committet. Reine Lookup-Ereignisse (Abruf- und Suchoperationen) werden
-   als verarbeitet markiert, ohne verankert zu werden — sie würden sonst
+   als verarbeitet markiert, ohne verankert zu werden; sie würden sonst
    die Stapel dominieren und echte Audit-Ereignisse verdrängen.
 3. **Nach-Zeitstempeln.** Checkpoints, die während einer TSA-Störung ohne
    Zeitstempel verankert wurden, erhalten ihn in einem Wiederholungslauf.
@@ -56,8 +56,8 @@ Ressource. Die Historie eines Vertrags oder einer Vorlage ist damit eine
 strikte Hash-Kette: Ein nachträglich veränderter Eintrag hätte eine andere
 CID, und alle Nachfolger würden ins Leere zeigen. Ketten verschiedener
 Ressourcen sind voneinander unabhängig und werden nebenläufig
-geschrieben — eine gestörte Ressource blockiert die übrigen nicht. Ein
-Audit-Lesevorgang läuft die Kette von ihrem Kopf rückwärts durch und
+geschrieben, so dass eine gestörte Ressource die übrigen nicht blockiert.
+Ein Audit-Lesevorgang läuft die Kette von ihrem Kopf rückwärts durch und
 rekonstruiert so die vollständige Historie.
 
 ### Öffentlicher Kopf, privater Rumpf
@@ -65,18 +65,18 @@ rekonstruiert so die vollständige Historie.
 Ein Audit-Eintrag zerfällt in zwei Teile (ADR-28):
 
 - **Kopf im Klartext:** Komponente, Ereignistyp, DID, Zeitstempel,
-  Vorgänger-CID und die Blinding-Nonce — alles, was die Kette und die
+  Vorgänger-CID und die Blinding-Nonce, also alles, was die Kette und die
   Beweise tragen.
 - **Rumpf verschlüsselt:** Die Ereignis-Payload liegt unter dem
   Inhaltsschlüssel des jeweiligen Vertrags oder der Vorlage. Ereignisse
-  ohne Ressourcenbezug — Checkpoints, instanzweite Reports und die
-  Löschnachweise selbst — liegen unter dem instanzweiten Schlüssel, den
-  keine Löschanforderung zerstört: Ein Löschnachweis, der sich selbst
+  ohne Ressourcenbezug (Checkpoints, instanzweite Reports und die
+  Löschnachweise selbst) liegen unter dem instanzweiten Schlüssel, den
+  keine Löschanforderung zerstört. Ein Löschnachweis, der sich selbst
   löschen könnte, würde nichts beweisen.
 
 Leaf-Hashes und Checkpoints werden über das gespeicherte Objekt gebildet,
 wie es ist. Deshalb macht eine Schlüsselvernichtung die Rümpfe dauerhaft
-unlesbar, während **jeder Inklusionsbeweis weiter verifiziert** —
+unlesbar, während **jeder Inklusionsbeweis weiter verifiziert**:
 Manipulationsnachweis und Löschbarkeit koexistieren, weil der Beweis nie
 davon abhing, den Klartext zu lesen.
 
@@ -86,14 +86,14 @@ davon abhing, den Klartext zu lesen.
 Ereignis her, sondern ein **Merkle-Checkpoint pro Verankerungs-Stapel**
 (ADR-16):
 
-- Über alle Einträge des Stapels — in Outbox-Reihenfolge — wird eine
+- Über alle Einträge des Stapels, in Outbox-Reihenfolge, wird eine
   Merkle-Root berechnet, mit Domänentrennung zwischen Blatt- und
   Knoten-Hashing.
 - Jede Root verkettet sich mit der Root des vorherigen Checkpoints. Eine
   einzige veröffentlichte Root committet dadurch transitiv den gesamten
   Log davor und beweist zusätzlich dessen Append-only-Eigenschaft.
 - Die Root wird **einmal pro Stapel** von der TSA nach RFC 3161
-  zeitgestempelt — statt einmal pro Ereignis. Ist die TSA nicht
+  zeitgestempelt, statt einmal pro Ereignis. Ist die TSA nicht
   erreichbar, wird der Checkpoint trotzdem verankert und der Zeitstempel
   später nachgereicht: Ein TSA-Ausfall verzögert die Evidenz, blockiert
   aber nie den Trail.
@@ -101,7 +101,7 @@ Ereignis her, sondern ein **Merkle-Checkpoint pro Verankerungs-Stapel**
   Blatt-Hash eingeht. Audit-Einträge sind hochgradig erratbar
   (Komponente, Ereignistyp, DID, Zeitstempel); ohne Nonce ließe sich ein
   Blatt-Hash per Brute-Force bestätigen. Mit Nonce sind Inklusionsbeweise
-  gefahrlos publizierbar — den Inhalt rekonstruieren kann nur, wer den
+  gefahrlos publizierbar. Den Inhalt rekonstruieren kann nur, wer den
   Eintrag samt Nonce bereits besitzt.
 
 ```mermaid
@@ -132,7 +132,7 @@ sequenceDiagram
 | Inklusionsbeweise (ausschließlich Hashes) | Die Einträge selbst (enthalten DIDs, Identitäten, Workflow-Payloads) |
 
 Der Head-Abruf liefert nur den Kopf; der Beweis-Abruf liefert Blatt-Hash,
-Blatt-Index, Geschwister-Hashes und den zugehörigen Head — nie den
+Blatt-Index, Geschwister-Hashes und den zugehörigen Head, nie den
 Eintrag. Der Beweis wird vor der Herausgabe intern gegen die gespeicherte
 Root verifiziert, sodass ein korrupter Index im System auffällt und nicht
 erst beim Auditor. Ein einzelner Checkpoint ist zusätzlich über seine
@@ -143,42 +143,42 @@ Sequenznummer abrufbar.
 Ein Trail, den nur der Betreiber hält, beweist nichts **gegen** den
 Betreiber. Deshalb holt ein ORCE-Flow den Checkpoint-Head periodisch ab
 und reicht ihn an eine externe Senke weiter. Der Flow authentifiziert sich
-als Maschinen-Identität mit der Rolle **Sys. Auditor** — Rollen und
+als Maschinen-Identität mit der Rolle **Sys. Auditor**; Rollen und
 Zurechnung liest das Backend anhand der Client-ID aus der Registry, nie
 aus Token-Claims (Kapitel 05). Diese Rolle darf ausschließlich den
-Checkpoint-Head lesen — keinen Vertragsinhalt, keinen Schreibpfad; der
+Checkpoint-Head lesen, keinen Vertragsinhalt und keinen Schreibpfad. Der
 Inklusionsbeweis-Endpunkt bleibt der menschlichen Auditor-Rolle
 vorbehalten.
 
 Ein Dritter verifiziert einen Eintrag mit genau drei Zutaten: den
 Eintrags-Bytes samt Nonce (die er selbst erhalten hat), dem
 Inklusionsbeweis und einem Head, den er **vom externen Anker bezieht,
-nicht vom Betreiber**. Die Zielsenke des Notar-Flows (Notariat, Chain,
-Gegenpartei) ist bewusst ein austauschbares Detail; im
-Auslieferungszustand endet der Flow an einem Platzhalter, den der
-Betreiber ersetzt.
+nicht vom Betreiber**. Welche Senke der Flow beliefert (Notariat, Chain,
+Gegenpartei), bestimmt der Betreiber. Ohne konfigurierte Senke findet
+keine externe Verankerung statt, und der Trail bleibt vollständig in der
+Reichweite des Betreibers.
 
 ## 9.3 Audits und Reports
 
 ### Audit-Abruf
 
 Auditoren (Rollen `Auditor`, `Archive Manager`) fordern die Audit-Trails
-eines **Scopes** an — Templates, Verträge, Archiv oder Signaturen,
+eines **Scopes** an: Templates, Verträge, Archiv oder Signaturen,
 optional gefiltert auf eine einzelne Ressourcen-DID. Jede Anfrage
 erfordert eine **Begründung**; der Abruf selbst wird als Audit-Ereignis in
-den Trail geschrieben — auch das Auditieren ist auditierbar. Ein Archive
+den Trail geschrieben, auch das Auditieren ist auditierbar. Ein Archive
 Manager ohne Auditor-Rolle darf ausschließlich den Archiv-Scope einsehen.
 
-Der Abruf ist zweistufig: Das DCS **sammelt die Evidenz** — die
+Der Abruf ist zweistufig: Das DCS **sammelt die Evidenz**, also die
 Hash-Ketten der Ressourcen des Scopes, ergänzt um die frisch berechneten
-Inhalts- und Policy-Prüfungen — und übergibt sie an den externen
+Inhalts- und Policy-Prüfungen, und übergibt sie an den externen
 **Audit-Executor**. Der bildet daraus die Befunde und liefert sie mit
 Executor-Identität, -Version und Ausführungszeitpunkt zurück; Anfrage,
 Antwort und Rohantwort werden persistiert. Damit ist die
 Auditbewertung austauschbar, ohne den Evidenzpfad zu berühren, und ihr
 Ergebnis nachträglich zuordenbar. Ist kein Executor konfiguriert oder
-erreichbar, antwortet der Abruf mit einem eigenen Fehler — es gibt kein
-stilles Ausweichen auf eine interne Bewertung.
+erreichbar, antwortet der Abruf mit einem eigenen Fehler; ein stilles
+Ausweichen auf eine interne Bewertung gibt es nicht.
 
 Bei einem vertragsbezogenen Abruf wird die Kette der Audit- und
 Compliance-Komponente mitgelesen, damit ein Befund, der am Vertrag
@@ -191,8 +191,8 @@ Aus demselben Datenbestand erzeugt der Report-Pfad Reports in JSON, CSV
 oder PDF. Ein Report gliedert sich in Zusammenfassung, Ressourcenliste,
 Lebenszyklus-Ereignisse und Compliance-Findings. Jeder Report erhält eine
 deterministische Report-ID und einen Content-Hash; die Report-Bytes werden
-zusätzlich abgelegt, und die Erzeugung selbst wird — mit Hash, CID und
-Begründung — als Ereignis im Audit-Trail festgehalten. Ein einmal
+zusätzlich abgelegt, und die Erzeugung selbst wird mit Hash, CID und
+Begründung als Ereignis im Audit-Trail festgehalten. Ein einmal
 ausgehändigter Report ist damit später gegen den Trail verifizierbar.
 
 ### Workflow-Gate-Läufe als Evidenz
@@ -212,24 +212,24 @@ Entscheider und Zeitpunkt persistiert und setzt genau den angehaltenen
 
 Der Compliance-Sweep meldet vier Klassen:
 
-- **`MISSING_APPROVAL`** — Verträge, die in einem freigabepflichtigen
+- **`MISSING_APPROVAL`**: Verträge, die in einem freigabepflichtigen
   Zustand auf eine noch ausstehende, erforderliche Freigabe warten (ein
   Risiko je Vertrag-Freigeber-Paar).
-- **`CONTRACT_UNDERPERFORMANCE`** — laufende Verträge, deren vom
+- **`CONTRACT_UNDERPERFORMANCE`**: laufende Verträge, deren vom
   Zielsystem zurückgemeldete KPI-Werte die eigenen ODRL-Verpflichtungen
   verletzen. Die Bewertung passiert bereits beim Eintreffen der
   Rückmeldung: Der Deployment-Callback prüft jeden gemeldeten Wert gegen
-  die ODRL-Policies des Vertrags und persistiert das Urteil mit dem Wert
-  — die Verletzung wird als Alert gemeldet, nicht als Request-Fehler
+  die ODRL-Policies des Vertrags und persistiert das Urteil mit dem Wert.
+  Die Verletzung wird als Alert gemeldet und nicht als Request-Fehler
   abgewiesen, denn der Vertrag ist in Kraft und der Verstoß ist ein zu
   dokumentierender Fakt. Der Sweep liest dieses Urteil zurück und benennt
   Metrik, beobachteten Wert und Beobachtungszeitpunkt, statt eine zweite,
   möglicherweise abweichende Bewertung vorzunehmen.
-- **`CONTRACT_DEPLOYMENT_FAILED`** — Deployments, deren Versand an das
+- **`CONTRACT_DEPLOYMENT_FAILED`**: Deployments, deren Versand an das
   designierte Zielsystem gescheitert ist. Der Vertrag ist auf dieser Seite
   in Kraft, beim Zielsystem aber nie angekommen; genau das ist der zu
   meldende Zustand.
-- **`UNAUTHORIZED_ACCESS`** — Verträge mit persistierten
+- **`UNAUTHORIZED_ACCESS`**: Verträge mit persistierten
   Zugriffsverweigerungen: Weist die Parteiprüfung einen Abruf ab, wird die
   Verweigerung als Audit-Artefakt festgehalten, bevor die Ablehnung
   zurückgeht; der Sweep flaggt daraus ein Risiko je Vertrag-Akteur-Paar.
@@ -242,7 +242,7 @@ Moment, in dem jemand zufällig fragt. Deshalb läuft dieselbe
 Erkennungslogik zusätzlich als **planmäßiger Sweep**:
 
 - Ein eigenes Kommando (`pacmonitor`) führt genau einen Sweep aus und
-  endet. Es öffnet nur die Datenbank — insbesondere durchläuft es nicht
+  endet. Es öffnet nur die Datenbank; insbesondere durchläuft es nicht
   die Startprüfungen des Servers, damit das Compliance-Monitoring genau
   dann weiterarbeitet, wenn eine Nachbarkomponente gestört ist. Es tritt
   auch dem Event-Bus nicht bei: Erkennungen gehen in die transaktionale
@@ -255,13 +255,13 @@ Erkennungslogik zusätzlich als **planmäßiger Sweep**:
 - Ein **Risiko-Register** (`compliance_risk_findings`) hält eine Zeile je
   offener Verletzung, geschlüsselt über Vertrag, Risikoklasse und einen
   Hash des Detailtexts. Ein Risiko alarmiert, wenn es zuerst erkannt
-  wird, und erneut, wenn es nach einer Behebung wiederkehrt — nie auf den
+  wird, und erneut, wenn es nach einer Behebung wiederkehrt, nie auf den
   Sweeps dazwischen. Ohne dieses Register würde derselbe Verstoß bei
   jedem Lauf neu gemeldet: ein Alarm-Sturm und ein Audit-Trail, in dem
   eine Verletzung hundertfach auftaucht und der Moment ihrer Erkennung
   darin untergeht.
 - Der Detailschlüssel ist Teil des Schlüssels, weil ein Vertrag mehrere
-  Risiken derselben Klasse gleichzeitig tragen kann — eine je
+  Risiken derselben Klasse gleichzeitig tragen kann: eine je
   ausstehendem Freigeber, eine je abgewiesenem Akteur, eine je
   verletzter Metrik. Nur über Vertrag und Klasse geschlüsselt würde ein
   zweiter abgewiesener Akteur stillschweigend als „schon gemeldet"
@@ -269,11 +269,11 @@ Erkennungslogik zusätzlich als **planmäßiger Sweep**:
 - Der Zeitpunkt der Ersterkennung wird bei einem Wiederauftreten
   zurückgesetzt: Eine wiederkehrende Verletzung ist ein neuer Vorfall,
   und die daran gemessene Erkennungszeit muss diesen Vorfall beschreiben.
-  Die abgelösten Vorfälle sind nicht verloren — jede Erkennung ist im
+  Die abgelösten Vorfälle sind nicht verloren, denn jede Erkennung ist im
   Audit-Trail verankert.
 - Ein erkanntes Risiko ist **kein Job-Fehlschlag**: Der Sweep meldet
   Risiken auf der Standardausgabe und endet erfolgreich. Ein Fehlschlag
-  bedeutet, dass der Sweep nicht laufen konnte — das ist der einzige
+  bedeutet, dass der Sweep nicht laufen konnte, und das ist der einzige
   Zustand, der einen Betreiber wecken sollte.
 
 Die Antwort des Abrufs auf Anfrage bleibt unverändert vollständig: Sie
@@ -281,16 +281,15 @@ listet jedes aktuell zutreffende Risiko, weil sie die Frage „was ist
 gerade falsch?" beantwortet. Die Deduplikation steuert nur das
 Alarmieren.
 
-Jeder Sweep wird selbst als Ereignis verankert — inklusive der gefundenen
-Risiken —, und jedes Risiko zusätzlich in der Audit-Kette des betroffenen
-Vertrags. Ein erkanntes Risiko ist damit sowohl gemeldet als auch
-beweisbar erfasst.
+Jeder Sweep wird selbst als Ereignis verankert, inklusive der gefundenen
+Risiken, und jedes Risiko zusätzlich in der Audit-Kette des betroffenen
+Vertrags.
 
 **Latenz.** Die zeitbasierten Regeln (fehlende Freigaben, Abläufe) sind
 mit dem Standardtakt gut bedient; die ereignisgetriebenen
 (unautorisierter Zugriff, gescheitertes Deployment) werden entsprechend
 verzögert gemeldet. Wo Sekundenlatenz gefordert ist, ist der Weg ein
-Event-Bus-Abonnent **neben** dem Sweep, kein engerer Takt — die
+Event-Bus-Abonnent **neben** dem Sweep und kein engerer Takt: Die
 zugrundeliegenden Ereignisse fließen bereits über den Bus, und das
 Risiko-Register macht beide Quellen kombinierbar, weil alarmiert, wer
 zuerst beobachtet.
@@ -316,14 +315,14 @@ dass und wann der Befund erfasst wurde.
 ### Startup-Attestierung der Konfiguration
 
 Beim Start hasht das Backend die sicherheitskritischen, als Datei
-gemounteten Konfigurationsartefakte — das DID-Dokument, das
+gemounteten Konfigurationsartefakte (das DID-Dokument, das
 Issuer-Trust-Dokument, die Zertifikats-Vertrauensanker und die
-Autorisierungs-Policy des Issuer-Vertrauens — und verankert die Hashes
+Autorisierungs-Policy des Issuer-Vertrauens) und verankert die Hashes
 als Attestierungsereignis im Audit-Trail: das
 Konfigurations-Integritätsprotokoll der Instanz. Pinnt der Betreiber
 erwartete Hashes, wird aus der Attestierung eine erzwungene
 Authentisierung der Konfiguration: Eine gepinnte Datei, die fehlt oder
-vom Pin abweicht, bricht den Start ab — ebenso eine syntaktisch
+vom Pin abweicht, bricht den Start ab, ebenso eine syntaktisch
 fehlerhafte Pin-Liste, damit ein Deployment nie mit stillschweigend
 unwirksamen Pins läuft. Dass die Policy mit attestiert wird, ist kein
 Detail: Sie rangiert über dem Trust-Dokument, und eine gepinnte Datei
@@ -333,7 +332,7 @@ unter einer ungepinnten Regel wäre wirkungslos (Kapitel 05).
 
 Die Vernichtung der Inhaltsschlüssel eines Vertrags (Kapitel 04 und 07)
 erzeugt auf jeder beteiligten Instanz ein eigenes Ereignis mit Akteur,
-Vertrag, Bereich und Grund — nie mit Inhalt. Diese Ereignisse liegen
+Vertrag, Bereich und Grund, nie mit Inhalt. Diese Ereignisse liegen
 unter dem instanzweiten Schlüssel und überleben damit jede Löschung, die
 sie dokumentieren. Der Fortschritt der Löschkette über die Instanzgrenze
 ist über eine eigene Statusabfrage sichtbar: welche gewickelten
@@ -344,18 +343,18 @@ Peer-Anforderungen noch offen sind.
 
 Vertragsbedingungen sind als ODRL 2.0 unter einem DCS-Profil formalisiert
 (ADR-6). Ausgewertet werden sie durch **Open Policy Agent**, eingebettet
-als Bibliothek (ADR-11): Die Operator-Semantik ist als Rego-Modul
-formuliert — Vergleichsoperatoren mit case-insensitivem String-Vergleich,
-numerischer Koerzierung mit Toleranz und RFC-3339-Zeitvergleich —, und
-jede Auswertung ist eine In-Process-Abfrage; kein Sidecar, keine
+als Bibliothek (ADR-11). Die Operator-Semantik ist als Rego-Modul
+formuliert (Vergleichsoperatoren mit case-insensitivem String-Vergleich,
+numerischer Koerzierung mit Toleranz und RFC-3339-Zeitvergleich), und
+jede Auswertung ist eine In-Process-Abfrage: kein Sidecar, keine
 zusätzliche Latenz auf dem Freigabe- und Signaturpfad. Die
 Übereinstimmung mit der Referenzsemantik ist durch ein
 Paritäts-Testorakel abgesichert.
 
 Was das Rego-Modul beantwortet, ist bewusst klein: die Wahrheit **einer**
-Bedingung. Die deontische Logik darüber — Verbot verletzt, wenn erfüllt;
+Bedingung. Die deontische Logik darüber (Verbot verletzt, wenn erfüllt;
 `and`/`or`/`xone`; Pflichten und ihre Konsequenzen; die Behandlung von
-Operanden, die erst zur Nutzungszeit bekannt sind — liegt im
+Operanden, die erst zur Nutzungszeit bekannt sind) liegt im
 auswertenden Code, nicht in Rego.
 
 Zwei Enforcement-Momente teilen sich denselben Evaluator und dieselben
@@ -373,7 +372,7 @@ Signatur nicht entschieden werden; sie erscheinen als Hinweisbefund
 Nutzungszeit tatsächlich beobachtet, ist die KPI-Rückmeldung des
 Zielsystems. Ein Vertrag, dessen Bedingungen überwiegend Kontextoperanden
 tragen, ist damit vor der Signatur formal geprüft, aber inhaltlich erst
-im Betrieb überwachbar — und nur, soweit ein Zielsystem die passenden
+im Betrieb überwachbar, und nur soweit ein Zielsystem die passenden
 Werte meldet.
 
 Ergänzend zu den vertragsindividuellen ODRL-Policies definieren zwei
@@ -383,15 +382,15 @@ deklarierte Vertragsfelder, Policy-Operanden referenzieren deklarierte
 Felder, Lebenszyklus- und Domänenfeld-Regeln) und ein
 Contract-Content-Policy-Set (kanonische Shapes und Validierungsprofil).
 Jede Regel trägt eine stabile Rule-ID, einen Schweregrad und den
-betroffenen Ontologie-Begriff; jedes Finding — Regel, Operator,
-Erwartungs- und Ist-Wert, Feld-IRI — wird als Audit-Ereignis festgehalten
+betroffenen Ontologie-Begriff; jedes Finding (Regel, Operator,
+Erwartungs- und Ist-Wert, Feld-IRI) wird als Audit-Ereignis festgehalten
 und erscheint in Audits und Reports. Ein Befund der Schwere „error" aus
 diesem Satz blockiert zusätzlich den zugehörigen Workflow-Gate-Übergang
 (Kapitel 04).
 
 Eine Präzisierung, die häufig missverstanden wird: Diese Regeln prüfen
 **Struktur und Vorhandensein** deklarierter Felder, nicht deren Werte.
-Wertgrenzen werden dort durchgesetzt, wo sie als SHACL formuliert sind —
+Wertgrenzen werden dort durchgesetzt, wo sie als SHACL formuliert sind,
 im Klausel-Katalog und in registrierten Shape-Bibliotheken (Kapitel 03).
 
 ## 9.6 Schnittstellen
@@ -402,7 +401,7 @@ im Klausel-Katalog und in registrierten Shape-Bibliotheken (Kapitel 03).
 | `GET /pac/report` | Audit-Report erzeugen (JSON/CSV/PDF; Hash und CID im Trail) | Auditor, Archive Manager |
 | `POST /pac/report` | Incident-Report: Non-Compliance-Findings zu einer Ressource erfassen | Compliance Officer |
 | `GET /pac/monitor` | Compliance-Sweep auf Anfrage; auch ein Lauf ohne Befund wird auditiert | Compliance Officer |
-| `GET /pac/audit/checkpoint/head` | Neuester Checkpoint-Head (nur Hashes, Zählwerte, Zeitstempel — publizierbar) | Auditor, Archive Manager, Sys. Auditor |
+| `GET /pac/audit/checkpoint/head` | Neuester Checkpoint-Head (nur Hashes, Zählwerte, Zeitstempel, publizierbar) | Auditor, Archive Manager, Sys. Auditor |
 | `GET /pac/audit/checkpoint/{seq}` | Ein bestimmter Checkpoint | Auditor, Archive Manager, Sys. Auditor |
 | `GET /pac/audit/checkpoint/proof/{entry_cid}` | Merkle-Inklusionsbeweis für einen verankerten Eintrag | Auditor |
 | `GET /pac/workflow-gates/{run_id}` | Persistierten Workflow-Gate-Lauf und seinen Prüfzustand lesen | Compliance Officer |
@@ -415,8 +414,8 @@ im Klausel-Katalog und in registrierten Shape-Bibliotheken (Kapitel 03).
   werden pro Ereignis gezählt und im nächsten Tick erneut versucht; der
   betroffene Eintrag fällt lediglich aus dem aktuellen Checkpoint und
   wandert in den nächsten. Sein fachlicher Zeitstempel bleibt
-  unverändert — der Trail unterscheidet ehrlich zwischen „wann geschah
-  es" und „bis wann war seine Existenz bewiesen".
+  unverändert, so dass der Trail zwischen „wann geschah es" und „bis wann
+  war seine Existenz bewiesen" unterscheidet.
 - **Dead-Lettering:** Nach 50 fehlgeschlagenen Verankerungsversuchen wird
   ein Ereignis totgelegt, deutlich geloggt und nicht mehr angefasst.
   Dead-Letter-Ereignisse sind Lücken im Trail und brauchen einen
@@ -434,5 +433,5 @@ im Klausel-Katalog und in registrierten Shape-Bibliotheken (Kapitel 03).
 - **Gelöschte Verträge im Audit:** Die Kette eines Vertrags, dessen
   Schlüssel vernichtet wurden, bleibt vorhanden und beweisbar, ihre Rümpfe
   sind unlesbar. Integritätsprüfungen des Archivs schließen Einträge aus,
-  die diese Instanz gelöscht hat — deren Zeitleiste dokumentiert die
+  die diese Instanz gelöscht hat; deren Audit-Kette dokumentiert die
   Löschung weiterhin.

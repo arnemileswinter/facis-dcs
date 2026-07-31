@@ -34,7 +34,9 @@ maschinenlesbare Ansicht aufklappen.
 
 1. **Approve** **(1)** prüft den Vertrag und leitet ihn zur Freigabe an den
    Contract Approver weiter (Status SUBMITTED → REVIEWED).
-2. **Reject** **(2)** weist den Vertrag zurück.
+2. **Reject** **(2)** gibt den Vertrag in die Verhandlung zurück. Der Dialog
+   **Comment findings** nimmt dabei Ihre Anmerkungen auf; ein Text ist
+   freiwillig, **Submit** führt die Rückgabe aus.
 
 Zusätzlich stehen **Export PDF** und **Back** zur Verfügung.
 
@@ -46,14 +48,14 @@ Weiterleitung beurteilen können.
 
 ![Dialog der semantischen Vorprüfung](images/contract-reviewer-vorpruefung.png)
 
-- **Keine Beanstandungen:** Der Dialog **Lokale semantische Vorprüfung** sagt
-  das ausdrücklich („Die lokale semantische Vorprüfung ist abgeschlossen:
-  keine Findings."). Unter **Kommentar (optional)** tragen Sie bei Bedarf
+- **Keine Beanstandungen:** Der Dialog **Lokale semantische Vorprüfung**
+  meldet „Die lokale semantische Vorprüfung ist abgeschlossen: keine
+  Findings.". Unter **Kommentar (optional)** tragen Sie bei Bedarf
   einen Hinweis für die freigebende Person ein; **Confirm approval** leitet
   den Vertrag weiter.
-- **Beanstandungen gefunden:** Der Dialog listet alle gefundenen Punkte auf;
-  eine Bestätigung ist dann nicht verfügbar. Lassen Sie die Punkte im Vertrag
-  beheben und starten Sie die Freigabe erneut.
+- **Beanstandungen gefunden:** Der Dialog listet alle gefundenen Punkte auf
+  und nennt ihre Zahl; eine Bestätigung ist dann nicht verfügbar. Lassen Sie
+  die Punkte im Vertrag beheben und starten Sie die Freigabe erneut.
 - **Vorprüfung technisch fehlgeschlagen:** Der Dialog zeigt einen Fehler und
   bietet **Retry verification** an. Der Vertrag wurde nicht weitergeleitet.
 - **Weiterleitung fehlgeschlagen:** Die Vorprüfung war erfolgreich, aber die
@@ -72,4 +74,4 @@ Vertrags serverseitig maßgeblich bleiben (siehe
 
 Steht **Approve** nicht bereit, prüfen Sie, ob Sie tatsächlich mit der Rolle
 Contract Reviewer angemeldet sind und ob der Vertrag noch auf die Prüfung
-wartet — ein bereits weitergeleiteter Vertrag lässt sich nicht erneut prüfen.
+wartet. Ein bereits weitergeleiteter Vertrag lässt sich nicht erneut prüfen.

@@ -16,9 +16,10 @@ der Seitennavigation sehen Sie den Bereich **Templates**.
 
 ![Vorlagenübersicht](images/template-creator-dashboard.png)
 
-1. Über das Suchfeld **(1)** filtern Sie die Liste. Voreingestellt ist die
-   Suche nach der eindeutigen Kennung (**DID**); über den Umschalter davor
-   suchen Sie stattdessen nach dem **Namen**.
+1. Über das Suchfeld **(1)** filtern Sie die Liste. Der Umschalter davor
+   bestimmt, worin gesucht wird; voreingestellt ist die eindeutige Kennung
+   (**DID**). Daneben stehen **Name**, **Description**, **Version** und
+   **Template Data** zur Wahl.
 2. **Filter** **(2)** grenzt die Liste nach Status ein (z. B. nur DRAFT oder
    SUBMITTED).
 3. **New Template** **(3)** startet eine neue Vorlage.
@@ -34,10 +35,10 @@ Nach **New Template** wählen Sie zunächst den Vorlagentyp.
 
 ![Typauswahl](images/template-creator-typwahl.png)
 
-1. **Contract** **(1)** — eine vollständige Vertragsvorlage, aus der später
+1. **Contract** **(1)** ist eine vollständige Vertragsvorlage, aus der später
    Verträge abgeleitet werden. Sie wird aus Komponenten zusammengesetzt und
    kann selbst Elternvorlage weiterer Verträge sein.
-2. **Component** **(2)** — ein wiederverwendbarer Teilbaustein (z. B.
+2. **Component** **(2)** ist ein wiederverwendbarer Teilbaustein (z. B.
    Zahlungsbedingungen), der in Vertragsvorlagen eingebettet wird.
 
 ## Grunddaten erfassen (Reiter „Details")
@@ -56,9 +57,9 @@ Aktionsleiste mit **Cancel** und **Create**.
 
 Bleiben Name oder Beschreibung leer, bricht **Create** ab: Die Ansicht springt
 in das erste unvollständige Feld und meldet dort „Global Name is required."
-bzw. „Base Description is required." — es wird nichts gespeichert.
+bzw. „Base Description is required.". Gespeichert wird dabei nichts.
 
-Ein Statusfeld gibt es bewusst nicht: Der Status einer Vorlage ändert sich
+Ein Statusfeld gibt es nicht. Der Status einer Vorlage ändert sich
 ausschließlich über die Arbeitsschritte Einreichen, Prüfen, Freigeben und
 Registrieren.
 
@@ -72,7 +73,7 @@ automatisch prüfen und durchsetzen kann. Beide Hälften stehen nebeneinander.
 
 1. Geben Sie der Klausel im Feld **(1)** einen Titel (z. B.
    „Zahlungsbedingungen").
-2. Über **Objects (Semantic Hub)** **(2)** — die Auswahl **+ add object…** —
+2. Über **Objects (Semantic Hub)** **(2)** und die Auswahl **+ add object…**
    wählen Sie die Fachbegriffe, auf die sich die Klausel bezieht, etwa
    **Payment Amount**. Die gewählten Begriffe erscheinen darunter als Marken,
    die sich mit **✕** wieder entfernen lassen. Die Begriffe stammen aus dem
@@ -99,31 +100,31 @@ Rechts neben dem Klauseltext legen Sie unter **Machine-readable meaning
 
 ![Regel und Bedingungen](images/template-creator-odrl-regel.png)
 
-1. **Rule** **(1)** bestimmt die Regelart: **Permission — the assignee MAY**
-   (Erlaubnis), **Prohibition — the assignee MUST NOT** (Verbot) oder
-   **Obligation — the assignee MUST** (Pflicht).
+1. **Rule** **(1)** bestimmt die Regelart. Zur Wahl stehen **Permission**
+   (der Adressat darf), **Prohibition** (der Adressat darf nicht) und
+   **Obligation** (der Adressat muss).
 2. **Action(s)** **(2)** benennt die Handlung (z. B. **use**); **+ action**
    ergänzt weitere Handlungen. Mit **Granted by (assigner)**, **Applies to
    (assignee)** und **Toward (target)** legen Sie fest, wer die Regel
-   einräumt, für wen sie gilt und worauf sie sich bezieht — die Auswahl bietet
+   einräumt, für wen sie gilt und worauf sie sich bezieht. Die Auswahl bietet
    dafür klare Begriffe wie **My organization**, **The counterparty** und
    **the contract** an.
 3. Eine Bedingungszeile **(3)** grenzt die Regel ein: links die Eigenschaft
    (z. B. **Payment Amount**), dann der Vergleich (z. B. **less than or equal
-   to**), dann die Grenze — entweder **a fixed value** mit einem festen Wert
-   oder eines der gewählten Fachfelder, dessen Wert erst bei der
-   Vertragsverhandlung feststeht. Das **✕** am Zeilenende entfernt die
+   to**), dann die Grenze. Als Grenze wählen Sie entweder **a fixed value**
+   mit einem festen Wert oder eines der gewählten Fachfelder, dessen Wert erst
+   bei der Vertragsverhandlung feststeht. Das **✕** am Zeilenende entfernt die
    Bedingung.
 4. **+ constraint** **(4)** fügt eine weitere Bedingung hinzu. Mehrere
    Bedingungen müssen standardmäßig gemeinsam erfüllt sein.
 5. **+ group** **(5)** öffnet eine verschachtelte Bedingungsgruppe mit eigener
-   Kombinationslogik — so lassen sich Ausdrücke wie „Zweck ist Forschung
+   Kombinationslogik. So lassen sich Ausdrücke wie „Zweck ist Forschung
    **und** (Region ist Deutschland **oder** Österreich)" abbilden.
 6. **+ duty** **(6)** unter **Duties (must fulfil to exercise)** hängt der
    Erlaubnis eine Pflicht an, die zu ihrer Ausübung erfüllt sein muss (z. B.
-   „muss anschließend löschen"). Eine Pflicht kann eigene Bedingungen und eine
-   **+ consequence** tragen — eine Folgepflicht für den Fall, dass die Pflicht
-   nicht erfüllt wird.
+   „muss anschließend löschen"). Eine Pflicht kann eigene Bedingungen tragen
+   und über **+ consequence** eine Folgepflicht für den Fall, dass sie nicht
+   erfüllt wird.
 
 **Add clause** übernimmt die fertige Klausel in die Vorlage; das Formular
 leert sich für die nächste Klausel.
@@ -141,8 +142,8 @@ Der Vergleich bestimmt, wie ausgewählt wird:
   Auswahl **choose value**.
 - **is any of**, **is none of** und **is all of** öffnen eine
   Mehrfachauswahl **(1)**: Ein Klick auf das Feld klappt die Liste auf, die
-  Einträge werden angehakt. Die Zusammenfassung zeigt die Anzahl der
-  gewählten Einträge (z. B. „2 selected").
+  Einträge werden angehakt. Vor der ersten Auswahl steht dort **choose
+  values**, danach die Anzahl der gewählten Einträge (z. B. „2 selected").
 
 Die Liste stammt aus dem hinterlegten Fachkatalog und ist gruppiert: unter
 **ISO 3166-1 alpha-3 Countries** stehen Länder mit ihrem dreistelligen Code
@@ -150,10 +151,11 @@ Die Liste stammt aus dem hinterlegten Fachkatalog und ist gruppiert: unter
 (USA)**), unter **FACIS Service Regions** zusammengefasste Regionen (**Europe,
 Middle East and Africa (EMEA)**, **Americas (AMER)**).
 
-Bereits getroffene Auswahlen bleiben beim Wechsel des Vergleichs erhalten —
-prüfen Sie nach einem Wechsel auf **equal to**, welches Land ausgewählt ist.
-Fehlt ein erwarteter Eintrag, kann er hier nicht als freier Text ergänzt
-werden; die Liste pflegt der Template Manager zentral über den Semantic Hub.
+Bereits getroffene Auswahlen bleiben beim Wechsel des Vergleichs erhalten.
+Prüfen Sie nach einem Wechsel auf **equal to** deshalb, welches Land
+ausgewählt ist. Fehlt ein erwarteter Eintrag, lässt er sich hier nicht als
+freier Text ergänzen; die Liste pflegt der Template Manager zentral über den
+Semantic Hub.
 
 Auch andere kataloggestützte Eigenschaften (z. B. **purpose**) bieten ihre
 Werte auf dieselbe Weise gruppiert zur Auswahl an.
@@ -165,16 +167,17 @@ Gliederung aufnehmen. Wählen Sie dazu **Place in document**.
 
 ![Klausel platzieren](images/template-creator-klausel-platzieren.png)
 
-Der Dialog **Add block** bietet unter „Common" allgemeine Blocktypen
-(**Section**, **Text**, **Clause**) und listet darunter unter „Selected
+Der Dialog **Add block** bietet unter „Common" die allgemeinen Blocktypen
+**Section**, **Text** und **Clause** und listet darunter unter „Selected
 clause" die soeben erstellte Klausel. Ein Klick auf die Klausel **(1)**
-übernimmt sie als Block in die Dokumentgliederung; über „Defined clauses"
-finden Sie bereits vorhandene Klauseln per Suche.
+übernimmt sie als Block in die Dokumentgliederung. Unter „Defined clauses"
+finden Sie bereits vorhandene, noch nicht platzierte Klauseln per Suche.
+Gibt es keine, meldet der Dialog „No unplaced clauses from the Clauses tab.".
 
 ## Semantische Datenobjekte (Reiter „Data")
 
 Neben Klauseln und Platzhaltern kann eine Vorlage strukturierte
-**Datenobjekte** mitführen — etwa eine juristische Person mit ihrer Anschrift.
+**Datenobjekte** mitführen, etwa eine juristische Person mit ihrer Anschrift.
 Welche Objektarten zur Verfügung stehen, bestimmen die im Semantic Hub
 hinterlegten Formbibliotheken; die Objekte werden gewählt und
 zusammengeklickt, nie frei modelliert.
@@ -185,7 +188,7 @@ zusammengeklickt, nie frei modelliert.
    eine juristische Person) und übernehmen Sie sie mit **Add object** in die
    Vorlage.
 2. Das Objekt erscheint mit allen Feldern, die seine Form vorgibt. Feste Werte
-   (z. B. eine Registernummer) **(2)** tragen Sie direkt ein — sie gelten dann
+   (z. B. eine Registernummer) **(2)** tragen Sie direkt ein; sie gelten dann
    unveränderlich für alle aus der Vorlage abgeleiteten Verträge. Felder mit
    fest vorgegebener Werteliste erscheinen als Auswahl, Felder für eine
    externe Adresse als Verweisfeld.
@@ -193,9 +196,9 @@ zusammengeklickt, nie frei modelliert.
    fügen Sie dieses über die zugehörige **Add …**-Schaltfläche als
    verschachteltes Objekt **(3)** hinzu und füllen es ebenso aus.
 4. Mit dem Kontrollkästchen **negotiable** **(4)** kennzeichnen Sie ein Feld
-   als verhandelbar: Sein Wert wird nicht in der Vorlage festgelegt, sondern
-   erst im abgeleiteten Vertrag ausgefüllt — dort erscheint das Feld als
-   Eingabefeld im Vertragsinhalt und wird wie die übrigen Vertragsfelder
+   als verhandelbar. Sein Wert wird dann nicht in der Vorlage festgelegt,
+   sondern erst im abgeleiteten Vertrag ausgefüllt; dort erscheint das Feld
+   als Eingabefeld im Vertragsinhalt und wird wie die übrigen Vertragsfelder
    behandelt.
 
 Sind im Semantic Hub keine Formbibliotheken über die Dokumenthülle hinaus
@@ -221,7 +224,7 @@ fügen Sie Inhalte hinzu.
 ![Builder-Gliederung](images/template-creator-builder-gliederung.png)
 
 Der Reiter **Builder** **(1)** zeigt die Gliederung des Dokuments mit allen
-aufgenommenen Blöcken — je Klausel Titel, Text und die enthaltenen
+aufgenommenen Blöcken, je Klausel Titel, Text und die enthaltenen
 Platzhalter. Über **Preview** kontrollieren Sie das spätere Erscheinungsbild.
 **Create** **(2)** legt die Vorlage an; **Cancel** verwirft sie. Schlägt das
 Anlegen fehl, erscheint eine rote Fehlermeldung; Ihre Eingaben bleiben
@@ -236,8 +239,8 @@ erhalten.
 Die Detailansicht zeigt eine Fortschrittsleiste über die Stationen Draft →
 Submitted → Reviewed → Approved → Registered (in use), darunter den Hinweis
 „This template is a draft" mit einer Erläuterung des nächsten Schritts. Die
-Abschnitte der Vorlage sind durchnummeriert — **01 Template Details** **(1)**
-ist der erste; rechts daneben steht das Statusabzeichen **DRAFT**.
+Abschnitte der Vorlage sind durchnummeriert; **01 Template Details** **(1)**
+ist der erste, rechts daneben steht das Statusabzeichen **DRAFT**.
 
 Mit **Submit** **(2)** reichen Sie den Entwurf zur Prüfung ein; die Vorlage
 wechselt nach SUBMITTED und erscheint beim Template Reviewer unter **Review
@@ -246,6 +249,6 @@ die Prüfung läuft. Über **Export PDF** erzeugen Sie jederzeit eine PDF-Fassun
 des aktuellen Stands.
 
 Solange eine Vorlage im Status DRAFT ist, können Sie sie über **Edit** weiter
-bearbeiten und mit **Update** speichern — der Status bleibt dabei unverändert.
+bearbeiten und mit **Update** speichern; der Status bleibt dabei unverändert.
 **Copy** legt eine Kopie der Vorlage als neuen Entwurf an, wenn Sie eine
 Variante brauchen, statt die vorhandene zu verändern.

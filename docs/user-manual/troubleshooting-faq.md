@@ -25,12 +25,12 @@ serverseitig geprüft.
 
 **„Global Name is required." / „Base Description is required."**
 Pflichtangaben fehlen. Die Ansicht springt in das erste unvollständige Feld;
-es wurde nichts gespeichert. Ergänzen Sie die Angaben und wiederholen Sie
+gespeichert wurde nichts. Ergänzen Sie die Angaben und wiederholen Sie
 **Create**.
 
 **Ich finde keine Schaltfläche „Verify" in der Prüfansicht.**
 Die fachliche Verifikation ist Bestandteil von **Approve** und wird bei jedem
-Freigabeversuch genau einmal ausgeführt. Sie lässt sich nicht überspringen.
+Freigabeversuch genau einmal ausgeführt. Überspringen lässt sie sich nicht.
 
 **Der Verifikationsdialog listet Beanstandungen und bietet keine
 Bestätigung an.**
@@ -38,13 +38,14 @@ Das ist beabsichtigt: Solange die Verifikation etwas beanstandet, kann die
 Vorlage nicht weitergeleitet werden. Lassen Sie die genannten Punkte
 überarbeiten und starten Sie die Freigabe erneut.
 
-**„Verification unavailable" im Dialog.**
+**„Verification could not be completed. Retry the verification before
+approving."**
 Die Verifikation ist technisch fehlgeschlagen. **Retry** wiederholt sie. Die
 Vorlage wurde nicht weitergeleitet.
 
 **Meine freigegebene Vorlage erscheint nicht bei der Vertragsanlage.**
-Freigabe (APPROVED) genügt nicht — die Vorlage muss vom Template Manager noch
-**registriert** werden (Status REGISTERED / in use).
+Die Freigabe (APPROVED) allein genügt nicht. Die Vorlage muss vom Template
+Manager noch **registriert** werden (Status REGISTERED / in use).
 
 **Der Reiter „Data" sagt, es seien keine Formbibliotheken registriert.**
 Semantische Datenobjekte stehen erst zur Verfügung, wenn im Semantic Hub eine
@@ -59,8 +60,8 @@ Semantic Hub pflegt.
 
 **„Offer to counterparty" ist ausgegraut.**
 Der Vertrag ist noch nicht vollständig ausgefüllt. Der Hinweis am Mauszeiger
-nennt das fehlende Pflichtfeld. Ein Angebot muss vollständig sein, bevor es
-das Haus verlässt.
+nennt die fehlenden Pflichtfelder beim Namen. Ein Angebot muss vollständig
+sein, bevor es das Haus verlässt.
 
 **Nach dem Anbieten ist die Schaltfläche verschwunden.**
 Ein Angebot wird genau einmal abgegeben (DRAFT → OFFERED). Weitere Änderungen
@@ -73,15 +74,15 @@ können Sie nicht selbst annehmen.
 
 **Mein gespeicherter Verhandlungsentwurf ist weg.**
 **Change Proposal** verbraucht den privaten Entwurf: Was verbindlich
-vorgeschlagen wurde, existiert nicht mehr als Entwurf. Ein Entwurf bleibt
-dagegen erhalten, wenn Sie die Ansicht nur verlassen und später zurückkehren.
+vorgeschlagen wurde, existiert nicht mehr als Entwurf. Verlassen Sie die
+Ansicht dagegen nur und kehren später zurück, ist der Entwurf noch da.
 
 **Die semantische Vorprüfung meldet Punkte.**
 Eine Bestätigung ist dann nicht verfügbar. Lassen Sie die Punkte beheben und
 starten Sie **Approve** erneut. Meldet der Dialog stattdessen einen
-technischen Fehler, hilft **Retry verification**; war die Vorprüfung
-erfolgreich und nur die Weiterleitung schlug fehl, hilft **Retry submission**
-— Ihr Kommentar bleibt erhalten.
+technischen Fehler, hilft **Retry verification**. War die Vorprüfung
+erfolgreich und nur die Weiterleitung schlug fehl, hilft **Retry submission**;
+Ihr Kommentar bleibt dabei erhalten.
 
 **Der Vertrag bleibt nach der Signatur auf SIGNED stehen.**
 Wahrscheinlich ist kein Zielsystem gesetzt. Die Karte **Deployment target**
@@ -93,11 +94,10 @@ Ein Vertrag wird nur ausgerollt, wenn alle vorgesehenen Unterschriften
 nachweisbar vorliegen und ein Zielsystem benannt ist.
 
 **Ein Vertrag mit drei oder mehr Parteien wird nicht ausgerollt.**
-Das ist eine bekannte Einschränkung: Der Nachweis der Unterschrift einer
-Gegenseite wird derzeit je Vertrag geführt, nicht je Unterschriftsfeld.
-Verträge mit mehr als zwei Parteien verweigert das System deshalb bewusst die
-Ausführung, statt eine unvollständige Signaturlage als vollständig zu
-behandeln. Nutzen Sie bis auf Weiteres Verträge mit zwei Parteien.
+Der Nachweis der Unterschrift einer Gegenseite wird je Vertrag geführt, nicht
+je Unterschriftsfeld. Bei mehr als zwei Parteien verweigert das System die
+Ausführung deshalb bewusst, statt eine unvollständige Signaturlage als
+vollständig zu behandeln. Verwenden Sie Verträge mit zwei Parteien.
 
 **„Terminate" lässt sich nicht abschließen.**
 Der Bestätigungsdialog verlangt eine Begründung (**Reason**). Ohne Begründung
@@ -132,7 +132,7 @@ Für jeden Signaturvorgang gilt eine Frist. Bestätigt die Wallet erst danach,
 wird die Vorlage abgelehnt. Starten Sie neu über **Open & sign**.
 
 **Mein PDF-Programm meldet „nach der Signatur verändert".**
-Das ist erwartet und kein Fehler: Nach dem Signieren fügt der DCS dem Dokument
+Das ist erwartet und kein Fehler. Nach dem Signieren fügt der DCS dem Dokument
 einen Herkunftsnachweis an, damit die Nachweiskette lückenlos bleibt.
 Prüfprogramme werten jede Ergänzung nach der Unterschrift als Änderung. Die
 Signatur selbst bleibt gültig und unverändert prüfbar.
@@ -145,9 +145,9 @@ Prüfumfang voraus. Ändern Sie Umfang oder Kennung, sperren sich die
 Schaltflächen wieder, bis erneut geprüft wurde.
 
 **Der Prüflauf schlägt technisch fehl.**
-Es gibt bewusst keinen automatischen zweiten Versuch und keinen ersatzweise
-erzeugten Befund. Starten Sie einen neuen Lauf erst, wenn die Ursache behoben
-ist.
+Einen automatischen zweiten Versuch und einen ersatzweise erzeugten Befund
+gibt es bewusst nicht. Starten Sie einen neuen Lauf erst, wenn die Ursache
+behoben ist.
 
 **Ein gerade geänderter Datensatz taucht in der Prüfung nicht auf.**
 Die Prüfhistorie wird in einem unveränderlichen Ablagespeicher geführt;
@@ -156,12 +156,13 @@ sein. Wiederholen Sie die Prüfung.
 
 **Ein Vertragsübergang bleibt hängen („manuelle Prüfung erforderlich").**
 Ein Compliance Officer muss den gespeicherten Prüflauf entscheiden. Ändern Sie
-den Vertrag in der Zwischenzeit nicht — sonst wird die Fortsetzung abgelehnt
+den Vertrag in der Zwischenzeit nicht. Sonst wird die Fortsetzung abgelehnt,
 und der Übergang muss für den aktuellen Stand neu angefordert werden.
 
-**„Content erased — encryption keys destroyed" beim Export.**
-Für diesen Vertrag wurde ein Löschersuchen ausgeführt; die Inhalte sind
-dauerhaft nicht mehr lesbar. Die Stammdaten des Vertrags bleiben sichtbar. Ein
+**„Content erased" beim Export.**
+Für diesen Vertrag wurde ein Löschersuchen ausgeführt, und die
+Verschlüsselungsschlüssel wurden vernichtet; die Inhalte sind dauerhaft nicht
+mehr lesbar. Die Stammdaten des Vertrags bleiben sichtbar. Ein
 Wiederherstellen ist ausgeschlossen.
 
 **Die Löschschaltfläche im Archiv bleibt inaktiv.**
@@ -177,7 +178,6 @@ einem Moment erneut.
 **Prüfung des angezeigten Vertragstexts.**
 Beim Signieren wird geprüft, ob der sichtbare Text dem maschinenlesbaren
 Inhalt entspricht. Diese Prüfung lässt sich mit einem gezielt präparierten
-PDF-Dokument umgehen. Die Behebung ist als eigener Arbeitsschritt vorgesehen.
-Prüfen Sie im Zweifel den Vertragsinhalt zusätzlich über die Ansicht
-**Machine-readable view**, die unmittelbar aus den gespeicherten
+PDF-Dokument umgehen. Prüfen Sie im Zweifel den Vertragsinhalt zusätzlich über
+die Ansicht **Machine-readable view**, die unmittelbar aus den gespeicherten
 Vertragsdaten erzeugt wird.

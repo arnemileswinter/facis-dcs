@@ -16,10 +16,12 @@ Systems**.
 ## Zielsysteme (Target Systems)
 
 Öffnen Sie **Target Systems** in der Seitennavigation. Die Ansicht besteht aus
-zwei Teilen: oben das Formular **Target system configuration** zum Anlegen
-(beim Bearbeiten heißt es **Change target system**), darunter die Tabelle
-**Registered target systems** mit den Spalten **Name**, **Endpoint**,
-**Description**, **Deployments** und **Callback credential**.
+zwei Teilen: oben das Formular **Target system configuration**, darunter die
+Tabelle **Registered target systems** mit den Spalten **Name**, **Endpoint**,
+**Description**, **Deployments** und **Callback credential**. Der Text unter
+der Formularüberschrift sagt, was das Formular gerade tut: „Register a new
+deployment destination." beim Anlegen, „Change the selected deployment
+destination." beim Bearbeiten.
 
 Solange kein Zielsystem registriert ist, erklärt ein Hinweis die Ausgangslage:
 Ein Vertrag kann nicht in Kraft gesetzt werden, bevor ein Zielsystem existiert
@@ -43,9 +45,9 @@ als **accepted** bzw. **refused**.
 
 ![Tabelle der Zielsysteme](images/systemadministrator-target-tabelle.png)
 
-In der Spalte **Callback credential** trägt ein neuer Eintrag zunächst den
-Vermerk, dass noch keine Zugangsdaten ausgestellt sind — ohne sie kann das
-Zielsystem keine Bereitstellung bestätigen.
+In der Spalte **Callback credential** steht bei einem neuen Eintrag zunächst
+**none**: Ohne Zugangsdaten kann das Zielsystem keine Bereitstellung
+bestätigen.
 
 ### Zugangsdaten für Bestätigungen ausstellen
 
@@ -55,34 +57,36 @@ Zielsystem erhält eigene Zugangsdaten, damit eine Bestätigung eindeutig von
 dem Zielsystem stammt, an das die Bereitstellung ging.
 
 1. Wählen Sie in der Zeile des Zielsystems **Issue credential**.
-2. Ein Dialog zeigt die ausgestellten Zugangsdaten — **einmalig**.
+2. Ein Dialog zeigt die ausgestellten Zugangsdaten, und zwar **einmalig**.
 
 ![Zugangsdaten-Dialog](images/systemadministrator-credential-dialog.png)
 
 Der Dialog **Callback credential for …** weist oben in einem gelben Hinweis
-ausdrücklich darauf hin, dass das Geheimnis nur einmal angezeigt wird: „This
-secret is shown once. It is not stored and cannot be retrieved — if it is
-lost, issue a new one, which stops this one working." Darunter stehen
-**Client ID**, **Client secret** (mit **Copy**) und **Token endpoint** — die
-Adresse, an der sich das Zielsystem mit diesen Zugangsdaten ausweist.
+ausdrücklich darauf hin, dass das Geheimnis nur einmal angezeigt wird: Es wird
+nicht gespeichert und lässt sich nicht wieder abrufen. Geht es verloren,
+stellen Sie ein neues aus, womit das alte seine Gültigkeit verliert. Darunter
+stehen **Client ID**, **Client secret** (mit **Copy**) und **Token endpoint**,
+die Adresse, an der sich das Zielsystem mit diesen Zugangsdaten ausweist.
 
 Übergeben Sie Kennung und Geheimnis auf sicherem Weg an die Betreiber des
 Zielsystems, bevor Sie den Dialog mit **I have copied it** schließen. Danach
-ist das Geheimnis nirgends in der Anwendung mehr einsehbar — der DCS
-speichert es nicht.
+ist das Geheimnis nirgends in der Anwendung mehr einsehbar; der DCS speichert
+es nicht.
 
-3. Nach dem Schließen zeigt die Spalte **Callback credential** den Vermerk,
-   dass Zugangsdaten ausgestellt sind.
+3. Nach dem Schließen zeigt die Spalte **Callback credential** den Vermerk
+   **issued**.
 
-Über **New secret** stellen Sie später neue Zugangsdaten aus (etwa bei einem
-Verdacht auf Kompromittierung): Das bisherige Geheimnis verliert sofort seine
+Über **New secret** stellen Sie später neue Zugangsdaten aus, etwa bei einem
+Verdacht auf Kompromittierung. Das bisherige Geheimnis verliert sofort seine
 Gültigkeit, nur das neue funktioniert weiter.
 
 ### Einträge bearbeiten und entfernen
 
 - **Edit** übernimmt die Werte eines Eintrags in das Formular; **Save
   changes** speichert die Änderung, **Cancel** verwirft sie.
-- **Remove** entfernt einen Eintrag aus dem Verzeichnis.
+- **Remove** entfernt einen Eintrag aus dem Verzeichnis. Der
+  Bestätigungsdialog nennt den Eintrag und weist darauf hin, dass Verträge,
+  die ihn noch benennen, zuvor umgehängt werden müssen.
 
 Wird eine Aktion vom System abgelehnt, erscheint die zugehörige Meldung als
 roter Hinweis oberhalb des Formulars.
@@ -91,11 +95,12 @@ roter Hinweis oberhalb des Formulars.
 
 ## Systembenutzer (System Users)
 
-Öffnen Sie **System Users** in der Seitennavigation. Hier registrieren Sie die
-technischen Benutzer, unter denen angebundene Fremdsysteme am DCS arbeiten —
-etwa ein Vorsystem, das Verträge automatisch anlegt. Zugangsdaten werden in
-der Anwendung ausgestellt und lassen sich jederzeit erneuern; dafür ist kein
-Eingriff in die Installation nötig.
+Öffnen Sie **System Users** in der Seitennavigation. Im Formular **System user
+configuration** registrieren Sie die technischen Benutzer, unter denen
+angebundene Fremdsysteme am DCS arbeiten, etwa ein Vorsystem, das Verträge
+automatisch anlegt. Zugangsdaten werden in der Anwendung ausgestellt und
+lassen sich jederzeit erneuern; ein Eingriff in die Installation ist dafür
+nicht nötig.
 
 ![Systembenutzer anlegen](images/systemadministrator-systembenutzer.png)
 
@@ -103,9 +108,10 @@ Eingriff in die Installation nötig.
    ein.
 2. Unter **Attributed participant DID** **(2)** geben Sie die Organisation an,
    in deren Namen der Systembenutzer handelt. Ein Hinweis erklärt: Seine
-   Handlungen erscheinen unter dieser Identität im Prüfprotokoll.
+   Handlungen erscheinen unter dieser Identität im Prüfprotokoll. Das Feld
+   **Description** darunter nimmt bei Bedarf eine nähere Beschreibung auf.
 3. Unter **What it may do** **(3)** wählen Sie, was der Systembenutzer darf.
-   Angeboten werden nur die für automatische Konten vorgesehenen Rollen —
+   Angeboten werden nur die für automatische Konten vorgesehenen Rollen:
    **Sys. Contract Creator**, **Sys. Contract Reviewer**, **Sys. Contract
    Approver**, **Sys. Contract Manager** und **Sys. Auditor**. Ein Hinweis
    erklärt, warum das Signieren nicht dabei ist: Eine Maschine kann höchstens
@@ -114,7 +120,7 @@ Eingriff in die Installation nötig.
 
 Unmittelbar danach erscheint derselbe Zugangsdaten-Dialog wie bei den
 Zielsystemen: Kennung und Geheimnis werden **einmalig** angezeigt. Notieren
-Sie das Geheimnis, bevor Sie den Dialog schließen — danach ist es nicht mehr
+Sie das Geheimnis, bevor Sie den Dialog schließen; danach ist es nicht mehr
 abrufbar.
 
 Die Tabelle **Registered system users** darunter führt je Eintrag **Name**,
@@ -123,10 +129,13 @@ Die Tabelle **Registered system users** darunter führt je Eintrag **Name**,
 
 - **New secret** stellt ein neues Geheimnis aus. Das bisherige verliert sofort
   seine Gültigkeit; nur das neue funktioniert weiter.
-- **Edit** öffnet den Eintrag zur Änderung. Über das Kontrollkästchen
-  **Enabled** deaktivieren Sie einen Systembenutzer; die Zeile trägt danach
-  den Vermerk **disabled**, und seine Zugangsdaten werden ab sofort abgewiesen.
-- **Remove** entfernt den Eintrag.
+- **Edit** öffnet den Eintrag zur Änderung. Über das Kontrollkästchen **May
+  call this deployment** deaktivieren Sie einen Systembenutzer; die Zeile
+  trägt danach den Vermerk **disabled**, und seine Zugangsdaten werden ab
+  sofort abgewiesen.
+- **Remove** entfernt den Eintrag. Der Bestätigungsdialog weist darauf hin,
+  dass die Zugangsdaten damit ihre Gültigkeit verlieren und Anbindungen, die
+  sie verwenden, den Zugriff verlieren.
 
 ---
 
@@ -141,9 +150,8 @@ Die Tabelle **Active key versions** listet je Schlüssel die Bezeichnung
 aktive Version (**Active version**, z. B. **v1**, solange nie gewechselt
 wurde) und den Zeitpunkt des letzten Wechsels (**Last rotated**).
 
-Die Ansicht ist ausschließlich zum Lesen — der Hinweis darüber sagt es
+Die Ansicht ist ausschließlich zum Lesen. Der Hinweis darüber sagt es
 ausdrücklich: Ein Schlüsselwechsel ist ein betrieblicher Vorgang und wird
 nicht über die Oberfläche ausgelöst; frühere Versionen bleiben erhalten,
-damit ältere Signaturen prüfbar bleiben. Die Ansicht dient dazu, jederzeit
-belegen zu können, welches Schlüsselmaterial in welcher Version im Einsatz
-ist.
+damit ältere Signaturen prüfbar bleiben. So lässt sich jederzeit belegen,
+welches Schlüsselmaterial in welcher Version im Einsatz ist.

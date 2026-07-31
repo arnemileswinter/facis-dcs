@@ -1,4 +1,4 @@
-# Benutzerhandbuch — Digital Contracting Service (DCS)
+# Benutzerhandbuch: Digital Contracting Service (DCS)
 
 ## Was der DCS ist
 
@@ -7,23 +7,22 @@ Lebenszyklus: von wiederverwendbaren Vertragsvorlagen über die
 Vertragserstellung und die Verhandlung mit einer Partnerorganisation bis zu
 Signatur, Inkraftsetzung, Überwachung, Archivierung und Prüfung.
 
-Ein Vertrag im DCS hat immer zwei Seiten, die untrennbar zusammengehören: das
-**lesbare Vertragsdokument**, das Menschen unterschreiben, und den
-**maschinenlesbaren Vertragsinhalt**, den das System auswerten, prüfen und an
-ein Zielsystem übergeben kann. Beide entstehen aus derselben Quelle und können
-deshalb nicht auseinanderlaufen. Jeder Schritt — Anlegen, Ändern, Anbieten,
-Freigeben, Signieren — wird revisionssicher festgehalten und ist später
-nachvollziehbar.
+Ein Vertrag im DCS hat immer zwei Seiten. Das **lesbare Vertragsdokument**
+unterschreiben Menschen. Den **maschinenlesbaren Vertragsinhalt** kann das
+System auswerten, prüfen und an ein Zielsystem übergeben. Beide entstehen aus
+derselben Quelle und können deshalb nicht auseinanderlaufen. Jeder Schritt
+(Anlegen, Ändern, Anbieten, Freigeben, Signieren) wird revisionssicher
+festgehalten und bleibt später nachvollziehbar.
 
 Die Anmeldung erfolgt ohne Benutzername und Passwort: Sie weisen sich mit
 Ihrer digitalen Wallet aus. Aus den dort vorgelegten Nachweisen ergeben sich
-Ihre Rollen — und damit alles, was Sie im System sehen und tun dürfen.
+Ihre Rollen und damit alles, was Sie im System sehen und tun dürfen.
 
 ## Aufbau des Handbuchs
 
 Jede Aufgabe im DCS ist einer Rolle zugeordnet; dieses Handbuch ist deshalb
-nach Rollen gegliedert. Lesen Sie das Kapitel Ihrer Rolle — die
-Querverweise führen Sie zu den angrenzenden Schritten.
+nach Rollen gegliedert. Lesen Sie das Kapitel Ihrer Rolle. Die Querverweise
+führen Sie zu den angrenzenden Schritten.
 
 | Kapitel | Rolle | Inhalt |
 | --- | --- | --- |
@@ -46,45 +45,45 @@ Querverweise führen Sie zu den angrenzenden Schritten.
 ## Benutzerrollen
 
 Welche Bereiche eine Person sieht und bedienen darf, ergibt sich ausschließlich
-aus den Rollen, die ihre Wallet-Nachweise ausweisen. Es gibt keine
-Rollenverwaltung in der Anwendung selbst.
+aus den Rollen, die ihre Wallet-Nachweise ausweisen. Eine Rollenverwaltung in
+der Anwendung gibt es nicht.
 
 **Rund um Vorlagen**
 
-- **Template Creator** — entwirft wiederverwendbare Komponenten und
+- **Template Creator:** entwirft wiederverwendbare Komponenten und
   Vertragsvorlagen und reicht sie zur Prüfung ein.
-- **Template Reviewer** — prüft eingereichte Vorlagen und leitet sie zur
+- **Template Reviewer:** prüft eingereichte Vorlagen und leitet sie zur
   Freigabe weiter oder weist sie zurück.
-- **Template Approver** — gibt geprüfte Vorlagen endgültig frei.
-- **Template Manager** — registriert freigegebene Vorlagen im Vorlagenkatalog
+- **Template Approver:** gibt geprüfte Vorlagen endgültig frei.
+- **Template Manager:** registriert freigegebene Vorlagen im Vorlagenkatalog
   und pflegt den Fachwortschatz im Semantic Hub.
 
 **Rund um Verträge**
 
-- **Contract Creator** — leitet Verträge aus registrierten Vorlagen ab, füllt
+- **Contract Creator:** leitet Verträge aus registrierten Vorlagen ab, füllt
   sie aus, bietet sie der Gegenseite an und verhandelt.
-- **Contract Negotiator** — verhandelt bestehende Verträge; sieht dieselben
-  Bereiche wie der Contract Creator ohne die Vertragsanlage.
-- **Contract Reviewer** — prüft verhandelte Verträge vor der Freigabe.
-- **Contract Approver** — gibt geprüfte Verträge zur Signatur frei.
-- **Contract Signer** — unterzeichnet freigegebene Verträge mit der eigenen
+- **Contract Negotiator:** verhandelt bestehende Verträge; sieht dieselben
+  Bereiche wie der Contract Creator, ohne die Vertragsanlage.
+- **Contract Reviewer:** prüft verhandelte Verträge vor der Freigabe.
+- **Contract Approver:** gibt geprüfte Verträge zur Signatur frei.
+- **Contract Signer:** unterzeichnet freigegebene Verträge mit der eigenen
   Wallet und dem eigenen Signaturschlüssel.
-- **Contract Manager** — führt den Vertragsbestand, legt das Zielsystem fest,
+- **Contract Manager:** führt den Vertragsbestand, legt das Zielsystem fest,
   setzt Verträge in Kraft, prüft Signaturen und beendet Verträge.
-- **Contract Observer** — liest Verträge und Signaturen mit, ohne selbst
+- **Contract Observer:** liest Verträge und Signaturen mit, ohne selbst
   Aktionen auszulösen.
 
 **Organisationsweit**
 
-- **Auditor** — führt begründete, protokollierte Prüfungen über Vorlagen,
+- **Auditor:** führt begründete, protokollierte Prüfungen über Vorlagen,
   Verträge, Signaturen und Archivvorgänge aus und exportiert Prüfberichte.
-- **Archive Manager** — überblickt das Vertragsarchiv, ruft archivierte
+- **Archive Manager:** überblickt das Vertragsarchiv, ruft archivierte
   Verträge ab und führt Löschersuchen aus.
-- **Compliance Officer** — überwacht das System auf Regelverstöße, meldet
+- **Compliance Officer:** überwacht das System auf Regelverstöße, meldet
   Vorfälle und entscheidet zurückgestellte Prüfungen.
-- **Sys. Administrator** — registriert Zielsysteme, verwaltet Systembenutzer
+- **Sys. Administrator:** registriert Zielsysteme, verwaltet Systembenutzer
   und deren Zugangsdaten und sieht das Schlüsselverzeichnis ein.
-- **Integration Manager** — verwaltet die Zielsysteme für die Anbindung
+- **Integration Manager:** verwaltet die Zielsysteme für die Anbindung
   angrenzender Systeme.
 
 Eine Person kann mehrere Rollen tragen; die Navigation zeigt dann die Summe
@@ -106,8 +105,8 @@ bzw. zurückgezogen) sowie nach der Signatur **REVOKED**, **TERMINATED** und
 
 Ein Statuswechsel geschieht ausschließlich über die Aktionen der jeweils
 zuständigen Rolle (**Submit**, **Approve**, **Register**, **Offer to
-counterparty**, **Deploy**, **Terminate**). Der Status lässt sich nirgends
-direkt setzen — es gibt kein Statusfeld zum Bearbeiten.
+counterparty**, **Deploy**, **Terminate**). Ein Statusfeld zum Bearbeiten gibt
+es nicht.
 
 ## Die fünf Kernabläufe auf einen Blick
 

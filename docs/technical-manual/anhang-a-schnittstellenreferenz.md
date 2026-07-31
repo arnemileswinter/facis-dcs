@@ -1,4 +1,4 @@
-# Anhang A — Schnittstellenreferenz
+# Anhang A Schnittstellenreferenz
 
 Dieser Anhang listet die Schnittstellen einer DCS-Instanz auf drei Ebenen:
 die HTTP-API-Gruppen des Backends, die Ereignisse auf dem internen
@@ -10,7 +10,7 @@ vollständige, maschinenlesbare API-Beschreibung liefert jede laufende
 Instanz selbst: eine Swagger-Oberfläche und eine
 OpenAPI-3-Spezifikation.
 
-Alle fachlichen APIs sind — sofern nicht anders vermerkt — durch das
+Alle fachlichen APIs sind, sofern nicht anders vermerkt, durch das
 OIDC-Bearer-Token geschützt; die Scopes im Access Token entsprechen den
 Rollen-Claims des Nutzers. Maschinelle Aufrufer (Maschinen-Identitäten
 und Contract Target Systems) authentifizieren sich mit
@@ -94,7 +94,7 @@ ausschließlich für den Template Manager.
 | Abruf und Suche | `GET /contract/retrieve`, `GET /contract/retrieve/{did}`, `GET /contract/{did}`, `GET /contract/history/{did}`, `GET /contract/search`, `GET /contract/templates` | Verträge listen, per DID auflösen (parteibeschränkt), Historie, Suche, verfügbare Vorlagen |
 | Abschluss und Betrieb | `POST /contract/store`, `POST /contract/terminate`, `GET /contract/kpis/{did}`, `POST /contract/audit` | Evidenz sichern, beenden, KPI-Beobachtungen einsehen, Audit-Auszug |
 | Deployment | `POST /contract/deploy`, `POST /contract/target/designate`, `POST /contract/deployment/callback` | An das designierte (oder ein explizit gewähltes) Zielsystem ausrollen; Designation setzen oder löschen; Rückmeldung des Zielsystems (Ack/Status, KPI-Werte), authentifiziert als dessen eigener OAuth2-Client und nur für Deployments, die an genau dieses Ziel gingen |
-| Zielsystem-Registry | `GET/POST/PUT/DELETE /contract/targets`, `POST /contract/targets/{id}/credential` | Registry administrieren (Schreibzugriff Sys. Administrator, Lesen auch Contract Manager); Löschen wird verweigert, solange ein Vertrag das Ziel designiert; Callback-Credential ausstellen/rotieren — das Secret erscheint genau einmal, das vorherige verliert sofort seine Gültigkeit |
+| Zielsystem-Registry | `GET/POST/PUT/DELETE /contract/targets`, `POST /contract/targets/{id}/credential` | Registry administrieren (Schreibzugriff Sys. Administrator und Integration Manager, Lesen zusätzlich Contract Manager); Löschen wird verweigert, solange ein Vertrag das Ziel designiert; Callback-Credential ausstellen/rotieren, wobei das Secret genau einmal erscheint und das vorherige sofort seine Gültigkeit verliert |
 | Maschinen-Identitäten | `GET/POST /machine-identities`, `PUT/DELETE /machine-identities/{id}`, `POST /machine-identities/{id}/credential` | Registry verwalten: Anlegen provisioniert den OAuth2-Client und liefert das Secret genau einmal; Deaktivieren weist Aufrufe sofort ab; Löschen entfernt auch den Client; Rotation invalidiert das alte Secret unmittelbar (Sys. Administrator) |
 
 ### SignatureManagement (`/signature/...`)
@@ -178,7 +178,7 @@ Abonnenten innerhalb der Instanz:
 | Konsument | Reagiert auf | Wirkung |
 | --- | --- | --- |
 | DCS-to-DCS-Synchronizer | Lebenszyklus- und Remote-Sync-Ereignisse, `PDF_REGENERATED` | Versand des Vertrags-PDFs an die Peer-Instanz bei versandpflichtigen Zuständen |
-| PDF-/C2PA-Regenerator | Lebenszyklusereignisse von Verträgen und Vorlagen | Hintergrund-Neurendering und Anfügen einer C2PA-Lifecycle-Assertion — Exporte werden nie on demand erzeugt |
+| PDF-/C2PA-Regenerator | Lebenszyklusereignisse von Verträgen und Vorlagen | Hintergrund-Neurendering und Anfügen einer C2PA-Lifecycle-Assertion; Exporte werden nie on demand erzeugt |
 | Webhook-Plattform | Domänenereignisse mit Webhook-Abbildung | Weiterleitung an registrierte externe Abonnenten |
 | Auto-Deployment | `APPLIED_SIGNATURE` | Anstoß der Zielsystem-Auslieferung über dasselbe Kommando wie der manuelle Deploy |
 | Event-Logger (optional) | alle Ereignisse | Diagnose-Mitschnitt, nur wenn ausdrücklich eingeschaltet |
@@ -188,7 +188,7 @@ Ereignistyp im Audit-Trail):
 
 | Domäne | Ereignistypen |
 | --- | --- |
-| Contract Workflow Engine | `CREATE_CONTRACT`, `UPDATE_CONTRACT`, `SUBMIT_CONTRACT`, `OFFER_CONTRACT`, `WITHDRAW_CONTRACT`, `NEGOTIATE_CONTRACT`, `ACCEPT_RESPOND_CONTRACT`, `REJECT_RESPOND_CONTRACT`, `INCREASE_CONTRACT_VERSION`, `APPROVE_CONTRACT`, `REJECT_CONTRACT`, `VERIFY_CONTRACT`, `REVIEW_CONTRACT`, `TERMINATE_CONTRACT`, `RENEW_CONTRACT`, `REVOKE_CONTRACT`, `CONTRACT_EXPIRED`, `RECORD_EVIDENCE`, `AUDIT_CONTRACT`, `EXPORT`, `SEARCH_CONTRACT`, `RETRIEVE_ALL_CONTRACTS`, `RETRIEVE_CONTRACT_BY_ID`, `RETRIEVE_CONTRACT_HISTORY_BY_DID`, `RETRIEVE_ALL_TEMPLATES`, `CONTRACT_ACCESS_DENIED` |
+| Contract Workflow Engine | `CREATE_CONTRACT`, `UPDATE_CONTRACT`, `SUBMIT_CONTRACT`, `OFFER_CONTRACT`, `WITHDRAW_CONTRACT`, `NEGOTIATE_CONTRACT`, `ACCEPT_RESPOND_CONTRACT`, `REJECT_RESPOND_CONTRACT`, `INCREASE_CONTRACT_VERSION`, `APPROVE_CONTRACT`, `REJECT_CONTRACT`, `VERIFY_CONTRACT`, `REVIEW_CONTRACT`, `TERMINATE_CONTRACT`, `RENEW_CONTRACT`, `CONTRACT_EXPIRED`, `RECORD_EVIDENCE`, `AUDIT_CONTRACT`, `EXPORT`, `SEARCH_CONTRACT`, `RETRIEVE_ALL_CONTRACTS`, `RETRIEVE_CONTRACT_BY_ID`, `RETRIEVE_CONTRACT_HISTORY_BY_DID`, `RETRIEVE_ALL_TEMPLATES`, `CONTRACT_ACCESS_DENIED` |
 | Föderation und Synchronisation | `REMOTE_SYNC`, `REMOTE_SYNC_REQUEST`, `REMOTE_ACTION_REQUEST`, `OUTDATED_PEER`, `PDF_REGENERATED` |
 | Archiv und Löschung | `STORE_ARCHIVED_CONTRACT`, `RETRIEVE_ARCHIVED_CONTRACTS`, `DELETE_ARCHIVED_CONTRACT`, `ANNOTATE_ARCHIVED_CONTRACT`, `KEY_SHREDDED` |
 | Template Repository | `CREATE_CONTRACT_TEMPLATE`, `COPY_CONTRACT_TEMPLATE`, `UPDATE_CONTRACT_TEMPLATE`, `SUBMIT_CONTRACT_TEMPLATE`, `VERIFY_CONTRACT_TEMPLATE`, `APPROVE_CONTRACT_TEMPLATE`, `REJECT_CONTRACT_TEMPLATE`, `REGISTER_CONTRACT_TEMPLATE`, `PUBLISH_CONTRACT_TEMPLATE`, `ARCHIVE_CONTRACT_TEMPLATE`, `AUDIT_CONTRACT_TEMPLATE`, `SEARCH_CONTRACT_TEMPLATE`, `RETRIEVE_ALL_CONTRACT_TEMPLATES`, `RETRIEVE_CONTRACT_TEMPLATE_BY_ID` |
@@ -229,7 +229,7 @@ Regelakzeptanz und Regeln einer Instanz, bevor Vertragsdaten fließen.
 | Endpunkt | Inhalt | Zweck |
 | --- | --- | --- |
 | `GET /.well-known/did.json` | DID-Dokument der Instanz (did:web) | Instanzidentität; öffentliche Schlüssel zu den im HSM gehaltenen privaten Schlüsseln, einschließlich des Schlüsselvereinbarungs-Schlüssels |
-| `GET /.well-known/dcs-agreement-credential.json` | Selbstsigniertes Agreement Credential | Nachweis, dass die Instanz die Föderationsregeln akzeptiert hat — Prüfgegenstand des Trust Gates auf Ein- und Ausgangspfad |
+| `GET /.well-known/dcs-agreement-credential.json` | Selbstsigniertes Agreement Credential | Nachweis, dass die Instanz die Föderationsregeln akzeptiert hat; Prüfgegenstand des Trust Gates auf Ein- und Ausgangspfad |
 | `GET /.well-known/dcs-federation-rules.md` | Föderationsregeln | Das Regeldokument, auf das sich das Agreement Credential per Hash bezieht |
 
 Ergänzend zur Auflösung durch Dritte:

@@ -1,11 +1,11 @@
-# 08 — Föderation
+# 08 Föderation
 
-Dieses Kapitel beschreibt, wie zwei unabhängige DCS-Instanzen — betrieben
-von verschiedenen Organisationen — Verträge austauschen und verhandeln,
+Dieses Kapitel beschreibt, wie zwei unabhängige DCS-Instanzen, betrieben
+von verschiedenen Organisationen, Verträge austauschen und verhandeln,
 welches Trust-Modell jede Interaktion absichert und wie Vorlagen über den
 XFSC Federated Catalogue instanzübergreifend auffindbar werden. Das
-Grundprinzip: Über die Instanzgrenze wandern **Artefakte, kein Zustand** —
-jede Instanz führt ihren eigenen Workflow, ihre eigene RBAC und ihre
+Grundprinzip: Über die Instanzgrenze wandern **Artefakte, kein Zustand**.
+Jede Instanz führt ihren eigenen Workflow, ihre eigene RBAC und ihre
 eigene Kopie des Vertrags (ADR-13).
 
 ## 8.1 Beteiligte Komponenten
@@ -26,7 +26,7 @@ eigene Kopie des Vertrags (ADR-13).
 Zwei DCS-Instanzen tauschen im Vertragsablauf drei Dinge aus: **das
 Vertrags-PDF pro sichtbarem Lebenszyklusschritt**, **die JAdES-Signatur
 nach dem Signieren** und **den Nachweis der Handlungsvollmacht hinter
-dieser Signatur**. Das PDF ist selbsttragend — es enthält das
+dieser Signatur**. Das PDF ist selbsttragend, es enthält das
 maschinenlesbare JSON-LD, die C2PA-Provenance-Kette und etwaige
 Signaturen (Kapitel 07). Ein bloßes PDF ist ein Vorschlag (Angebot oder
 Verhandlungs-Gegenvorschlag); ein PDF mit JAdES ist die Signatur der
@@ -35,17 +35,17 @@ Inhaltsschlüssel mit, damit beide Seiten dieselben Artefakte lesen können
 (ADR-28, Kapitel 07).
 
 Verschickt wird nur, was die Gegenseite sehen muss: die Zustände
-`OFFERED`, `NEGOTIATION`, `SIGNED` und `REVOKED` — der Widerruf einer
+`OFFERED`, `NEGOTIATION`, `SIGNED` und `REVOKED`. Der Widerruf einer
 angebrachten Signatur muss die Gegenpartei unmittelbar erreichen, weil er
 die Vereinbarung entwertet. Interne Zustände (Entwurf, Review, Freigabe,
-Aktivierung, Terminierung) bleiben lokal — Review- und Freigabeprozesse
+Aktivierung, Terminierung) bleiben lokal; Review- und Freigabeprozesse
 der einen Organisation sind für die andere unsichtbar.
 
 Die Verhandlung verläuft in drei getrennten Phasen: **verhandeln**
 (Gegenvorschläge als neue PDF-Versionen), **einigen** (beide Seiten
 bestätigen dieselbe Version; nachweisbar aus der Provenance des
 Artefakts) und erst danach **signieren**. Ein einseitig signierter, noch
-nicht beidseitig geeinigter Vertrag wäre ein disputables Artefakt —
+nicht beidseitig geeinigter Vertrag wäre ein disputables Artefakt,
 deshalb ist die Phasentrennung Teil des Protokolls.
 
 ### Der Ablauf
@@ -75,38 +75,38 @@ sequenceDiagram
     B-->>A: OK
 ```
 
-Beim **ersten Empfang** entsteht die lokale Kopie im Zustand `OFFERED`
-(ein Angebot auf dem eigenen Tisch), mit dem Absender als Origin und den
+Beim **ersten Empfang** entsteht die lokale Kopie im Zustand `OFFERED`,
+ein Angebot auf dem eigenen Tisch, mit dem Absender als Origin und den
 eigenen Nutzern in den lokalen Rollen; die eigenen Review-, Freigabe- und
 Verhandlungs-Tasks werden lokal geöffnet. Ein **erneuter Empfang**
 aktualisiert den Inhalt und erhöht die lokale Version, ohne den eigenen
 Workflow-Fortschritt zu überschreiben. Der vom Absender deklarierte
-Vertragszustand ist dabei rein informativ — mit genau einer Ausnahme:
+Vertragszustand ist dabei rein informativ, mit genau einer Ausnahme:
 Meldet die authentifizierte Gegenpartei `REVOKED`, übernimmt der
 Empfänger diesen Zustand, denn der Widerruf der Signatur der Gegenseite
-entwertet die Vereinbarung; kein anderer Peer-Zustand überschreibt je den
+entwertet die Vereinbarung. Kein anderer Peer-Zustand überschreibt je den
 lokalen Workflow.
 
 Das empfangene PDF wird **exakt so, wie es kam**, als eigene Kopie
-gespeichert — ein Neu-Rendern würde die C2PA-Provenance-Kette der
+gespeichert. Ein Neu-Rendern würde die C2PA-Provenance-Kette der
 Gegenseite zerstören; spätere eigene Änderungen amendieren diese Basis,
 sodass die Kette über beide Instanzen hinweg wächst.
 
 ### Transport folgt der Identität, nicht der Netztopologie
 
-Der Peer wird aus seinem `did:web`-Identifier aufgelöst — einschließlich
+Der Peer wird aus seinem `did:web`-Identifier aufgelöst, einschließlich
 etwaiger Pfadsegmente, sodass mehrere Instanzen einen Host teilen können
 und jede unter ihrem eigenen Pfadpräfix angesprochen wird (Kapitel 05).
 
 **Die Auflösung ist HTTPS-only.** Ein Rückfall auf Klartext ließe einen
 Angreifer auf dem Pfad sowohl das DID-Dokument mit dem Schlüssel des
-Peers als auch das dagegen geprüfte Agreement Credential ausliefern — das
+Peers als auch das dagegen geprüfte Agreement Credential ausliefern; das
 Föderations-Gate wäre wertlos. Zwei eng gefasste Ausnahmen gibt es:
 Loopback-Hosts, weil Entwicklungs- und CI-Stacks sich so gegenseitig
 auflösen, und Hosts, die ein Deployment ausdrücklich benennt, weil eine
 clusterinterne Identität hinter einem Service-Namen liegt, der weder
 Loopback ist noch TLS terminiert. Die Ausnahme ist damit explizit und
-pro Deployment sichtbar, nicht ein stiller Fallback.
+pro Deployment sichtbar.
 
 Ergänzend gilt für jeden ausgehenden Abruf: keine Weiterleitungen (eine
 Weiterleitung ließe die Gegenstelle das Ziel nach der Prüfung wechseln)
@@ -125,15 +125,15 @@ verifizierbaren Schichten:
 
 | Schicht | Frage | Mechanismus | Anker |
 | --- | --- | --- | --- |
-| 1 — Identität | Wer bist du? | `did:web` mit Zertifikatskette, optional gegen den EU-Trust-Pool geprüft | EU-Vertrauenslisten / QTSP |
-| 2 — Besitznachweis | Sprichst gerade du? | Challenge-Response pro Request: Zufallswert, mit dem HSM-Schlüssel des Absenders signiert, verifiziert gegen dessen publizierten Schlüssel | Schicht 1 |
-| 3a — Regelakzeptanz | Spielst du nach den Regeln? | Selbstsigniertes Agreement Credential unter `/.well-known/dcs-agreement-credential.json`, signiert mit dem dedizierten VC-Schlüssel aus dem eigenen DID-Dokument, dessen `termsOfUse`-Hash das Föderationsregelwerk benennt | In die Binärdatei einkompiliertes Regelwerk — der Hash muss dem eigenen entsprechen |
-| 3b — Policy | Darf **diese** Interaktion stattfinden? | Eigener lokaler Policy-Endpunkt (`DCS_TRUST_PDP_URL`): 2xx erlaubt, alles andere verweigert | Was auch immer der Endpunkt konsultiert (Allowlist, Trust-Listen, Clearing House, …) |
-| 3c — Vollmacht | Durfte der, der unterschrieben hat, für diese Partei handeln? | Mitgeschickter Vollmachtsnachweis, geprüft gegen einen für `peer` zugelassenen Aussteller mit Organisationsberechtigung, inklusive Statusliste (ADR-31) | Ausstellervertrauen der empfangenden Instanz |
-| 4 — Rechtswirkung | Bindet der Vertrag? | AES/QES auf dem Dokument (PAdES/JAdES, Kapitel 06) | eIDAS |
+| 1: Identität | Wer bist du? | `did:web` mit Zertifikatskette, optional gegen den EU-Trust-Pool geprüft | EU-Vertrauenslisten / QTSP |
+| 2: Besitznachweis | Sprichst gerade du? | Challenge-Response pro Request: Zufallswert, mit dem HSM-Schlüssel des Absenders signiert, verifiziert gegen dessen publizierten Schlüssel | Schicht 1 |
+| 3a: Regelakzeptanz | Spielst du nach den Regeln? | Selbstsigniertes Agreement Credential unter `/.well-known/dcs-agreement-credential.json`, signiert mit dem dedizierten VC-Schlüssel aus dem eigenen DID-Dokument, dessen `termsOfUse`-Hash das Föderationsregelwerk benennt | In die Binärdatei einkompiliertes Regelwerk; der Hash muss dem eigenen entsprechen |
+| 3b: Policy | Darf **diese** Interaktion stattfinden? | Eigener lokaler Policy-Endpunkt (`DCS_TRUST_PDP_URL`): 2xx erlaubt, alles andere verweigert | Was auch immer der Endpunkt konsultiert (Allowlist, Trust-Listen, Clearing House, …) |
+| 3c: Vollmacht | Durfte der, der unterschrieben hat, für diese Partei handeln? | Mitgeschickter Vollmachtsnachweis, geprüft gegen einen für `peer` zugelassenen Aussteller mit Organisationsberechtigung, inklusive Statusliste (ADR-31) | Ausstellervertrauen der empfangenden Instanz |
+| 4: Rechtswirkung | Bindet der Vertrag? | AES/QES auf dem Dokument (PAdES/JAdES, Kapitel 06) | eIDAS |
 
 Die Schichten 3a/3b bilden zusammen das **Trust Gate** (ADR-19), das auf
-beiden Pfaden konsultiert wird — vor jedem Versand und bei jedem Empfang.
+beiden Pfaden konsultiert wird, vor jedem Versand und bei jedem Empfang.
 Kernentscheidungen:
 
 - **Fail-closed.** Ein nicht konfigurierter, nicht erreichbarer oder
@@ -144,21 +144,21 @@ Kernentscheidungen:
   ist einkompiliert und unter `/.well-known/dcs-federation-rules.md`
   abrufbar; sein Hash steht im Agreement Credential. Zwei Instanzen
   derselben Version stimmen automatisch überein, abweichende Regelwerke
-  scheitern laut am Hash-Vergleich — Regeländerungen sind
+  scheitern laut am Hash-Vergleich. Regeländerungen sind
   Software-Releases.
 - **Das Credential muss vom Peer selbst stammen.** Aussteller-Hostname
   und Bezugsquelle müssen übereinstimmen, und der Proof muss den
-  dedizierten VC-Eintrag des Peer-DID-Dokuments referenzieren — ein
-  fremdes, zufällig verifizierbares Credential kann nicht untergeschoben
-  werden.
+  dedizierten VC-Eintrag des Peer-DID-Dokuments referenzieren, damit kein
+  fremdes, zufällig verifizierbares Credential untergeschoben werden
+  kann.
 - **Kein „Phone home".** Jede Instanz befragt ausschließlich ihren
   eigenen Policy-Endpunkt; die Gegenseite ruft ihn nie auf. Die
   Standard-Auslieferung enthält einen minimalen Flow, den Betreiber um
   dataspace-spezifische Prüfungen erweitern.
 - **Jede Ablehnung ist auditierbar.** Trust-Gate-Denials landen als
-  Incident im Audit-Trail; auf dem Versandpfad wird eine
+  Incident im Audit-Trail. Auf dem Versandpfad wird eine
   Agreement-Credential-Ablehnung erneut versucht, eine
-  Policy-Endpunkt-Ablehnung ist dagegen terminal — kein Retry, genau ein
+  Policy-Endpunkt-Ablehnung ist dagegen terminal: kein Retry, genau ein
   Incident pro Versuch, dedupliziert pro Vertrag, Peer und Richtung.
 
 ### Provenance und Vollmacht des Gegenseiten-Artefakts
@@ -170,15 +170,13 @@ akzeptiert: Das kompakte JWS muss gegen seine eigene Zertifikatskette
 verifizieren, der Leaf-Schlüssel muss der publizierte
 `did:web`-Schlüssel des Absenders sein, und die signierte Payload muss
 exakt die Kanonisierung aus Vertrags-DID, Version und dem im verschickten
-PDF eingebetteten Vertragsdokument sein — die Challenge-Response-Signatur
+PDF eingebetteten Vertragsdokument sein. Die Challenge-Response-Signatur
 authentifiziert nur die Sitzung, die JAdES bindet den Vertrags**inhalt**
 an den Schlüssel des Absenders. Das verifizierte Artefakt wird
 persistiert und bleibt als unabhängig nachprüfbarer Nachweis abrufbar.
 
-**Zusätzlich reist die Handlungsvollmacht mit (ADR-31).** Bisher
-behauptete eine Instanz die Vollmacht ihres Unterzeichners, und die
-Gegenseite hatte nichts, wogegen sie das hätte prüfen können. Die
-Signatur-Ceremony bewahrt deshalb das Vollmachts-Credential auf, das der
+**Zusätzlich reist die Handlungsvollmacht mit (ADR-31).** Die
+Signatur-Ceremony bewahrt das Vollmachts-Credential auf, das der
 Signatar vorgelegt hat, und der Synchronizer schickt es mit, sobald der
 Vertrag Signaturen trägt. Der Empfänger prüft, bevor er etwas von der
 Sendung persistiert:
@@ -196,16 +194,16 @@ Was diese Prüfung feststellt, ist präzise begrenzt: **eine Attestierung
 von Vollmacht.** Ein Aussteller, dem diese Instanz vertraut und der für
 diese Organisation sprechen darf, sagt, dass der Inhaber für sie handeln
 darf, und hat das nicht widerrufen. Sie stellt **nicht** fest, wer der
-Mensch ist — die Identitätsprüfung fand auf der Instanz statt, auf der
+Mensch ist; die Identitätsprüfung fand auf der Instanz statt, auf der
 die Ceremony lief, gegen deren Vertrauensanker. Auch Frische und Bindung
 an genau diesen Vertrag lassen sich nicht feststellen: Dieselbe
 Präsentation verifiziert für einen anderen Vertrag zwischen denselben
 Parteien identisch, bis sie abläuft oder widerrufen wird.
 
-Das Verhalten bei Fehlern ist bewusst asymmetrisch: Ein Nachweis, der
+Das Verhalten bei Fehlern ist bewusst asymmetrisch. Ein Nachweis, der
 **vorhanden ist und nicht verifiziert**, verweigert die Sendung und
 erzeugt einen Trust-Gate-Incident. Ein Nachweis, der **fehlt**, tut das
-nicht — ein Peer, der keine Nachweise aufbewahrt, muss weiter
+nicht, denn ein Peer, der keine Nachweise aufbewahrt, muss weiter
 föderieren können, und eine Partei ohne hinterlegte Vollmacht ist etwas,
 das der Signature Compliance Viewer ohnehin ausweist. Das hebt den Boden
 an (wer Nachweise schickt, kann keine falschen schicken), erzwingt aber
@@ -213,7 +211,7 @@ niemanden zum Nachweis.
 
 Ein weiterer Nebeneffekt ist zu kennen: Läuft ein Vollmachts-Credential
 nach der Signatur ab oder wird es widerrufen, scheitern spätere Sendungen
-desselben Vertrags — die Lebensdauer einer Vollmacht muss den Austausch
+desselben Vertrags. Die Lebensdauer einer Vollmacht muss den Austausch
 überdauern.
 
 ## 8.4 Löschung über die Instanzgrenze
@@ -230,7 +228,7 @@ did:web-Challenge-Response authentifiziert wie der PDF-Austausch:
 2. Sie fordert jede Gegenpartei-Instanz auf, dasselbe zu tun. Eine nicht
    erreichbare Gegenseite blockiert nicht: Die Anforderung bleibt als
    offener Eintrag stehen und wird periodisch erneut zugestellt.
-3. Beide Seiten emittieren dasselbe Zerstörungsereignis — mit Akteur,
+3. Beide Seiten emittieren dasselbe Zerstörungsereignis, mit Akteur,
    Vertrag, Bereich und Grund, nie mit Inhalt.
 
 Ein einmal vernichteter Bereich ist endgültig: Weder ein lokaler
@@ -256,22 +254,19 @@ Aus DCS-Sicht:
 
 | Schnittstelle | Zweck |
 | --- | --- |
-| Publish einer Vorlage (Kapitel 03) | Eine registrierte Vorlage wird als Self-Description an den Katalog übermittelt. Aussteller ist die **Instanz-DID**, nicht der einzelne Mitarbeiter — der Participant ist eine Organisation, kein Endnutzer (ADR-18) |
+| Publish einer Vorlage (Kapitel 03) | Eine registrierte Vorlage wird als Self-Description an den Katalog übermittelt. Aussteller ist die **Instanz-DID**, nicht der einzelne Mitarbeiter; der Participant ist eine Organisation, kein Endnutzer (ADR-18) |
 | Katalog-Lesezugriff | Vorlagenliste abrufen, einzelne Vorlage per DID/Version auflösen, Metadaten durchsuchen |
 
 Zur Authentifizierung gegenüber dem Katalog verwendet die Instanz einen
-Keycloak-Service-Account. Dieser hält derzeit sämtliche funktionalen
-Katalogrollen einschließlich der administrativen — eine ausdrücklich als
-Übergangslösung dokumentierte Stellung (ADR-18): Solange sie besteht,
-darf ein Katalog **nicht** von mehreren DCS-Deployments geteilt werden,
-die sich nicht vollständig vertrauen, da jede Instanz sonst
-Katalogeinträge anderer Mandanten ändern könnte. Der Zielzustand ist ein
-Client pro Deployment mit auf die eigene Participant-ID gebundenem Claim
-und rein funktionalen Rollen. Das Deployment erzwingt diese Grenze:
-Wird die Katalog-Integration gegen einen entfernten, nicht mitdeployten
-Katalog konfiguriert, schlägt das Rendering fehl, solange der Betreiber
-die gemeinsame administrative Vertrauensgrenze nicht ausdrücklich
-bestätigt.
+Keycloak-Service-Account. Dieser hält sämtliche funktionalen
+Katalogrollen einschließlich der administrativen (ADR-18). Daraus folgt
+eine harte Betriebsgrenze: Ein Katalog darf **nicht** von mehreren
+DCS-Deployments geteilt werden, die sich nicht vollständig vertrauen, da
+jede Instanz sonst Katalogeinträge anderer Mandanten ändern könnte. Das
+Deployment erzwingt diese Grenze: Wird die Katalog-Integration gegen
+einen entfernten, nicht mitdeployten Katalog konfiguriert, schlägt das
+Rendering fehl, solange der Betreiber die gemeinsame administrative
+Vertrauensgrenze nicht ausdrücklich bestätigt.
 
 Betriebsdetails der Katalog-Kopplung (Realm-Provisionierung, bekannte
 Upstream-Eigenheiten, Beispiel-Self-Descriptions) sammelt der
@@ -292,7 +287,7 @@ das Deployment beschreibt der [Deployment-Leitfaden](../deployment-guide.md).
   Versand explizit in die Retry-Queue gestellt.
 - **Terminale Policy-Denials verlassen die Retry-Queue.** Eine Ablehnung
   durch den eigenen Policy-Endpunkt erzeugt einen Incident und entfernt
-  einen etwaigen Retry-Eintrag atomar — sie würde sonst endlos erneut
+  einen etwaigen Retry-Eintrag atomar. Sie würde sonst endlos erneut
   anlaufen, obwohl die Entscheidung terminal ist.
 - **Was der Betreiber sieht:** Trust-Gate-Incidents im Audit-Trail mit
   Peer-DID, Richtung und Begründung; Versand- und Empfangsfehler in den

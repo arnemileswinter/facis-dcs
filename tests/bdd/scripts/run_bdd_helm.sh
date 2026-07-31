@@ -404,9 +404,6 @@ echo "ORCE contract-target flow is reachable (HTTP $orce_code); BDD_ORCE_TARGET_
 source "$VENV_PATH/bin/activate"
 export BDD_DCS_BASE_URL
 
-echo "Checking statuslist for BDD at $STATUSLIST_SERVICE_URL"
-python "$PWD/scripts/ensure_statuslist_for_bdd.py"
-
 export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
 
 # Canonical bdd-executor integration requires the package in the active environment.

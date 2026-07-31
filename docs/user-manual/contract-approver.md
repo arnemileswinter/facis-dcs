@@ -1,7 +1,7 @@
 # Verträge freigeben (Contract Approver)
 
 Als Contract Approver geben Sie geprüfte Verträge zur Signatur frei. Erst Ihre
-Freigabe (Status APPROVED) öffnet den Vertrag für die Unterzeichnung — vorher
+Freigabe (Status APPROVED) öffnet den Vertrag für die Unterzeichnung. Vorher
 lässt das System keine Signatur zu, und der Vertrag erscheint in keiner
 Signierliste.
 
@@ -25,7 +25,8 @@ Freigabeansicht.
 Die Ansicht **Approve Contract** zeigt den Vertrag schreibgeschützt mit
 Fortschrittsleiste (Station **Reviewed**) und dem Hinweis „This contract
 awaits approval". Unter **Contract Content** lesen Sie das vollständige
-Dokument, unter **Contract Details** die Stammdaten.
+Dokument, unter **Contract Details** die Stammdaten, unter **Structure** die
+Einordnung in eine Vertragshierarchie.
 
 1. **Approve** **(1)** gibt den Vertrag zur Signatur frei (Status REVIEWED →
    APPROVED). Der Vertrag erscheint anschließend in der Signierliste der
@@ -35,12 +36,20 @@ Dokument, unter **Contract Details** die Stammdaten.
 Daneben stehen **Resubmit** (den Vertrag zur erneuten Prüfung zurückgeben),
 **Export PDF** und **Back**.
 
-Beide Aktionen öffnen einen Bestätigungsdialog, in dem Sie einen Kommentar
-hinterlegen können; erst **Confirm** im Dialog führt die Entscheidung aus,
-**Cancel** bricht ab.
+Jede der drei Entscheidungen öffnet einen Dialog:
+
+- **Approve** fragt nur nach der Bestätigung („Confirm approval") und wird
+  mit **Confirm** ausgeführt.
+- **Resubmit** bietet unter „Add decision note" einen freiwilligen Vermerk an
+  und wird mit **Submit** ausgeführt.
+- **Reject** verlangt unter „Add rejection reason" eine Begründung. Ohne Text
+  wird nichts ausgeführt, und die Ansicht weist darauf hin, dass ein Grund
+  erforderlich ist.
+
+**Cancel** bricht jeden dieser Dialoge folgenlos ab.
 
 Wird ein Vertrag zwischen zwei Organisationen verhandelt, gibt jede Seite
-ihren eigenen Vertragsstand über die eigenen Rollen frei — die Freigabe der
+ihren eigenen Vertragsstand über die eigenen Rollen frei. Die Freigabe der
 einen Organisation ersetzt nicht die der anderen.
 
 ## Nach der Freigabe

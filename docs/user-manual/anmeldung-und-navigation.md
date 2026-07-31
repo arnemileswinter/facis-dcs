@@ -12,16 +12,15 @@ Beim Aufruf der Anwendung erscheint die Anmeldeseite **Sign in with wallet**.
 1. Scannen Sie den QR-Code **(1)** mit Ihrer Wallet. Alternativ überträgt
    **Copy link** **(2)** denselben Anmeldelink in die Zwischenablage, wenn Sie
    ihn von Hand in die Wallet übernehmen wollen.
-2. Legen Sie in der Wallet Ihre Nachweise vor — Ihre Identität und Ihre
-   Rollen. Anschließend werden Sie automatisch in die Anwendung
-   weitergeleitet.
+2. Legen Sie in der Wallet Ihre Nachweise vor: Ihre Identität und Ihre Rollen.
+   Anschließend werden Sie automatisch in die Anwendung weitergeleitet.
 
 Der Hinweis unter dem Code erklärt, dass sich QR-Code und Link selbstständig
 erneuern, solange die Seite geöffnet bleibt (etwa alle fünf Minuten). Lassen
 Sie den Reiter geöffnet, bis die Weiterleitung erfolgt ist.
 
 Welche Bereiche Sie danach sehen, bestimmen ausschließlich die Rollen aus den
-vorgelegten Nachweisen — es gibt keine Rolleneinstellung in der Anwendung.
+vorgelegten Nachweisen. Eine Rolleneinstellung in der Anwendung gibt es nicht.
 
 ## Startseite
 
@@ -36,13 +35,14 @@ zugehörigen Arbeitsbereich (z. B. **Open Contracts**). Sie sehen nur die
 Stationen, an denen Ihre eigenen Rollen mitwirken.
 
 1. Die Seitennavigation **(1)** links enthält ausschließlich die Bereiche
-   Ihrer Rollen — im Beispiel die eines Contract Creators mit **Contracts**
+   Ihrer Rollen, im Beispiel die eines Contract Creators mit **Contracts**
    und **Negotiation Tasks**.
 2. **User Details** **(2)** zeigt Ihre angemeldete Identität und Ihre Rollen.
 3. **Log out** **(3)** meldet Sie ab.
 
-Mit dem Doppelpfeil links oben klappen Sie die Seitenleiste ein und wieder
-aus.
+Mit dem Doppelpfeil links oben in der Kopfzeile klappen Sie die Seitenleiste
+ein und wieder aus. Eingeklappt zeigt sie nur die Symbole; der Name eines
+Eintrags erscheint dann als Kurzhinweis am Mauszeiger.
 
 ## Seitennavigation
 
@@ -71,10 +71,12 @@ dort folgende Einträge:
 
 Die Übersichten für Vorlagen, Verträge und Aufgaben sind gleich aufgebaut:
 
-- Ein **Suchfeld** mit vorangestelltem Umschalter. Voreingestellt ist die
-  Suche nach der eindeutigen Kennung (**DID**); über den Umschalter wechseln
-  Sie auf **Name** und suchen dann nach der Bezeichnung. **Search** löst die
-  Suche aus.
+- Ein **Suchfeld** mit vorangestelltem Umschalter. Der Umschalter bestimmt,
+  worin gesucht wird; voreingestellt ist die eindeutige Kennung (**DID**).
+  Daneben stehen **Name**, **Description**, **Version** sowie **Contract
+  Data** bzw. **Template Data** zur Wahl. **Search** löst die Suche aus. In
+  den Aufgabenlisten wird ausschließlich nach **Name** gesucht, der
+  Umschalter ist dort ohne Funktion.
 - **Filter** grenzt die Liste nach Status ein (z. B. nur **DRAFT** oder nur
   **APPROVED**). Ein erneuter Klick auf denselben Status hebt die Einschränkung
   wieder auf.
@@ -86,6 +88,6 @@ Die Übersichten für Vorlagen, Verträge und Aufgaben sind gleich aufgebaut:
 
 Rufen Sie eine Ansicht auf, für die Ihnen die Rolle fehlt, leitet die
 Anwendung Sie ohne weitere Meldung auf die Startseite zurück. Zusätzlich prüft
-der Server jede einzelne Aktion: Ein abgewiesener Aufruf erscheint als rote
-Hinweismeldung (z. B. „insufficient permissions: requires one of […]"). Die
-Sichtbarkeit eines Bedienelements allein verschafft also keine Berechtigung.
+der Server jede einzelne Aktion. Ein abgewiesener Aufruf erscheint als rote
+Hinweismeldung, etwa „insufficient permissions: requires one of […]". Die
+Sichtbarkeit eines Bedienelements allein verschafft keine Berechtigung.
