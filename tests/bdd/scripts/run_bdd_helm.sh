@@ -34,7 +34,11 @@ trap cleanup EXIT
 
 BDD_PUBLIC_ORIGIN="${BDD_PUBLIC_ORIGIN:-http://localhost:18080}"
 export BDD_PUBLIC_ORIGIN
-export STATUSLIST_SERVICE_URL="${STATUSLIST_SERVICE_URL:-${BDD_PUBLIC_ORIGIN}/statuslist}"
+# The status list every BDD credential names, served and signed by this
+# release's ORCE issuer (ADR-34). It has to be the URL the BACKEND fetches,
+# because the verifier requires the token's sub to equal the credential's URI —
+# the ingress origin is reachable from both the host and the cluster.
+export ISSUER_BASE_URL="${ISSUER_BASE_URL:-${BDD_PUBLIC_ORIGIN}/issuer}"
 
 # BDD_DCS_BASE_URL_A / _B: the two-instance (@two-instance) peer-trust
 # scenarios (steps/peer_trust/dcs_peer_trust_steps.py) address instance A and
@@ -404,8 +408,8 @@ echo "ORCE contract-target flow is reachable (HTTP $orce_code); BDD_ORCE_TARGET_
 source "$VENV_PATH/bin/activate"
 export BDD_DCS_BASE_URL
 
-echo "Checking statuslist for BDD at $STATUSLIST_SERVICE_URL"
-python "$PWD/scripts/ensure_statuslist_for_bdd.py"
+echo "Checking the issuer status list at $ISSUER_BASE_URL"
+python "$PWD/scripts/check_status_list.py"
 
 export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
 

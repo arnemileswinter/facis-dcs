@@ -9,7 +9,7 @@ import {
   E2E_API_BASE_B,
   E2E_DSS_URL,
   E2E_FRONTEND_B_ORIGIN,
-  E2E_STATUSLIST_URL,
+  E2E_ISSUER_BASE_URL,
 } from '../playwright.config'
 import { formatNumberInput } from '../src/modules/template-repository/utils/number-format'
 import type { Browser, BrowserContext, Page } from '@playwright/test'
@@ -145,7 +145,7 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     // against each other.
     env: {
       ...process.env,
-      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
       BDD_DCS_BASE_URL: inst.apiBase,
       E2E_SIGNATORY: signatory,
     },

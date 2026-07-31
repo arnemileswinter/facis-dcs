@@ -45,7 +45,7 @@ const DefaultListID = 1
 
 // statusListEntryType is the credentialStatus.type a contract VC advertises: a
 // token status list, which is what the XFSC statuslist-service serves (see
-// QueryStatusListStatus for the format and its LSB-first bit order).
+// ReadUnsignedStatusList for the format and its LSB-first bit order).
 const statusListEntryType = "TokenStatusList"
 
 // OCMWStatusListPublisher is a client for the XFSC statuslist-service.
@@ -190,15 +190,52 @@ type statusListResponse struct {
 	List string `json:"list"`
 }
 
-// QueryStatusListStatus fetches the status list at statusListCredential and returns
-// "revoked" if the entry at index is set, "active" otherwise (DCS-OR-C2PA-006).
+// UnverifiedStatusReading renders a ReadUnsignedStatusList result for a
+// verification report.
+//
+// A report is read as a set of established facts, and "revoked"/"active" on its
+// own reads as one. It is not: nothing signed the list it came from, so the
+// qualification travels with the value rather than sitting in a footnote the
+// reader has to find. Every caller renders through here so the two reports
+// cannot describe the same reading differently.
+func UnverifiedStatusReading(state string) string {
+	return fmt.Sprintf("%s (UNVERIFIED: read from a status list nobody signed)", state)
+}
+
+// UnverifiedStatusUnavailable renders a ReadUnsignedStatusList failure.
+//
+// It names the reason it has rather than one it does not. "Status service
+// unreachable" was asserted for every failure here, including the ones where
+// the service answered perfectly and the list was then unparseable,
+// undecompressable, or too short to hold the index — sending whoever read the
+// report to look at the network for a defect in the list.
+func UnverifiedStatusUnavailable(err error) string {
+	return fmt.Sprintf("UNKNOWN (status could not be verified: %v)", err)
+}
+
+// ReadUnsignedStatusList fetches the status list at statusListCredential and
+// returns "revoked" if the entry at index is set, "active" otherwise
+// (DCS-OR-C2PA-006).
+//
+// The name says what the reading is worth. The envelope below carries no
+// signature at all, so what comes back is whatever answered the URL: a network
+// position, a DNS answer or a misrouted ingress is enough to make a revoked
+// contract read active. That is the arrangement ADR-34 removed for credential
+// status lists, and it survives here only because the C2PA provenance
+// credential's list is still the XFSC service's. Closing it means this
+// deployment serving and signing that list itself, since here it IS the issuer.
+//
+// Until then no caller may state this reading as a fact. Both render it through
+// UnverifiedStatusReading, and a failure through UnverifiedStatusUnavailable —
+// which is also why the failure is not called an outage: the list may have been
+// served in full and been unusable.
 //
 // The XFSC statuslist-service (deployment/helm/charts/statuslist-service) returns a
 // plain {"list": "...", "listId": ..., "tenantId": "..."} JSON object rather than a
 // W3C VC; "list" is a base64-encoded, gzip-compressed bitstring. Bit packing
 // follows the IETF Token Status List / XFSC convention (LSB-first), matching the
 // parsing already established for status list checks in internal/auth/oid4vp.
-func QueryStatusListStatus(ctx context.Context, client *http.Client, statusListCredential string, index uint32) (string, error) {
+func ReadUnsignedStatusList(ctx context.Context, client *http.Client, statusListCredential string, index uint32) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusListCredential, nil)
 	if err != nil {
 		return "", fmt.Errorf("build status list request: %w", err)

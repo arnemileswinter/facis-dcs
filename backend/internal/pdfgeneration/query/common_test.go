@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -71,14 +72,40 @@ func TestEvaluateLiveStatusCheckMarksOutageFailed(t *testing.T) {
 	}
 }
 
-func TestEvaluateLiveStatusCheckKeepsActiveAndRevokedResults(t *testing.T) {
+// The failure the report shows is the one that happened. Every failure here
+// used to be described as the status service being unreachable, so a list that
+// was served in full and could not be parsed sent the reader to the network
+// (ADR-34, and the same misattribution in signingmanagement/query/verify.go).
+func TestEvaluateLiveStatusCheckReportsTheFailureItHad(t *testing.T) {
+	_, _, failure, _ := evaluateLiveStatusCheck(context.Background(), "active", func() (string, error) {
+		return "", errors.New("parse status list response: unexpected end of JSON input")
+	})
+	if !strings.Contains(failure, "parse status list response") {
+		t.Fatalf("failure = %q, want the parse error it actually had", failure)
+	}
+	if strings.Contains(strings.ToLower(failure), "unreachable") {
+		t.Fatalf("failure = %q, but the list was served — nothing was unreachable", failure)
+	}
+}
+
+// The reading comes off an unsigned list, so it is reported as a reading and
+// not as the contract's revocation state. A bare "revoked"/"active" in a
+// verification report is read as established fact, and nothing established it:
+// whoever answered the URL chose it (ADR-34).
+func TestEvaluateLiveStatusCheckReportsTheReadingAsUnverified(t *testing.T) {
 	for _, want := range []string{"active", "revoked"} {
 		t.Run(want, func(t *testing.T) {
 			status, check, failure, passed := evaluateLiveStatusCheck(context.Background(), "active", func() (string, error) {
 				return want, nil
 			})
-			if !passed || status != want || check != "passed" || failure != "" {
-				t.Fatalf("got status=%q check=%q failure=%q passed=%v", status, check, failure, passed)
+			if !passed || check != "passed" || failure != "" {
+				t.Fatalf("got check=%q failure=%q passed=%v", check, failure, passed)
+			}
+			if status == want {
+				t.Fatalf("status = %q, which states an unsigned list's answer as fact", status)
+			}
+			if !strings.Contains(status, want) || !strings.Contains(status, "UNVERIFIED") {
+				t.Fatalf("status = %q, want the %q reading marked UNVERIFIED", status, want)
 			}
 		})
 	}

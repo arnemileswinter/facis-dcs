@@ -52,6 +52,26 @@
         "pid"
       ],
       "mechanism": "x5c"
+    },
+    "did:web:localhost%3A30181": {
+      "purposes": [
+        "login",
+        "peer"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "x5c"
+    },
+    "did:web:localhost%3A18080:issuer": {
+      "purposes": [
+        "login",
+        "peer"
+      ],
+      "organizations": [
+        "*"
+      ],
+      "mechanism": "x5c"
     }
   }
 }

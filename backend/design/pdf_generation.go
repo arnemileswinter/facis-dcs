@@ -25,9 +25,9 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	Attribute("vc_proof_status", String, "Embedded contract-lifecycle credential proof status: 'valid' when its Data Integrity proof verified against a key the credential's issuer publishes for assertions, 'invalid' when it did not, 'indeterminate' when the issuer could not be resolved, 'not_available' when the PDF carries no such credential. Never reports a pass for a credential that was only parsed.")
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
 	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
-	Attribute("status_list_status", String, "Live revocation state queried from the XFSC status list service: active or revoked (DCS-OR-C2PA-006)")
-	Attribute("status_list_check", String, "Named live status-list check result: passed, failed, or not_available (DCS-OR-C2PA-006)")
-	Attribute("status_list_error", String, "Explicit failure reason when the live status-list check could not be completed")
+	Attribute("status_list_status", String, "Revocation state read from the XFSC status list service ('active' or 'revoked'), always marked UNVERIFIED: that list carries no signature, so the value is what answered the URL rather than the issuer's statement, and this field never presents it as established (ADR-34)")
+	Attribute("status_list_check", String, "Named live status-list check result: passed, failed, or not_available (DCS-OR-C2PA-006). 'passed' means the lookup completed and returned a reading, not that the reading is attributable to anyone — see status_list_status")
+	Attribute("status_list_error", String, "The failure that stopped the live status-list check, as it occurred — a list served and then unusable is reported as that, not as an unreachable service")
 
 	// PDF signature check (DCS-OR-C2PA-006). This is an independently named
 	// check distinct from the C2PA COSE signature check: when the PDF carries

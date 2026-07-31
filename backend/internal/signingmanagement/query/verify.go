@@ -144,12 +144,16 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 			statusListStatus = fmt.Sprintf("UNKNOWN (%v)", refErr)
 		case present:
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			status, statusErr := provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
+			status, statusErr := provenance.ReadUnsignedStatusList(ctx, httpClient, ref.StatusListCredential, ref.Index)
 			switch {
 			case statusErr != nil:
-				statusListStatus = "UNKNOWN (status service unreachable)"
+				statusListStatus = provenance.UnverifiedStatusUnavailable(statusErr)
 			default:
-				statusListStatus = status
+				// Reported as a reading, not as the contract's revocation
+				// state: this list carries no signature, so "revoked" here is
+				// what an unauthenticated URL said, and a report that prints it
+				// bare has the reader believe it was established.
+				statusListStatus = provenance.UnverifiedStatusReading(status)
 			}
 		}
 	case vcProofStatus != provenance.CheckNotAvailable:

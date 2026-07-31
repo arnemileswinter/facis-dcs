@@ -1,6 +1,7 @@
 package oid4vp
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -224,6 +225,69 @@ func TestDevTrustConfigLoads(t *testing.T) {
 				t.Errorf("issuer %q jwks is not an object: %v", iss, err)
 			}
 		}
+	}
+}
+
+// The ORCE credential issuer the dev and BDD stacks run is trusted to grant a
+// session, and trusted through the certificate chain it signs with — the same
+// chain, to the same anchor, as the status list those credentials point at
+// (ADR-34: served by the issuer that issued the credential, signed with the
+// same key, identified the same way).
+//
+// The mechanism is the part worth pinning. jwks cannot express this issuer: its
+// key is generated on its own volume at boot and is not committable. did:web
+// cannot either — resolution is https-only (didWebURL), and both stacks reach
+// the issuer over http on a NodePort and a local ingress. Configured as either
+// one, every credential from /offer is refused, and the refusal names the
+// issuer rather than the configuration.
+func TestDevTrustConfigCoversTheORCEIssuersItsStacksRun(t *testing.T) {
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	cfg, err := LoadTrustConfig(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("shipped dev trust config must load: %v", err)
+	}
+	// dev-stack.sh reaches it on the NodePort (values.issuer.dev.yml); the kind
+	// BDD stack behind a prefix-stripping ingress (values.issuer.bdd.yml). The
+	// DID follows the URL, so each stack's issuer is a distinct identity.
+	for _, iss := range []string{"did:web:localhost%3A30181", "did:web:localhost%3A18080:issuer"} {
+		entry, ok := cfg.Issuers[iss]
+		if !ok {
+			t.Fatalf("issuer %q has no trust entry, so the credentials it issues are refused as untrusted", iss)
+		}
+		if entry.Mechanism != MechanismX5C {
+			t.Errorf("issuer %q declares mechanism %q; it signs with an x5c chain and nothing else can resolve it", iss, entry.Mechanism)
+		}
+		if !cfg.For(PurposeLogin).IssuerTrusted(iss) {
+			t.Errorf("issuer %q may not grant a session, which is the only thing its Power of Attorney is for", iss)
+		}
+	}
+}
+
+// An x5c issuer is resolvable only against anchors, so an entry declaring that
+// mechanism with no anchors configured cannot verify a single credential. The
+// two are separate settings (OID4VP_TRUST_DATA_PATH, OID4VP_X5C_TRUST_ANCHORS_
+// PATH) and a stack that sets one without the other looks configured.
+func TestDevTrustConfigShipsAnchorsForItsX5CIssuers(t *testing.T) {
+	t.Setenv("DCS_ALLOW_DEV_TRUST", "true")
+	cfg, err := LoadTrustConfig(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("shipped dev trust config must load: %v", err)
+	}
+	var x5cIssuers []string
+	for iss, entry := range cfg.Issuers {
+		if entry.Mechanism == MechanismX5C {
+			x5cIssuers = append(x5cIssuers, iss)
+		}
+	}
+	if len(x5cIssuers) == 0 {
+		t.Fatal("no issuer resolves by certificate chain, so this stack no longer exercises the production path")
+	}
+	pool, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
+	if err != nil {
+		t.Fatalf("issuers %v resolve by chain but the shipped anchors do not load: %v", x5cIssuers, err)
+	}
+	if pool == nil {
+		t.Fatalf("issuers %v resolve by chain against no anchors at all", x5cIssuers)
 	}
 }
 
@@ -588,6 +652,37 @@ func TestDevX5CTrustAnchorsRefusedUnlessExplicitlyAllowed(t *testing.T) {
 	pool, err := LoadX5CTrustAnchors(devX5CAnchorsPath)
 	if err != nil || pool == nil {
 		t.Fatalf("DCS_ALLOW_DEV_TRUST must permit the dev anchors: %v", err)
+	}
+}
+
+// The guard refuses the bundle on the FIRST anchor it recognises, so an anchor
+// added after that one is never reached and its key never has to be registered.
+// The bundle holds a root per issuer whose chains this stack verifies, and each
+// of their private keys is committed here — so each one is checked on its own.
+func TestEveryDevX5CAnchorIsRecognisedAsCommittedMaterial(t *testing.T) {
+	data, err := os.ReadFile(devX5CAnchorsPath)
+	if err != nil {
+		t.Fatalf("read dev anchors: %v", err)
+	}
+
+	anchors := 0
+	for rest := data; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatalf("parse dev anchor: %v", err)
+		}
+		anchors++
+		if _, ok := devCertificateKey(cert); !ok {
+			t.Errorf("anchor %q is committed to this repository but devIssuerKeySources does not name its key, so a deployment would accept it without saying so", cert.Subject.CommonName)
+		}
+	}
+	if anchors < 2 {
+		t.Fatalf("expected the dev bundle to hold the PID issuer anchor and the ORCE issuer root, got %d", anchors)
 	}
 }
 

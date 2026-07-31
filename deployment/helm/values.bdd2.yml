@@ -84,7 +84,6 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
     x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's

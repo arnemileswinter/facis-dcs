@@ -77,7 +77,6 @@ oid4vp:
     existingConfigMapKey: trust.json
     # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
     existingConfigMapMountPath: /etc/dcs/oid4vp
-    xfscAllowUnsignedFallback: false
     # Optional: trust anchors an x5c-bearing credential's certificate chain
     # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
     # unset — an x5c-bearing credential is then refused outright, never
@@ -387,6 +386,19 @@ statusListLocalhostProxy:
   listenPort: 18080
   upstream: ""
   ingressHost: localhost
+  # Prefixes of the public origin this sidecar answers for. A credential names
+  # its status list by absolute URL and the verifier requires the served token's
+  # `sub` to equal that URL exactly, so the Pod has to fetch the credential's own
+  # URL rather than an in-cluster equivalent.
+  #
+  # `host` is the Ingress host the prefix is routed under, defaulting to
+  # ingressHost — this release's own. The credential issuer is a SEPARATE release
+  # published once at one origin (ADR-34), so its prefix names that origin
+  # outright and stays right for a release answering on some other host.
+  paths:
+    - prefix: /statuslist/
+    - prefix: /issuer/
+      host: localhost
   # Functional HTTP route used by the sidecar readiness probe. Environments
   # that require a particular seeded status list can override this path.
   readinessPath: "/statuslist/health"

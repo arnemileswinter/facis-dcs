@@ -302,10 +302,10 @@ def step_given_fresh_fc_install(context):
     context.catalogue_calls = []
     previous_dcs_base_url = os.environ.get("BDD_DCS_BASE_URL")
     os.environ["BDD_DCS_BASE_URL"] = context.fc_lifecycle_base_url
-    previous_statuslist_url = os.environ.get("STATUSLIST_SERVICE_URL")
-    os.environ["STATUSLIST_SERVICE_URL"] = os.environ.get(
-        "BDD_FC_LIFECYCLE_STATUSLIST_URL",
-        "http://localhost:18080/statuslist",
+    previous_issuer_base = os.environ.get("ISSUER_BASE_URL")
+    os.environ["ISSUER_BASE_URL"] = os.environ.get(
+        "BDD_FC_LIFECYCLE_ISSUER_BASE_URL",
+        "http://localhost:18080/issuer",
     )
     def restore_dcs_base_url():
         if previous_dcs_base_url is None:
@@ -313,14 +313,14 @@ def step_given_fresh_fc_install(context):
         else:
             os.environ["BDD_DCS_BASE_URL"] = previous_dcs_base_url
 
-    def restore_statuslist_url():
-        if previous_statuslist_url is None:
-            os.environ.pop("STATUSLIST_SERVICE_URL", None)
+    def restore_issuer_base():
+        if previous_issuer_base is None:
+            os.environ.pop("ISSUER_BASE_URL", None)
         else:
-            os.environ["STATUSLIST_SERVICE_URL"] = previous_statuslist_url
+            os.environ["ISSUER_BASE_URL"] = previous_issuer_base
 
     context.add_cleanup(restore_dcs_base_url)
-    context.add_cleanup(restore_statuslist_url)
+    context.add_cleanup(restore_issuer_base)
     # Tokens are scoped by API base, but clearing removes any ambiguity when a
     # previous scenario happened to use the same generated namespace name.
     from steps.support.services.auth_service import AuthService  # noqa: PLC0415
@@ -904,7 +904,7 @@ exit 0''',
         REPO_ROOT / "tests" / "bdd" / "scripts" / "keep_port_forward.sh",
         scripts_dir / "keep_port_forward.sh",
     )
-    (scripts_dir / "ensure_statuslist_for_bdd.py").touch()
+    (scripts_dir / "check_status_list.py").touch()
     venv = root / "venv"
     (venv / "bin").mkdir(parents=True)
     (venv / "bin" / "activate").touch()

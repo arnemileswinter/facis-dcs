@@ -234,7 +234,7 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		default:
 			httpClient := &http.Client{Timeout: 10 * time.Second}
 			queryStatus := func() (string, error) {
-				return provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
+				return provenance.ReadUnsignedStatusList(ctx, httpClient, ref.StatusListCredential, ref.Index)
 			}
 			var statusPassed bool
 			statusListStatus, statusListCheck, statusListError, statusPassed =
@@ -278,11 +278,17 @@ func evaluateLiveStatusCheck(
 	lifecycleStatus string,
 	query func() (string, error),
 ) (status, check, failure string, passed bool) {
-	status, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
+	state, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
 	if err != nil {
+		// The error itself, not a cause invented for it: it distinguishes a
+		// service that never answered from a list that was served and could not
+		// be used, and those are looked into in different places.
 		return "unavailable", "failed", err.Error(), false
 	}
-	return status, "passed", "", true
+	// "passed" says the lookup ran and returned a reading. It does not say the
+	// reading is the contract's revocation state — the list is served unsigned,
+	// so the value carries that with it (ADR-34).
+	return provenance.UnverifiedStatusReading(state), "passed", "", true
 }
 
 func queryStatusWithPublicationBarrier(

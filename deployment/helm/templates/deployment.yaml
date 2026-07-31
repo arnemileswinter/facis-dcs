@@ -241,10 +241,6 @@ spec:
             {{- if .Values.oid4vp.trust.enabled }}
             - name: OID4VP_TRUST_DATA_PATH
               value: {{ include "digital-contracting-service.oid4vpTrustDataPath" . | quote }}
-            {{- if .Values.oid4vp.trust.xfscAllowUnsignedFallback }}
-            - name: OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK
-              value: "true"
-            {{- end }}
             {{- if .Values.oid4vp.trust.x5cAnchorsPath }}
             - name: OID4VP_X5C_TRUST_ANCHORS_PATH
               value: {{ .Values.oid4vp.trust.x5cAnchorsPath | quote }}

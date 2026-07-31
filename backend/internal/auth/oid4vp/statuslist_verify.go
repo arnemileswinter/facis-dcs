@@ -34,6 +34,16 @@ func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 		// nothing and the status list is refused, which is every status list
 		// an x5c issuer signs.
 		cfg.X5CRoots = trustCfg.X5CTrustRoots()
+		// Neither a bundled key nor an anchor means every status list this
+		// deployment ever fetches resolves to no key and is refused. That is a
+		// misconfiguration to report at startup, not one to discover at the
+		// first login. Either alone is enough: our own issuers publish by
+		// certificate and bundle no key at all (ADR-34).
+		if len(cfg.Issuers) == 0 && cfg.X5CRoots == nil {
+			return fmt.Errorf(
+				"status list trust config: no issuer carries a bundled JWKS and no x5c trust anchors are configured, " +
+					"so no status list could be verified")
+		}
 		trust = cfg
 	}
 	statusListVerifier = handler.NewVerifier(trust, handler.Options{})

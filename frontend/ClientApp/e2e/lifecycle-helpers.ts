@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
-import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_STATUSLIST_URL } from '../playwright.config'
+import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
 import type { Browser, Page } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -541,7 +541,7 @@ async function startCeremonyAndPrepareDocument(
     cwd: repoRoot,
     env: {
       ...process.env,
-      STATUSLIST_SERVICE_URL: E2E_STATUSLIST_URL,
+      ISSUER_BASE_URL: E2E_ISSUER_BASE_URL,
       BDD_DCS_BASE_URL: E2E_API_BASE,
       E2E_SIGNATORY: E2E_SIGNATORY_NAME,
     },

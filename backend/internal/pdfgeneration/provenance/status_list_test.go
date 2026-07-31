@@ -200,10 +200,10 @@ func TestStatusListURI_Format(t *testing.T) {
 	assert.Equal(t, "http://statuslist:8080/v1/tenants/acme/status/1", uri)
 }
 
-// TestQueryStatusListStatus_ActiveBitNotSet verifies "active" is returned when
+// TestReadUnsignedStatusList_ActiveBitNotSet verifies "active" is returned when
 // the bitstring bit at the contract's index is 0, against the ACTUAL XFSC
 // statuslist-service response shape ({"list", "listId", "tenantId"}, gzip, LSB).
-func TestQueryStatusListStatus_ActiveBitNotSet(t *testing.T) {
+func TestReadUnsignedStatusList_ActiveBitNotSet(t *testing.T) {
 	const idx = uint32(4711)
 
 	body := makeXFSCStatusListResponse(int(listSize/8), idx, false /* not revoked */)
@@ -216,15 +216,15 @@ func TestQueryStatusListStatus_ActiveBitNotSet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, err := QueryStatusListStatus(context.Background(), srv.Client(), srv.URL, idx)
+	status, err := ReadUnsignedStatusList(context.Background(), srv.Client(), srv.URL, idx)
 	require.NoError(t, err)
 	assert.Equal(t, "active", status)
 }
 
-// TestQueryStatusListStatus_RevokedBitSet verifies "revoked" is returned when
+// TestReadUnsignedStatusList_RevokedBitSet verifies "revoked" is returned when
 // the bit at the contract's index is 1, against the ACTUAL XFSC
 // statuslist-service response shape ({"list", "listId", "tenantId"}, gzip, LSB).
-func TestQueryStatusListStatus_RevokedBitSet(t *testing.T) {
+func TestReadUnsignedStatusList_RevokedBitSet(t *testing.T) {
 	const idx = uint32(88123)
 
 	body := makeXFSCStatusListResponse(int(listSize/8), idx, true /* revoked */)
@@ -237,27 +237,27 @@ func TestQueryStatusListStatus_RevokedBitSet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, err := QueryStatusListStatus(context.Background(), srv.Client(), srv.URL, idx)
+	status, err := ReadUnsignedStatusList(context.Background(), srv.Client(), srv.URL, idx)
 	require.NoError(t, err)
 	assert.Equal(t, "revoked", status)
 }
 
-// TestQueryStatusListStatus_HTTPErrorPropagates verifies that a non-200 response
+// TestReadUnsignedStatusList_HTTPErrorPropagates verifies that a non-200 response
 // from the status list service is returned as an error (hard-fail policy).
-func TestQueryStatusListStatus_HTTPErrorPropagates(t *testing.T) {
+func TestReadUnsignedStatusList_HTTPErrorPropagates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 
-	_, err := QueryStatusListStatus(context.Background(), srv.Client(), srv.URL, 0)
+	_, err := ReadUnsignedStatusList(context.Background(), srv.Client(), srv.URL, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "503")
 }
 
-// TestQueryStatusListStatus_MissingEncodedList verifies that a response with
+// TestReadUnsignedStatusList_MissingEncodedList verifies that a response with
 // neither "list" nor credentialSubject.encodedList returns an error.
-func TestQueryStatusListStatus_MissingEncodedList(t *testing.T) {
+func TestReadUnsignedStatusList_MissingEncodedList(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, err := w.Write([]byte(`{"credentialSubject":{}}`))
 		if err != nil {
@@ -266,7 +266,33 @@ func TestQueryStatusListStatus_MissingEncodedList(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := QueryStatusListStatus(context.Background(), srv.Client(), srv.URL, 0)
+	_, err := ReadUnsignedStatusList(context.Background(), srv.Client(), srv.URL, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no list field")
+}
+
+// A reading off an unsigned list is never rendered as the bare word a reader
+// takes for an established verdict. The list carries no signature, so
+// "revoked"/"active" is what answered the URL and nothing more (ADR-34); both
+// report writers render through this one helper so they cannot disagree about
+// how much the reading is worth.
+func TestUnverifiedStatusReadingDoesNotStateTheReadingAsFact(t *testing.T) {
+	for _, state := range []string{"active", "revoked"} {
+		rendered := UnverifiedStatusReading(state)
+		assert.NotEqual(t, state, rendered,
+			"a bare %q reads as an established revocation state", state)
+		assert.Contains(t, rendered, state, "the reading itself must still be legible")
+		assert.Contains(t, rendered, "UNVERIFIED")
+	}
+}
+
+// The failure named is the one that occurred. Calling every failure an
+// unreachable service asserted a cause that was never established and pointed
+// whoever read the report at the network, when the list had been served in full
+// and was simply unusable.
+func TestUnverifiedStatusUnavailableNamesTheFailureItHad(t *testing.T) {
+	rendered := UnverifiedStatusUnavailable(fmt.Errorf("index 9 out of range for bitstring of 1 bytes"))
+	assert.Contains(t, rendered, "UNKNOWN")
+	assert.Contains(t, rendered, "index 9 out of range")
+	assert.NotContains(t, strings.ToLower(rendered), "unreachable")
 }

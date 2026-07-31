@@ -446,3 +446,62 @@ func TestIssuerAuthority(t *testing.T) {
 		}
 	}
 }
+
+// The ORCE issuer flow mints ONE leaf and signs two things with it: the Power
+// of Attorney credential, whose `iss` is the issuer's did:web identifier, and
+// the status list that credential points at, whose `iss` is the issuer's base
+// URL. Both must be identifiable from the same certificate, or ADR-34's
+// arrangement — same issuer, same key, identified the same way — falls apart at
+// one of the two.
+//
+// The dev stack makes it awkward on purpose: the issuer is reached on a
+// NodePort, so its authority carries a port, which arrives percent-encoded in
+// the DID and decodes to host:port. No DNS SAN can equal that, and the http
+// base URL is not the DID either, so both identifiers are carried explicitly
+// (deployment/helm/charts/orce/flows-issuer/flow-pki.json ensureIssuerCertFor
+// writes URI:<did>, URI:<baseUrl>, DNS:<hostname>).
+func TestLeafIdentifiesIssuer_ORCEIssuerLeafNamesBothItsIdentifiers(t *testing.T) {
+	const (
+		baseURL  = "http://localhost:30181"
+		issuerID = "did:web:localhost%3A30181"
+		hostname = "localhost"
+	)
+	caKey, caCert := mintSelfSignedCA(t, "FACIS Demo Root CA")
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+	didURI, err := url.Parse(issuerID)
+	if err != nil {
+		t.Fatalf("parse did uri: %v", err)
+	}
+	baseURI, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("parse base url: %v", err)
+	}
+	leaf := mintTestCertFrom(t, &x509.Certificate{
+		Subject:               pkix.Name{CommonName: "FACIS Demo Issuer"},
+		URIs:                  []*url.URL{didURI, baseURI},
+		DNSNames:              []string{hostname},
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}, &leafKey.PublicKey, caKey, caCert)
+
+	// The percent-encoded port has to survive parsing and re-serialisation, or
+	// the SAN the issuer wrote is not the string compared against `iss`.
+	for _, iss := range []string{issuerID, baseURL} {
+		binding, err := leafIdentifiesIssuer(leaf, iss)
+		if err != nil {
+			t.Fatalf("leaf must identify %q: %v", iss, err)
+		}
+		if binding != bindingURI {
+			t.Errorf("issuer %q was identified by %v, not by the URI SAN the flow writes", iss, binding)
+		}
+	}
+
+	// The same issuer published on a different port is a different issuer, and
+	// the shared DNS name must not make one speak for the other.
+	if _, err := leafIdentifiesIssuer(leaf, "did:web:localhost%3A18080:issuer"); err == nil {
+		t.Error("a leaf minted for one base URL must not identify the issuer at another")
+	}
+}

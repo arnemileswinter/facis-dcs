@@ -113,7 +113,7 @@ func IssueLifecycleVC(ctx context.Context, signer VCSigner, issuerDID string, st
 //
 // The type names a token status list because that is what the URI serves: the
 // XFSC statuslist-service answers {tenantId, listId, list} with an LSB-first
-// gzip bitstring (QueryStatusListStatus). Declaring the W3C
+// gzip bitstring (ReadUnsignedStatusList). Declaring the W3C
 // BitstringStatusListEntry told a verifier to expect a
 // BitstringStatusListCredential with credentialSubject.encodedList and MSB-first
 // bits — a document that is not there, and a bit order that reads a different

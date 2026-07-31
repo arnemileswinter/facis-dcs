@@ -21,6 +21,10 @@ ARG_BDD ?=
 ARG_BDD_JUNIT ?= --junit --junit-directory $(REPORTS_ABS)/junit
 K8S_NAMESPACE ?= default
 HELM_RELEASE ?= dcs
+# The credential issuer is a release of its own, from the same chart and the
+# same values base production installs it with (ADR-34,
+# deployment/helm/values.issuer-base.yml).
+ISSUER_RELEASE ?= dcs-issuer
 DCS_SERVICE ?= $(HELM_RELEASE)-digital-contracting-service
 DCS_DEPLOYMENT ?= $(DCS_SERVICE)
 LOCAL_FORWARD_PORT ?= 18991
@@ -313,6 +317,21 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@# time: a prior version wired only to cluster creation was observed to
 	@# not reliably stick.
 	@$(MAKE) kind_coredns_rewrite
+	@# The credential issuer, after the release above because its Ingress
+	@# references a Traefik Middleware and the Traefik CRDs arrive with that
+	@# release. Same chart, same values base and same release name production
+	@# uses, published at the same <origin>/issuer — a signed status list behind
+	@# a stripped path prefix is what broke in production, and it can only fail
+	@# here if here serves the same shape (ADR-34).
+	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(ISSUER_RELEASE)" \
+		bash "$(ORCE_PERSISTENCE_SCRIPT)"
+	@"$(HELM_BIN)" upgrade --install "$(ISSUER_RELEASE)" "$(HELM_CHART_PATH)/charts/orce" \
+		--namespace "$(KIND_NAMESPACE)" \
+		--timeout "$(HELM_TIMEOUT)" \
+		--values "$(HELM_CHART_PATH)/values.issuer-base.yml" \
+		--values "$(HELM_CHART_PATH)/values.issuer.bdd.yml"
+	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
+		deployment/"$(ISSUER_RELEASE)"-orce --timeout "$(HELM_TIMEOUT)"
 	@# The image tag is static, so an unchanged manifest never rolls the pods
 	@# even though kind load just replaced the node image — restart both
 	@# freshly-built workloads so the run tests the image that was built.
@@ -425,6 +444,7 @@ kind_deploy_b: kind_deploy
 	fi
 
 kind_uninstall:
+	@"$(HELM_BIN)" uninstall "$(ISSUER_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE_B)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 	@"$(HELM_BIN)" uninstall "$(HELM_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true
 

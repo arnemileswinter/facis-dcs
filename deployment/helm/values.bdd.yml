@@ -91,9 +91,11 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
-    # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
-    # issuer" scenarios) verifies against this baked-in dev cert.
+    # Baked-in bundle of the roots this stack verifies chains to: the dev PID
+    # issuer's own certificate (signing_acceptance_hardening.feature's "trusted
+    # dev issuer" scenarios) and the root the dev ORCE credential issuer is
+    # handed rather than generating one, which is what the signed status list a
+    # login credential names chains to.
     x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
@@ -309,7 +311,6 @@ statuslistService:
   bddListInit:
     enabled: true
     tenantIDs:
-      - credential
       - c2pa
       # Instance B shares this service but not this instance's database, and a
       # revocation entry is allocated out of that database (migration 20260734).
@@ -321,9 +322,11 @@ statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # The backend immediately dereferences this exact seeded credential list;
-  # Pod readiness therefore requires the full proxy→Ingress→list route.
-  readinessPath: "/statuslist/v1/tenants/credential/status/1"
+  # A list this service actually serves, so Pod readiness requires the full
+  # proxy→Ingress→list route. Login credentials no longer live here — they name
+  # the ORCE issuer's own signed list — so the "credential" tenant is gone and
+  # the C2PA one this instance allocates from takes its place.
+  readinessPath: "/statuslist/v1/tenants/c2pa/status/1"
 
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:
