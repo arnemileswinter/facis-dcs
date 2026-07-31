@@ -527,6 +527,47 @@ func TestPinSemanticBundleLeavesUndeclaredLibrariesOutOfTheBundle(t *testing.T) 
 	require.NotContains(t, effective, VersionedShapeRef{Name: "e2e-erasure-shape-1785499278293", Version: 1})
 }
 
+// A template that names a library without a version delegates the choice to
+// the hub the contract is created on, so the contract pins whichever version
+// is active there at that moment. That is what makes an activation change the
+// library a NEW contract is judged against while every contract already
+// produced keeps the version it was pinned to.
+func TestPinSemanticBundleTakesADeclaredLibrarysActiveVersion(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id": "did:web:example.test:contract",
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library"},
+		},
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+		},
+		[]string{"https://dcs.test/semantic/shapes/customer-library?version=7"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Equal(t, []any{
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		map[string]any{"@id": "https://dcs.test/semantic/shapes/customer-library?version=7"},
+	}, document["sh:shapesGraph"])
+
+	effective, err := EffectiveShapeRefs(document)
+	require.NoError(t, err)
+	require.Equal(t, []VersionedShapeRef{
+		{Name: "facis-dcs", Version: 4},
+		{Name: "clause-catalog", Version: 2},
+		{Name: "customer-library", Version: 7},
+	}, effective)
+}
+
 // A client that rebuilds the contract document from its editor state drops
 // every property it does not model, and the Semantic Hub pin is one of them —
 // which left the contract unable to say what it had been validated against.
