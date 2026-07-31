@@ -29,11 +29,11 @@ import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
+import { declaredPartyRoles, type ParticipantSelection } from '@/utils/participant-selection'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
-import type { ParticipantSelection } from '@/utils/participant-selection'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -88,7 +88,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft).filter((tab) => tab.id !== 'audit'),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content']),
 )
 
 const story = computed(() =>
@@ -166,13 +166,15 @@ async function verifyContractDetails(): Promise<boolean> {
   return false
 }
 
-const createContract = async ({ counterparty }: ParticipantSelection) => {
+const createContract = async ({ counterparty, originatorRole, parties }: ParticipantSelection) => {
   isSubmitting.value = true
   try {
     if (selectedTemplate.value) {
       const response = await contractWorkflowService.create({
         template_did: selectedTemplate.value.did,
         counterparty,
+        originator_role: originatorRole,
+        parties,
       })
       did.value = response.did
       if (selectedParentContractDid.value) {
@@ -341,6 +343,9 @@ function applyContractDataToDraft(contractData?: unknown) {
   }
   verificationResult.value = null
 }
+
+// The roles the chosen template declares, offered as the originator's own.
+const templatePartyRoles = computed(() => declaredPartyRoles(selectedTemplate.value?.template_data))
 
 const scrollStore = useScrollStore()
 
@@ -516,6 +521,7 @@ onBeforeRouteLeave(() => {
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <ParticipantSelectionDialog
           v-if="!isEditMode"
+          :party-roles="templatePartyRoles"
           :disabled="isSubmitting || !canSubmit"
           class="btn flex-1 btn-primary"
           @submit="createContract"

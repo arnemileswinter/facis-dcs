@@ -478,9 +478,14 @@ var _ = Service("SignatureManagement", func() {
 		Description("check contract integrity & envelope.")
 		Meta("dcs:requirements", "DCS-IR-SM-02")
 
+		// Read-only integrity check over the envelope retrieve_by_id already
+		// hands these roles; the Secure Contract Viewer offers it as step 2 to
+		// signer and manager alike.
 		Security(JWTAuth, func() {
 			Scope("Contract Signer")
 			Scope("Sys. Contract Signer")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
 		})
 
 		Payload(SMContractVerifyRequest)
@@ -793,9 +798,13 @@ var _ = Service("SignatureManagement", func() {
 		Description("validate the contract's applied signature(s) and return any compliance findings.")
 		Meta("dcs:requirements", "DCS-IR-SM-04", "DCS-IR-SM-05")
 
+		// The signer closes the Secure Contract Viewer wizard on the signature
+		// they just applied; validation is a read-only check.
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Contract Signer")
+			Scope("Sys. Contract Signer")
 		})
 
 		Payload(SMContractValidateRequest)

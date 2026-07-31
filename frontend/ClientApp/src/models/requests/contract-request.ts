@@ -9,6 +9,12 @@ export interface ContractCreateRequest {
   /** The counterparty DCS this contract is offered to and negotiated with (a
    *  `did:web` peer, ADR-13). Omitted for a purely local contract. */
   counterparty?: string
+  /** The contractual role the creating organization declares for itself; binds
+   *  the origin DID to that role's party node in the contract's ODRL rules. */
+  originator_role?: string
+  /** Organizations authorized to read the contract, by legal name. Read
+   *  authorization only — not the ODRL rule parties. */
+  parties?: string[]
 }
 
 export interface ContractUpdateRequest {
@@ -101,9 +107,18 @@ export interface ContractRejectRequest {
   reason: string
 }
 
-export interface ContractStoreRequest {
+export interface ContractWithdrawRequest {
   did: string
   updated_at: string
+}
+
+export interface ContractRenewRequest {
+  did: string
+  updated_at: string
+  new_start_date?: string
+  new_exp_date?: string
+  new_exp_policy?: ExpirationPolicy
+  new_exp_notice_period?: number
 }
 
 export interface ContractTerminateRequest {

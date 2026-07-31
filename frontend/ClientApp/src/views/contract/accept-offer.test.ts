@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { useAuthStore } from '@/stores/auth-store'
 import NegotiateContractView from './NegotiateContractView.vue'
+import type { UserRole } from '@/types/user-role'
 
 /**
  * The counterparty's route into a received offer. Before this, the only forward
@@ -55,11 +56,11 @@ vi.mock('@/services/contract-workflow-service', () => ({
   },
 }))
 
-async function mountOfferedContract() {
+async function mountOfferedContract(roles: UserRole[] = ['CONTRACT_NEGOTIATOR']) {
   const pinia = createPinia()
   const wrapper = shallowMount(NegotiateContractView, { global: { plugins: [pinia] } })
   setActivePinia(pinia)
-  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles: [] }
+  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles }
   await nextTick()
   await nextTick()
   await nextTick()
@@ -98,6 +99,25 @@ describe('accepting an inbound offer', () => {
       updated_at: '2026-07-31T00:00:00Z',
       accepted_by: 'did:web:example.com:org',
     })
+  })
+
+  // design accept_offer scopes Contract Creator, Contract Negotiator and
+  // Contract Manager — the responder instance drives its inbound contracts as
+  // the last of those and holds neither of the first two.
+  it.each<UserRole>(['CONTRACT_NEGOTIATOR', 'CONTRACT_CREATOR', 'CONTRACT_MANAGER'])(
+    'enables Accept offer for %s',
+    async (role) => {
+      const wrapper = await mountOfferedContract([role])
+
+      expect(buttonLabelled(wrapper, 'Accept offer')?.attributes('disabled')).toBeUndefined()
+    },
+  )
+
+  it('does not offer Accept to a role the endpoint refuses', async () => {
+    const wrapper = await mountOfferedContract(['CONTRACT_OBSERVER'])
+
+    expect(buttonLabelled(wrapper, 'Accept offer')?.attributes('disabled')).toBeDefined()
+    expect(buttonLabelled(wrapper, 'Change Proposal')?.attributes('disabled')).toBeDefined()
   })
 
   it('does not offer Submit before the offer has been accepted', async () => {

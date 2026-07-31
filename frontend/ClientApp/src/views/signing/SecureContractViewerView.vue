@@ -94,6 +94,11 @@ function stepState(id: StepId): 'done' | 'active' | 'pending' {
 }
 
 const signed = computed(() => envelope.value?.status === 'SIGNED')
+
+// design/signature_management.go verify() and validate() both scope the signer
+// and the manager. The observer reaches this page from the signing list and
+// reads the envelope, but neither check is offered to it.
+const mayCheck = computed(() => isSigner.value || isManager.value)
 const executed = computed(() => done.value.validate && signed.value)
 
 // The signature field to sign is the participating party's slot (dcs:signatoryName
@@ -424,7 +429,7 @@ async function validate() {
               </ul>
               <div v-if="stepError.verify" class="text-xs text-error">{{ stepError.verify }}</div>
               <div class="card-actions">
-                <button class="btn btn-sm btn-primary" :disabled="busy" @click="verify">
+                <button class="btn btn-sm btn-primary" :disabled="busy || !mayCheck" @click="verify">
                   <span v-if="busy && currentStep === 'verify'" class="loading loading-xs loading-spinner" />
                   {{ done.verify ? 'Re-verify' : 'Verify' }}
                 </button>
@@ -527,7 +532,7 @@ async function validate() {
               </p>
               <div v-if="stepError.validate" class="text-xs text-error">{{ stepError.validate }}</div>
               <div class="card-actions">
-                <button class="btn btn-sm btn-primary" :disabled="busy || !signed" @click="validate">
+                <button class="btn btn-sm btn-primary" :disabled="busy || !signed || !mayCheck" @click="validate">
                   <span v-if="busy && currentStep === 'validate'" class="loading loading-xs loading-spinner" />
                   {{ done.validate ? 'Re-validate' : 'Validate' }}
                 </button>
@@ -538,6 +543,10 @@ async function validate() {
 
         <p v-if="isManager && !isSigner" class="mt-4 text-xs text-base-content/70">
           Manager view: retrieval, verification and validation are available; signing is performed by a Signer.
+        </p>
+        <p v-if="!mayCheck" class="mt-4 text-xs text-base-content/70">
+          Read-only view: the contract and its signature envelope are shown; verification, validation and signing are
+          performed by a Signer or a Contract Manager.
         </p>
       </section>
     </div>

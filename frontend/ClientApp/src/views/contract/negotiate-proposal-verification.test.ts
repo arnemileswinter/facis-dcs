@@ -87,7 +87,7 @@ async function mountNegotiateView() {
   const pinia = createPinia()
   const wrapper = shallowMount(NegotiateContractView, { global: { plugins: [pinia] } })
   setActivePinia(pinia)
-  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles: [] }
+  useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles: ['CONTRACT_NEGOTIATOR'] }
   await nextTick()
   await nextTick()
   await nextTick()

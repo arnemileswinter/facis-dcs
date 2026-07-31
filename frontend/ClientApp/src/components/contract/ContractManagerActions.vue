@@ -53,10 +53,15 @@ const canOffer = computed(() => {
 // OFFERED this is therefore the sole route into the negotiate view and its
 // Accept offer / Change Proposal actions. From NEGOTIATION the task row in the
 // tab is the discoverable route and this stays as a convenience.
+// Contract Manager is included because the counterparty drives its inbound
+// contracts through that role (design accept_offer/negotiate both scope it);
+// on a pure responder instance no Creator or Negotiator role is granted, and
+// this button is that instance's only way into a received offer.
 const canNegotiate = computed(() => {
   const state = props.contract.state
   return (
-    (isNegotiator.value || isCreator.value) && (state === ContractState.offered || state === ContractState.negotiation)
+    (isNegotiator.value || isCreator.value || isManager.value) &&
+    (state === ContractState.offered || state === ContractState.negotiation)
   )
 })
 
@@ -88,6 +93,32 @@ const offerBlockedReason = computed(() => {
 
 const canTerminate = computed(() => {
   return isManager.value && props.contract.state !== ContractState.terminated
+})
+
+// contractstate.Transitions allows EventWithdraw from exactly these four; it is
+// refused once APPROVED. design withdraw() scopes Contract Creator.
+const withdrawableStates: ContractState[] = [
+  ContractState.offered,
+  ContractState.negotiation,
+  ContractState.submitted,
+  ContractState.reviewed,
+]
+
+const canWithdraw = computed(() => {
+  return isCreator.value && withdrawableStates.includes(props.contract.state)
+})
+
+// command/renew.go renewableStates; design renew() scopes Contract Manager.
+const renewableStates: ContractState[] = [
+  ContractState.approved,
+  ContractState.signed,
+  ContractState.active,
+  ContractState.terminated,
+  ContractState.expired,
+]
+
+const canRenew = computed(() => {
+  return isManager.value && renewableStates.includes(props.contract.state)
 })
 
 // SIGNED and ACTIVE both, because deployment is a Contract Manager action and
@@ -140,6 +171,50 @@ const deploy = async () => {
     reportActionError(err, 'Deploy contract')
   } finally {
     deploying.value = false
+  }
+}
+
+const withdrawing = ref(false)
+
+const withdraw = async () => {
+  if (!canWithdraw.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message: 'Withdraw this contract from the counterparty? It cannot be taken forward afterwards.',
+  })
+  if (isCanceled) return
+  withdrawing.value = true
+  try {
+    await contractWorkflowService.withdraw({
+      did: props.contract.did,
+      updated_at: props.contract.updated_at,
+    })
+    await router.push({ name: ROUTES.CONTRACTS.LIST })
+  } catch (err) {
+    reportActionError(err, 'Withdraw contract')
+  } finally {
+    withdrawing.value = false
+  }
+}
+
+const renewing = ref(false)
+
+const renew = async () => {
+  if (!canRenew.value || !confirmationModal.value) return
+  const { isCanceled } = await confirmationModal.value.reveal({
+    message: 'Create a renewal contract from this one? The original is left untouched.',
+  })
+  if (isCanceled) return
+  renewing.value = true
+  try {
+    const response = await contractWorkflowService.renew({
+      did: props.contract.did,
+      updated_at: props.contract.updated_at,
+    })
+    await router.push({ name: ROUTES.CONTRACTS.VIEW, params: { did: response.did } })
+  } catch (err) {
+    reportActionError(err, 'Renew contract')
+  } finally {
+    renewing.value = false
   }
 }
 
@@ -196,6 +271,24 @@ const terminate = async () => {
     @click="openNegotiation"
   >
     {{ negotiateLabel }}
+  </button>
+  <button
+    v-if="canRenew"
+    data-testid="renew-contract"
+    :class="[filteredClass, 'btn-primary']"
+    :disabled="renewing"
+    @click="renew"
+  >
+    {{ renewing ? 'Renewing…' : 'Renew' }}
+  </button>
+  <button
+    v-if="canWithdraw"
+    data-testid="withdraw-contract"
+    :class="[filteredClass, 'btn-error']"
+    :disabled="withdrawing"
+    @click="withdraw"
+  >
+    {{ withdrawing ? 'Withdrawing…' : 'Withdraw' }}
   </button>
   <button v-if="canTerminate" :class="[filteredClass, 'btn-error']" @click="terminate">Terminate</button>
   <ConfirmationModal ref="confirmation-modal" />

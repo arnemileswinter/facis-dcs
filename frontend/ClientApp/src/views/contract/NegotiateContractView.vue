@@ -57,7 +57,7 @@ const contractContentValuesStore = useContractContentValuesStore()
 
 const isSubmitting = ref(false)
 
-const { isCreator, isReviewer } = useContractPermissions()
+const { isCreator, isReviewer, isManager, isNegotiator } = useContractPermissions()
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
@@ -66,12 +66,17 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 
 const isAuditingAuthorized = computed(
   () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER', 'SYSTEM_ADMINISTRATOR'] as UserRole[]).some((role) =>
-      authStore.user?.roles?.includes(role),
-    ) ?? false,
+    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
-const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
+const tabs = computed(() =>
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'diff',
+    'audit',
+  ]),
+)
 
 const story = computed(() =>
   contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
@@ -621,7 +626,11 @@ const exportPDF = async () => {
         <div class="divider"></div>
         <div class="mx-auto max-w-4xl p-6">
           <div class="text-lg">Active negotiations</div>
-          <NegotiationList :contract="contract" @selected-negotiation="handleSelectedNegotiation" />
+          <NegotiationList
+            :contract="contract"
+            :local-instance-did="localInstanceDid"
+            @selected-negotiation="handleSelectedNegotiation"
+          />
         </div>
       </template>
     </div>
@@ -636,7 +645,13 @@ const exportPDF = async () => {
         <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn btn-outline md:w-36"
-          :disabled="isSavingDraft || isSubmitting || !hasChangeRequest || !!proposalComparison"
+          :disabled="
+            (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
+            isSavingDraft ||
+            isSubmitting ||
+            !hasChangeRequest ||
+            !!proposalComparison
+          "
           @click="saveNegotiationDraft"
         >
           <span v-if="isSavingDraft" class="loading loading-sm loading-spinner"></span>
@@ -656,7 +671,7 @@ const exportPDF = async () => {
           v-if="contract?.state === ContractState.offered"
           data-testid="accept-offer"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting || !!proposalComparison"
+          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting || !!proposalComparison"
           @click="acceptOffer"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -665,7 +680,12 @@ const exportPDF = async () => {
         <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"
           class="btn flex-1 btn-primary"
-          :disabled="isSubmitting || !hasChangeRequest || !!proposalComparison"
+          :disabled="
+            (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
+            isSubmitting ||
+            !hasChangeRequest ||
+            !!proposalComparison
+          "
           @click="negotiateContractChange"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -675,7 +695,11 @@ const exportPDF = async () => {
           v-if="contract?.state === ContractState.negotiation"
           class="btn flex-1 btn-primary"
           :disabled="
-            (!isCreator && !isReviewer) || isSubmitting || hasChangeRequest || hasOpenDecisions || !!proposalComparison
+            (!isCreator && !isReviewer && !isNegotiator) ||
+            isSubmitting ||
+            hasChangeRequest ||
+            hasOpenDecisions ||
+            !!proposalComparison
           "
           @click="submitContract"
         >

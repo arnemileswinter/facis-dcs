@@ -325,6 +325,12 @@ export interface DcsDocumentData {
 export interface DcsTemplateData extends DcsDocumentData {
   '@type': 'dcs:ContractTemplate'
   'dcs:metadata': DcsTemplateMetadata
+  /**
+   * The contractual roles the template declares, as party placeholder nodes
+   * whose IRIs end `#party-<role>`. Creating a contract binds the originating
+   * organization to one of them (backend command/create.go bindOriginatorParty).
+   */
+  'dcs:parties'?: unknown[]
 }
 
 export interface DcsContractData extends DcsDocumentData {

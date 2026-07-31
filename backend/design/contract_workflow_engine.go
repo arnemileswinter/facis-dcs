@@ -1381,6 +1381,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Scope("Sys. Contract Approver")
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// The contract list renders its search box for every role that can
+			// open it, and search returns a strict subset of retrieve's fields.
+			Scope("Contract Observer")
 		})
 
 		Payload(ContractSearchRequest)
