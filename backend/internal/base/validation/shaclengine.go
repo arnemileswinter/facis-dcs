@@ -69,7 +69,7 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 	var shapesTTL string
 	var shapesVersion int
 	var err error
-	refs, refsErr := effectiveShapeRefs(contract)
+	refs, refsErr := EffectiveShapeRefs(contract)
 	if refsErr != nil {
 		return nil, 0, refsErr
 	}

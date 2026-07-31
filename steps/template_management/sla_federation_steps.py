@@ -685,13 +685,16 @@ def _shapes_anchor_identity(document: dict) -> list:
     AUTHOR pinned, it is never re-anchored to the importer's own hub)."""
     anchors = hub_shapes_anchors(document)
     assert anchors, f"the document carries no hub sh:shapesGraph anchor: {document.get('sh:shapesGraph')!r}"
-    identities = []
-    for anchor in anchors:
-        parsed = urlparse(anchor)
-        name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        version = (parse_qs(parsed.query).get("version") or [None])[0]
-        identities.append((name, version))
-    return sorted(identities)
+    return sorted(_anchor_identity(anchor) for anchor in anchors)
+
+
+def _anchor_identity(anchor) -> tuple:
+    """One hub anchor's (name, version) — see _shapes_anchor_identity."""
+    assert isinstance(anchor, str) and anchor, f"not a hub anchor: {anchor!r}"
+    parsed = urlparse(anchor)
+    name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    version = (parse_qs(parsed.query).get("version") or [None])[0]
+    return name, version
 
 
 def _install_sla_domain_library(context, base_url: str):
@@ -1030,6 +1033,48 @@ def step_then_imported_field_bound_operands(context, count):
         "instance A's own template declares "
         f"{authored['field_bound_right_operands']} negotiated boundaries, not {count} — the fixture "
         "and the feature file disagree"
+    )
+
+
+@then(
+    "the SLA contract on instance {label} pins an effective bundle covering every shapes graph it declares"
+)
+def step_then_contract_bundle_covers_its_declarations(context, label):
+    """The workflow gate refuses a transition whose immutable snapshot it
+    cannot build, and it builds that snapshot from these two properties
+    (backend/internal/processauditandcompliance/workflowgate). A contract drawn
+    from an IMPORTED template is the case that breaks them apart: its template
+    declares the upstream author's shape library beside the canonical DCS graph,
+    so sh:shapesGraph is a LIST and one of its anchors is served by the
+    publishing instance. Both are compared by hub entry name and version, never
+    by URL — the host is the instance that produced the document."""
+    document = _contract_data(context, label)
+    declared = [_anchor_identity(anchor) for anchor in hub_shapes_anchors(document)]
+    assert declared, (
+        f"the SLA contract on instance {label} declares no hub sh:shapesGraph anchor: "
+        f"{document.get('sh:shapesGraph')!r}"
+    )
+    effective_anchors = document.get("dcs:effectiveShapes")
+    assert isinstance(effective_anchors, list) and effective_anchors, (
+        f"the SLA contract on instance {label} pins no dcs:effectiveShapes bundle, so no workflow "
+        f"transition can be gated: {effective_anchors!r}"
+    )
+    effective = [
+        _anchor_identity(entry.get("@id") if isinstance(entry, dict) else entry)
+        for entry in effective_anchors
+    ]
+    assert declared[0] == effective[0], (
+        f"the canonical shapes graph the contract declares first ({declared[0]}) is not the one its "
+        f"effective bundle leads with ({effective[0]}) on instance {label}"
+    )
+    missing = [anchor for anchor in declared if anchor not in effective]
+    assert not missing, (
+        f"the SLA contract on instance {label} declares shapes graphs its effective bundle does not "
+        f"carry: {missing}; bundle={effective}"
+    )
+    # The upstream author's library is the reason the array form exists.
+    assert any(name == _SLA_LIBRARY_NAME for name, _version in declared), (
+        f"the contract lost the {_SLA_LIBRARY_NAME!r} library its imported template declared: {declared}"
     )
 
 

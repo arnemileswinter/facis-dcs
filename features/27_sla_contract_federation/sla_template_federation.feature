@@ -81,12 +81,22 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
     And instance B registers the catalogued SLA template into its own repository
     And instance B drives the imported SLA template through its own approval and registers it
     And instance B instantiates an SLA contract from its imported template with instance A as counterparty
+    # A contract drawn from an imported template declares the upstream author's
+    # shape library beside the canonical DCS graph. Every consequential
+    # transition below is gated on an immutable snapshot built from that
+    # declaration and the pinned bundle, so the two have to agree before the
+    # offer is even attempted.
+    Then the SLA contract on instance B pins an effective bundle covering every shapes graph it declares
     When instance B fills every open field of the SLA contract
     Then all 13 contract fields of the SLA contract carry a value on instance B
+    And the SLA contract on instance B pins an effective bundle covering every shapes graph it declares
     When instance B offers the SLA contract to instance A
     Then the SLA contract is in state OFFERED on instance B
     And the SLA contract appears on instance A in state OFFERED within a few seconds
     And instance A's copy of the SLA contract carries the identical ODRL Offer
+    # The copy that crossed carries instance B's pin under instance B's
+    # hostname; instance A gates its own transitions on exactly that document.
+    And the SLA contract on instance A pins an effective bundle covering every shapes graph it declares
     # What crossed must be the contract that was offered, not a render of it
     # taken before the fields were filled: the PDF the peer adopts as its copy
     # carries the document (ADR-13), so an offer whose PDF lags its own

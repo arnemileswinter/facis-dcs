@@ -405,6 +405,16 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		if err != nil {
 			return nil, fmt.Errorf("contract data validation failed: %w", err)
 		}
+		stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+		if err != nil {
+			return nil, fmt.Errorf("could not read contract data: %w", err)
+		}
+		// The submitted draft replaces the document wholesale, so the bundle it
+		// was created against travels from the stored copy (CarrySemanticBundle).
+		normalizedContractData, err = validation.CarrySemanticBundle(stored.ContractData, normalizedContractData)
+		if err != nil {
+			return nil, fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
+		}
 		updateData := db.ContractUpdateData{
 			DID:          cmd.DID,
 			ContractData: normalizedContractData,
