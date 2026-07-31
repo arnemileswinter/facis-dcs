@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -29,6 +30,10 @@ import (
 // purpose first, in policy/trust.rego, not filtering here.
 type TrustConfig struct {
 	Issuers map[string]TrustIssuerEntry
+	// X5CRoots are the anchors an x5c-bearing status list's chain must verify
+	// against. An issuer that publishes its key by chain carries no bundled
+	// JWKS, so without these its status list resolves to no key at all.
+	X5CRoots *x509.CertPool
 }
 
 type TrustIssuerEntry struct {
@@ -40,9 +45,9 @@ type TrustJWKS struct {
 }
 
 // NewTrustConfig builds the key-resolution view from each issuer's raw "jwks"
-// object. Issuers whose key is resolved elsewhere (x5c, did:web, ORCE) carry
-// no bundled JWKS and are simply absent from the view; a status list they
-// signed resolves to no key and is refused.
+// object. An issuer whose key is resolved by certificate chain carries no
+// bundled JWKS and is absent from this view: its status list is verified from
+// the chain in the token's own x5c header against X5CRoots, not from here.
 func NewTrustConfig(issuerJWKS map[string]json.RawMessage) (*TrustConfig, error) {
 	cfg := TrustConfig{Issuers: map[string]TrustIssuerEntry{}}
 	for issuer, raw := range issuerJWKS {
