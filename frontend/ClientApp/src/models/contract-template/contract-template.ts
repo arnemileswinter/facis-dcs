@@ -1,5 +1,5 @@
+import type { DcsTemplateData } from '../dcs-jsonld'
 import type { ContractTemplateResponsible } from './contract-template-responsible'
-import type { DcsTemplateData } from './dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { TemplateType } from '@/types/template-type'
 

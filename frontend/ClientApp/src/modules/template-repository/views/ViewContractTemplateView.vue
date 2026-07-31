@@ -13,7 +13,7 @@ import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { useNavStore } from '@/stores/nav-store'
 import { TemplateState } from '@/types/contract-template-state'
-import type { PartialContractTemplate } from '@/models/contract-template'
+import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
 const props = defineProps<{
   did: string

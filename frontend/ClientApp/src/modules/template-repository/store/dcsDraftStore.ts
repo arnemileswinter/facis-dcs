@@ -28,9 +28,9 @@ import {
   typedFieldFill,
   type XsdDatatype,
 } from '@/models/dcs-jsonld'
-import type { SemanticConditionValue } from '@/models/contract-data'
-import type { ContractTemplate } from '@/models/contract-template'
-import type { ContractTemplateResponsible } from '@/models/contract-template-responsible'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
+import type { ContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type {
   ContractTemplateCreateRequest,
   ContractTemplateUpdateManageRequest,

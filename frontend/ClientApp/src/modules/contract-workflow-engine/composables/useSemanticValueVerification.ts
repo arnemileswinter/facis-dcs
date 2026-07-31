@@ -1,7 +1,7 @@
 import { normalizeNumberInput } from '@template-repository/utils/number-format'
 import { resolveAllowedValues } from '@template-repository/utils/value-constraint-catalog'
 import { compareXsdValues } from '@/models/xsd-order'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsBlock, DcsClause } from '@/models/dcs-jsonld'
 import type { SemanticCondition, SemanticValueConstraint } from '@template-repository/models/contract-template'
 

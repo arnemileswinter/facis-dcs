@@ -1,4 +1,4 @@
-import type { DcsContractData } from './dcs-jsonld'
+import type { DcsContractData } from '../dcs-jsonld'
 
 export type ContractData = DcsContractData
 

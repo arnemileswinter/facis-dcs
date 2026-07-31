@@ -11,7 +11,7 @@ import { findVerificationError as findValueVerificationError } from '@contract-w
 import { PREVIEW_NEWLINE_SPAN_CLASS } from './preview-classes'
 import PreviewParamInput from './PreviewParamInput.vue'
 import PreviewTextBlock from './PreviewTextBlock.vue'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsContentSegment } from '@/models/dcs-jsonld'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
