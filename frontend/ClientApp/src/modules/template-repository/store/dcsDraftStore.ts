@@ -85,8 +85,6 @@ export const useDcsDraftStore = defineStore(storeId, {
       return [
         { id: objectIri('party', 'assigner', documentId), label: 'My organization' },
         { id: objectIri('party', 'assignee', documentId), label: 'The counterparty' },
-        { id: objectIri('party', 'provider', documentId), label: 'Provider' },
-        { id: objectIri('party', 'customer', documentId), label: 'Customer' },
       ]
     },
     /** The contract/asset IRI an ODRL rule targets. */
