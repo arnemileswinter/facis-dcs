@@ -234,6 +234,13 @@ def contract_peer_provenance_url(context) -> str:
     return f"{context.base_url}/peer/contracts/provenance"
 
 
+def contract_peer_settlement_url(context) -> str:
+    """POST /peer/contracts/settlement (post_settlement,
+    backend/design/dcs_to_dcs.go): where a peer deposits its signed statement
+    that it settled a named version of a contract this instance holds."""
+    return f"{context.base_url}/peer/contracts/settlement"
+
+
 def signature_prepare_url(context) -> str:
     return f"{context.base_url}/signature/prepare"
 

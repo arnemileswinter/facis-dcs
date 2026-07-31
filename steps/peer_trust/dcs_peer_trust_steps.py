@@ -82,6 +82,7 @@ same-peer guard.
 """
 
 import base64
+import hashlib
 import jcs
 import json
 import os
@@ -101,6 +102,7 @@ from steps.support.api_client import (
     contract_peer_action_url,
     contract_peer_pdf_url,
     contract_peer_post_sync_url,
+    contract_peer_settlement_url,
     contract_retrieve_by_id_url,
     did_document_url,
     get_with_headers,
@@ -913,10 +915,38 @@ def step_when_drive_to_approved_locally(context):
 # ---------------------------------------------------------------------------
 
 
-@when("instance A applies a ceremony-backed signature to the contract")
-def step_when_sign_cross_instance(context):
-    # Reuses the real-signing pack's ceremony machinery verbatim — every URL
-    # builder reads context.base_url, which _as_instance swaps to A.
+def _run_ceremony_and_sign(context, base_url, label, field_name, given_name, await_settlement=True):
+    """Run the full signing attempt for one party of the cross-instance
+    contract and return whatever /signature/prepare or /signature/submit
+    answered — 200 or a refusal.
+
+    Shared by the two signing steps and by the settlement-gate refusal step:
+    the gate under test runs INSIDE prepare, after the ceremony and after the
+    state-machine check, so a scenario asserting the refusal has to get all the
+    way here and cannot short-cut the ceremony. Reuses the real-signing pack's
+    ceremony machinery verbatim — every URL builder reads context.base_url,
+    which _as_instance swaps to the instance being driven.
+
+    The settlement gate answers three different things under one API code, and
+    they are not waited on alike (apply.go assertCounterpartiesSettled):
+
+    - "this instance has not settled ..." is this instance's OWN bookkeeping,
+      written by the outbox handler that ships the settlement, so it trails its
+      own SUBMITTED by a moment. Always retried — a step signing right after
+      its own approve would otherwise race its own row.
+    - "no settlement from ... is held" is the peer's evidence, which travels
+      over the DCS-to-DCS channel after the peer's SUBMITTED. Retried only when
+      await_settlement is on; scenarios that ASSERT the refusal pass False, and
+      it is exactly this answer they mean.
+    - "... settled document X, this instance settled Y" is two settlements that
+      disagree, which no waiting resolves: PostSettlement refuses a divergent
+      artifact at the door, so the stored pair cannot change on its own. Never
+      retried — waiting on it would spend the whole window to report the same
+      thing.
+
+    A refused prepare persists nothing (the gate is checked before anything
+    mutates), so retrying it costs one request.
+    """
     from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
         ceremony_aud,
         _build_pid_presentation,
@@ -924,14 +954,9 @@ def step_when_sign_cross_instance(context):
         _fetch_pending_nonce,
     )
 
-    with _as_instance(context, context.base_url_a):
+    with _as_instance(context, base_url):
         c_did = context.cross_instance_contract_did
-        # The seeded signature fields name the PARTIES (create.go
-        # seedSignatureFields: one field per instance DID), and the ceremony's
-        # PoA must authorize exactly the signed party (UC-14) — so the field
-        # is A's own peer DID.
-        field_name = context.peer_did_a
-        signer_h = AuthService.get_headers_for_roles(["Contract Signer"], api_base=context.base_url_a)
+        signer_h = AuthService.get_headers_for_roles(["Contract Signer"], api_base=base_url)
         start = post_json(
             context,
             signature_request_url(context),
@@ -939,44 +964,129 @@ def step_when_sign_cross_instance(context):
             headers=signer_h,
         )
         assert start.status_code == 200, (
-            f"POST /signature/request failed on instance A: {start.status_code} {start.text}"
+            f"POST /signature/request failed on instance {label}: {start.status_code} {start.text}"
         )
         ceremony_id = start.json().get("ceremony_id")
         assert ceremony_id, f"/signature/request response has no ceremony_id: {start.text}"
 
         nonce = _fetch_pending_nonce(context, ceremony_id)
-        given_name, family_name = "PeerRevocation", "BDD-Testperson"
         presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-            given_name=given_name, family_name=family_name,
+            given_name=given_name, family_name="BDD-Testperson",
             aud=ceremony_aud(context), nonce=nonce,
         )
         completion = _complete_ceremony_via_presentation(
-            context, ceremony_id, presentation, subject_did, given_name, family_name,
+            context, ceremony_id, presentation, subject_did, given_name, "BDD-Testperson",
             poa_organization=field_name, nonce=nonce,
         )
         assert completion.status_code == 200, (
-            f"ceremony presentation failed on instance A: {completion.status_code} {completion.text}"
+            f"ceremony presentation failed on instance {label}: {completion.status_code} {completion.text}"
         )
 
-        manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=context.base_url_a)
-        retrieve = get_with_headers(
-            context, contract_retrieve_by_id_url(context, c_did), headers=manager_h
-        )
-        assert retrieve.status_code == 200, retrieve.text
-        apply_resp = wallet_sign(
-            context,
-            c_did,
-            signer_did=subject_did,
-            signatory=given_name,
-            field_name=field_name,
-            credential_type="AES",
-            headers=signer_h,
-            ceremony_id=ceremony_id,
-        )
-        assert apply_resp.status_code == 200, (
-            f"wallet signing failed on instance A: {apply_resp.status_code} {apply_resp.text}"
-        )
-        context.requests_response = apply_resp
+        deadline = time.monotonic() + 90
+        while True:
+            resp = wallet_sign(
+                context,
+                c_did,
+                signer_did=subject_did,
+                signatory=given_name,
+                field_name=field_name,
+                credential_type="AES",
+                headers=signer_h,
+                ceremony_id=ceremony_id,
+            )
+            gate_refusal = resp.status_code == 400 and "counterparty_not_settled" in resp.text
+            waiting_for_own = gate_refusal and "this instance has not settled" in resp.text
+            waiting_for_peer = gate_refusal and "no settlement from" in resp.text
+            keep_waiting = waiting_for_own or (await_settlement and waiting_for_peer)
+            if not keep_waiting or time.monotonic() > deadline:
+                return resp
+            time.sleep(3)
+
+
+@when("instance A applies a ceremony-backed signature to the contract")
+def step_when_sign_cross_instance(context):
+    # The seeded signature fields name the PARTIES (create.go
+    # seedSignatureFields: one field per instance DID), and the ceremony's PoA
+    # must authorize exactly the signed party (UC-14) — so the field is A's own
+    # peer DID.
+    apply_resp = _run_ceremony_and_sign(
+        context, context.base_url_a, "A", context.peer_did_a, "PeerRevocation",
+    )
+    assert apply_resp.status_code == 200, (
+        f"wallet signing failed on instance A: {apply_resp.status_code} {apply_resp.text}"
+    )
+    context.requests_response = apply_resp
+
+
+@when("instance {label} attempts a ceremony-backed signature on the contract")
+def step_when_attempt_signature(context, label):
+    """Attempts, not asserts: the signing party is complete on its own side —
+    APPROVED, a verified ceremony, a PoA for its own party — so whether this is
+    granted is the counterparty's business, which is what the Then step reads.
+    The wait for the COUNTERPARTY's settlement is off here (that answer is the
+    point of the attempt); the wait for this instance's own settlement row is
+    not, so the refusal read below is about the peer and not about this
+    instance's outbox still catching up with its own approve."""
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    field_name = context.peer_did_a if label == "A" else context.peer_did_b
+    given_name = "PeerSettlementGate" if label == "A" else "PeerSettlementGateB"
+    context.requests_response = _run_ceremony_and_sign(
+        context, base_url, label, field_name, given_name, await_settlement=False,
+    )
+
+
+@then("the signature attempt on instance {label} is refused because the counterparty has not settled")
+def step_then_signature_refused_counterparty_not_settled(context, label):
+    """The mutual-settlement gate, asserted positively: local APPROVED is not
+    enough to sign a federated contract, because APPROVED is this instance's
+    own intrinsic state (ADR-13) and says nothing about the counterparty. The
+    refusal must be the gate's OWN typed error — counterparty_not_settled is
+    the code the frontend routes on ("waiting for the counterparty", not "you
+    may not sign") — so matching the code is what makes this scenario fail if
+    the refusal ever comes from somewhere else.
+
+    The refusal must also NAME THE COUNTERPARTY. The same code covers "this
+    instance has not settled yet", which is only this instance's outbox
+    trailing its own approve — a scenario satisfied by that would pass without
+    the counterparty ever being consulted."""
+    counterparty = context.peer_did_b if label == "A" else context.peer_did_a
+    resp = context.requests_response
+    assert resp.status_code == 400, (
+        f"Expected instance {label} to refuse signing a version its counterparty has not settled, "
+        f"got {resp.status_code}: {resp.text}"
+    )
+    assert "counterparty_not_settled" in resp.text, (
+        f"Expected the refusal to be the settlement gate's own error code, got: {resp.text}"
+    )
+    assert counterparty in resp.text, (
+        f"Expected the refusal to name the missing settlement of {counterparty}, not this instance's "
+        f"own: {resp.text}"
+    )
+
+
+@then("instance {label} holds an applied signature for its own party field")
+def step_then_instance_holds_own_signature(context, label):
+    """What the gate lifting looks like: the same signer, on the same
+    contract, in the same state, now records a signature — so the refusal
+    before it was about the counterparty's settlement and nothing else."""
+    base_url = context.base_url_a if label == "A" else context.base_url_b
+    field_name = context.peer_did_a if label == "A" else context.peer_did_b
+    manager_h = AuthService.get_headers_for_roles(["Contract Manager"], api_base=base_url)
+    view = _requests.get(
+        f"{base_url}/signature/view",
+        params={"did": context.cross_instance_contract_did},
+        headers=manager_h,
+        timeout=context.http_timeout_seconds,
+    )
+    assert view.status_code == 200, f"signature view failed on instance {label}: {view.status_code} {view.text}"
+    applied = [
+        signature for signature in (view.json().get("signatures") or [])
+        if signature.get("field_name") == field_name and signature.get("status") != "REVOKED"
+    ]
+    assert applied, (
+        f"Expected instance {label} to hold its own applied signature for {field_name} once the "
+        f"counterparty had settled, got: {view.json()}"
+    )
 
 
 @when("instance A revokes the applied signature of the cross-instance contract")
@@ -1197,6 +1307,10 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
+def _b64url_decode(segment: str) -> bytes:
+    return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+
+
 def _canonical_jades_payload(contract_did: str, contract_version: int, contract_document: dict) -> bytes:
     """The canonical contract representation the backend signs
     (internal/base/jades.BuildContractPayload): RFC 8785 JSON
@@ -1229,16 +1343,50 @@ def _der_to_jose(der: bytes) -> bytes:
 
 
 def _own_x5c(context):
+    """The certificate chain of the verification method that publishes the key
+    _sign_secret_value_with_dev_key actually signs with.
+
+    Which method that is gets PROBED, not assumed by position: a did.json
+    publishes several keys (instance signer, credential issuance, key
+    agreement) in no promised order, and the backend pairs its own signer with
+    a method by matching the key rather than by index too
+    (identity.methodHoldingKey). A chain taken from any other method would make
+    every JAdES built here fail signature verification — a rejection that looks
+    like the one under test but is the harness's."""
+    from cryptography.hazmat.primitives import hashes  # noqa: PLC0415
+    from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
+
+    _real_did, token_dir = _own_identity(context)
     did_url = did_document_url(context.base_url)
     resp = _requests.get(did_url, timeout=context.http_timeout_seconds)
     assert resp.status_code == 200, f"could not fetch own did.json: {resp.status_code} {resp.text}"
     methods = resp.json().get("verificationMethod") or []
     assert methods, "own did.json has no verificationMethod"
-    x5c = (methods[0].get("publicKeyJwk") or {}).get("x5c") or []
-    if isinstance(x5c, str):
-        x5c = [x5c]
-    assert x5c, "own did.json carries no x5c certificate chain"
-    return x5c
+
+    probe = str(uuid.uuid4())
+    signature = _sign_secret_value_with_dev_key(token_dir, probe)
+    for method in methods:
+        jwk = method.get("publicKeyJwk") or {}
+        x5c = jwk.get("x5c") or []
+        if isinstance(x5c, str):
+            x5c = [x5c]
+        if not x5c or not jwk.get("x") or not jwk.get("y"):
+            continue
+        numbers = ec.EllipticCurvePublicNumbers(
+            int.from_bytes(_b64url_decode(jwk["x"]), "big"),
+            int.from_bytes(_b64url_decode(jwk["y"]), "big"),
+            ec.SECP256R1(),
+        )
+        try:
+            numbers.public_key().verify(signature, probe.encode(), ec.ECDSA(hashes.SHA256()))
+        except Exception:  # noqa: BLE001 — any failure means this is not the signer's method
+            continue
+        return x5c
+
+    raise AssertionError(
+        f"no verification method in {did_url} publishes the key this harness signs with — the "
+        f"instance's did.json and its HSM token have drifted apart: {[m.get('id') for m in methods]}"
+    )
 
 
 def _jades_sign_as_own_instance(context, payload_bytes: bytes) -> str:
@@ -1276,6 +1424,90 @@ def step_when_post_sync_tampered_jades(context):
     payload["secret_value"] = context.peer_secret_value
     payload["secret_hash"] = context.peer_secret_hash
     context.requests_response = post_json(context, contract_peer_post_sync_url(context), payload, headers={})
+
+
+# ---------------------------------------------------------------------------
+# Settlement artifacts (POST /peer/contracts/settlement) — the evidence the
+# signing gate reads. The binding under test is the DOCUMENT DIGEST: a
+# settlement is a statement about one version of one document, and
+# contract_version cannot carry that across the boundary (it is a per-instance
+# counter — the sender bumps it on merging a redline, the receiver on every
+# inbound ship).
+# ---------------------------------------------------------------------------
+
+
+def _canonical_settlement_payload(
+    contract_did: str, contract_version: int, document_digest: str,
+    settled_by: str, settled_with: str, settled_at: str,
+) -> bytes:
+    """The canonical settlement artifact the backend signs and re-derives
+    (internal/base/jades.BuildSettlementPayload): RFC 8785. settled_at is
+    written at second precision because the receiver re-formats the parsed
+    timestamp as RFC3339Nano — which drops a zero fraction — and compares the
+    bytes."""
+    return jcs.canonicalize({
+        "@context": {"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+        "@type": "dcs:ContractSettlement",
+        "dcs:contractDid": contract_did,
+        "dcs:contractVersion": contract_version,
+        "dcs:contractDocumentDigest": document_digest,
+        "dcs:settledBy": settled_by,
+        "dcs:settledWith": settled_with,
+        "dcs:settledAt": settled_at,
+    })
+
+
+@when("instance A ships instance B a settlement naming a document instance B does not hold")
+def step_when_ship_settlement_for_another_document(context):
+    """Everything about this artifact is genuine except the version it covers:
+    it is signed with instance A's own key, by instance A's own identity,
+    towards instance B, for a contract B holds and a party B knows — only the
+    document digest names something else. So the refusal can come from nothing
+    but the digest binding."""
+    digest = "sha256:" + hashlib.sha256(b"a contract document instance B never held").hexdigest()
+    context.foreign_settlement_digest = digest
+
+    body, _manager_h = _cross_instance_contract(context, context.base_url_a)
+    with _as_instance(context, context.base_url_a):
+        _real_did, token_dir = _own_identity(context)
+        secret_value = str(uuid.uuid4())
+        secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
+        payload = _canonical_settlement_payload(
+            contract_did=context.cross_instance_contract_did,
+            contract_version=int(body.get("contract_version") or 1),
+            document_digest=digest,
+            settled_by=context.peer_did_a,
+            settled_with=context.peer_did_b,
+            settled_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        settlement_jades = _jades_sign_as_own_instance(context, payload)
+
+    with _as_instance(context, context.base_url_b):
+        context.requests_response = post_json(
+            context,
+            contract_peer_settlement_url(context),
+            {
+                "from_peer_did": context.peer_did_a,
+                "contract_iri": context.cross_instance_contract_did,
+                "secret_value": secret_value,
+                "secret_hash": secret_hash,
+                "settlement_jades": settlement_jades,
+            },
+            headers={},
+        )
+
+
+@then("instance B refuses the settlement because it covers another document")
+def step_then_settlement_refused_other_document(context):
+    resp = context.requests_response
+    assert resp.status_code == 400, (
+        f"Expected instance B to refuse a settlement covering a document it does not hold, got "
+        f"{resp.status_code}: {resp.text}"
+    )
+    assert context.foreign_settlement_digest in resp.text, (
+        "Expected the refusal to name the document the settlement covers — the digest binding is the "
+        f"whole point of the artifact, and no other check reports it. Got: {resp.text}"
+    )
 
 
 @then("the post_sync request is rejected because the JAdES payload does not match")
@@ -1324,9 +1556,6 @@ def step_then_provenance_on_b(context):
     jws = body.get("jades_signature") or ""
     parts = jws.split(".")
     assert len(parts) == 3, f"Expected a compact JWS with three segments, got: {jws[:120]}"
-
-    def _b64url_decode(segment: str) -> bytes:
-        return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
 
     header = json.loads(_b64url_decode(parts[0]))
     assert header.get("alg") == "ES256", f"Expected alg ES256, got: {header.get('alg')}"
@@ -1566,56 +1795,13 @@ def step_when_countersign_on_b(context):
     """The counterparty's own signature, on its own copy, for its OWN seeded
     field (its peer DID) — the signature A's database will never hold a row
     for."""
-    from steps.real_signing_vertical.dcs_real_signing_vertical_steps import (  # noqa: PLC0415
-        ceremony_aud,
-        _build_pid_presentation,
-        _complete_ceremony_via_presentation,
-        _fetch_pending_nonce,
+    apply_resp = _run_ceremony_and_sign(
+        context, context.base_url_b, "B", context.peer_did_b, "PeerCountersignature",
     )
-
-    with _as_instance(context, context.base_url_b):
-        c_did = context.cross_instance_contract_did
-        field_name = context.peer_did_b
-        signer_h = AuthService.get_headers_for_roles(["Contract Signer"], api_base=context.base_url_b)
-        start = post_json(
-            context,
-            signature_request_url(context),
-            {"contract_did": c_did, "field_name": field_name},
-            headers=signer_h,
-        )
-        assert start.status_code == 200, (
-            f"POST /signature/request failed on instance B: {start.status_code} {start.text}"
-        )
-        ceremony_id = start.json().get("ceremony_id")
-        assert ceremony_id, f"/signature/request response has no ceremony_id: {start.text}"
-
-        nonce = _fetch_pending_nonce(context, ceremony_id)
-        given_name, family_name = "PeerCountersignature", "BDD-Testperson"
-        presentation, _issuer_jwt, _disclosures, subject_did = _build_pid_presentation(
-            given_name=given_name, family_name=family_name,
-            aud=ceremony_aud(context), nonce=nonce,
-        )
-        completion = _complete_ceremony_via_presentation(
-            context, ceremony_id, presentation, subject_did, given_name, family_name,
-            poa_organization=field_name, nonce=nonce,
-        )
-        assert completion.status_code == 200, (
-            f"ceremony presentation failed on instance B: {completion.status_code} {completion.text}"
-        )
-        apply_resp = wallet_sign(
-            context,
-            c_did,
-            signer_did=subject_did,
-            signatory=given_name,
-            field_name=field_name,
-            credential_type="AES",
-            headers=signer_h,
-            ceremony_id=ceremony_id,
-        )
-        assert apply_resp.status_code == 200, (
-            f"wallet signing failed on instance B: {apply_resp.status_code} {apply_resp.text}"
-        )
-        context.requests_response = apply_resp
+    assert apply_resp.status_code == 200, (
+        f"wallet signing failed on instance B: {apply_resp.status_code} {apply_resp.text}"
+    )
+    context.requests_response = apply_resp
 
 
 @then("a manual deployment of the cross-instance contract on instance {label} is rejected because signing is incomplete")
