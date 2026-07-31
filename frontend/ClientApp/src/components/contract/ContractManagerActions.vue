@@ -54,8 +54,7 @@ const canOffer = computed(() => {
 const canNegotiate = computed(() => {
   const state = props.contract.state
   return (
-    (isNegotiator.value || isCreator.value) &&
-    (state === ContractState.offered || state === ContractState.negotiation)
+    (isNegotiator.value || isCreator.value) && (state === ContractState.offered || state === ContractState.negotiation)
   )
 })
 
