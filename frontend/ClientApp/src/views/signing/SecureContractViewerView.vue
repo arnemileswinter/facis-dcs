@@ -193,7 +193,12 @@ async function verify() {
   delete stepError.value.verify
   try {
     verifyResult.value = await signatureManagementService.verifySignature(did.value)
-    done.value.verify = true
+    // The verdict, not the call completing. A deterministic re-render that does
+    // not match the signed document means the human-readable PDF and the
+    // machine-readable contract are different documents, which is the property
+    // this step exists to establish — so it must not read as Verified, and must
+    // not open the ceremony.
+    done.value.verify = verifyResult.value?.match === true
   } catch (e: unknown) {
     stepError.value.verify = `Verification failed: ${message(e)}`
   } finally {
@@ -397,6 +402,7 @@ async function validate() {
               <div class="flex items-center justify-between">
                 <h4 class="card-title text-sm">2 · Verify integrity &amp; envelope</h4>
                 <span v-if="done.verify" class="badge badge-sm badge-success">Verified</span>
+                <span v-else-if="verifyResult" class="badge badge-sm badge-error">Not verified</span>
               </div>
               <p class="text-xs text-base-content/70">
                 pdf-core deterministically re-renders the PDF from the contract's embedded machine-readable payload and

@@ -11,11 +11,20 @@ export const ExpirationPolicy = {
 
 export type ExpirationPolicy = (typeof ExpirationPolicy)[keyof typeof ExpirationPolicy]
 
+/**
+ * What the target system concluded about the ODRL rule its report names
+ * (ADR-33). 'not_evaluated' is a distinct outcome, neither a breach nor
+ * compliance, and never renders as either.
+ */
+export type KpiVerdict = 'satisfied' | 'violated' | 'not_evaluated'
+
 export interface ContractDeploymentKpi {
   metric: string
   value: string
   observed_at: string
-  violation?: boolean
+  verdict: KpiVerdict
+  /** @id of the ODRL rule the verdict concerns; absent when the target named none */
+  rule?: string
 }
 
 export interface Contract {
@@ -47,10 +56,8 @@ export interface Contract {
   template_version?: number
   template_is_deprecated?: boolean
   parent_contract_did?: string
-  /** KPI values reported via deployment callback (DCS-FR-CWE-31, DCS-FR-CWE-09) */
+  /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
-  /** Metric names whose latest reported value violates its contractual SLA threshold */
-  kpi_violations?: string[]
   /** Registered target system this contract deploys to (ADR-25); absent until designated */
   target_id?: string
   /** Name of that target, so the destination is readable without a second lookup */

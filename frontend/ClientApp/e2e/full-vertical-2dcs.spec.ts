@@ -230,11 +230,13 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   })
 
   // ---- Stages 9-10 [UC-05 Contract Deployment; DCS-FR-SM-10 Proof of Contract
-  // Execution (receipt/hash/tx-id); DCS-FR-CWE-09 + DCS-FR-CWE-31 deployment KPI
-  // callback; SRS §2.2.5 Process Audit & Compliance (PACM)]: deploy to the
-  // target, receipt + async KPIs checked vs policy, and the full audit trail on
-  // both instances.
-  await test.step('Stages 9-10 [UC-05, DCS-FR-SM-10, DCS-FR-CWE-09/-31, §2.2.5]: deploy, receipt, KPI, audit', async () => {
+  // Execution (receipt/hash/tx-id); SRS §2.2.5 Process Audit & Compliance
+  // (PACM)]: deploy to the target and walk the full audit trail on both
+  // instances. No KPI is asserted here: the KPI verdict is the target system's
+  // conclusion, not the DCS's (ADR-33), so it is exercised where a target
+  // actually reports one — kpi-underperformance-alert.spec.ts end to end, and
+  // features/05_contract_deployment for the callback contract itself.
+  await test.step('Stages 9-10 [UC-05, DCS-FR-SM-10, §2.2.5]: deploy, receipt, audit', async () => {
     // A's Contract Manager clicks "Deploy" (SIGNED -> ACTIVE) on the signed contract.
     await deployContract(a, contractDid)
 

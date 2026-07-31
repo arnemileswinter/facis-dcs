@@ -282,6 +282,19 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				}
 
 			} else {
+				// No change requests to merge. That is a settlement only if a
+				// negotiator actually accepted: a contract whose counterparty
+				// never received a task has no open tasks and no negotiations
+				// either, so both checks above pass the moment the offer is
+				// opened and the round would end before it began. Settlement is
+				// evidenced by an acceptance, never inferred from absence.
+				accepted, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, negotiationtaskstate.Accepted.String())
+				if err != nil {
+					return fmt.Errorf("could not check accepted negotiation tasks: %w", err)
+				}
+				if !accepted {
+					return ErrNegotiationNotSettled
+				}
 				nextState = contractstate.Submitted
 			}
 		}
@@ -404,6 +417,16 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		normalizedContractData, err := validation.NormalizeContractDataForPersistence(cmd.ContractData, cmd.DID, false)
 		if err != nil {
 			return nil, fmt.Errorf("contract data validation failed: %w", err)
+		}
+		stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+		if err != nil {
+			return nil, fmt.Errorf("could not read contract data: %w", err)
+		}
+		// The submitted draft replaces the document wholesale, so the bundle it
+		// was created against travels from the stored copy (CarrySemanticBundle).
+		normalizedContractData, err = validation.CarrySemanticBundle(stored.ContractData, normalizedContractData)
+		if err != nil {
+			return nil, fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 		}
 		updateData := db.ContractUpdateData{
 			DID:          cmd.DID,

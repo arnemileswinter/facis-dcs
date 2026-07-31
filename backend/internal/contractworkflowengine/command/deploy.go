@@ -163,10 +163,7 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		"dcs:timestamp":        now.Format(time.RFC3339Nano),
 		"dcs:correlationId":    correlationID,
 		"dcs:contractDocument": contractDocument,
-		"odrl:policy": map[string]any{
-			"@id":   "urn:uuid:deployment-policy-" + correlationID,
-			"@type": "odrl:Set",
-		},
+		"odrl:policy":          deploymentPolicy(contractDocument, correlationID),
 	}
 
 	contentHash, err := hashDeploymentPayload(payload)
@@ -262,6 +259,92 @@ func (h *Deployer) recordDispatchFailure(ctx context.Context, correlationID stri
 	if err := tx.Commit(); err != nil {
 		log.Printf("contractworkflowengine: could not record dispatch failure for %s: %v", correlationID, err)
 	}
+}
+
+// odrlRuleProperties are the ODRL rule collections a contract's policy set may
+// carry. A deployed policy names the same rules the parties signed; it does not
+// restate or summarise them.
+var odrlRuleProperties = [...]string{"odrl:permission", "odrl:prohibition", "odrl:obligation"}
+
+// deploymentPolicy is the policy the target system enforces (SRS §1.2: the
+// target system is where automated runtime enforcement happens; DCS-IR-SI-05
+// is the interface that hands it over). It carries the rules of the signed
+// contract's own policy set, so an integrator reading the documented odrl:policy
+// slot finds the terms rather than an empty Set and has to go digging in
+// dcs:contractDocument for them.
+//
+// The set is emitted even when the contract states no rules: an empty policy is
+// the honest answer for a contract that constrains nothing, and is distinct from
+// the slot being absent.
+func deploymentPolicy(contractDocument map[string]any, correlationID string) map[string]any {
+	policy := map[string]any{
+		"@id":   "urn:uuid:deployment-policy-" + correlationID,
+		"@type": "odrl:Set",
+	}
+	policies, ok := contractDocument["dcs:policies"].(map[string]any)
+	if !ok {
+		return policy
+	}
+	if profile, ok := policies["odrl:profile"]; ok {
+		policy["odrl:profile"] = profile
+	}
+	for _, property := range odrlRuleProperties {
+		if rules, ok := policies[property]; ok {
+			policy[property] = rules
+		}
+	}
+	return policy
+}
+
+// nestedRuleProperties are the rule slots a rule may itself carry: a duty
+// attached to a permission, and the consequence of a breached duty. Both travel
+// inside the rule they hang off, so the target can conclude about them too.
+var nestedRuleProperties = [...]string{"odrl:duty", "odrl:consequence"}
+
+// deployedRuleIDs collects the @id of every ODRL rule the deployment envelope
+// hands the target — the buckets deploymentPolicy copies, plus the duties and
+// consequences nested inside them. A reported verdict names one of these; an
+// @id outside the set is a conclusion the DCS cannot attribute to a term of
+// this contract (ADR-33).
+func deployedRuleIDs(contractDocument map[string]any) map[string]bool {
+	ids := map[string]bool{}
+	policies, ok := contractDocument["dcs:policies"].(map[string]any)
+	if !ok {
+		return ids
+	}
+	for _, property := range odrlRuleProperties {
+		collectRuleIDs(policies[property], ids)
+	}
+	return ids
+}
+
+func collectRuleIDs(rules any, ids map[string]bool) {
+	for _, rule := range ruleNodes(rules) {
+		if id, ok := rule["@id"].(string); ok && strings.TrimSpace(id) != "" {
+			ids[strings.TrimSpace(id)] = true
+		}
+		for _, property := range nestedRuleProperties {
+			collectRuleIDs(rule[property], ids)
+		}
+	}
+}
+
+// ruleNodes reads a rule slot, which JSON-LD lets hold either a single node or
+// an array of them.
+func ruleNodes(raw any) []map[string]any {
+	switch value := raw.(type) {
+	case map[string]any:
+		return []map[string]any{value}
+	case []any:
+		nodes := make([]map[string]any, 0, len(value))
+		for _, item := range value {
+			if node, ok := item.(map[string]any); ok {
+				nodes = append(nodes, node)
+			}
+		}
+		return nodes
+	}
+	return nil
 }
 
 // hashDeploymentPayload computes the payload's canonical content hash:

@@ -289,8 +289,7 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("negotiations", ArrayOf(ContractNegotiationItem), "List with negotiations for that contract")
 
-	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract (DCS-FR-CWE-31, DCS-FR-CWE-09)")
-	Attribute("kpi_violations", ArrayOf(String), "Metric names whose latest reported value violates its contractual SLA threshold (DCS-FR-CWE-09)")
+	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract, each carrying the verdict the target system reached (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33)")
 
 	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
 	Attribute("target_name", String, "Name of that target system, so the destination is readable without a second lookup")
@@ -299,14 +298,17 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 })
 
 var ContractDeploymentKPIItem = Type("ContractDeploymentKPIItem", func() {
-	Description("A single KPI value reported via the deployment callback (DCS-FR-CWE-09, DCS-FR-CWE-31)")
+	Description("A single KPI observation reported via the deployment callback, with the verdict the target system reached on it (DCS-FR-CWE-09, DCS-FR-CWE-31, ADR-33)")
 
 	Attribute("metric", String, "KPI metric name")
 	Attribute("value", String, "Reported KPI value")
 	Attribute("observed_at", String, "When the KPI was reported")
-	Attribute("violation", Boolean, "Whether this KPI value violates its contractual SLA threshold")
+	Attribute("verdict", String, "What the target system concluded: satisfied, violated, or not_evaluated. A report that carried no verdict is recorded as not_evaluated, never as satisfied", func() {
+		Enum("satisfied", "violated", "not_evaluated")
+	})
+	Attribute("rule", String, "@id of the ODRL rule the verdict concerns, as it travels in the deployment envelope's odrl:policy; absent when the target named none")
 
-	Required("metric", "value", "observed_at")
+	Required("metric", "value", "observed_at", "verdict")
 })
 
 var ContractReviewRequest = Type("ContractReviewRequest", func() {
@@ -806,10 +808,14 @@ var ContractDeploymentReceiptPayload = Type("ContractDeploymentReceiptPayload", 
 })
 
 var ContractDeploymentKPIReport = Type("ContractDeploymentKPIReport", func() {
-	Description("A single KPI value report carried in a deployment callback")
+	Description("A single KPI report carried in a deployment callback: what the target system observed, and what it concluded from it (ADR-33)")
 
 	Attribute("metric", String, "KPI metric name")
 	Attribute("value", String, "Reported KPI value")
+	Attribute("verdict", String, "What the target system concluded about the rule it names: satisfied, violated, or not_evaluated. Absent is recorded as not_evaluated", func() {
+		Enum("satisfied", "violated", "not_evaluated")
+	})
+	Attribute("rule", String, "@id of the ODRL rule this verdict concerns, verbatim from the odrl:policy the deployment carried")
 })
 
 var ContractDeploymentCallbackRequest = Type("ContractDeploymentCallbackRequest", func() {
@@ -1176,7 +1182,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	// GET /contract/kpis/{did}
 	Method("kpi_observations", func() {
-		Description("The KPI values reported for a deployed contract as a JSON-LD observation set: dcs:KPIObservation nodes anchored to the Semantic Hub context, machine-readable alongside the human-facing kpis field of retrieve (DCS-FR-CWE-09/-31).")
+		Description("The KPI reports of a deployed contract as a JSON-LD observation set: dcs:KPIObservation nodes anchored to the Semantic Hub context, each carrying the target system's verdict and the ODRL rule it names, machine-readable alongside the human-facing kpis field of retrieve (DCS-FR-CWE-09/-31, ADR-33).")
 		Meta("dcs:requirements", "DCS-FR-CWE-09", "DCS-FR-CWE-31")
 
 		Security(JWTAuth, func() {

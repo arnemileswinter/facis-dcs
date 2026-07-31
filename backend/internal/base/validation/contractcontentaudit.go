@@ -337,7 +337,7 @@ func auditContractValidationRule(contract map[string]any, rule ValidationRule) [
 			}
 		}
 		if len(findings) == 0 {
-			return []PolicyFinding{validationRuleFinding(rule, strings.Join(rule.RequiredFields, ", "), "info", issueMessage(rule))}
+			return []PolicyFinding{validationRuleFinding(rule, strings.Join(rule.RequiredFields, ", "), SeveritySatisfied, issueMessage(rule))}
 		}
 		return findings
 	case ValidationRuleFieldValue:
@@ -345,26 +345,26 @@ func auditContractValidationRule(contract map[string]any, rule ValidationRule) [
 		if !ok || !compareValues(value, defaultOperator(rule.Operator, "eq"), rule.Value) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, rule.Value, nil, defaultOperator(rule.Operator, "eq"))}
 	case ValidationRuleComparison:
 		value, ok := contractValue(contract, rule.Target)
 		if !ok || !compareValues(value, rule.Operator, rule.Value) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), rule.Value, nil, rule.Operator)}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, rule.Value, nil, rule.Operator)}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, rule.Value, nil, rule.Operator)}
 	case ValidationRuleValueIn:
 		value, ok := contractString(contract, rule.Target)
 		if !ok || !normalizedSet(rule.Values)[strings.ToUpper(strings.TrimSpace(value))] {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), nil, anySliceFromStrings(rule.Values), "in")}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, nil, anySliceFromStrings(rule.Values), "in")}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, nil, anySliceFromStrings(rule.Values), "in")}
 	case ValidationRuleSignatureLevel:
 		value, ok := contractString(contract, rule.Target)
 		required, _ := rule.Value.(string)
 		if !ok || !signatureLevelSatisfies(value, required) {
 			return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, defaultSeverity(rule.Severity), issueMessage(rule), optionalActualValue(value, ok), required, nil, "atLeast")}
 		}
-		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, "info", issueMessage(rule), value, required, nil, "atLeast")}
+		return []PolicyFinding{validationRuleFindingWithDetails(rule, rule.Target, SeveritySatisfied, issueMessage(rule), value, required, nil, "atLeast")}
 	default:
 		return nil
 	}

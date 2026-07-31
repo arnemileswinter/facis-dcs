@@ -199,7 +199,7 @@ const exportBundle = async () => {
                   </div>
                 </div>
 
-                <!-- Deployment KPIs (DCS-FR-CWE-31, DCS-FR-CWE-09) -->
+                <!-- Deployment KPIs with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) -->
                 <div
                   v-if="contract.kpis && contract.kpis.length > 0"
                   class="card mt-4 border border-base-300 bg-base-100 shadow-sm"
@@ -211,11 +211,31 @@ const exportBundle = async () => {
                         v-for="kpi in contract.kpis"
                         :key="`${kpi.metric}-${kpi.observed_at}`"
                         class="flex items-center gap-2 text-sm"
+                        data-testid="contract-kpi-row"
                       >
                         <span class="font-medium">{{ kpi.metric }}</span>
                         <span>{{ kpi.value }}</span>
                         <span class="text-xs text-base-content/40">{{ kpi.observed_at }}</span>
-                        <span v-if="kpi.violation" class="badge badge-sm badge-error">Violation</span>
+                        <span
+                          v-if="kpi.verdict === 'violated'"
+                          class="badge badge-sm badge-error"
+                          data-testid="contract-kpi-verdict"
+                        >
+                          Violation
+                        </span>
+                        <span
+                          v-else-if="kpi.verdict === 'satisfied'"
+                          class="badge badge-sm badge-success"
+                          data-testid="contract-kpi-verdict"
+                        >
+                          Satisfied
+                        </span>
+                        <span v-else class="badge badge-ghost badge-sm" data-testid="contract-kpi-verdict">
+                          Not evaluated
+                        </span>
+                        <span v-if="kpi.rule" class="text-xs text-base-content/40" data-testid="contract-kpi-rule">
+                          {{ kpi.rule }}
+                        </span>
                       </li>
                     </ul>
                   </div>

@@ -92,7 +92,23 @@ func currentSHACLShapesRef() string {
 }
 
 // PinSemanticBundle stamps the immutable Semantic Hub bundle selected while a
-// new artifact is created.
+// new artifact is created: the hub context, the shapes graphs the artifact is
+// validated against, and the validation profile, each at an exact version that
+// no later activation or rollback moves.
+//
+// The canonical DCS envelope graph is this deployment's own, so the new
+// artifact gets the version active at its creation — the same rule the hub
+// context anchor above follows, and what makes an activation change what newly
+// created contracts are checked against. The shape LIBRARIES the document
+// declares are the opposite case: they are the authoring choice a federated
+// template carries, naming the graphs its author modelled its data against, and
+// they are what must validate it on a peer. Those are kept exactly as declared,
+// at the version declared (ADR-8 pin, ADR-23 libraries).
+//
+// dcs:effectiveShapes is derived from the result, so the two can never
+// disagree: it holds the selected bundle plus every library the document
+// declares beyond it, which is what makes a declared library resolve even when
+// this hub does not have it active.
 func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
 	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
 		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
@@ -115,19 +131,117 @@ func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string
 		contextEntries = append(contextEntries, current)
 	}
 	data["@context"] = contextEntries
-	// Anchors a document already declares are never rewritten (ADR-8): a
-	// federated template names the shape libraries its author modelled against,
-	// and those graphs are what must validate it on a peer. The bundle is only
-	// stamped here when the document declares no shapes graph of its own.
-	if _, declared := data["sh:shapesGraph"]; !declared {
+	libraries := declaredShapeLibraryAnchors(data["sh:shapesGraph"], canonicalShapesRef, effectiveShapeRefs)
+	if len(libraries) == 0 {
 		data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
+	} else {
+		graphs := make([]any, 0, len(libraries)+1)
+		graphs = append(graphs, map[string]any{"@id": canonicalShapesRef})
+		for _, library := range libraries {
+			graphs = append(graphs, map[string]any{"@id": library})
+		}
+		data["sh:shapesGraph"] = graphs
 	}
-	refs := make([]any, 0, len(effectiveShapeRefs))
-	for _, ref := range effectiveShapeRefs {
-		refs = append(refs, map[string]any{"@id": ref})
-	}
-	data["dcs:effectiveShapes"] = refs
+	data["dcs:effectiveShapes"] = effectiveShapesBundle(effectiveShapeRefs, libraries)
 	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
+	return encodeDocumentData(data)
+}
+
+// declaredShapeLibraryAnchors returns the anchors of the shape libraries a
+// document declares beside the canonical graph, in declaration order and as the
+// document wrote them. An anchor that names no version pins nothing, so it is
+// resolved to the bundle's entry of the same name; one this hub has no entry for
+// names a graph that resolves nowhere and is dropped rather than pinned.
+func declaredShapeLibraryAnchors(declared any, canonicalShapesRef string, bundleRefs []string) []string {
+	canonicalName, ok := anchorShapesName(canonicalShapesRef)
+	if !ok {
+		return nil
+	}
+	bundleByName := map[string]string{}
+	for _, ref := range bundleRefs {
+		if name, ok := anchorShapesName(ref); ok {
+			bundleByName[name] = ref
+		}
+	}
+	var libraries []string
+	for _, declaration := range declaredShapesGraphDeclarations(declared) {
+		if declaration.Name == canonicalName {
+			continue
+		}
+		anchor := declaration.IRI
+		if declaration.Version <= 0 {
+			active, registered := bundleByName[declaration.Name]
+			if !registered {
+				continue
+			}
+			anchor = active
+		}
+		libraries = append(libraries, anchor)
+	}
+	return libraries
+}
+
+// effectiveShapesBundle lists the selected bundle first — its canonical entry
+// leads, which is where the gate and validateAgainstShapeSource read the
+// canonical graph — followed by every declared library the bundle does not
+// already carry at that exact version.
+func effectiveShapesBundle(bundleRefs, libraries []string) []any {
+	refs := make([]any, 0, len(bundleRefs)+len(libraries))
+	pinned := map[shapesGraphAnchor]bool{}
+	for _, ref := range bundleRefs {
+		refs = append(refs, map[string]any{"@id": ref})
+		if name, ok := anchorShapesName(ref); ok {
+			pinned[shapesGraphAnchor{Name: name, Version: anchorVersion(ref)}] = true
+		}
+	}
+	for _, library := range libraries {
+		name, ok := anchorShapesName(library)
+		if !ok {
+			continue
+		}
+		anchor := shapesGraphAnchor{Name: name, Version: anchorVersion(library)}
+		if pinned[anchor] {
+			continue
+		}
+		pinned[anchor] = true
+		refs = append(refs, map[string]any{"@id": library})
+	}
+	return refs
+}
+
+// semanticBundleProperties are the document properties PinSemanticBundle owns.
+// They record which hub assets an artifact was produced against, so they are
+// written once at production time and are never the client's to restate.
+var semanticBundleProperties = []string{"sh:shapesGraph", "dcs:effectiveShapes", "dcterms:conformsTo"}
+
+// CarrySemanticBundle restores onto a replacement document the Semantic Hub
+// bundle the stored document is pinned to. Every command that lets a client
+// replace the document wholesale (a save, a submitted draft, a negotiated
+// redline) receives one the client assembled from its editor state, and that
+// document models none of these properties — so without this the contract loses
+// the bundle it was created under, and with it the ability to prove what it was
+// validated against.
+func CarrySemanticBundle(stored, replacement *datatype.JSON) (*datatype.JSON, error) {
+	pinned, err := decodeDocumentData(stored)
+	if err != nil {
+		return nil, err
+	}
+	data, err := decodeDocumentData(replacement)
+	if err != nil {
+		return nil, err
+	}
+	carried := false
+	for _, property := range semanticBundleProperties {
+		value, exists := pinned[property]
+		if !exists {
+			continue
+		}
+		data[property] = value
+		carried = true
+	}
+	if !carried {
+		return replacement, nil
+	}
 	return encodeDocumentData(data)
 }
 

@@ -23,11 +23,12 @@ func federated(signedLocally, peerSigners []string, localPeer string) SignatureE
 
 // The defect this closes: the first signatory's own instance reported the
 // agreement executed the moment it signed, before the counterparty had
-// countersigned anything (DCS-FR-SM-10, ADR-13).
+// countersigned anything (DCS-FR-SM-10, ADR-13). Nor is it agreed — our own
+// signature is one party committing, and "agreed" claims both did.
 func TestFirstOfTwoSignaturesIsNotExecuted(t *testing.T) {
 	extrinsic := InferExtrinsic(Signed.String(), federated([]string{peerA}, nil, peerA))
 
-	require.Equal(t, Agreed, extrinsic)
+	require.Equal(t, Proposed, extrinsic)
 }
 
 // The counterparty signs on ITS instance, so the evidence here is the
@@ -47,10 +48,41 @@ func TestCountersignerAlsoReadsExecuted(t *testing.T) {
 }
 
 // A shipped signature from a peer that is not the party whose slot is open
-// says nothing about that slot.
+// says nothing about that slot — and so is no evidence the counterparty
+// settled either.
 func TestSignatureFromAnotherPeerDoesNotExecute(t *testing.T) {
 	extrinsic := InferExtrinsic(Signed.String(),
 		federated([]string{peerA}, []string{"did:web:dcs-c.localhost"}, peerA))
+
+	require.Equal(t, Proposed, extrinsic)
+}
+
+// The defect this closes: a contract naming a counterparty could run
+// Draft -> Submit -> Negotiation -> Submitted -> Reviewed -> Approved entirely
+// inside the originating organization (transition.go; command/submit.go starts
+// the round identically from DRAFT and OFFERED), and this projection then told
+// the peer-facing world a bilateral agreement existed — on a contract signed by
+// nobody that the counterparty had never received.
+func TestApprovalAloneIsNotAgreement(t *testing.T) {
+	extrinsic := InferExtrinsic(Approved.String(), federated(nil, nil, peerA))
+
+	require.Equal(t, Proposed, extrinsic)
+}
+
+// Once the counterparty has committed, approval does say the parties settled.
+func TestApprovalWithACounterpartySignatureIsAgreed(t *testing.T) {
+	extrinsic := InferExtrinsic(Approved.String(), federated(nil, []string{peerB}, peerA))
+
+	require.Equal(t, Agreed, extrinsic)
+}
+
+// A contract that declares no remote party has no counterparty to hear from,
+// so its own approval is the whole settlement.
+func TestApprovalOfANonFederatedContractIsAgreed(t *testing.T) {
+	extrinsic := InferExtrinsic(Approved.String(), SignatureEvidence{
+		Declared:  []string{"Signatory A", "Signatory B"},
+		LocalPeer: peerA,
+	})
 
 	require.Equal(t, Agreed, extrinsic)
 }

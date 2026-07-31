@@ -96,14 +96,9 @@ func newVerifierWithInlineList(t *testing.T, listBody []byte) *status.Verifier {
 	t.Cleanup(srv.Close)
 
 	fetcher := &fetch.Client{HTTPClient: &http.Client{Transport: localTransport{base: srv.URL}}}
-	verifier := handler.NewVerifier(nil, handler.Options{
-		XFSCAllowUnsignedFallback: true,
-	})
+	verifier := handler.NewVerifier(nil, handler.Options{})
 	verifier.Fetcher = fetcher
-	verifier.Handlers[status.MechanismXFSC] = &handler.XFSC{
-		Fetcher:               fetcher,
-		AllowUnsignedFallback: true,
-	}
+	verifier.Handlers[status.MechanismXFSC] = &handler.XFSC{Fetcher: fetcher}
 	return verifier
 }
 

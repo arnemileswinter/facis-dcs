@@ -17,10 +17,7 @@ var statusListVerifier *status.Verifier
 // the same file. The status-list path used to re-parse the trust document with
 // its own struct, which had no purposes and no organizations fields — so the
 // two paths could disagree about who is trusted without anything saying so.
-func ConfigureStatusListVerification(
-	trustCfg *TrustConfig,
-	xfscAllowUnsignedFallback bool,
-) error {
+func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 	var trust *status.TrustConfig
 	if trustCfg != nil {
 		bundled := map[string]json.RawMessage{}
@@ -31,12 +28,15 @@ func ConfigureStatusListVerification(
 		if err != nil {
 			return fmt.Errorf("status list trust config: %w", err)
 		}
+		// An issuer configured to publish its key by certificate chain bundles
+		// no JWKS, so its status list is verified from the chain the token
+		// carries. Without the anchors here that chain verifies against
+		// nothing and the status list is refused, which is every status list
+		// an x5c issuer signs.
+		cfg.X5CRoots = trustCfg.X5CTrustRoots()
 		trust = cfg
 	}
-
-	statusListVerifier = handler.NewVerifier(trust, handler.Options{
-		XFSCAllowUnsignedFallback: xfscAllowUnsignedFallback,
-	})
+	statusListVerifier = handler.NewVerifier(trust, handler.Options{})
 	return nil
 }
 

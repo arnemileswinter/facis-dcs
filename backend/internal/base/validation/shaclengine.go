@@ -69,7 +69,7 @@ func validateAgainstShapeSource(ctx context.Context, contract map[string]any, so
 	var shapesTTL string
 	var shapesVersion int
 	var err error
-	refs, refsErr := effectiveShapeRefs(contract)
+	refs, refsErr := EffectiveShapeRefs(contract)
 	if refsErr != nil {
 		return nil, 0, refsErr
 	}
@@ -236,7 +236,7 @@ func shaclResultSeverity(result shacl.ValidationResult) string {
 	case shacl.SHWarning.Value():
 		return "warning"
 	case shacl.SHInfo.Value():
-		return "info"
+		return SeverityInfo
 	case "":
 		return "error"
 	default:

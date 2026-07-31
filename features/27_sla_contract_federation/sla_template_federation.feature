@@ -81,12 +81,22 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
     And instance B registers the catalogued SLA template into its own repository
     And instance B drives the imported SLA template through its own approval and registers it
     And instance B instantiates an SLA contract from its imported template with instance A as counterparty
+    # A contract drawn from an imported template declares the upstream author's
+    # shape library beside the canonical DCS graph. Every consequential
+    # transition below is gated on an immutable snapshot built from that
+    # declaration and the pinned bundle, so the two have to agree before the
+    # offer is even attempted.
+    Then the SLA contract on instance B pins an effective bundle covering every shapes graph it declares
     When instance B fills every open field of the SLA contract
     Then all 13 contract fields of the SLA contract carry a value on instance B
+    And the SLA contract on instance B pins an effective bundle covering every shapes graph it declares
     When instance B offers the SLA contract to instance A
     Then the SLA contract is in state OFFERED on instance B
     And the SLA contract appears on instance A in state OFFERED within a few seconds
     And instance A's copy of the SLA contract carries the identical ODRL Offer
+    # The copy that crossed carries instance B's pin under instance B's
+    # hostname; instance A gates its own transitions on exactly that document.
+    And the SLA contract on instance A pins an effective bundle covering every shapes graph it declares
     # What crossed must be the contract that was offered, not a render of it
     # taken before the fields were filled: the PDF the peer adopts as its copy
     # carries the document (ADR-13), so an offer whose PDF lags its own
@@ -188,11 +198,12 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
   # ---------------------------------------------------------------------
   # The same authored SLA in operation, on one instance and with no Federated
   # Catalogue involved. The parties committed 99.9% availability; the target
-  # system reports a measured 98.2%. The reported metric IS the committed
-  # availability field's node IRI, which is how the KPI binds to the ODRL
-  # constraint that governs it (DCS-FR-CWE-09) — and DCS-FR-CWE-31 requires
-  # more than recording the breach, so the compliance monitor an officer
-  # actually watches must surface it as well.
+  # system measures 98.2% and concludes that this breaches the availability
+  # duty, naming that rule's @id as it travelled to it in the deployment
+  # envelope (ADR-33) — one term out of the nine this SLA carries, which is
+  # what makes the recorded verdict traceable. DCS-FR-CWE-31 requires more
+  # than recording the breach, so the compliance monitor an officer actually
+  # watches must surface it as well.
   # ---------------------------------------------------------------------
 
   @DCS-FR-CWE-09 @DCS-FR-CWE-31 @DCS-FR-PACM-03 @DCS-FR-UC-06-1
@@ -204,9 +215,9 @@ Feature: SLA contract federation — a template's enforcement semantics bind the
     And an authorized user deploys contract "Federated SLA Operation" to the configured contract target
     And get http 200:Success code
     And the contract target acknowledges the deployment of contract "Federated SLA Operation"
-    When the target reports an availability KPI value "98.2" for contract "Federated SLA Operation"
+    When the target reports an availability KPI value "98.2" for contract "Federated SLA Operation", concluding "violated" on the deployed availability rule
     Then get http 200:Success code
-    And the contract detail for "Federated SLA Operation" shows a KPI violation flag for its committed availability
+    And the contract detail for "Federated SLA Operation" records the availability KPI as "violated" against the deployed availability rule
     When the Compliance Officer requests continuous monitoring
     Then get http 200:Success code
     And the monitoring sweep flags contract "Federated SLA Operation" with a "CONTRACT_UNDERPERFORMANCE" compliance risk

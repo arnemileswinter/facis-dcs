@@ -302,19 +302,32 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 	return runID, false, snapshot.UpdatedAt, nil
 }
 
+// resultFromLocal summarises the DCS-local evaluation for the gate request and
+// the run record. A deferred finding (ADR-33) neither blocks nor asks for a
+// human decision — its verdict belongs to the target system that executes the
+// contract, and demanding review would refuse every contract carrying a context
+// operand or a duty. It does, however, stop the run reading as PASSED: what the
+// DCS checked is not all there was to check.
 func resultFromLocal(findings []validation.PolicyFinding) string {
 	result := "PASSED"
 	for _, finding := range findings {
 		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
-		case "error", "critical", "blocking", "violation":
+		case validation.SeverityError, "critical", "blocking", "violation":
 			return "BLOCKED"
-		case "warning", "warn", "review":
+		case validation.SeverityWarning, "warn", "review":
 			result = "REVIEW"
+		case validation.SeverityDeferred:
+			if result == "PASSED" {
+				result = "NOT_EVALUATED"
+			}
 		}
 	}
 	return result
 }
 
+// resultStatus combines the local summary with the executor's. NOT_EVALUATED is
+// deliberately absent: an unobserved rule is not a reason to hold the workflow,
+// only a reason not to claim the gate verified it.
 func resultStatus(local string, response Response) string {
 	status := "SUCCESS"
 	if local == "REVIEW" || response.Result == "REVIEW" {
@@ -355,7 +368,15 @@ func (c *Coordinator) snapshot(ctx context.Context, input Input) (Snapshot, stri
 	snapshot.ContentHash = hashJSON(snapshot.Content)
 	rawRefs, ok := snapshot.Content["dcs:effectiveShapes"].([]any)
 	if !ok || len(rawRefs) == 0 {
-		return snapshot, "", errors.New("immutable workflow snapshot has no effective shapes")
+		// Every contract is pinned to a Semantic Hub bundle when it is created
+		// (validation.PinSemanticBundle), and every command that replaces the
+		// document carries that pin forward, so a contract reaching a gate
+		// without one predates the pin. Say so: there is nothing an operator can
+		// retry, the contract has to be created again.
+		return snapshot, "", fmt.Errorf(
+			"contract %s declares no dcs:effectiveShapes, so the Semantic Hub bundle it must be evaluated "+
+				"against cannot be determined; it was created before contracts were pinned to a bundle and "+
+				"has to be recreated from its template", input.ContractDID)
 	}
 	for _, rawRef := range rawRefs {
 		ref := anchor(rawRef)
@@ -364,9 +385,8 @@ func (c *Coordinator) snapshot(ctx context.Context, input Input) (Snapshot, stri
 		}
 		snapshot.EffectiveShapes = append(snapshot.EffectiveShapes, ref)
 	}
-	canonical := anchor(snapshot.Content["sh:shapesGraph"])
-	if canonical == "" || canonical != snapshot.EffectiveShapes[0] {
-		return snapshot, "", errors.New("immutable workflow snapshot has missing or mismatched canonical shapes")
+	if err := requireConsistentShapesBundle(snapshot.Content); err != nil {
+		return snapshot, "", err
 	}
 	profile := anchor(snapshot.Content["dcterms:conformsTo"])
 	snapshot.ProfileVersion = versionFromAnchor(profile)
@@ -374,6 +394,37 @@ func (c *Coordinator) snapshot(ctx context.Context, input Input) (Snapshot, stri
 		return snapshot, "", errors.New("immutable workflow snapshot has no validation profile")
 	}
 	return snapshot, snapshotIdentity(snapshot), nil
+}
+
+// requireConsistentShapesBundle checks that the effective shapes the snapshot
+// pins actually cover what the document declares in sh:shapesGraph. That
+// property is multi-valued — a contract derived from a federated template names
+// the shape libraries its author modelled against beside the canonical DCS
+// graph — so the canonical graph is its FIRST anchor, not its only one, and
+// every further anchor has to be part of the bundle the gate evaluates against.
+// An anchor that pins no version pins nothing immutable and is not part of the
+// snapshot.
+func requireConsistentShapesBundle(content map[string]any) error {
+	effective, err := validation.EffectiveShapeRefs(content)
+	if err != nil {
+		return fmt.Errorf("immutable workflow snapshot has invalid effective shapes: %w", err)
+	}
+	declared := validation.DeclaredShapesGraphs(content)
+	if len(declared) == 0 || len(effective) == 0 || declared[0] != effective[0] {
+		return errors.New("immutable workflow snapshot has missing or mismatched canonical shapes")
+	}
+	bundled := make(map[validation.VersionedShapeRef]bool, len(effective))
+	for _, ref := range effective {
+		bundled[ref] = true
+	}
+	for _, ref := range declared[1:] {
+		if ref.Version > 0 && !bundled[ref] {
+			return fmt.Errorf(
+				"immutable workflow snapshot declares shapes library %q version %d outside its effective bundle",
+				ref.Name, ref.Version)
+		}
+	}
+	return nil
 }
 
 func (c *Coordinator) verifySnapshot(ctx context.Context, expected Snapshot) (time.Time, error) {

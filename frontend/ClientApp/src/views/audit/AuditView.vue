@@ -36,7 +36,7 @@ const authStore = useAuthStore()
 const isArchiveManagerOnly = computed(
   () => authStore.user?.roles.includes('ARCHIVE_MANAGER') && !authStore.user?.roles.includes('AUDITOR'),
 )
-type AuditResult = 'passed' | 'failed' | 'review'
+type AuditResult = 'passed' | 'failed' | 'review' | 'not_evaluated'
 type TableFilterKey = 'result' | 'category' | 'component' | 'did'
 
 const emptyValueLabel = '-'
@@ -129,6 +129,9 @@ const passedCheckCount = computed(() =>
 )
 const reviewCheckCount = computed(() =>
   hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'review').length : 0,
+)
+const notEvaluatedCheckCount = computed(() =>
+  hasExecutedAudit.value ? findings.value.filter((finding) => auditResult(finding) === 'not_evaluated').length : 0,
 )
 const auditIsEmpty = computed(() => hasExecutedAudit.value && findings.value.length === 0 && !error.value)
 const auditHasPassed = computed(
@@ -319,6 +322,8 @@ function findingBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-erro
   if (result === 'failed') {
     return 'badge-error'
   }
+  // A not-evaluated finding shares the neutral badge with an unknown one: it is
+  // neither a pass nor a review task (ADR-33).
   return result === 'review' ? 'badge-warning' : 'badge-ghost'
 }
 
@@ -332,16 +337,22 @@ function auditResult(finding: AuditFinding): AuditResult | null {
   if (finding.status === 'REVIEW') {
     return 'review'
   }
+  if (finding.status === 'NOT_EVALUATED') {
+    return 'not_evaluated'
+  }
   return null
 }
 
-function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Unknown' {
+function auditResultLabel(finding: AuditFinding): 'Passed' | 'Failed' | 'Needs Review' | 'Not Evaluated' | 'Unknown' {
   const result = auditResult(finding)
   if (result === 'passed') {
     return 'Passed'
   }
   if (result === 'failed') {
     return 'Failed'
+  }
+  if (result === 'not_evaluated') {
+    return 'Not Evaluated'
   }
   return result === 'review' ? 'Needs Review' : 'Unknown'
 }
@@ -357,6 +368,11 @@ function auditResultSummary(finding: AuditFinding): string {
   }
   if (result === 'review') {
     return assertion ? `Review: ${assertion}` : 'Review required'
+  }
+  if (result === 'not_evaluated') {
+    return assertion
+      ? `Not evaluated here: ${assertion}`
+      : 'Not evaluated here - the executing target system reports this verdict'
   }
   return assertion ? `Unknown result: ${assertion}` : 'Unknown result'
 }
@@ -405,15 +421,17 @@ function severityBadgeClass(finding: AuditFinding): 'badge-success' | 'badge-err
     return 'badge-warning'
   }
   if (
+    severity === 'satisfied' ||
     severity === 'passed' ||
     severity === 'pass' ||
     severity === 'success' ||
     severity === 'ok' ||
-    severity === 'compliant' ||
-    severity === 'info'
+    severity === 'compliant'
   ) {
     return 'badge-success'
   }
+  // 'deferred' falls through to the neutral badge: the DCS reached no verdict,
+  // so it must not read as a passing check (ADR-33).
   return 'badge-ghost'
 }
 
@@ -472,6 +490,13 @@ function formatDateTime(value?: string): string {
             Needs Review
           </div>
           <div class="stat-value text-2xl text-base-content">{{ reviewCheckCount }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title flex items-center gap-2 text-base-content/70">
+            <span class="size-2 rounded-full bg-base-content/30"></span>
+            Not Evaluated
+          </div>
+          <div class="stat-value text-2xl text-base-content">{{ notEvaluatedCheckCount }}</div>
         </div>
       </div>
 
@@ -561,10 +586,14 @@ function formatDateTime(value?: string): string {
     <div v-if="selectedAuditLoading" class="p-4" role="status">Executing audit...</div>
     <div v-else-if="error" class="alert rounded-box alert-error" role="alert">{{ error }}</div>
     <div v-if="auditHasPassed" class="alert rounded-box alert-success" role="status">
-      Audit passed. No failed checks or review findings were returned.
+      Audit passed. Every check returned a verdict, and none failed or needs review.
+    </div>
+    <div v-if="notEvaluatedCheckCount > 0" class="alert rounded-box alert-info" role="status">
+      {{ notEvaluatedCheckCount }} check(s) were not evaluated here. Their verdict belongs to the target system that
+      executes the contract, which observes the facts they depend on.
     </div>
     <div v-if="auditIsEmpty" class="alert rounded-box alert-info" role="status">
-      Audit completed successfully. No matching entries were found.
+      Audit completed. No matching entries were found.
     </div>
 
     <!-- Erasure state of the inspected archive entry (DCS-NFR-SEC-13) -->

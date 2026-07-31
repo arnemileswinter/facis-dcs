@@ -151,6 +151,17 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			if err != nil {
 				return fmt.Errorf("proposed contract data validation failed: %w", err)
 			}
+			stored, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+			if err != nil {
+				return fmt.Errorf("could not read contract data: %w", err)
+			}
+			// The redline replaces the document with the one the proposing client
+			// assembled, so the bundle this copy is pinned to travels from the
+			// stored document (CarrySemanticBundle).
+			normalized, err = validation.CarrySemanticBundle(stored.ContractData, normalized)
+			if err != nil {
+				return fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
+			}
 			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
 				DID:             cmd.DID,
 				ContractData:    normalized,

@@ -204,6 +204,9 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
+		errors.Is(err, command.ErrKPIVerdictUnknown) ||
+		errors.Is(err, command.ErrKPIRuleMissing) ||
+		errors.Is(err, command.ErrKPIRuleUnknown) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -215,6 +218,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
 		errors.Is(err, command.ErrAgreementSettled) ||
+		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
@@ -671,7 +675,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		expPolicy = &s
 	}
 
-	kpis, kpiViolations, err := s.retrieveKPIs(ctx, req.Did)
+	kpis, err := s.retrieveKPIs(ctx, req.Did)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
@@ -719,7 +723,6 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		ExpNoticePeriod:    contractResult.ExpNoticePeriod,
 		Responsible:        contractResult.Responsible,
 		Kpis:               kpis,
-		KpiViolations:      kpiViolations,
 		TargetID:           contractResult.TargetID,
 		TargetName:         targetName,
 	}, nil
@@ -794,15 +797,22 @@ func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *c
 
 	observations := make([]any, 0, len(entries))
 	for _, entry := range entries {
-		observations = append(observations, map[string]any{
+		observation := map[string]any{
 			"@id":               fmt.Sprintf("%s#kpi-%d", base.ResourceIRI("contract", req.Did), entry.ID),
 			"@type":             "dcs:KPIObservation",
 			"dcs:metricName":    entry.Metric,
 			"dcs:observedValue": entry.Value,
 			"dcs:observedAt":    entry.ObservedAt.Format(time.RFC3339),
-			"dcs:violation":     entry.Violation,
+			"dcs:verdict":       entry.Verdict,
 			"dcs:aboutContract": map[string]any{"@id": base.ResourceIRI("contract", req.Did)},
-		})
+		}
+		// The rule is a node reference, not a literal: it is the @id the ODRL
+		// rule carries inside the contract the target system was deployed, so a
+		// reader follows it back to the exact term the verdict is about.
+		if entry.RuleID != nil {
+			observation["dcs:aboutRule"] = map[string]any{"@id": *entry.RuleID}
+		}
+		observations = append(observations, observation)
 	}
 	return map[string]any{
 		"@context":        semantichub.AnchorURL("context", semantichub.ContextName, contextVersion),
@@ -812,53 +822,39 @@ func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *c
 	}, nil
 }
 
-// retrieveKPIs reads the KPI values reported via deployment callbacks for a
-// contract (DCS-FR-CWE-31, DCS-FR-CWE-09), returning both the per-KPI list
-// and the distinct set of metric names whose latest reported value violates
-// its contractual SLA threshold.
-func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did string) ([]*contractworkflowengine.ContractDeploymentKPIItem, []string, error) {
+// retrieveKPIs reads the KPI reports received via deployment callbacks for a
+// contract (DCS-FR-CWE-31, DCS-FR-CWE-09), each with the verdict the target
+// system reached and the ODRL rule it named (ADR-33).
+func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did string) ([]*contractworkflowengine.ContractDeploymentKPIItem, error) {
 	if s.DeploymentRepo == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not start transaction: %w", err)
+		return nil, fmt.Errorf("could not start transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	entries, err := s.DeploymentRepo.ReadKPIsByDID(ctx, tx, did)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not read KPIs for contract %s: %w", did, err)
+		return nil, fmt.Errorf("could not read KPIs for contract %s: %w", did, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("could not commit transaction: %w", err)
+		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	kpis := make([]*contractworkflowengine.ContractDeploymentKPIItem, 0, len(entries))
-	latestViolation := map[string]bool{}
-	order := make([]string, 0)
 	for _, entry := range entries {
-		violation := entry.Violation
 		kpis = append(kpis, &contractworkflowengine.ContractDeploymentKPIItem{
 			Metric:     entry.Metric,
 			Value:      entry.Value,
 			ObservedAt: entry.ObservedAt.Format(time.RFC3339),
-			Violation:  &violation,
+			Verdict:    entry.Verdict,
+			Rule:       entry.RuleID,
 		})
-		if _, seen := latestViolation[entry.Metric]; !seen {
-			order = append(order, entry.Metric)
-		}
-		latestViolation[entry.Metric] = violation
 	}
 
-	violations := make([]string, 0)
-	for _, metric := range order {
-		if latestViolation[metric] {
-			violations = append(violations, metric)
-		}
-	}
-
-	return kpis, violations, nil
+	return kpis, nil
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, req *contractworkflowengine.ContractHistoryRetrieveByIDRequest) (res []*contractworkflowengine.ContractHistoryRetrieveByIDResponse, err error) {
@@ -1757,6 +1753,12 @@ func (s *contractWorkflowEnginesrvc) DeploymentCallback(ctx context.Context, req
 		}
 		if req.Kpi.Value != nil {
 			cmd.KPIValue = *req.Kpi.Value
+		}
+		if req.Kpi.Verdict != nil {
+			cmd.KPIVerdict = *req.Kpi.Verdict
+		}
+		if req.Kpi.Rule != nil {
+			cmd.KPIRule = *req.Kpi.Rule
 		}
 	}
 

@@ -24,7 +24,10 @@ const policyBadgeClass = (audit: TemplateAuditItem) => {
   const severity = policyField(audit, 'severity').toLowerCase()
   if (severity === 'error') return 'badge-error'
   if (severity === 'warning') return 'badge-warning'
-  return 'badge-info'
+  // 'satisfied' is a verdict this audit reached; 'deferred' is the absence of
+  // one (ADR-33), so it does not share the passing badge.
+  if (severity === 'satisfied') return 'badge-success'
+  return 'badge-ghost'
 }
 </script>
 

@@ -685,13 +685,16 @@ def _shapes_anchor_identity(document: dict) -> list:
     AUTHOR pinned, it is never re-anchored to the importer's own hub)."""
     anchors = hub_shapes_anchors(document)
     assert anchors, f"the document carries no hub sh:shapesGraph anchor: {document.get('sh:shapesGraph')!r}"
-    identities = []
-    for anchor in anchors:
-        parsed = urlparse(anchor)
-        name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        version = (parse_qs(parsed.query).get("version") or [None])[0]
-        identities.append((name, version))
-    return sorted(identities)
+    return sorted(_anchor_identity(anchor) for anchor in anchors)
+
+
+def _anchor_identity(anchor) -> tuple:
+    """One hub anchor's (name, version) — see _shapes_anchor_identity."""
+    assert isinstance(anchor, str) and anchor, f"not a hub anchor: {anchor!r}"
+    parsed = urlparse(anchor)
+    name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    version = (parse_qs(parsed.query).get("version") or [None])[0]
+    return name, version
 
 
 def _install_sla_domain_library(context, base_url: str):
@@ -1030,6 +1033,48 @@ def step_then_imported_field_bound_operands(context, count):
         "instance A's own template declares "
         f"{authored['field_bound_right_operands']} negotiated boundaries, not {count} — the fixture "
         "and the feature file disagree"
+    )
+
+
+@then(
+    "the SLA contract on instance {label} pins an effective bundle covering every shapes graph it declares"
+)
+def step_then_contract_bundle_covers_its_declarations(context, label):
+    """The workflow gate refuses a transition whose immutable snapshot it
+    cannot build, and it builds that snapshot from these two properties
+    (backend/internal/processauditandcompliance/workflowgate). A contract drawn
+    from an IMPORTED template is the case that breaks them apart: its template
+    declares the upstream author's shape library beside the canonical DCS graph,
+    so sh:shapesGraph is a LIST and one of its anchors is served by the
+    publishing instance. Both are compared by hub entry name and version, never
+    by URL — the host is the instance that produced the document."""
+    document = _contract_data(context, label)
+    declared = [_anchor_identity(anchor) for anchor in hub_shapes_anchors(document)]
+    assert declared, (
+        f"the SLA contract on instance {label} declares no hub sh:shapesGraph anchor: "
+        f"{document.get('sh:shapesGraph')!r}"
+    )
+    effective_anchors = document.get("dcs:effectiveShapes")
+    assert isinstance(effective_anchors, list) and effective_anchors, (
+        f"the SLA contract on instance {label} pins no dcs:effectiveShapes bundle, so no workflow "
+        f"transition can be gated: {effective_anchors!r}"
+    )
+    effective = [
+        _anchor_identity(entry.get("@id") if isinstance(entry, dict) else entry)
+        for entry in effective_anchors
+    ]
+    assert declared[0] == effective[0], (
+        f"the canonical shapes graph the contract declares first ({declared[0]}) is not the one its "
+        f"effective bundle leads with ({effective[0]}) on instance {label}"
+    )
+    missing = [anchor for anchor in declared if anchor not in effective]
+    assert not missing, (
+        f"the SLA contract on instance {label} declares shapes graphs its effective bundle does not "
+        f"carry: {missing}; bundle={effective}"
+    )
+    # The upstream author's library is the reason the array form exists.
+    assert any(name == _SLA_LIBRARY_NAME for name, _version in declared), (
+        f"the contract lost the {_SLA_LIBRARY_NAME!r} library its imported template declared: {declared}"
     )
 
 
@@ -1488,13 +1533,16 @@ def step_given_single_instance_sla_contract(context, name):
     _sla(context)["single_instance_contract_did"] = contract_did
 
 
-@step('the target reports an availability KPI value "{value}" for contract "{name}"')
-def step_when_target_reports_availability_kpi(context, value, name):
-    """The metric IS the committed-availability field's node IRI, which is how
-    EvaluateKPIViolation binds a reported measurement to the ODRL constraint
-    that governs it (DCS-FR-CWE-09) — a label would bind to nothing."""
+AVAILABILITY_METRIC = "availability_percent"
+
+
+def _deployed_availability_rule(context, name: str) -> str:
+    """The @id of the one deployed rule whose constraint governs the committed
+    availability. This SLA carries nine rules, so a verdict about availability
+    has to say which of them it concluded about (ADR-33)."""
     from steps.contract_deployment.dcs_contract_deployment_steps import (  # noqa: PLC0415
-        step_when_target_reports_kpi,
+        deployed_policy,
+        rule_constraining_field,
     )
     from steps.support.services.contract_service import ContractService  # noqa: PLC0415
 
@@ -1503,7 +1551,26 @@ def step_when_target_reports_availability_kpi(context, value, name):
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
     assert retrieve.status_code == 200, retrieve.text
     field = _field_by_fragment(retrieve.json().get("contract_data") or {}, "committed-availability")
-    step_when_target_reports_kpi(context, field["@id"], value, name)
+    return rule_constraining_field(deployed_policy(context, name), field["@id"])
+
+
+@step(
+    'the target reports an availability KPI value "{value}" for contract "{name}", '
+    'concluding "{verdict}" on the deployed availability rule'
+)
+def step_when_target_reports_availability_kpi(context, value, name, verdict):
+    """The target measured the availability and reached its own conclusion
+    about the duty that governs it; the DCS records both (DCS-FR-CWE-09)."""
+    from steps.contract_deployment.dcs_contract_deployment_steps import report_kpi  # noqa: PLC0415
+
+    report_kpi(
+        context,
+        name,
+        AVAILABILITY_METRIC,
+        value,
+        verdict=verdict,
+        rule=_deployed_availability_rule(context, name),
+    )
 
 
 @step('the committed availability of contract "{name}" is "{value}"')
@@ -1521,16 +1588,20 @@ def step_then_committed_availability_is(context, name, value):
     )
 
 
-@then('the contract detail for "{name}" shows a KPI violation flag for its committed availability')
-def step_then_kpi_violation_on_availability(context, name):
-    from steps.contract_deployment.dcs_contract_deployment_steps import (  # noqa: PLC0415
-        step_then_contract_detail_shows_kpi_violation,
-    )
-    from steps.support.services.contract_service import ContractService  # noqa: PLC0415
+@then(
+    'the contract detail for "{name}" records the availability KPI as "{verdict}" '
+    "against the deployed availability rule"
+)
+def step_then_availability_verdict_recorded(context, name, verdict):
+    from steps.contract_deployment.dcs_contract_deployment_steps import recorded_kpi  # noqa: PLC0415
 
-    did, _ = ContractService._contract_data(context, name)
-    headers = context.contract_seed_headers.get(name)
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=headers)
-    assert retrieve.status_code == 200, retrieve.text
-    field = _field_by_fragment(retrieve.json().get("contract_data") or {}, "committed-availability")
-    step_then_contract_detail_shows_kpi_violation(context, name, field["@id"])
+    entry = recorded_kpi(context, name, AVAILABILITY_METRIC)
+    expected_rule = _deployed_availability_rule(context, name)
+    assert str(entry.get("verdict")) == verdict, (
+        f"expected the availability KPI on contract {name!r} to carry the target's verdict "
+        f"{verdict!r}, got: {entry!r}"
+    )
+    assert str(entry.get("rule")) == expected_rule, (
+        f"expected the availability verdict on contract {name!r} to name the deployed availability "
+        f"rule {expected_rule!r}, got: {entry!r}"
+    )

@@ -137,13 +137,12 @@ describe('an unrecognised datatype does not silently become a string', () => {
     expect(compactXsdDatatype(iri)).toBeDefined()
   })
 
-  it.each([
-    'http://www.w3.org/2001/XMLSchema#gYear',
-    'http://www.w3.org/2001/XMLSchema#time',
-    'xsd:gMonthDay',
-  ])('rejects %s rather than reading it as a string', (iri) => {
-    expect(() => compactXsdDatatype(iri)).toThrow(/cannot order/)
-  })
+  it.each(['http://www.w3.org/2001/XMLSchema#gYear', 'http://www.w3.org/2001/XMLSchema#time', 'xsd:gMonthDay'])(
+    'rejects %s rather than reading it as a string',
+    (iri) => {
+      expect(() => compactXsdDatatype(iri)).toThrow(/cannot order/)
+    },
+  )
 
   it('leaves a non-XSD range undeclared instead of guessing a datatype', () => {
     expect(compactXsdDatatype('https://w3id.org/facis/dcs/ontology/v1#CompanyParty')).toBeUndefined()

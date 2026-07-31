@@ -35,7 +35,7 @@ const props = defineProps<{
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
 const router = useRouter()
-const { isCreator, isManager } = useContractPermissions()
+const { isCreator, isManager, isNegotiator } = useContractPermissions()
 
 // SRS DCS-IR-CWE-01 / §1.2 offer→acceptance lifecycle: only a Contract Creator
 // may transmit a DRAFT to the counterparty (EventOffer is allowed solely from
@@ -44,6 +44,23 @@ const { isCreator, isManager } = useContractPermissions()
 const canOffer = computed(() => {
   return isCreator.value && props.contract.state === ContractState.draft
 })
+
+// An OFFERED contract's only forward move is the counterparty opening the
+// negotiation (contractstate.Transitions: Offered -Negotiate-> Negotiation,
+// SRS §4 — the Responder may accept, negotiate or refuse). The view that does
+// it exists; nothing linked to it, so a received offer showed a read-only page
+// whose only enabled action was Terminate. NEGOTIATION keeps the entry so a
+// round in progress is reachable the same way.
+const canNegotiate = computed(() => {
+  const state = props.contract.state
+  return (
+    (isNegotiator.value || isCreator.value) && (state === ContractState.offered || state === ContractState.negotiation)
+  )
+})
+
+function openNegotiation() {
+  void router.push({ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: props.contract.did } })
+}
 
 // Required contract fields still missing a filled dcs:value — the completeness
 // the backend's offer gate (command/offer.go validateOfferReady, SRS §1.2
@@ -167,6 +184,14 @@ const terminate = async () => {
     @click="deploy"
   >
     {{ deploying ? 'Deploying…' : deployLabel }}
+  </button>
+  <button
+    v-if="canNegotiate"
+    data-testid="open-negotiation"
+    :class="[filteredClass, 'btn-primary']"
+    @click="openNegotiation"
+  >
+    Negotiate
   </button>
   <button v-if="canTerminate" :class="[filteredClass, 'btn-error']" @click="terminate">Terminate</button>
   <ConfirmationModal ref="confirmation-modal" />

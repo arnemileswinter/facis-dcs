@@ -85,8 +85,6 @@ export const useDcsDraftStore = defineStore(storeId, {
       return [
         { id: objectIri('party', 'assigner', documentId), label: 'My organization' },
         { id: objectIri('party', 'assignee', documentId), label: 'The counterparty' },
-        { id: objectIri('party', 'provider', documentId), label: 'Provider' },
-        { id: objectIri('party', 'customer', documentId), label: 'Customer' },
       ]
     },
     /** The contract/asset IRI an ODRL rule targets. */
@@ -921,6 +919,10 @@ function remapConstraintIds(node: OdrlConstraintNode, idMap: Map<string, string>
     if (right && !Array.isArray(right) && typeof right === 'object' && '@id' in right) {
       next['odrl:rightOperand'] = mapRef(right)
     }
+    // A unit may name a contract field too (a negotiated unit); one naming a
+    // fixed concept is not in the map and passes through.
+    const unit = node['odrl:unit']
+    if (unit) next['odrl:unit'] = mapRef(unit)
     return next
   }
   const next = { ...node }
