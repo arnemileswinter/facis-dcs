@@ -282,6 +282,19 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				}
 
 			} else {
+				// No change requests to merge. That is a settlement only if a
+				// negotiator actually accepted: a contract whose counterparty
+				// never received a task has no open tasks and no negotiations
+				// either, so both checks above pass the moment the offer is
+				// opened and the round would end before it began. Settlement is
+				// evidenced by an acceptance, never inferred from absence.
+				accepted, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, negotiationtaskstate.Accepted.String())
+				if err != nil {
+					return fmt.Errorf("could not check accepted negotiation tasks: %w", err)
+				}
+				if !accepted {
+					return ErrNegotiationNotSettled
+				}
 				nextState = contractstate.Submitted
 			}
 		}
