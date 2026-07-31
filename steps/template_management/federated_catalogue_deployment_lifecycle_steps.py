@@ -100,7 +100,31 @@ def _create_isolated_namespace(context):
     if owned:
         def cleanup():
             # The generated prefix makes the destructive target explicit.
-            if namespace.startswith("dcs-fc-lifecycle-"):
+            if not namespace.startswith("dcs-fc-lifecycle-"):
+                return
+            # These namespaces hold a full catalogue stack -- Postgres, fc-service
+            # and, for the legacy upgrade, Neo4j -- on the same single kind node as
+            # the two DCS instances. Deleting without waiting returns while every
+            # pod is still running, so the features that follow (encryption at
+            # rest, checkpoints, SLA federation) execute against a node that is
+            # still carrying this scenario's load. Drop the pods first, then wait
+            # for the namespace, so the compute is actually released here.
+            # A teardown that overruns must not fail the scenario that owns it.
+            try:
+                _run(
+                    [
+                        _kubectl_binary(), "-n", namespace, "delete", "pod", "--all",
+                        "--grace-period=0", "--force", "--wait=false",
+                    ],
+                    timeout=60,
+                )
+                _run(
+                    [_kubectl_binary(), "delete", "namespace", namespace, "--wait=true"],
+                    timeout=float(
+                        os.environ.get("BDD_FC_LIFECYCLE_TEARDOWN_TIMEOUT_SECONDS", "180")
+                    ),
+                )
+            except subprocess.TimeoutExpired:
                 _run(
                     [_kubectl_binary(), "delete", "namespace", namespace, "--wait=false"],
                     timeout=30,
