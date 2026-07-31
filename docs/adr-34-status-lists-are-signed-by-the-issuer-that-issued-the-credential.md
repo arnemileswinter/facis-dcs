@@ -20,8 +20,9 @@ unsuitable.
 the default output — but only by delegating to a separate component: *"Optional:
 Signer Service (in case for signed results)"*, reached over NATS
 (`STATUSLIST_SIGNER_URL`, `STATUSLIST_SIGNER_TOPIC`; `topics.signer` in our
-chart). No signer was wired in any of our deployments, and the service also
-offers a raw unsigned output, so what it served was `application/json` —
+chart). No deployment here wired one — for the reason the next point gives —
+and the service also offers a raw unsigned output, so what it served was
+`application/json` —
 `{tenantId, listId, list}` — an envelope with no signature at all. The verifier
 was given an `xfscAllowUnsignedFallback` flag to accept it, enabled in the BDD
 stack *and* on both live instances. An unsigned status list asserts a
@@ -30,12 +31,26 @@ write it: a network position, a DNS answer, or a misrouted ingress is enough to
 un-revoke a credential. No conformant wallet or verifier can accept that, and
 neither should ours.
 
-**It cannot express an x5c chain.** Its signing path is a key service: it holds a
-key and returns a signature. The upstream README documents the signed header as
-carrying a key id — `"kid": "11"` in its own example — and mentions no
-certificate chain anywhere. A list it signs is therefore identified by `kid`
-against a JWKS the verifier must already hold: a second, parallel trust
-distribution problem, out of band, before anything can be checked.
+**It cannot express an x5c chain.** This is a property of the code, not of its
+configuration. `internal/api/messaging.go` builds the protected header as a map
+with exactly one entry:
+
+    var ph = make(map[string]interface{})
+    ph["kid"] = did + "#" + key
+
+`x5c` appears nowhere in the repository. There is no option to enable and no
+field to populate: a certificate chain cannot reach the header the service
+signs. The `kid` it does emit is a DID fragment, so resolving it means resolving
+a DID — a third key-resolution model beside our certificate chains and bundled
+JWKS.
+
+The same function shows the signed path is not merely certificate-less but
+unusable as written: `iat` is set with `UnixMilli()` where RFC 7519 defines
+seconds, and `exp` is `time.Now().Add(time.Duration(time.Now().Year()))`, which
+adds the year *as nanoseconds* — every signed token expires roughly two
+microseconds after it is issued. A conformant verifier refuses them as expired.
+That is the likely reason no deployment ever wired the signer: the unsigned
+output was the only one that worked, and the fallback kept anyone from noticing.
 
 The same README states the service *"should not be directly public"*. A status
 list is fetched by every verifier that checks a credential, so a component whose
@@ -120,13 +135,13 @@ because the fixture avoided the case.
 
 ## Alternatives considered
 
-**Wire the Signer Service into the statuslist-service.** Supported upstream and
-closes the unsigned hole. Rejected: it does not close the second one. The result
-is `kid`-identified, so every verifier still needs the JWKS distributed out of
-band, and this project would maintain two trust models — one certificate-based
-for credentials, one key-based for their revocation status — with no
-relationship between them. It also adds a component (the signer) to keep
-running, to reach the position the issuer's own flow already occupies.
+**Wire the Signer Service into the statuslist-service.** Documented upstream and
+closes the unsigned hole. Rejected on the source: the tokens it produces expire
+microseconds after issuance (`exp` adds the year as nanoseconds) and carry a DID
+`kid` and no chain, so they are neither verifiable by a conformant verifier nor
+expressible in this project's PKI. Making it work would mean patching upstream's
+signing path and running an additional component, to reach a position the
+issuer's own flow already occupies.
 
 **Keep the fallback for development only.** The smallest change, and it keeps
 CI green today. Rejected outright: it is the arrangement that hid both defects.
