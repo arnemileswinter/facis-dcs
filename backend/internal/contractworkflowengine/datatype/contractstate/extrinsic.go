@@ -144,29 +144,64 @@ func (e SignatureEvidence) peerSigned(field string) bool {
 	return false
 }
 
+// counterpartyCommitted reports whether this instance holds evidence that the
+// OTHER party settled on this version: a verified cross-instance signature for
+// the slot naming it. A contract that declares no remote party slot has no
+// counterparty to hear from, so its own workflow is the whole story.
+//
+// Local workflow progress is never such evidence. Approval, review and our own
+// signature are all things this organization does alone, and a contract can
+// reach every one of them without the peer having received the document —
+// Draft -> Submit -> Negotiation needs no counterparty (transition.go), and
+// command/submit.go starts the negotiation round identically from DRAFT and
+// OFFERED.
+func (e SignatureEvidence) counterpartyCommitted() bool {
+	remote := false
+	for _, field := range e.Declared {
+		if !e.isRemotePartyField(field) {
+			continue
+		}
+		remote = true
+		if e.peerSigned(field) {
+			return true
+		}
+	}
+	return !remote
+}
+
 // InferExtrinsic projects the extrinsic lifecycle from a contract's intrinsic
 // state and the signature evidence this instance holds. The pre-settlement
-// formation states all read as "proposed"; internal approval on both sides is
-// the settlement, so APPROVED reads as "agreed". Off-ramps pass through as
-// their lowercase state so a caller can still tell why a contract left the
-// happy path.
+// formation states all read as "proposed". Off-ramps pass through as their
+// lowercase state so a caller can still tell why a contract left the happy
+// path.
+//
+// "Agreed" asserts that BOTH parties settled on this version, so it is claimed
+// only where this instance holds evidence of the counterparty's commitment.
+// APPROVED alone is not that evidence: it is one organization's internal
+// decision, reachable without the counterparty ever receiving the contract, and
+// projecting it as agreement told a peer a bilateral agreement existed on the
+// strength of a unilateral act. The same applies to our own first signature.
 //
 // SIGNED is written on the FIRST local signature, so it does not by itself say
-// the agreement is executed: a signed contract whose declared fields are not
-// all satisfied is still "agreed" — the parties have settled and signatures are
-// being collected. ACTIVE is only ever reached through the deployment gate,
-// which already refuses a contract with an unsigned declared field.
+// the agreement is executed. ACTIVE is only ever reached through the deployment
+// gate, which already refuses a contract with an unsigned declared field.
 func InferExtrinsic(intrinsicState string, signatures SignatureEvidence) ExtrinsicLifecycle {
 	switch strings.ToUpper(intrinsicState) {
 	case Draft.String(), Offered.String(), Negotiation.String(), Submitted.String(), Reviewed.String():
 		return Proposed
 	case Approved.String():
-		return Agreed
+		if signatures.counterpartyCommitted() {
+			return Agreed
+		}
+		return Proposed
 	case Signed.String():
 		if signatures.AllSignaturesCollected() {
 			return Executed
 		}
-		return Agreed
+		if signatures.counterpartyCommitted() {
+			return Agreed
+		}
+		return Proposed
 	case Active.String():
 		return Executed
 	default:
