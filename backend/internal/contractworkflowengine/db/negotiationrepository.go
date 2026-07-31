@@ -36,9 +36,14 @@ type NegotiationData struct {
 	CreatedAt       time.Time      `db:"created_at"`
 }
 
+// NegotiationChangeData is one accepted change request of a round. CreatedAt
+// carries the row's proposal time because the merge folds the requests in that
+// order (see MergeChangeRequests): later accepted requests overwrite earlier
+// ones field by field, so the fold is only well-defined against a total order.
 type NegotiationChangeData struct {
 	ID            string         `db:"id"`
 	ChangeRequest *datatype.JSON `db:"change_request"`
+	CreatedAt     time.Time      `db:"created_at"`
 }
 
 type NegotiationDecisionData struct {
@@ -68,6 +73,9 @@ type NegotiationRepo interface {
 	Accept(ctx context.Context, tx *sqlx.Tx, id string, acceptedBy string) error
 	Reject(ctx context.Context, tx *sqlx.Tx, id string, rejectedBy string, rejectionReason *string) error
 	ReadAllByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationData, error)
+	// ReadAllAcceptedByContractDIDAndVersion returns the round's accepted
+	// change requests ordered by (created_at, id). The order is part of the
+	// contract: the merge that consumes them is order-dependent.
 	ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) ([]NegotiationChangeData, error)
 	HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error)
 	HasNegotiationForContractVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) (bool, error)

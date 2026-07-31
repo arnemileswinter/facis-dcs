@@ -181,14 +181,21 @@ func (r PostgresNegotiationRepo) ReadAllByContractDID(ctx context.Context, tx *s
 }
 
 func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) ([]db.NegotiationChangeData, error) {
+	// Without ORDER BY the row order is a GROUP BY artefact — a planner
+	// detail — and the merge that folds these rows is last-write-wins per
+	// field, so it would resolve conflicts differently run to run.
+	// (created_at, id) is a total order: CURRENT_TIMESTAMP is the transaction
+	// clock, so requests proposed in one transaction share a created_at and
+	// the primary key separates them.
 	query := `
-        SELECT cn.id, change_request
+        SELECT cn.id, cn.change_request, cn.created_at
 		FROM contract_negotiations cn
 		JOIN contract_negotiation_decisions cnd ON cnd.negotiation_id = cn.id
 		WHERE cn.did = $1
 		  AND cn.contract_version = $2
-		GROUP BY cn.id, cn.change_request
+		GROUP BY cn.id, cn.change_request, cn.created_at
 		HAVING COUNT(*) = COUNT(CASE WHEN cnd.decision = 'ACCEPTED' THEN 1 END)
+		ORDER BY cn.created_at, cn.id
     `
 	var negotiations []db.NegotiationChangeData
 	err := tx.SelectContext(ctx, &negotiations, query, did, contractVersion)

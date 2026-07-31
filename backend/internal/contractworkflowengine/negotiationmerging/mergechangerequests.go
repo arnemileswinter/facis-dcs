@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -14,15 +16,28 @@ import (
 )
 
 // MergeChangeRequests folds every accepted (not merely proposed) change
-// request of contractVersion into a single update. Requests are applied in
-// read order, field by field, so a later accepted request silently
+// request of contractVersion into a single update. Requests are applied
+// oldest first, field by field, so a later accepted request silently
 // overwrites an earlier one touching the same field (last-write-wins, no
 // conflict detection).
+//
+// The fold therefore has no meaning without a total order over the accepted
+// set. It is established here rather than trusted from the repository,
+// because the result is bound by digest into the settlement artifact
+// (signingmanagement/command.assertCounterpartiesSettled) and a document that
+// depends on which row a query happened to return first is a document the
+// counterparty cannot be held to.
 func MergeChangeRequests(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo, nRepo db.NegotiationRepo, did string, contractVersion int) (*db.ContractUpdateData, error) {
 	changeRequests, err := nRepo.ReadAllAcceptedByContractDIDAndVersion(ctx, tx, did, contractVersion)
 	if err != nil {
 		return nil, err
 	}
+	slices.SortStableFunc(changeRequests, func(a, b db.NegotiationChangeData) int {
+		if applied := a.CreatedAt.Compare(b.CreatedAt); applied != 0 {
+			return applied
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 
 	contract, err := cRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
