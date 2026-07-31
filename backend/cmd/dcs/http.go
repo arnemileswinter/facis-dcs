@@ -351,10 +351,11 @@ type bundleExportRefusedResponse struct {
 func (e *bundleExportRefusedResponse) StatusCode() int { return http.StatusUnprocessableEntity }
 
 type workflowGateBlockedResponse struct {
-	Name      string `json:"name"`
-	Message   string `json:"message"`
-	GateRunID string `json:"gate_run_id,omitempty"`
-	Status    string `json:"status"`
+	Name      string   `json:"name"`
+	Message   string   `json:"message"`
+	GateRunID string   `json:"gate_run_id,omitempty"`
+	Status    string   `json:"status"`
+	Findings  []string `json:"findings,omitempty"`
 }
 
 func (e *workflowGateBlockedResponse) StatusCode() int {
@@ -369,10 +370,15 @@ func (e *workflowGateBlockedResponse) StatusCode() int {
 func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 	var gateBlocked *workflowgate.BlockedError
 	if errors.As(err, &gateBlocked) {
-		return &workflowGateBlockedResponse{
+		response := &workflowGateBlockedResponse{
 			Name: "workflow_gate_blocked", Message: gateBlocked.Error(),
 			GateRunID: gateBlocked.RunID, Status: gateBlocked.Status,
 		}
+		var localBlocked *workflowgate.LocalEvaluationBlockedError
+		if errors.As(err, &localBlocked) {
+			response.Findings = localBlocked.Reasons()
+		}
+		return response
 	}
 
 	// A bundle-export refusal is its own error type (not a *goa.ServiceError),

@@ -178,7 +178,7 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 	case "deployment":
 		_, err := (&command.Deployer{
 			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
-			TargetRepo: s.TargetRepo, Target: s.TargetClient,
+			TargetRepo: s.TargetRepo, Target: s.TargetClient, PeerSigs: s.SRepo,
 		}).Handle(ctx, command.DeployCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
 			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
