@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -49,7 +50,9 @@ var ErrOwnAgreementSettled = errors.New("this instance already agreed to this ex
 // (signingmanagement/command/apply.go) and are never touched from here.
 type OwnSettlements interface {
 	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*db2.Settlement, error)
+	GetSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) ([]db2.Settlement, error)
 	DeleteSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) error
+	UpsertSettlementWithdrawal(ctx context.Context, tx *sqlx.Tx, withdrawal db2.SettlementWithdrawal) error
 }
 
 // requireUnsettledAgreement refuses a caller that is about to persist a NEW
@@ -146,9 +149,35 @@ func ownSettlementCoversStoredDocument(
 // with "this instance has not settled", which is the truth between the
 // withdrawal and the next submit. The next settle writes a fresh, undelivered
 // artifact for the new version and the retry scheduler ships it.
+//
+// Deleting locally only makes THIS instance stop signing. The counterparty
+// holds the settlement too, as the evidence ITS gate reads, so every row
+// dropped here queues a withdrawal toward the audience it was shipped to
+// (dcstodcs ships and retries it). The withdrawal names the digest the deleted
+// settlement covered, so it takes back exactly the agreement that was given and
+// cannot land on a later one.
 func withdrawOwnSettlement(ctx context.Context, tx *sqlx.Tx, settlements OwnSettlements, localPeer, did string) error {
 	if settlements == nil {
 		return fmt.Errorf("could not withdraw this instance's settlement of %s: no settlement store is configured", did)
+	}
+	given, err := settlements.GetSettlementsBy(ctx, tx, did, localPeer)
+	if err != nil {
+		return fmt.Errorf("could not read this instance's settlements of %s: %w", did, err)
+	}
+	// Truncated as BuildSettlement truncates settled_at, so the timestamp the
+	// artifact is signed over is the one this row keeps across re-deliveries.
+	withdrawnAt := time.Now().UTC().Truncate(time.Microsecond)
+	for _, settlement := range given {
+		if err := settlements.UpsertSettlementWithdrawal(ctx, tx, db2.SettlementWithdrawal{
+			DID:            did,
+			FromPeerDID:    localPeer,
+			ToPeerDID:      settlement.ToPeerDID,
+			DocumentDigest: settlement.DocumentDigest,
+			WithdrawnAt:    withdrawnAt,
+		}); err != nil {
+			return fmt.Errorf("could not queue the withdrawal of this instance's settlement of %s toward %s: %w",
+				did, settlement.ToPeerDID, err)
+		}
 	}
 	if err := settlements.DeleteSettlementsBy(ctx, tx, did, localPeer); err != nil {
 		return fmt.Errorf("could not withdraw this instance's settlement of %s: %w", did, err)

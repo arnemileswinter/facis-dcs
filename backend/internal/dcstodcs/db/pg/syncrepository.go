@@ -125,6 +125,20 @@ func (r PostgresSyncRepository) GetSettlement(ctx context.Context, tx *sqlx.Tx, 
 	return &settlement, nil
 }
 
+func (r PostgresSyncRepository) GetSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) ([]db.Settlement, error) {
+	query := `
+        SELECT did, from_peer_did, to_peer_did, contract_version, document_digest, settled_at, jades_signature, recorded_at, delivered_at
+        FROM contract_settlements
+        WHERE did = $1 AND from_peer_did = $2
+        ORDER BY to_peer_did
+    `
+	var settlements []db.Settlement
+	if err := tx.SelectContext(ctx, &settlements, query, did, fromPeerDID); err != nil {
+		return nil, err
+	}
+	return settlements, nil
+}
+
 func (r PostgresSyncRepository) DeleteSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) error {
 	statement := `
         DELETE FROM contract_settlements
@@ -151,6 +165,47 @@ func (r PostgresSyncRepository) GetUndeliveredSettlements(ctx context.Context, t
 func (r PostgresSyncRepository) MarkSettlementDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error {
 	statement := `
         UPDATE contract_settlements
+        SET delivered_at = CURRENT_TIMESTAMP
+        WHERE did = $1 AND from_peer_did = $2 AND to_peer_did = $3
+    `
+	_, err := tx.ExecContext(ctx, statement, did, fromPeerDID, toPeerDID)
+	return err
+}
+
+// UpsertSettlementWithdrawal replaces an undelivered earlier withdrawal toward
+// the same audience: it named an earlier settlement, and the settlement that
+// has to go now is the one this row names.
+func (r PostgresSyncRepository) UpsertSettlementWithdrawal(ctx context.Context, tx *sqlx.Tx, w db.SettlementWithdrawal) error {
+	statement := `
+        INSERT INTO contract_settlement_withdrawals (did, from_peer_did, to_peer_did, document_digest, withdrawn_at, recorded_at, delivered_at)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, NULL)
+        ON CONFLICT (did, from_peer_did, to_peer_did) DO UPDATE SET
+            document_digest = EXCLUDED.document_digest,
+            withdrawn_at    = EXCLUDED.withdrawn_at,
+            recorded_at     = CURRENT_TIMESTAMP,
+            delivered_at    = NULL
+    `
+	_, err := tx.ExecContext(ctx, statement, w.DID, w.FromPeerDID, w.ToPeerDID, w.DocumentDigest, w.WithdrawnAt.UTC())
+	return err
+}
+
+func (r PostgresSyncRepository) GetUndeliveredSettlementWithdrawals(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]db.SettlementWithdrawal, error) {
+	query := `
+        SELECT did, from_peer_did, to_peer_did, document_digest, withdrawn_at, recorded_at, delivered_at
+        FROM contract_settlement_withdrawals
+        WHERE from_peer_did = $1 AND delivered_at IS NULL
+        ORDER BY recorded_at
+    `
+	var withdrawals []db.SettlementWithdrawal
+	if err := tx.SelectContext(ctx, &withdrawals, query, fromPeerDID); err != nil {
+		return nil, err
+	}
+	return withdrawals, nil
+}
+
+func (r PostgresSyncRepository) MarkSettlementWithdrawalDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error {
+	statement := `
+        UPDATE contract_settlement_withdrawals
         SET delivered_at = CURRENT_TIMESTAMP
         WHERE did = $1 AND from_peer_did = $2 AND to_peer_did = $3
     `

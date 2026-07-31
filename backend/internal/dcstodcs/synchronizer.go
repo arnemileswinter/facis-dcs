@@ -86,6 +86,19 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		// signed PDF directly). shipContractPDF gates on the shippable state.
 		switch source {
 		case componenttype.ContractWorkflowEngine:
+			// The two edges that take an agreement back — a reviewer sending the
+			// submission back (SUBMIT_CONTRACT) and an approver rejecting
+			// (REJECT_CONTRACT) — queue a withdrawal toward every peer that was
+			// told this instance settled. Delivering it here rather than only at
+			// the next scheduler tick closes the window in which the peer's
+			// signing gate still reads the withdrawn agreement as evidence.
+			if evt.Type() == eventtype.Submit.String() || evt.Type() == eventtype.Reject.String() {
+				if withdrawnDID, err := didFromEvent(evt); err == nil {
+					s.shipSettlementWithdrawals(ctx, withdrawnDID)
+				} else {
+					log.Errorf(ctx, err, "could not read did from event %s", evt.Data())
+				}
+			}
 			// Settlement (NEGOTIATION -> SUBMITTED) is a statement about BOTH
 			// parties — this instance agreed the document — so the counterparty
 			// must hold verified evidence of it before it may sign. No PDF and no
@@ -211,9 +224,11 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 				log.Printf(ctx, "contract PDF ship retry was not successful: %v", err)
 			}
 		}
-		// Settlements have their own queue: sync_fails is keyed by contract and
-		// its retry re-ships the PDF, which would never deliver a settlement.
+		// Settlements and their withdrawals have their own queues: sync_fails is
+		// keyed by contract and its retry re-ships the PDF, which would never
+		// deliver either.
 		s.retryUndeliveredSettlements(ctx)
+		s.retryUndeliveredSettlementWithdrawals(ctx)
 	}
 }
 

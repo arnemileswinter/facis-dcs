@@ -49,14 +49,29 @@ func (r *settledContractRepoFake) ReadDataByDID(_ context.Context, _ *sqlx.Tx, d
 type settlementStoreFake struct {
 	db2.SyncRepository
 	rows map[string]*db2.Settlement
+	// queued mirrors contract_settlement_withdrawals: what the peer holding a
+	// settlement will be told, keyed by the audience it is addressed to.
+	queued map[string]db2.SettlementWithdrawal
 }
 
 func (s *settlementStoreFake) GetSettlement(_ context.Context, _ *sqlx.Tx, _, fromPeerDID string) (*db2.Settlement, error) {
 	return s.rows[fromPeerDID], nil
 }
 
+func (s *settlementStoreFake) GetSettlementsBy(_ context.Context, _ *sqlx.Tx, _, fromPeerDID string) ([]db2.Settlement, error) {
+	if row := s.rows[fromPeerDID]; row != nil {
+		return []db2.Settlement{*row}, nil
+	}
+	return nil, nil
+}
+
 func (s *settlementStoreFake) DeleteSettlementsBy(_ context.Context, _ *sqlx.Tx, _, fromPeerDID string) error {
 	delete(s.rows, fromPeerDID)
+	return nil
+}
+
+func (s *settlementStoreFake) UpsertSettlementWithdrawal(_ context.Context, _ *sqlx.Tx, w db2.SettlementWithdrawal) error {
+	s.queued[w.ToPeerDID] = w
 	return nil
 }
 
@@ -82,7 +97,10 @@ func unsignedArtifactOf(document string) *settledContractRepoFake {
 }
 
 func emptyStore() *settlementStoreFake {
-	return &settlementStoreFake{rows: map[string]*db2.Settlement{}}
+	return &settlementStoreFake{
+		rows:   map[string]*db2.Settlement{},
+		queued: map[string]db2.SettlementWithdrawal{},
+	}
 }
 
 // The window this gate exists for: both parties agreed, nobody has signed yet,
@@ -146,6 +164,40 @@ func TestRenegotiationIsPermittedAfterWithdrawingTheAgreement(t *testing.T) {
 	require.NoError(t, requireUnsettledAgreement(context.Background(), nil, repo, store, thisInstance, settledContractDID))
 	// Withdrawing takes back this instance's own word only; the evidence the
 	// signing gate holds about the counterparty is not ours to drop.
+	require.NotNil(t, store.rows[theCounterparty])
+}
+
+// Dropping the local row only stops THIS instance signing. The counterparty
+// holds the same settlement as the evidence its own gate reads, so withdrawing
+// has to be told to it — and told as a statement about the version that was
+// agreed, so it cannot land on a later one.
+func TestWithdrawingQueuesTheWithdrawalTowardThePeerThatWasTold(t *testing.T) {
+	store := emptyStore()
+	settledOn(t, store, thisInstance, agreedDocument)
+
+	require.NoError(t, withdrawOwnSettlement(context.Background(), nil, store, thisInstance, settledContractDID))
+
+	queued, ok := store.queued[theCounterparty]
+	require.True(t, ok, "the peer that holds this instance's settlement must be told it is withdrawn")
+	require.Equal(t, settledContractDID, queued.DID)
+	require.Equal(t, thisInstance, queued.FromPeerDID)
+
+	digest, err := jades.ContractDocumentDigest([]byte(agreedDocument))
+	require.NoError(t, err)
+	require.Equal(t, digest, queued.DocumentDigest,
+		"the withdrawal must name the version that was agreed, not the document as it now stands")
+	require.False(t, queued.WithdrawnAt.IsZero())
+}
+
+// Nothing was given, so nothing is taken back: a rejection on a contract that
+// never settled must not put a message on the wire.
+func TestWithdrawingWithoutAnOwnSettlementQueuesNothing(t *testing.T) {
+	store := emptyStore()
+	settledOn(t, store, theCounterparty, agreedDocument)
+
+	require.NoError(t, withdrawOwnSettlement(context.Background(), nil, store, thisInstance, settledContractDID))
+
+	require.Empty(t, store.queued)
 	require.NotNil(t, store.rows[theCounterparty])
 }
 

@@ -103,6 +103,28 @@ var DCSToDCSContractSettlementResponse = Type("DCSToDCSContractSettlementRespons
 	Required("from_peer_did")
 })
 
+var DCSToDCSSettlementWithdrawalRequest = Type("DCSToDCSSettlementWithdrawalRequest", func() {
+	Description("The counterparty taking back a settlement it previously shipped: it reopened its negotiation round (a reviewer sent the submission back, or an approver rejected it) and no longer agrees to the document version it named. Shipped over the same channel and authenticated the same way as the settlement itself. The receiver drops the settlement it holds from that peer, so its signing gate stops treating a withdrawn agreement as evidence.")
+
+	Attribute("secret_value", String, "Secret value")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the peer withdrawing its settlement")
+	Attribute("contract_iri", String, "IRI of the contract whose settlement is withdrawn")
+	Attribute("withdrawal_jades", String, "The sender's JAdES baseline-B compact JWS over the dcs:ContractSettlementWithdrawal artifact ({dcs:contractDid, dcs:contractDocumentDigest, dcs:withdrawnBy, dcs:withdrawnFrom, dcs:withdrawnAt}), signed with the same instance key as the settlement it takes back. The digest names WHICH settlement is withdrawn, so a withdrawal cannot be replayed against a later one")
+
+	Required("from_peer_did", "contract_iri", "secret_value", "secret_hash", "withdrawal_jades")
+})
+
+var DCSToDCSSettlementWithdrawalResponse = Type("DCSToDCSSettlementWithdrawalResponse", func() {
+	Description("Result for receiving a counterparty settlement withdrawal")
+
+	Attribute("from_peer_did", String, "Decentralized Identifier of the receiving peer")
+	Attribute("withdrawn", Boolean, "Whether a held settlement was actually removed. False when none was held or when the one held names a different document version than the withdrawal does — the withdrawal is accepted either way, so its delivery is not retried forever")
+
+	Required("from_peer_did", "withdrawn")
+})
+
 var DCSToDCSContractEraseRequest = Type("DCSToDCSContractEraseRequest", func() {
 	Description("A counterparty's request to shred this instance's wrapped CEKs for a contract (DCS-NFR-COMP-03, DCS-NFR-SEC-13): erasure of a federated contract completes only when both instances have destroyed their key records. Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
 
@@ -174,6 +196,23 @@ var _ = Service("DcsToDcs", func() {
 
 		HTTP(func() {
 			POST("/peer/contracts/settlement")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("post_settlement_withdrawal", func() {
+		Description("Receive the counterparty taking back a settlement it shipped earlier. Authenticated and trust-gated exactly as post_settlement, then the JAdES is verified against the peer's published assertion key and must name this contract, this instance as its audience, and a party of the contract as the withdrawing peer. The settlement held from that peer is removed only when the withdrawal names the very document version that settlement covers and is not dated before it — so a replayed withdrawal cannot delete a settlement made after it. A withdrawal that removes nothing still succeeds, so its delivery is not retried forever.")
+
+		Payload(DCSToDCSSettlementWithdrawalRequest)
+		Result(DCSToDCSSettlementWithdrawalResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/settlement-withdrawal")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

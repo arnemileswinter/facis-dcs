@@ -99,3 +99,40 @@ func callSites(body *ast.BlockStmt, name string) []token.Pos {
 	})
 	return positions
 }
+
+// A withdrawal DELETES the evidence a signature is gated on, so the ordering
+// matters more here than anywhere else on this channel: everything that decides
+// whether the deletion is legitimate has to have run first.
+func TestPostSettlementWithdrawalDeletesNothingItHasNotVerified(t *testing.T) {
+	body := settlementHandlerBody(t, "PostSettlementWithdrawal")
+
+	del := callSites(body, "DeleteSettlementsBy")
+	if len(del) != 1 {
+		t.Fatalf("PostSettlementWithdrawal calls DeleteSettlementsBy %d times, want exactly once", len(del))
+	}
+	for _, gate := range []string{"VerifyPeerChallenge", "Check", "verifyShippedWithdrawal", "withdrawalTakesBack"} {
+		sites := callSites(body, gate)
+		if len(sites) == 0 {
+			t.Errorf("PostSettlementWithdrawal no longer calls %s: any host could strip the evidence a signature is gated on", gate)
+			continue
+		}
+		if sites[0] > del[0] {
+			t.Errorf("%s runs after the settlement is deleted", gate)
+		}
+	}
+}
+
+// The rejected design, pinned. Auto-withdrawing a settlement when the document
+// it names is no longer the one held would delete the counterparty's evidence
+// exactly when it is needed: the first signature seals odrl:Offer into
+// odrl:Agreement, so on the receive path a digest mismatch is the NORMAL state
+// of a peer that has signed, and the instance that has to countersign would
+// have destroyed what lets it. A settlement goes only when the party that made
+// it says so, over the withdrawal channel.
+func TestNoSettlementIsDroppedByTheReceivePath(t *testing.T) {
+	for _, handler := range []string{"PostSettlement", "verifyShippedSettlement", "supersededDocumentDigests"} {
+		if sites := callSites(settlementHandlerBody(t, handler), "DeleteSettlementsBy"); len(sites) > 0 {
+			t.Errorf("%s deletes a settlement: a digest mismatch on receive is not evidence that a peer withdrew", handler)
+		}
+	}
+}

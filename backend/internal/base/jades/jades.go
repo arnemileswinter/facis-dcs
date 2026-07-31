@@ -102,6 +102,42 @@ func BuildSettlementPayload(s Settlement) ([]byte, error) {
 	return jcs.Transform(encoded)
 }
 
+// SettlementWithdrawalType is the @type of the artifact a peer signs and ships
+// when it takes back a settlement it previously shipped.
+const SettlementWithdrawalType = "dcs:ContractSettlementWithdrawal"
+
+// SettlementWithdrawal is the peer's statement that the settlement it made of
+// one named document version no longer stands. It names that document by the
+// same digest the settlement carried, which is what tells the receiver which
+// settlement is being taken back — a withdrawal that names a version the
+// receiver no longer holds a settlement for removes nothing.
+type SettlementWithdrawal struct {
+	ContractDID    string
+	DocumentDigest string
+	WithdrawnBy    string
+	WithdrawnFrom  string
+	WithdrawnAt    time.Time
+}
+
+// BuildSettlementWithdrawalPayload canonicalizes the withdrawal artifact with
+// JCS (RFC 8785), as BuildSettlementPayload does for the settlement it revokes.
+func BuildSettlementWithdrawalPayload(w SettlementWithdrawal) ([]byte, error) {
+	payload := map[string]any{
+		"@context":                   map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+		"@type":                      SettlementWithdrawalType,
+		"dcs:contractDid":            w.ContractDID,
+		"dcs:contractDocumentDigest": w.DocumentDigest,
+		"dcs:withdrawnBy":            w.WithdrawnBy,
+		"dcs:withdrawnFrom":          w.WithdrawnFrom,
+		"dcs:withdrawnAt":            w.WithdrawnAt.UTC().Format(time.RFC3339Nano),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return jcs.Transform(encoded)
+}
+
 // ContractDocumentDigest is the version identity of a contract document that
 // both instances can compute from their own copy: the SHA-256 of its JCS
 // canonicalization. Canonicalizing first is what makes it survive the

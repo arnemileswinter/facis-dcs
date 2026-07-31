@@ -127,16 +127,40 @@ func TestVerifyShippedSettlementSurvivesDocumentReserialization(t *testing.T) {
 	}
 }
 
-// The defect this closes: a settlement of the document that was negotiated
-// must not authorize the document a later redline produced.
-func TestVerifyShippedSettlementRefusesAnotherDocumentVersion(t *testing.T) {
+// A settlement of a document version neither side ever held authorizes nothing,
+// whatever the delivery story: the digest binding is what makes the artifact
+// evidence rather than an assertion.
+func TestVerifyShippedSettlementRefusesADocumentVersionNeverHeld(t *testing.T) {
 	peer := jadesTestDIDDocument(t, "dcs-b.localhost")
 	shipped := shipSettlementFrom(t, peer, settledDocument, time.Now())
 
 	renegotiated := localContext(t, `{"dcs:metadata":{"dcs:title":"Peer Contract"},"dcs:clause":"the amended terms"}`)
+	renegotiated.SupersededDigest = []string{digestOf(t, `{"dcs:clause":"some third document"}`)}
 	_, err := verifyShippedSettlement(shipped.JadesSignature, settlingPeer, peer, renegotiated)
 	if err == nil || !strings.Contains(err.Error(), "but this instance holds") {
-		t.Fatalf("expected the stale settlement to be refused naming both documents, got: %v", err)
+		t.Fatalf("expected the settlement of an unknown version to be refused naming both documents, got: %v", err)
+	}
+}
+
+// The defect this closes (#44): a settlement whose first delivery was lost is
+// re-shipped unchanged, and by then the document has moved — the first
+// signature seals odrl:Offer into odrl:Agreement on both copies. Refusing it
+// against the document held AT ARRIVAL made the artifact permanently
+// undeliverable and the exchange permanently unfinishable.
+func TestVerifyShippedSettlementAcceptsAVersionThisInstanceHasHeld(t *testing.T) {
+	peer := jadesTestDIDDocument(t, "dcs-b.localhost")
+	shipped := shipSettlementFrom(t, peer, settledDocument, time.Now())
+
+	sealed := localContext(t, `{"dcs:metadata":{"dcs:title":"Peer Contract"},"dcs:policies":{"@type":"odrl:Agreement"}}`)
+	sealed.SupersededDigest = []string{digestOf(t, settledDocument)}
+
+	stored, err := verifyShippedSettlement(shipped.JadesSignature, settlingPeer, peer, sealed)
+	if err != nil {
+		t.Fatalf("expected the late settlement of a version this instance held to verify, got: %v", err)
+	}
+	if stored.DocumentDigest != digestOf(t, settledDocument) {
+		t.Fatalf("settlement stored against %s, want the version it names (%s)",
+			stored.DocumentDigest, digestOf(t, settledDocument))
 	}
 }
 
