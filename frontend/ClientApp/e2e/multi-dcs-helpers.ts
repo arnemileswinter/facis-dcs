@@ -167,8 +167,18 @@ async function runSigningCeremonyOn(inst: Instance, contractDid: string, signato
   await row.getByRole('link', { name: /Open/ }).click()
   await expect(inst.page).toHaveURL(/\/signing\/.+/)
 
+  // The badge follows the VERDICT, not the call completing
+  // (SecureContractViewerView.verify), so an absent badge is a failed integrity
+  // check rather than a slow one, and step 3 stays closed behind it. Capture the
+  // verdict the viewer read so the failure names the mismatch and its findings
+  // instead of reporting a missing element for fifteen seconds.
+  const verified = inst.page.waitForResponse((r) => r.url().includes('/signature/verify'), { timeout: 60_000 })
   await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await expect(inst.page.getByText('Verified', { exact: true })).toBeVisible()
+  const verifyResponse = await verified
+  await expect(
+    inst.page.getByText('Verified', { exact: true }),
+    `the integrity check of ${contractDid} on ${inst.origin} did not pass, so the ceremony stays closed: HTTP ${verifyResponse.status()} ${await verifyResponse.text().catch(() => '')}`,
+  ).toBeVisible()
 
   // Match ANY ceremony-start response, then assert: an r.ok() filter turns a
   // refusal into "no response at all", which has cost several runs already.
