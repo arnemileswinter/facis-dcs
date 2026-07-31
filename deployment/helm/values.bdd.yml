@@ -450,8 +450,14 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
-      - host: "localhost"
-        path: /orce
+      # No /orce rule here. The DCS mounts its webhook platform at /orce/ on
+      # the service root (backend/cmd/dcs/http.go, DCS-FR-TR-22) and claims the
+      # prefix on this same host, so a second rule for it is a coin toss that
+      # the webhook platform loses. The audit-executor control and run seams
+      # are reached over the ORCE port-forward instead
+      # (BDD_ORCE_AUDIT_CONTROL_URL / BDD_ORCE_AUDIT_EXECUTOR_URL in
+      # tests/bdd/scripts/run_bdd_helm.sh), which is why this rule was only
+      # ever an unused fallback.
 
 auditExecutor:
   url: "http://dcs-orce:1880/customer-audit/run"

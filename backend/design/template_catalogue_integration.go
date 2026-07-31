@@ -100,6 +100,11 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 		// from the catalogue, so the catalogue is a Template Manager surface.
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
 		})
 
 		Payload(TemplateCatalogueRetrieveRequest)
@@ -123,6 +128,11 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
 		})
 
 		Payload(TemplateCatalogueRetrieveByIDRequest)
@@ -146,6 +156,11 @@ var _ = Service("TemplateCatalogueIntegration", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
+			Scope("Contract Creator")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Manager")
+			Scope("Contract Signer")
 		})
 
 		Payload(TemplateCatalogueSearchRequest)

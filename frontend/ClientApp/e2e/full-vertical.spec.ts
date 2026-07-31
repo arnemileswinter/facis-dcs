@@ -43,13 +43,27 @@ async function completeParticipantDialog(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
-/** Waits until the template detail view finished loading (name populated). */
+/**
+ * Waits until the template detail view finished loading (name populated).
+ *
+ * Reloads rather than waiting longer. The runner hosts both DCS stacks and
+ * their port-forwards, and re-establishing one resets the browser's network
+ * stack: the trace of the last failure carries 36 net::ERR_NETWORK_CHANGED and
+ * not one HTTP status. The view's load request dies in flight, so nothing is
+ * pending and no timeout can help — the fetch has to be issued again. A longer
+ * timeout was tried first and still failed.
+ */
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
-  // The default 15s is tight while the e2e runner also hosts the second DCS
-  // stack — this step was flaky, passing only on retry.
-  await expect(page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')).toHaveValue(name, {
-    timeout: 45_000,
-  })
+  const field = page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await expect(field).toHaveValue(name, { timeout: 20_000 })
+      return
+    } catch {
+      await page.reload()
+    }
+  }
+  await expect(field).toHaveValue(name, { timeout: 20_000 })
 }
 
 /**
