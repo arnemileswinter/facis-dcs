@@ -18,7 +18,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_ = ConfigureStatusListVerification(nil, true)
+	_ = ConfigureStatusListVerification(nil)
 	os.Exit(m.Run())
 }
 
@@ -38,8 +38,8 @@ func TestConfigureStatusListVerificationTakesOnlyIssuersWithABundledKey(t *testi
 		},
 	}}
 
-	require.NoError(t, ConfigureStatusListVerification(trustCfg, true))
-	t.Cleanup(func() { _ = ConfigureStatusListVerification(nil, true) })
+	require.NoError(t, ConfigureStatusListVerification(trustCfg))
+	t.Cleanup(func() { _ = ConfigureStatusListVerification(nil) })
 
 	projected, err := status.NewTrustConfig(map[string]json.RawMessage{
 		"did:web:example:issuer:bundled": trustCfg.Issuers["did:web:example:issuer:bundled"].JWKS,
