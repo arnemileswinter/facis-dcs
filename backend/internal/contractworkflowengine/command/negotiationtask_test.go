@@ -212,6 +212,14 @@ type negotiationRepoFake struct {
 	// proposed are the rows negotiate recorded, each on the round it was
 	// proposed against.
 	proposed []proposedChange
+	// superseded are the annotations the merge left on accepted requests whose
+	// content it discarded.
+	superseded []db.NegotiationSupersession
+}
+
+func (r *negotiationRepoFake) MarkSuperseded(_ context.Context, _ *sqlx.Tx, supersessions []db.NegotiationSupersession) error {
+	r.superseded = append(r.superseded, supersessions...)
+	return nil
 }
 
 // proposedChange is one contract_negotiations row: the change request and the

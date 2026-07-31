@@ -34,6 +34,24 @@ type NegotiationData struct {
 	RejectionReason *string        `db:"rejection_reason"`
 	CreatedBy       string         `db:"created_by"`
 	CreatedAt       time.Time      `db:"created_at"`
+	// SupersededBy is the JSON array written by MarkSuperseded — nil until the
+	// round folds, and on a request whose content survived it. It is the only
+	// thing distinguishing an accepted request that shaped the contract from
+	// one that was accepted and then discarded, since Decision stays ACCEPTED
+	// either way.
+	SupersededBy *datatype.JSON `db:"superseded_by"`
+}
+
+// NegotiationSupersession records that folding a negotiation round dropped
+// part of one accepted change request in favour of a later one. The fold is
+// last-accepted-wins per field (see negotiationmerging.MergeChangeRequests),
+// so an accepted request can leave nothing behind while its decision still
+// reads ACCEPTED; Fields names the change-request keys whose values did not
+// reach the merged version.
+type NegotiationSupersession struct {
+	NegotiationID  string   `json:"negotiation_id"`
+	SupersededByID string   `json:"superseded_by"`
+	Fields         []string `json:"fields"`
 }
 
 // NegotiationChangeData is one accepted change request of a round. CreatedAt
@@ -81,6 +99,11 @@ type NegotiationRepo interface {
 	HasNegotiationForContractVersion(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int) (bool, error)
 	ReadAllNegotiationDecisionsByContractDID(ctx context.Context, tx *sqlx.Tx, did string) ([]NegotiationDecisionData, error)
 	ReadCreatedByByNegotiationID(ctx context.Context, tx *sqlx.Tx, id string) (string, error)
+	// MarkSuperseded annotates the change requests whose content the fold of a
+	// round discarded, each naming the later accepted request that beat it.
+	// Written in the same transaction as the merged contract version, so the
+	// annotation and the document it explains land together.
+	MarkSuperseded(ctx context.Context, tx *sqlx.Tx, supersessions []NegotiationSupersession) error
 
 	RemoteCreateOrUpdateNegotiation(ctx context.Context, tx *sqlx.Tx, data NegotiationData) error
 	RemoteCreateOrUpdateNegotiationDecision(ctx context.Context, tx *sqlx.Tx, data NegotiationDecisionData) error

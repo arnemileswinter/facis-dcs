@@ -82,7 +82,7 @@ func mergeRound(t *testing.T, accepted []db.NegotiationChangeData) *db.ContractU
 	cRepo := &mergeOrderContractRepoFake{stored: &db.Contract{DID: mergeOrderDID, ContractData: &stored}}
 	nRepo := &mergeOrderNegotiationRepoFake{accepted: accepted}
 
-	updated, err := MergeChangeRequests(context.Background(), nil, cRepo, nRepo, mergeOrderDID, 1)
+	updated, _, err := MergeChangeRequests(context.Background(), nil, cRepo, nRepo, mergeOrderDID, 1)
 	require.NoError(t, err)
 	require.NotNil(t, updated.ContractData)
 	require.NotNil(t, updated.Name)

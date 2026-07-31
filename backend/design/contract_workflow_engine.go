@@ -251,6 +251,13 @@ var ContractNegotiationDecisionItem = Type("ContractNegotiationDecisionItem", fu
 	Required("negotiator")
 })
 
+var ContractNegotiationSupersessionItem = Type("ContractNegotiationSupersessionItem", func() {
+	Attribute("superseded_by", String, "id of the later accepted change request whose values the merge kept instead")
+	Attribute("fields", ArrayOf(String), "Change request fields whose values did not reach the merged contract version")
+
+	Required("superseded_by", "fields")
+})
+
 var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("id", String, "id of the negotiation")
 	Attribute("change_request", Any, "Change request")
@@ -259,6 +266,7 @@ var ContractNegotiationItem = Type("ContractNegotiationItem", func() {
 	Attribute("contract_version", Int, "Version of the contract for that the negotiation is")
 
 	Attribute("negotiation_decisions", ArrayOf(ContractNegotiationDecisionItem), "List with decisions for that negotiation")
+	Attribute("superseded", ArrayOf(ContractNegotiationSupersessionItem), "Set when this change request was accepted but a later accepted request overwrote it, so the merged contract version does not carry its content (last-accepted-wins). Absent when nothing of it was discarded.")
 
 	Required("id", "change_request", "created_by", "created_at", "negotiation_decisions", "contract_version")
 })

@@ -240,7 +240,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					return fmt.Errorf("could not create history entry for did %s: %w", cmd.DID, err)
 				}
 
-				updatedData, err := negotiationmerging.MergeChangeRequests(ctx, tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
+				updatedData, superseded, err := negotiationmerging.MergeChangeRequests(ctx, tx, h.CRepo, h.NRepo, cmd.DID, processData.ContractVersion)
 				if err != nil {
 					return fmt.Errorf("could not merge change requests: %w", err)
 				}
@@ -277,6 +277,31 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				if updatedData.ContractData != nil {
 					if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
 						return err
+					}
+				}
+
+				// Last-accepted-wins leaves accepted requests whose content the
+				// merged version does not carry. Their decision rows still read
+				// ACCEPTED, so the discard is annotated on the losing request and
+				// put on the audit trail; without it the record asserts a party
+				// agreed to wording the contract never contained.
+				if len(superseded) > 0 {
+					if err := h.NRepo.MarkSuperseded(ctx, tx, superseded); err != nil {
+						return fmt.Errorf("could not record superseded change requests: %w", err)
+					}
+
+					supersededEvt := contractevents.NegotiationChangeSupersededEvent{
+						DID:             cmd.DID,
+						HolderDID:       cmd.HolderDID,
+						ContractVersion: processData.ContractVersion,
+						MergedVersion:   processData.ContractVersion + 1,
+						Superseded:      superseded,
+						SubmittedBy:     cmd.SubmittedBy,
+						OccurredAt:      time.Now().UTC(),
+						UserRoles:       cmd.UserRoles,
+					}
+					if err := event.Create(ctx, tx, supersededEvt, componenttype.ContractWorkflowEngine); err != nil {
+						return fmt.Errorf("could not create superseded change request event: %w", err)
 					}
 				}
 

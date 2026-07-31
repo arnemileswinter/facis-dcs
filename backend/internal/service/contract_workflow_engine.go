@@ -604,6 +604,28 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 	}, nil
 }
 
+// supersessionItems reads back the annotation the negotiation merge left on a
+// change request it accepted and then discarded (last-accepted-wins). A reader
+// of the contract otherwise sees only the ACCEPTED decision and would take the
+// request's content for part of the agreement.
+func supersessionItems(annotation *datatype.JSON) ([]*contractworkflowengine.ContractNegotiationSupersessionItem, error) {
+	if annotation == nil {
+		return nil, nil
+	}
+	var records []db.NegotiationSupersession
+	if err := json.Unmarshal(*annotation, &records); err != nil {
+		return nil, fmt.Errorf("could not read superseded change request record: %w", err)
+	}
+	items := make([]*contractworkflowengine.ContractNegotiationSupersessionItem, 0, len(records))
+	for _, record := range records {
+		items = append(items, &contractworkflowengine.ContractNegotiationSupersessionItem{
+			SupersededBy: record.SupersededByID,
+			Fields:       record.Fields,
+		})
+	}
+	return items, nil
+}
+
 func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
@@ -639,12 +661,17 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 	for _, item := range contractResult.Negotiations {
 		negotiation, ok := negotiations[item.ID]
 		if !ok {
+			superseded, err := supersessionItems(item.SupersededBy)
+			if err != nil {
+				return nil, contractworkflowengine.MakeInternalError(err)
+			}
 			negotiation = &contractworkflowengine.ContractNegotiationItem{
 				ID:              item.ID,
 				ContractVersion: item.ContractVersion,
 				ChangeRequest:   item.ChangeRequest,
 				CreatedBy:       item.CreatedBy,
 				CreatedAt:       item.CreatedAt.String(),
+				Superseded:      superseded,
 			}
 			negotiations[item.ID] = negotiation
 		}
