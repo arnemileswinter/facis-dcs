@@ -449,6 +449,19 @@ class AuthService:
             if url.startswith("http://localhost:5173") or url.startswith("https://localhost:5173"):
                 url = AuthService.normalize_callback_url(url, api_base)
 
+            # A refused login redirects to the UI with the reason in the query
+            # and, being same-origin, does it with a relative Location. Fetching
+            # that raises MissingSchema and buries the reason under an invalid
+            # URL, so report what the authorization server actually said.
+            auth_error = parse_qs(urlparse(url).query).get("auth_error")
+            if auth_error:
+                description = parse_qs(urlparse(url).query).get(
+                    "auth_error_description", [""]
+                )[0]
+                raise RuntimeError(
+                    f"login refused ({auth_error[0]}): {description or 'no description given'}"
+                )
+
             parsed = urlparse(url)
             if parsed.path.endswith("/auth/callback") and parse_qs(parsed.query).get("code"):
                 return url

@@ -27,6 +27,29 @@ async function gotoAs(page: Page, loginAs: LoginAs, role: DcsRole, url: string):
   await page.goto(url)
 }
 
+/**
+ * Navigates and waits for the control that proves the page arrived, reloading
+ * once if it does not. The runner hosts both DCS stacks and their
+ * port-forwards, and re-establishing one resets the browser's network stack
+ * mid-flight — the request dies rather than being slow, so nothing is pending
+ * and a longer timeout cannot help. Only re-issuing it can.
+ */
+async function gotoAsAndFind(
+  page: Page,
+  loginAs: LoginAs,
+  role: DcsRole,
+  url: string,
+  control: ReturnType<Page['getByRole']>,
+): Promise<void> {
+  await gotoAs(page, loginAs, role, url)
+  try {
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  } catch {
+    await page.reload()
+    await expect(control).toBeVisible({ timeout: 20_000 })
+  }
+}
+
 /** Confirms the shared ConfirmationModal (comment/decision-note dialogs). */
 async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Confirmation' })
@@ -210,8 +233,9 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
   let contractTemplateDid = ''
   await test.step('create contract template from approved component', async () => {
     // DCS-FR-TR-25
-    await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
-    await page.getByRole('button', { name: /parent for other contracts/ }).click()
+    const parentChoice = page.getByRole('button', { name: /parent for other contracts/ })
+    await gotoAsAndFind(page, loginAs, 'Template Creator', '/ui/templates/new', parentChoice)
+    await parentChoice.click()
     await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(contractTemplateName)
     await page
       .getByRole('group')
