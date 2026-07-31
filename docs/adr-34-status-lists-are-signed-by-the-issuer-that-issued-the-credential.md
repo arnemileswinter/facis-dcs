@@ -152,3 +152,25 @@ production's behaviour, and the difference surfaces where it is most expensive.
 key and could sign them. Rejected: a status list is the issuer's statement about
 credentials it issued, and the relying party issuing it is the same conflation
 ADR-31 removed for PID issuance. The issuer signs its own.
+
+## Scope note: the demo issuers
+
+The ORCE issuers this project deploys are stand-ins. They mint their own root at
+runtime, hold no legally meaningful key, and a real deployment replaces them with
+the counterparty's own credential issuance — the DCS decides whether to trust an
+issuer (ADR-31), it does not operate one.
+
+Properties of those stand-ins are therefore out of scope here and are not
+defects to fix: the unauthenticated /pki/reissue endpoint, the unauthenticated
+/admin revocation endpoints enabled in the shared values base, and the issuer
+minting a leaf for whatever base URL a request carries. None survives contact
+with a real issuer, and the guard that stops a real deployment inheriting demo
+material already exists — DCS_ALLOW_DEV_TRUST is set in values.bdd.yml alone.
+
+What is NOT in that category, and remains a defect: no status-list handler binds
+the list's issuer to the issuer of the credential it governs. All three discard
+the credential argument (handler.IETFToken, handler.XFSC, handler.W3CBitstring
+take `_ status.VerifiedCredential`). That is this project's verification logic,
+not the stand-in's key hygiene: it lets any trusted issuer publish revocation
+status for any other issuer's credential, and it is the sentence this ADR is
+named after. Replacing the demo issuers does not fix it.
