@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { getSemanticConditionsFromTemplateData } from '@template-repository/store/dcsDraftStore'
 import { useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsContractField, DcsDocumentData, OdrlConstraint, OdrlRule } from '@/models/dcs-jsonld'
 
 /**

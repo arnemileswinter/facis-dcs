@@ -16,12 +16,13 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractVerificationFindingsDialog from '@/components/contract/ContractVerificationFindingsDialog.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
-import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -31,8 +32,6 @@ const navStore = useNavStore()
 const authStore = useAuthStore()
 
 const { isReviewer } = useContractPermissions()
-
-const errorStore = useErrorStore()
 
 const dcsDraftStore = useDcsDraftStore()
 const contractEditorUiStore = useContractEditorUiStore()
@@ -65,11 +64,15 @@ const story = computed(() =>
 )
 
 const verificationResult = computed(() => {
-  return verifySemanticValue(
-    dcsDraftStore.semanticConditions,
-    contractContentValuesStore.semanticConditionValues,
-    dcsDraftStore.blocks,
-  )
+  try {
+    return verifySemanticValue(
+      dcsDraftStore.semanticConditions,
+      contractContentValuesStore.semanticConditionValues,
+      dcsDraftStore.blocks,
+    )
+  } catch {
+    return { isValid: false, errors: [] }
+  }
 })
 
 const contract: Ref<Contract | null> = ref(null)
@@ -85,7 +88,7 @@ watch(
           applyContractDataToDraft(contract.value?.contract_data)
         }
       } catch (err: unknown) {
-        console.error('Failed to load contract', err)
+        reportActionError(err, 'Load contract review')
       }
     }
   },
@@ -104,45 +107,31 @@ watch(
   { deep: true },
 )
 
-const verifyContract = () => {
-  isSubmitting.value = true
-  if (!contract.value || !verificationResult?.value?.isValid) {
-    verificationResult?.value?.errors.forEach((error) => errorStore.add(error.message))
-    contractEditorUiStore.setActiveTab('content')
-  } else {
-    errorStore.add('Contract is valid', 'info')
-  }
-  isSubmitting.value = false
+const runLocalSemanticVerification = () => {
+  return verifySemanticValue(
+    dcsDraftStore.semanticConditions,
+    contractContentValuesStore.semanticConditionValues,
+    dcsDraftStore.blocks,
+  )
 }
 
-const forwardToApproval = async () => {
-  if (!contract.value || !verificationResult?.value?.isValid) {
-    verificationResult?.value?.errors.forEach((error) => errorStore.add(error.message))
-    contractEditorUiStore.setActiveTab('content')
+const forwardToApproval = async (comment: string) => {
+  const currentContract = contract.value
+  if (!isReviewer.value || currentContract?.state !== ContractState.submitted || !currentContract.updated_at) {
+    reportActionError(
+      new Error('Only a reviewer can forward a current submitted contract to approval.'),
+      'Forward contract',
+    )
     return
   }
-
-  try {
-    const confirmationResult = await confirmationDialog.value?.reveal({
-      message: 'Add comment?',
-      editor: { requiredText: false },
-    })
-    if (confirmationResult?.isCanceled) return
-    const comment = confirmationResult?.data
-    isSubmitting.value = true
-    const response = await contractWorkflowService.submit({
-      did: contract.value.did,
-      updated_at: contract.value.updated_at,
-      forward_to: 'APPROVAL',
-      comments: comment ? [comment] : [],
-    })
-    if (response.did) {
-      await navStore.goToPreviousRoute()
-    }
-  } catch (err) {
-    console.error('Failed to submit', err)
-  } finally {
-    isSubmitting.value = false
+  const response = await contractWorkflowService.submit({
+    did: currentContract.did,
+    updated_at: currentContract.updated_at,
+    forward_to: 'APPROVAL',
+    comments: comment ? [comment] : [],
+  })
+  if (response.did) {
+    await navStore.goToPreviousRoute()
   }
 }
 
@@ -166,7 +155,7 @@ const returnToNegotiation = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
-    console.error('Failed to return to negotiation', err)
+    reportActionError(err, 'Return contract to negotiation')
   } finally {
     isSubmitting.value = false
   }
@@ -294,29 +283,18 @@ const exportPDF = async () => {
           v-if="contract?.state === ContractState.submitted"
           class="btn flex-1 btn-primary"
           :disabled="!isReviewer || isSubmitting"
-          @click="verifyContract"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Verify
-        </button>
-        <button
-          v-if="contract?.state === ContractState.submitted"
-          class="btn flex-1 btn-primary"
-          :disabled="!isReviewer || isSubmitting"
           @click="returnToNegotiation"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
-        <button
+        <ContractVerificationFindingsDialog
           v-if="contract?.state === ContractState.submitted"
           class="btn flex-1 btn-primary"
-          :disabled="!isReviewer || isSubmitting || !verificationResult.isValid"
-          @click="forwardToApproval"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Approve
-        </button>
+          :disabled="!isReviewer || isSubmitting"
+          :verify="runLocalSemanticVerification"
+          :submit="forwardToApproval"
+        />
         <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
       </div>
       <ConfirmationModal ref="confirmation-dialog" />

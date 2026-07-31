@@ -24,12 +24,12 @@ func (r *PostgresContractRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.
 
 	statement := `
         INSERT INTO contracts (
-            did, origin, created_by, state, name,
+            did, origin, created_at, created_by, state, name,
             description, contract_data, template_did, template_version, responsible
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
 	_, err := tx.ExecContext(ctx, statement,
-		data.DID, data.Origin, data.CreatedBy, data.State, data.Name,
+		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.State, data.Name,
 		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible)
 	return err
 }

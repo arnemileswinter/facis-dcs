@@ -455,3 +455,77 @@ func TestNormalizedDocumentsClaimNoValidationProfile(t *testing.T) {
 	// The shapes anchor is standard SHACL and stays.
 	require.Contains(t, result, "sh:shapesGraph")
 }
+
+func TestPinSemanticBundleRecordsCompleteImmutableReferences(t *testing.T) {
+	raw, err := datatype.NewJSON(map[string]any{
+		"@context": []any{map[string]any{"custom": "https://example.test/custom#"}},
+		"@id":      "did:web:example.test:contract",
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{
+			"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+			"https://dcs.test/semantic/shapes/clause-catalog?version=2",
+			"https://dcs.test/semantic/shapes/customer-library?version=7",
+		},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Len(t, document["dcs:effectiveShapes"], 3)
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}
+
+// A federated template names the shape libraries its author modelled against.
+// Those anchors are what make it validate on a peer, so pinning records the
+// bundle beside them and never over them.
+func TestPinSemanticBundleKeepsDeclaredShapesGraph(t *testing.T) {
+	declared := []any{
+		map[string]any{"@id": "https://peer.test/semantic/shapes/facis-dcs?version=2"},
+		map[string]any{"@id": "https://peer.test/semantic/shapes/partner-library?version=9"},
+	}
+	raw, err := datatype.NewJSON(map[string]any{
+		"@id":            "did:web:example.test:contract",
+		"sh:shapesGraph": declared,
+	})
+	require.NoError(t, err)
+	pinned, err := PinSemanticBundle(
+		&raw,
+		"https://dcs.test/semantic/context/facis-dcs?version=3",
+		"https://dcs.test/semantic/shapes/facis-dcs?version=4",
+		[]string{"https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		"https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+	)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(*pinned, &document))
+	require.Equal(t, declared, document["sh:shapesGraph"])
+	// The record of what it was validated against is still written.
+	require.Len(t, document["dcs:effectiveShapes"], 1)
+	require.Equal(t, "https://dcs.test/semantic/profile/facis.sla.basic?version=5",
+		document["dcterms:conformsTo"].(map[string]any)["@id"])
+}
+
+// sh:shapesGraph is multi-valued, so the canonical anchor is found by name
+// among every declared anchor rather than assumed to be the sole value.
+func TestPinnedHubShapesVersionReadsArrayForm(t *testing.T) {
+	contract := map[string]any{
+		"sh:shapesGraph": []any{
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/partner-library?version=9"},
+			map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=4"},
+		},
+	}
+	require.Equal(t, 4, pinnedHubShapesVersion(contract, "facis-dcs"))
+	require.Equal(t, 9, pinnedHubShapesVersion(contract, "partner-library"))
+	require.Equal(t, 0, pinnedHubShapesVersion(contract, "absent-library"))
+
+	scalar := map[string]any{
+		"sh:shapesGraph": map[string]any{"@id": "https://dcs.test/semantic/shapes/facis-dcs?version=7"},
+	}
+	require.Equal(t, 7, pinnedHubShapesVersion(scalar, "facis-dcs"))
+}

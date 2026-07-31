@@ -35,6 +35,11 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // actually perform.
 const pdfSignatureNotAvailable = provenance.CheckNotAvailable
 
+const (
+	statusPublicationConsistencyWait = 6 * time.Second
+	statusPublicationRetryInterval   = 100 * time.Millisecond
+)
+
 // Failure classes reported in PDFVerifyResult.Discrepancy.
 const (
 	discrepancyNone         = ""
@@ -155,6 +160,8 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 		C2paManifestFound:   false,
 		C2paSignatureStatus: provenance.CheckInvalid,
 		VcProofStatus:       provenance.CheckInvalid,
+		StatusListCheck:     "failed",
+		StatusListError:     ptrToString("stored artifact is not authentic"),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
 		PdfSignatureStatus:  pdfSignatureNotAvailable,
 		Discrepancy:         ptrToString(discrepancyNotAuthentic),
@@ -207,20 +214,34 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	// contract came back clean.
 	statusListURI := ""
 	statusListStatus := ""
+	statusListCheck := "not_available"
+	statusListError := ""
 	switch {
 	case vcProofStatus == provenance.CheckValid:
 		statusListURI = provenance.ExtractStatusListURI(result.VCBytes)
 		ref, present, err := provenance.ExtractCredentialStatus(result.VCBytes)
 		switch {
 		case err != nil:
-			statusListStatus = fmt.Sprintf("UNKNOWN (%v)", err)
-		case present:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = fmt.Sprintf("invalid embedded status-list reference: %v", err)
+		case !present:
+			match = false
+			statusListStatus = "unavailable"
+			statusListCheck = "failed"
+			statusListError = "embedded lifecycle credential has no usable status-list reference"
+		default:
 			httpClient := &http.Client{Timeout: 10 * time.Second}
-			status, queryErr := provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
-			if queryErr != nil {
-				status = "UNKNOWN (status service unreachable)"
+			queryStatus := func() (string, error) {
+				return provenance.QueryStatusListStatus(ctx, httpClient, ref.StatusListCredential, ref.Index)
 			}
-			statusListStatus = status
+			var statusPassed bool
+			statusListStatus, statusListCheck, statusListError, statusPassed =
+				evaluateLiveStatusCheck(ctx, lifecycleStatus, queryStatus)
+			if !statusPassed {
+				match = false
+			}
 		}
 	case vcProofStatus != provenance.CheckNotAvailable:
 		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
@@ -240,6 +261,8 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		VcProofStatus:       vcProofStatus,
 		StatusListURI:       ptrToString(statusListURI),
 		StatusListStatus:    ptrToString(statusListStatus),
+		StatusListCheck:     statusListCheck,
+		StatusListError:     ptrToString(statusListError),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
 		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
 		// check, distinct from the C2PA COSE signature check. This path performs
@@ -248,6 +271,49 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		PdfSignatureStatus: pdfSignatureNotAvailable,
 		Discrepancy:        ptrToString(discrepancy),
 	}, nil
+}
+
+func evaluateLiveStatusCheck(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (status, check, failure string, passed bool) {
+	status, err := queryStatusWithPublicationBarrier(ctx, lifecycleStatus, query)
+	if err != nil {
+		return "unavailable", "failed", err.Error(), false
+	}
+	return status, "passed", "", true
+}
+
+func queryStatusWithPublicationBarrier(
+	ctx context.Context,
+	lifecycleStatus string,
+	query func() (string, error),
+) (string, error) {
+	status, err := query()
+	if err != nil || status != "active" ||
+		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended") {
+		return status, err
+	}
+
+	timer := time.NewTimer(statusPublicationConsistencyWait)
+	defer timer.Stop()
+	ticker := time.NewTicker(statusPublicationRetryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timer.C:
+			return status, nil
+		case <-ticker.C:
+			status, err = query()
+			if err != nil || status != "active" {
+				return status, err
+			}
+		}
+	}
 }
 
 func stateToReason(state string) string {

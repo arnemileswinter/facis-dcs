@@ -117,4 +117,3 @@ func ExtractSigningEvidence(pdfBytes []byte) ([]byte, bool, error) {
 	}
 	return append([]byte(nil), pdfBytes[streamStart:streamEnd]...), true, nil
 }
-

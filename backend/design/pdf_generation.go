@@ -26,6 +26,8 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
 	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
 	Attribute("status_list_status", String, "Live revocation state queried from the XFSC status list service: active or revoked (DCS-OR-C2PA-006)")
+	Attribute("status_list_check", String, "Named live status-list check result: passed, failed, or not_available (DCS-OR-C2PA-006)")
+	Attribute("status_list_error", String, "Explicit failure reason when the live status-list check could not be completed")
 
 	// PDF signature check (DCS-OR-C2PA-006). This is an independently named
 	// check distinct from the C2PA COSE signature check: when the PDF carries
@@ -40,7 +42,7 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// be made about the content they were supposed to carry.
 	Attribute("discrepancy", String, "Failure class when match is false: 'content_hash_mismatch' (manifest present, content differs from the embedded JSON-LD), 'artifact_not_authentic' (stored bytes failed authenticated decryption — altered or substituted at rest), or 'verification_failed' (any other check failure). Empty when match is true.")
 
-	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "pdf_signature_status")
+	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
 })
 
 // BundleExportRefusedError is returned when the FR-PACM-06 structural-integrity

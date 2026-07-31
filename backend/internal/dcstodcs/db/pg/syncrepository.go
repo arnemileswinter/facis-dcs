@@ -68,21 +68,23 @@ func (r PostgresSyncRepository) GetPendingSyncFails(ctx context.Context, tx *sql
 
 func (r PostgresSyncRepository) UpsertSyncSignature(ctx context.Context, tx *sqlx.Tx, sig db.SyncSignature) error {
 	statement := `
-        INSERT INTO contract_sync_signatures (did, contract_version, from_peer_did, jades_signature, received_at)
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        INSERT INTO contract_sync_signatures (did, contract_version, from_peer_did, jades_signature, received_at, poa_evidence, poa_revalidated_at)
+        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6)
         ON CONFLICT (did) DO UPDATE SET
             contract_version = EXCLUDED.contract_version,
             from_peer_did    = EXCLUDED.from_peer_did,
             jades_signature  = EXCLUDED.jades_signature,
-            received_at      = CURRENT_TIMESTAMP
+            received_at      = CURRENT_TIMESTAMP,
+            poa_evidence     = EXCLUDED.poa_evidence,
+            poa_revalidated_at = EXCLUDED.poa_revalidated_at
     `
-	_, err := tx.ExecContext(ctx, statement, sig.DID, sig.ContractVersion, sig.FromPeerDID, sig.JadesSignature)
+	_, err := tx.ExecContext(ctx, statement, sig.DID, sig.ContractVersion, sig.FromPeerDID, sig.JadesSignature, sig.PoAEvidence, sig.PoARevalidatedAt)
 	return err
 }
 
 func (r PostgresSyncRepository) GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db.SyncSignature, error) {
 	query := `
-        SELECT did, contract_version, from_peer_did, jades_signature, received_at
+        SELECT did, contract_version, from_peer_did, jades_signature, received_at, poa_evidence, poa_revalidated_at
         FROM contract_sync_signatures
         WHERE did = $1
     `

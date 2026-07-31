@@ -91,6 +91,46 @@ func currentSHACLShapesRef() string {
 	return schemaRefSHACLShapes
 }
 
+// PinSemanticBundle stamps the immutable Semantic Hub bundle selected while a
+// new artifact is created.
+func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
+	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
+		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
+		return nil, errors.New("complete semantic bundle references are required")
+	}
+	var data documentData
+	if err := json.Unmarshal(*raw, &data); err != nil {
+		return nil, fmt.Errorf("decode semantic bundle document: %w", err)
+	}
+	contextEntries := []any{contextRef}
+	switch current := data["@context"].(type) {
+	case []any:
+		for _, entry := range current {
+			if iri, ok := entry.(string); ok && isHubContextAnchor(iri) {
+				continue
+			}
+			contextEntries = append(contextEntries, entry)
+		}
+	case map[string]any:
+		contextEntries = append(contextEntries, current)
+	}
+	data["@context"] = contextEntries
+	// Anchors a document already declares are never rewritten (ADR-8): a
+	// federated template names the shape libraries its author modelled against,
+	// and those graphs are what must validate it on a peer. The bundle is only
+	// stamped here when the document declares no shapes graph of its own.
+	if _, declared := data["sh:shapesGraph"]; !declared {
+		data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
+	}
+	refs := make([]any, 0, len(effectiveShapeRefs))
+	for _, ref := range effectiveShapeRefs {
+		refs = append(refs, map[string]any{"@id": ref})
+	}
+	data["dcs:effectiveShapes"] = refs
+	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
+	return encodeDocumentData(data)
+}
+
 // SetCanonicalOntologyIRIs installs the ACTIVE hub context's prefix -> IRI
 // map for enforcement during normalization.
 func SetCanonicalOntologyIRIs(iris map[string]string) {

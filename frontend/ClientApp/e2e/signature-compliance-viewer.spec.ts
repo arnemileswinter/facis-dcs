@@ -166,6 +166,9 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
       (r) => r.url().includes('/signature/revoke') && r.request().method() === 'POST' && r.ok(),
     )
     await sigRow.getByRole('button', { name: 'Revoke', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Confirmation' })
+    await confirmation.getByPlaceholder('Reason for revocation').fill('Superseded during compliance review')
+    await confirmation.getByRole('button', { name: 'Submit' }).click()
     await revoked
     await expect(page.locator('.badge').filter({ hasText: 'REVOKED' }).first()).toBeVisible()
   })

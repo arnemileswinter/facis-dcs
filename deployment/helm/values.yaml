@@ -62,15 +62,16 @@ volumeMounts: []
 
 oid4vp:
   trust:
-    enabled: true
-    # Baked into the container image (see deployment/docker/Dockerfile).
-    dataPath: /app/config/oid4vp/trust.dev.json
+    # Trust is deployment state. The chart default deliberately trusts no
+    # development issuer or Dev Root; dev/demo/BDD overlays opt in explicitly.
+    enabled: false
+    dataPath: ""
     # Name of an operator-supplied ConfigMap holding the trust document, for
     # deployments that must trust a REAL credential issuer rather than the dev
     # fixture baked into the image. When set it is mounted read-only and
     # dataPath above is ignored in favour of the mounted file, so the issuer
     # registry is deployment state rather than a hand-applied patch that the
-    # next upgrade silently reverts. Unset keeps the in-image default.
+    # next upgrade silently reverts.
     existingConfigMap: ""
     # Key within that ConfigMap; also the mounted file name.
     existingConfigMapKey: trust.json
@@ -103,11 +104,34 @@ archiveNotary:
   # The audit-log bearer token is NOT configured here: the wired source is
   # global.archiveAuditToken / global.archiveAuditTokenSecretRef below.
 
+# External PAC audit executor. The bundled ORCE endpoint is selected when URL
+# is empty and orce.enabled=true; a customer replaces it through configuration
+# only, without changing DCS code.
+auditExecutor:
+  url: ""
+  path: "/audit/run"
+  timeout: "10s"
+
+# Consequential contract transitions use this distinct, snapshot-pinned
+# executor contract. Missing/invalid configuration is a backend boot failure.
+workflowGateExecutor:
+  url: ""
+  path: "/workflow-gate/run"
+  timeout: "10s"
+
 global:
   archiveAuditToken: ""
   archiveAuditTokenSecretRef:
     name: ""
     key: "ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"
+  auditExecutorToken: ""
+  auditExecutorTokenSecretRef:
+    name: ""
+    key: "PAC_AUDIT_EXECUTOR_BEARER_TOKEN"
+  workflowGateToken: ""
+  workflowGateTokenSecretRef:
+    name: ""
+    key: "PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN"
 
 # Route and path configuration
 route:
@@ -277,6 +301,10 @@ pkcs11:
 # Only fields referenced by the parent chart's helpers are listed here.
 # All other sub-chart options (images, resources, persistence, etc.) can
 # be set directly in your values override file.
+
+orce:
+  checkpointSink:
+    internalTimeoutSeconds: 30
 
 postgresql:
   enabled: false

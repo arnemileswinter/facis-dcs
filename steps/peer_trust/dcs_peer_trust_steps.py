@@ -994,7 +994,11 @@ def step_when_revoke_cross_instance(context):
         revoke = post_json(
             context,
             signature_revoke_url(context),
-            {"did": c_did, "signer_did": signatures[0]["signer_did"]},
+            {
+                "did": c_did,
+                "signer_did": signatures[0]["signer_did"],
+                "reason": "Cross-instance revocation replication",
+            },
             headers=manager_h,
         )
         assert revoke.status_code == 200, (

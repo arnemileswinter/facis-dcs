@@ -581,8 +581,8 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
   // The bound must admit the amounts this vertical negotiates (20000 -> 10000 ->
   // 15000). Carried over from the single-instance component (which fills 250),
   // 500 made every negotiated value violate the contract's own ODRL rule, so the
-  // reviewer's Approve stayed disabled on !verificationResult.isValid and the
-  // settle could never complete.
+  // reviewer's local semantic precheck withheld confirmation and the settle could
+  // never complete.
   await constraint.locator('input[placeholder="value"]').fill('50000')
 
   await editor.getByRole('button', { name: 'Add clause', exact: true }).click()
@@ -620,14 +620,12 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
   const verified = inst.page.waitForResponse(
     (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
   )
-  await inst.page.getByRole('button', { name: 'Verify', exact: true }).click()
-  await verified
-  await inst.page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await confirmModalOn(inst, 'Submit')
+  await verified
+  await inst.page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
   await forwarded
 
   await inst.gotoAs('Template Approver', `/ui/templates/approve/${did}`)
@@ -1157,7 +1155,10 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await confirmModalOn(inst, 'Submit')
+  await inst.page
+    .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+    .getByRole('button', { name: 'Confirm approval', exact: true })
+    .click()
   await forwarded
 
   // Approve: REVIEWED -> APPROVED.

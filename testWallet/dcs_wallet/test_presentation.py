@@ -7,11 +7,35 @@ import jwt
 from jwt.algorithms import ECAlgorithm
 
 from dcs_wallet.credential import decode_jwt_payload, load_credential_sd_jwt
+from dcs_wallet.issuer import issue_access_credential
 from dcs_wallet.presentation import build_vp_token, load_jwk
 from dcs_wallet.sdjwt import KB_JWT_TYP, decode_disclosure, sd_hash, split_sd_jwt
 
 
 class PresentationTest(unittest.TestCase):
+    def test_fresh_access_credential_uses_ceremony_specific_status_index(self) -> None:
+        issuer_private = load_jwk("issuer-dev.jwk")
+        wallet_private = load_jwk("wallet.jwk")
+        first = issue_access_credential(
+            organization="did:web:example:organization",
+            roles=["Contract Signer"],
+            issuer_private=issuer_private,
+            wallet_private=wallet_private,
+            nonce="ceremony-one",
+        )
+        second = issue_access_credential(
+            organization="did:web:example:organization",
+            roles=["Contract Signer"],
+            issuer_private=issuer_private,
+            wallet_private=wallet_private,
+            nonce="ceremony-two",
+        )
+        first_issuer, _, _ = split_sd_jwt(first)
+        second_issuer, _, _ = split_sd_jwt(second)
+        first_idx = decode_jwt_payload(first_issuer)["status"]["status_list"]["idx"]
+        second_idx = decode_jwt_payload(second_issuer)["status"]["status_list"]["idx"]
+        self.assertNotEqual(first_idx, second_idx)
+
     def test_generated_credential_contains_issuer_header_jwk_and_holder_cnf(self) -> None:
         issuer_jwt, _, _ = split_sd_jwt(load_credential_sd_jwt("johndoe"))
         header = jwt.get_unverified_header(issuer_jwt)

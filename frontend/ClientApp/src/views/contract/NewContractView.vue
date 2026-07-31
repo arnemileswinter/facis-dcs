@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { useScrollStore } from '@core/store/scroll'
@@ -29,6 +29,7 @@ import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
@@ -55,6 +56,13 @@ const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
 const verificationResult: Ref<VerificationResult | null> = ref(null)
+const detailsValidationAttempted = ref(false)
+const nameError = computed(() =>
+  detailsValidationAttempted.value && !contract.value?.name?.trim() ? 'Global Name is required.' : null,
+)
+const descriptionError = computed(() =>
+  detailsValidationAttempted.value && !contract.value?.description?.trim() ? 'Base Description is required.' : null,
+)
 const selectedParentContractDid = ref<string | null>(null)
 
 const templatePickerId = useId()
@@ -148,6 +156,16 @@ function verifySemanticValues(): boolean {
   return false
 }
 
+async function verifyContractDetails(): Promise<boolean> {
+  detailsValidationAttempted.value = true
+  if (!nameError.value && !descriptionError.value) return true
+  contractEditorUiStore.setActiveTab('details')
+  await nextTick()
+  const testId = nameError.value ? 'contract-global-name' : 'contract-base-description'
+  document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus()
+  return false
+}
+
 const createContract = async ({ counterparty }: ParticipantSelection) => {
   isSubmitting.value = true
   try {
@@ -175,13 +193,14 @@ const createContract = async ({ counterparty }: ParticipantSelection) => {
       errorStore.add('Contract created.', 'info')
     }
   } catch (error) {
-    console.error('creation failed', error)
+    reportActionError(error, 'Create contract')
   } finally {
     isSubmitting.value = false
   }
 }
 
 const updateContract = async () => {
+  if (!(await verifyContractDetails())) return
   isSubmitting.value = true
   try {
     if (contract.value) {
@@ -197,14 +216,14 @@ const updateContract = async () => {
       await router.push({ name: ROUTES.CONTRACTS.LIST })
     }
   } catch (error) {
-    console.error('Submission failed', error)
+    reportActionError(error, 'Update contract')
   } finally {
     isSubmitting.value = false
   }
 }
 
 const submitContract = async () => {
-  if (!contract.value || !verifySemanticValues()) return
+  if (!contract.value || !(await verifyContractDetails()) || !verifySemanticValues()) return
   isSubmitting.value = true
   try {
     const updatedContract = await saveContractDraftForSubmit()
@@ -216,14 +235,14 @@ const submitContract = async () => {
       await router.push({ name: ROUTES.CONTRACTS.LIST })
     }
   } catch (error) {
-    console.error('Contract submission failed', error)
+    reportActionError(error, 'Submit contract')
   } finally {
     isSubmitting.value = false
   }
 }
 
 const submitRejectedContract = async () => {
-  if (!contract.value || !verifySemanticValues()) return
+  if (!contract.value || !(await verifyContractDetails()) || !verifySemanticValues()) return
   isSubmitting.value = true
   try {
     const updatedContract = await saveContractDraftForSubmit()
@@ -235,7 +254,7 @@ const submitRejectedContract = async () => {
       await router.push({ name: ROUTES.CONTRACTS.LIST })
     }
   } catch (error) {
-    console.error('Contract resubmission failed', error)
+    reportActionError(error, 'Resubmit contract')
   } finally {
     isSubmitting.value = false
   }
@@ -257,7 +276,7 @@ watch(
           )
         }
       } catch (err: unknown) {
-        console.error('Failed to load contract', err)
+        reportActionError(err, 'Load contract')
       }
     } else {
       await contractStore.loadApprovedTemplates()
@@ -427,7 +446,11 @@ onBeforeRouteLeave(() => {
                 :actions="toBannerActions(story.actionHints)"
               />
               <div v-show="activeTab === 'details'">
-                <ContractDetailsEditor :contract="contract" />
+                <ContractDetailsEditor
+                  :contract="contract"
+                  :name-error="nameError ?? undefined"
+                  :description-error="descriptionError ?? undefined"
+                />
               </div>
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">

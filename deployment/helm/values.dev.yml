@@ -55,7 +55,10 @@ postgresql:
     database: dcs
   additionalDatabases: ["fc", "statuslist", "hydra"]
   persistence:
-    enabled: false
+    # The dependency stack is upgraded in place by dev-stack.sh. Keeping the
+    # databases on emptyDir loses Hydra clients, status lists and DCS data as
+    # soon as PostgreSQL rolls during an upgrade.
+    enabled: true
   service:
     type: NodePort
     nodePort: 30432
@@ -148,6 +151,17 @@ oidc:
   logoutRedirectURI: "http://localhost:5173/api/auth/logout-complete"
   realm: "gaia-x"
   keycloakScheme: "http"
+
+# The chart default trusts no issuer (values.yaml). The dev stack runs against
+# the dev fixture baked into the image, so it opts back in explicitly —
+# otherwise the backend renders with no trust document and every credential
+# presentation fails closed.
+oid4vp:
+  trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
+    xfscAllowUnsignedFallback: true
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # XFSC Status List Service (DCS-OR-C2PA-005)
 statuslistService:

@@ -434,16 +434,6 @@ var (
 // appended with IDs beyond the existing maximum so originals are unreachable
 // via the updated xref chain but their bytes remain intact for signature
 // verification.
-// buildUpdateAppendixBytes constructs the raw bytes of the PDF incremental
-// update section. It supersedes:
-//   - obj 2  (Pages)        — updated /Kids list pointing to new page objects
-//   - obj 9  (C2PA manifest) — updated hard-binding hash and provenance chain
-//   - obj 11 (embedded JSON-LD) — replaced with the new payload, carried verbatim
-//
-// New objects (page content streams, page dictionaries, annotations) are
-// appended with IDs beyond the existing maximum so originals are unreachable
-// via the updated xref chain but their bytes remain intact for signature
-// verification.
 func buildUpdateAppendixBytes(
 	baseLen, prevStartXref, oldSize int,
 	fileID string,

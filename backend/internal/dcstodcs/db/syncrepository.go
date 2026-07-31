@@ -27,11 +27,13 @@ type SyncFail struct {
 // contract's canonical representation (DCS-FR-SM-02), persisted on the
 // receiving instance as the contract's cross-instance provenance artifact.
 type SyncSignature struct {
-	DID             string    `db:"did"`
-	ContractVersion int       `db:"contract_version"`
-	FromPeerDID     string    `db:"from_peer_did"`
-	JadesSignature  string    `db:"jades_signature"`
-	ReceivedAt      time.Time `db:"received_at"`
+	DID              string     `db:"did"`
+	ContractVersion  int        `db:"contract_version"`
+	FromPeerDID      string     `db:"from_peer_did"`
+	JadesSignature   string     `db:"jades_signature"`
+	ReceivedAt       time.Time  `db:"received_at"`
+	PoAEvidence      []byte     `db:"poa_evidence"`
+	PoARevalidatedAt *time.Time `db:"poa_revalidated_at"`
 }
 
 type SyncRepository interface {

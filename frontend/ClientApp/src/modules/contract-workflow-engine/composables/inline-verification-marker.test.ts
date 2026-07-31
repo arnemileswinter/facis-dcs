@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findVerificationError, useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
-import type { SemanticConditionValue } from '@/models/contract-data'
+import type { SemanticConditionValue } from '@/models/contract/contract-data'
 import type { DcsBlock } from '@/models/dcs-jsonld'
 import type { SemanticCondition } from '@template-repository/models/contract-template'
 

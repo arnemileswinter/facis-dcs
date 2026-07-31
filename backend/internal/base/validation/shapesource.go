@@ -47,6 +47,50 @@ type ShapeSource interface {
 	ActiveDomainOntology(ctx context.Context) (content string, version int, err error)
 }
 
+type VersionedShapeRef struct {
+	Name    string
+	Version int
+}
+
+// EffectiveBundleShapeSource is implemented by the production Semantic Hub.
+// It keeps independently-versioned shape libraries immutable for produced
+// artifacts without widening ShapeSource for remote/fixture implementations.
+type EffectiveBundleShapeSource interface {
+	ShapesBundleAt(context.Context, []VersionedShapeRef) (string, error)
+	ProfileAt(context.Context, int) (string, error)
+}
+
+func effectiveShapeRefs(contract map[string]any) ([]VersionedShapeRef, error) {
+	raw, ok := contract["dcs:effectiveShapes"]
+	if !ok {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("dcs:effectiveShapes must be a non-empty array")
+	}
+	refs := make([]VersionedShapeRef, 0, len(items))
+	for _, item := range items {
+		iri := anchorIRI(item)
+		version := anchorVersion(iri)
+		const marker = "/semantic/shapes/"
+		index := strings.Index(iri, marker)
+		if index < 0 || version <= 0 {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		name := strings.SplitN(iri[index+len(marker):], "?", 2)[0]
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		refs = append(refs, VersionedShapeRef{Name: name, Version: version})
+	}
+	return refs, nil
+}
+
+func pinnedHubProfileVersion(contract map[string]any) int {
+	return anchorVersion(anchorIRI(contract["dcterms:conformsTo"]))
+}
+
 // activeShapeSource is the process-wide enforcement source, installed at
 // startup (cmd/dcs/main.go); nil until SetShapeSource runs.
 var activeShapeSource ShapeSource
@@ -70,6 +114,20 @@ func requireShapeSource() (ShapeSource, error) {
 // pinnedVersionPattern extracts the ?version=N (or &version=N) query
 // parameter semantichub.AnchorURL encodes into a hub-served schema URL.
 var pinnedVersionPattern = regexp.MustCompile(`[?&]version=(\d+)`)
+
+// pinnedHubShapesVersion reads the canonical shapes version a document pins.
+// sh:shapesGraph is multi-valued — a document names the shape libraries its
+// data is modelled against beside the canonical DCS shapes (ADR-23) — so the
+// canonical anchor is located by name among every declared anchor rather than
+// assumed to be the sole value.
+func pinnedHubShapesVersion(contract map[string]any, canonicalName string) int {
+	for _, anchor := range declaredShapesGraphs(contract) {
+		if anchor.Name == canonicalName {
+			return anchor.Version
+		}
+	}
+	return 0
+}
 
 // hubShapesAnchorPath marks a hub-served shapes URL
 // (semantichub.AnchorURL) among a document's sh:shapesGraph values.

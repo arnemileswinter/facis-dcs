@@ -26,6 +26,7 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
@@ -38,6 +39,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 
 	"github.com/jmoiron/sqlx"
@@ -62,6 +64,7 @@ type contractWorkflowEnginesrvc struct {
 	ArchiveNotary        command.ArchiveNotary
 	ArchiveTSA           *tsa.APIClient
 	TargetClient         command.ContractTargetClient
+	WorkflowGate         *workflowgate.Coordinator
 	// MachineIdentities is the registry every machine caller is resolved
 	// against, and HydraAdmin provisions the OAuth2 clients they present
 	// (ADR-27).
@@ -79,10 +82,11 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient,
 	deploymentRepo db.DeploymentRepo, targetRepo db.ContractTargetRepo,
 	targetClient command.ContractTargetClient,
+	workflowGate *workflowgate.Coordinator,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
 	hydraPublicIssuerURL string) contractworkflowengine.Service {
 
-	return &contractWorkflowEnginesrvc{
+	service := &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
@@ -101,10 +105,88 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		ArchiveNotary:    archiveNotary,
 		ArchiveTSA:       archiveTSA,
 		TargetClient:     targetClient,
+		WorkflowGate:     workflowGate,
 
 		MachineIdentities:    machineIdentities,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
+	}
+	if workflowGate != nil {
+		for _, gate := range []string{"submission", "offer", "approval", "deployment"} {
+			workflowGate.SetReviewContinuation(gate, service.resumeReviewedWorkflowGate)
+		}
+	}
+	return service
+}
+
+func workflowRoles(ctx context.Context) []string {
+	roles := middleware.GetUserRoles(ctx)
+	result := make([]string, 0, len(roles))
+	for _, role := range roles {
+		result = append(result, role.String())
+	}
+	return result
+}
+
+func (s *contractWorkflowEnginesrvc) runWorkflowGate(ctx context.Context, gate, did string, updatedAt time.Time, continuation map[string]any) (time.Time, bool, error) {
+	_, reused, snapshotUpdatedAt, err := s.WorkflowGate.ExecuteSnapshot(ctx, workflowgate.Input{
+		Gate: gate, ContractDID: did, ExpectedUpdatedAt: updatedAt,
+		Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
+		Continuation: continuation,
+	})
+	return snapshotUpdatedAt, reused, err
+}
+
+func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Context, run workflowgate.Run) error {
+	stringValue := func(name string) string {
+		value, _ := run.Continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	if values, ok := run.Continuation["user_roles"].([]any); ok {
+		for _, value := range values {
+			if role, ok := value.(string); ok {
+				roles = append(roles, userrole.UserRole(role))
+			}
+		}
+	}
+	switch run.Gate {
+	case "submission":
+		handler := command.Submitter{
+			DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo,
+			NRepo: s.NRepo, NTRepo: s.NTRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
+		}
+		return handler.Handle(ctx, command.SubmitCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			SubmittedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "offer":
+		return (&command.Offerer{DB: s.DB, CRepo: s.CRepo, DIDDocument: s.DIDDocument}).Handle(ctx, command.OfferCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			OfferedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "approval":
+		return (&command.Approver{
+			DB: s.DB, CRepo: s.CRepo, ATRepo: s.ATRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
+		}).Handle(ctx, command.ApproveCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			ApprovedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
+			UserRoles: roles, CauserDID: stringValue("causer_did"),
+		})
+	case "deployment":
+		_, err := (&command.Deployer{
+			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
+			TargetRepo: s.TargetRepo, Target: s.TargetClient,
+		}).Handle(ctx, command.DeployCmd{
+			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
+			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
+			TargetIDOverride: stringValue("target_id"),
+		})
+		return err
+	default:
+		return fmt.Errorf("reviewed continuation is not available for gate %q", run.Gate)
 	}
 }
 
@@ -325,6 +407,26 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 	localPeer, err := s.DIDDocument.GetID()
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	gateUpdatedAt, reusedGate, err := s.runWorkflowGate(ctx, "submission", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
+	updatedAt = gateUpdatedAt
+	if reusedGate {
+		qryHandler := contract.GetProcessDataByIDHandler{DB: s.DB, CRepo: s.CRepo}
+		processData, readErr := qryHandler.Handle(ctx, contract.GetProcessDataByIDQry{
+			DID: req.Did, RetrievedBy: middleware.GetParticipantID(ctx),
+			HolderDID: middleware.GetHolderDID(ctx),
+		})
+		if readErr == nil && processData.UpdatedAt.After(updatedAt) {
+			return &contractworkflowengine.ContractSubmitResponse{Did: req.Did, CurrentState: processData.State.String()}, nil
+		}
 	}
 
 	cmd := command.SubmitCmd{
@@ -1153,6 +1255,15 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	cmd := command.ApproveCmd{
 		DID:        req.Did,
@@ -1399,6 +1510,15 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "offer", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"holder_did":   middleware.GetHolderDID(ctx),
+		"user_roles":   workflowRoles(ctx),
+		"causer_did":   localPeer,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	cmd := command.OfferCmd{
 		DID:       req.Did,
@@ -1554,6 +1674,22 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	targetID := ""
+	if req.TargetID != nil {
+		targetID = *req.TargetID
+	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	updatedAt, _, err = s.runWorkflowGate(ctx, "deployment", req.Did, updatedAt, map[string]any{
+		"requested_by": middleware.GetParticipantID(ctx),
+		"causer_did":   localPeer,
+		"target_id":    targetID,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	handler := command.Deployer{
 		DB:             s.DB,
@@ -1563,21 +1699,12 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		Target:         s.TargetClient,
 		PeerSigs:       s.SRepo,
 	}
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
-		DID:         req.Did,
-		UpdatedAt:   updatedAt,
-		RequestedBy: middleware.GetParticipantID(ctx),
-		LocalPeer:   localPeer,
-		TargetIDOverride: func() string {
-			if req.TargetID != nil {
-				return *req.TargetID
-			}
-			return ""
-		}(),
+		DID:              req.Did,
+		UpdatedAt:        updatedAt,
+		RequestedBy:      middleware.GetParticipantID(ctx),
+		LocalPeer:        localPeer,
+		TargetIDOverride: targetID,
 	})
 	if err != nil {
 		return nil, mapContractCommandError(err)

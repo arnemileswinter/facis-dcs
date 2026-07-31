@@ -7,6 +7,7 @@ import { type DcsContractField, fieldFillScalar } from '@/models/dcs-jsonld'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 
 defineOptions({
@@ -97,7 +98,7 @@ const offer = async () => {
     })
     router.go(0)
   } catch (err) {
-    console.error('Offer failed:', err)
+    reportActionError(err, 'Offer contract')
   } finally {
     offering.value = false
   }
@@ -115,7 +116,7 @@ const deploy = async () => {
     })
     router.go(0)
   } catch (err) {
-    console.error('Deployment failed:', err)
+    reportActionError(err, 'Deploy contract')
   } finally {
     deploying.value = false
   }
@@ -129,7 +130,7 @@ const terminate = async () => {
       editor: { requiredText: true, placeholder: 'Reason' },
     })
     if (!reason) {
-      console.error('Reason is required for termination')
+      reportActionError(new Error('A reason is required.'), 'Terminate contract')
       return
     }
     if (!isCanceled) {
@@ -143,7 +144,7 @@ const terminate = async () => {
       }
     }
   } catch (err) {
-    console.error('Termination failed:', err)
+    reportActionError(err, 'Terminate contract')
   }
 }
 </script>

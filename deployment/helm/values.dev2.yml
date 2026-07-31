@@ -140,6 +140,17 @@ oidc:
   realm: "gaia-x"
   keycloakScheme: "http"
 
+# The chart default trusts no issuer (values.yaml). The dev stack runs against
+# the dev fixture baked into the image, so it opts back in explicitly —
+# otherwise the backend renders with no trust document and every credential
+# presentation fails closed.
+oid4vp:
+  trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
+    xfscAllowUnsignedFallback: true
+    x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
+
 # XFSC Status List Service (DCS-OR-C2PA-005)
 statuslistService:
   enabled: true

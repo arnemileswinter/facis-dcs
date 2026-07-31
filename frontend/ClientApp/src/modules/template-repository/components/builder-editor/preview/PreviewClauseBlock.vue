@@ -28,6 +28,7 @@ const props = defineProps<{
   semanticConditionValues?: SemanticConditionValue[]
   verificationResult?: VerificationResult | null
   setSemanticConditionValue?: SemanticConditionValueSetter
+  disabled?: boolean
 }>()
 
 type PreviewSegment =
@@ -110,6 +111,7 @@ function findVerificationError(conditionId: string, parameterName: string) {
       :value-constraint="seg.valueConstraint"
       :is-invalid="seg.isInvalid"
       :invalid-tip="seg.invalidTip"
+      :disabled="disabled"
       @update:value="(val) => onParamValueChange(seg, val)"
     />
     <span

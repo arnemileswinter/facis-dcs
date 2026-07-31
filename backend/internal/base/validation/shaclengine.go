@@ -66,7 +66,27 @@ func validateAgainstHubShapes(ctx context.Context, contract map[string]any) ([]P
 // the process-wide activeShapeSource without mutating shared process state
 // under concurrent request handling.
 func validateAgainstShapeSource(ctx context.Context, contract map[string]any, source ShapeSource) ([]PolicyFinding, int, error) {
-	shapesTTL, shapesVersion, err := declaredShapes(ctx, contract, source)
+	var shapesTTL string
+	var shapesVersion int
+	var err error
+	refs, refsErr := effectiveShapeRefs(contract)
+	if refsErr != nil {
+		return nil, 0, refsErr
+	}
+	if len(refs) > 0 {
+		bundleSource, ok := source.(EffectiveBundleShapeSource)
+		if !ok {
+			return nil, 0, fmt.Errorf("shape source cannot resolve immutable effective bundle")
+		}
+		pinned := pinnedHubShapesVersion(contract, source.CanonicalShapesName())
+		if pinned <= 0 || refs[0].Name != source.CanonicalShapesName() || refs[0].Version != pinned {
+			return nil, 0, fmt.Errorf("effective shapes bundle does not match sh:shapesGraph")
+		}
+		shapesTTL, err = bundleSource.ShapesBundleAt(ctx, refs)
+		shapesVersion = pinned
+	} else {
+		shapesTTL, shapesVersion, err = declaredShapes(ctx, contract, source)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
