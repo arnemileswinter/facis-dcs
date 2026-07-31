@@ -237,6 +237,29 @@ const negotiateContractChange = async () => {
   }
 }
 
+// Accepting an offered contract as it stands (SRS §4: the Responder may accept,
+// negotiate or refuse). This is what mints this instance's negotiation task for
+// the round, so it is also what makes the contract appear in the Negotiations
+// tab and what Submit later reads as "a party engaged".
+const acceptOffer = async () => {
+  if (!contract.value || !issuer.value) return
+  isSubmitting.value = true
+  try {
+    const response = await contractWorkflowService.acceptOffer({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      accepted_by: issuer.value,
+    })
+    if (response.did) {
+      await loadContract()
+    }
+  } catch (err) {
+    reportActionError(err, 'Accept offer')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
 // SRS §3.1.1 Contract Negotiation UI "Save draft": stage the current
 // modifications privately (per contract + author, server-side) without
 // proposing them; restored into the editor on the next visit.
@@ -347,26 +370,6 @@ const hasOpenDecisions = computed(
           (decision) => !decision.decision && decision.negotiator === localInstanceDid.value,
         ),
     ) ?? false,
-)
-
-// TEMP-INSTRUMENT: log what disables the Submit button on the negotiate view.
-watch(
-  () => ({
-    state: contract.value?.state,
-    isCreator: isCreator.value,
-    isReviewer: isReviewer.value,
-    hasChangeRequest: hasChangeRequest.value,
-    changedName: changedName.value,
-    changedDescription: changedDescription.value,
-    changedContractData: changedContractData.value,
-    hasOpenDecisions: hasOpenDecisions.value,
-    proposalComparison: !!proposalComparison.value,
-    contractVersion: contract.value?.contract_version,
-    store: contractContentValuesStore.semanticConditionValues,
-    snapshot: contractSemanticConditionValueSnapshot.value,
-  }),
-  (s) => console.log('[SUBMIT-GATE]', JSON.stringify(s)),
-  { immediate: true, deep: true },
 )
 
 onMounted(async () => {
@@ -648,6 +651,16 @@ const exportPDF = async () => {
           @click="discardNegotiationDraft"
         >
           Discard draft
+        </button>
+        <button
+          v-if="contract?.state === ContractState.offered"
+          data-testid="accept-offer"
+          class="btn flex-1 btn-primary"
+          :disabled="isSubmitting || !!proposalComparison"
+          @click="acceptOffer"
+        >
+          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
+          Accept offer
         </button>
         <button
           v-if="contract?.state === ContractState.negotiation || contract?.state === ContractState.offered"

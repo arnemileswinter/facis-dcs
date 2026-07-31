@@ -94,6 +94,10 @@ interface ContractSearchResponseItem {
 
 export type ContractSearchResponse = ContractSearchResponseItem[]
 
+export interface ContractOfferAcceptResponse {
+  did: string
+}
+
 export interface ContractNegotiationResponse {
   did: string
 }

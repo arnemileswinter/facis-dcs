@@ -13,6 +13,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/identity"
 
+	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/reviewtaskstate"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -28,6 +29,11 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/query/contracttemplate"
 	"digital-contracting-service/internal/semantichub"
 )
+
+// initialContractVersion mirrors the contracts table's contract_version
+// default: a freshly created or renewed contract is at version 1, which is the
+// negotiation round its first tasks belong to.
+const initialContractVersion = 1
 
 type CreateCmd struct {
 	DID         string `json:"did"`
@@ -95,10 +101,10 @@ func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs
 	}, nil
 }
 
-// createTasks opens this instance's own review, negotiation, and approval
+// createReviewAndApprovalTasks opens this instance's own review and approval
 // tasks (ADR-13): the responsible role lists hold local-RBAC holders only, so
 // each DCS creates and owns its tasks; nothing crosses the boundary.
-func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, ntRepo db.NegotiationTaskRepo, did, createdBy string, resp db.Responsible) error {
+func createReviewAndApprovalTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atRepo db.ApprovalTaskRepo, did, createdBy string, resp db.Responsible) error {
 	for _, reviewer := range resp.Reviewers {
 		reviewTask := db.ReviewTaskData{
 			DID:       did,
@@ -109,19 +115,6 @@ func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atR
 		_, err := rtRepo.Create(ctx, tx, reviewTask)
 		if err != nil {
 			return fmt.Errorf("could not create review task: %w", err)
-		}
-	}
-
-	for _, negotiator := range resp.Negotiators {
-		negotiationTask := db.NegotiationTaskData{
-			DID:        did,
-			Negotiator: negotiator,
-			State:      reviewtaskstate.Open.String(),
-			CreatedBy:  createdBy,
-		}
-		_, err := ntRepo.Create(ctx, tx, negotiationTask)
-		if err != nil {
-			return fmt.Errorf("could not create negotiation task: %w", err)
 		}
 	}
 
@@ -138,6 +131,26 @@ func createTasks(ctx context.Context, tx *sqlx.Tx, rtRepo db.ReviewTaskRepo, atR
 		}
 	}
 
+	return nil
+}
+
+// mintNegotiationTask records that this instance engaged with a contract's
+// current negotiation round: authoring the contract (create/renew), accepting
+// an inbound offer, or proposing a redline on one. A task is never minted by
+// passive receipt — it would queue work nobody chose and make the settlement
+// gate in submit read an engagement that never happened. Repeat mints for the
+// same round are absorbed by the repository (idempotent Create).
+func mintNegotiationTask(ctx context.Context, tx *sqlx.Tx, ntRepo db.NegotiationTaskRepo, did, negotiator, createdBy string, contractVersion int) error {
+	_, err := ntRepo.Create(ctx, tx, db.NegotiationTaskData{
+		DID:             did,
+		ContractVersion: contractVersion,
+		Negotiator:      negotiator,
+		State:           negotiationtaskstate.Open.String(),
+		CreatedBy:       createdBy,
+	})
+	if err != nil {
+		return fmt.Errorf("could not create negotiation task: %w", err)
+	}
 	return nil
 }
 
@@ -268,9 +281,18 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		return fmt.Errorf("could not create contract: %w", err)
 	}
 
-	err = createTasks(ctx, tx, h.RTRepo, h.ATRepo, h.NTRepo, cmd.DID, cmd.CreatedBy, resp)
+	err = createReviewAndApprovalTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd.DID, cmd.CreatedBy, resp)
 	if err != nil {
 		return err
+	}
+
+	// Authoring the contract is this instance's engagement with its first
+	// negotiation round, so the originator holds a task from the start; the
+	// counterparty mints its own when it accepts the offer.
+	for _, negotiator := range resp.Negotiators {
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, negotiator, cmd.CreatedBy, initialContractVersion); err != nil {
+			return err
+		}
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)

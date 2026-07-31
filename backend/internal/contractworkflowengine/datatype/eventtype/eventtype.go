@@ -8,11 +8,15 @@ package eventtype
 type EventType string
 
 const (
-	Create                   EventType = "CREATE_CONTRACT"
-	RemoteSync               EventType = "REMOTE_SYNC"
-	RemoteSyncRequest        EventType = "REMOTE_SYNC_REQUEST"
-	Submit                   EventType = "SUBMIT_CONTRACT"
-	Negotiation              EventType = "NEGOTIATE_CONTRACT"
+	Create            EventType = "CREATE_CONTRACT"
+	RemoteSync        EventType = "REMOTE_SYNC"
+	RemoteSyncRequest EventType = "REMOTE_SYNC_REQUEST"
+	Submit            EventType = "SUBMIT_CONTRACT"
+	Negotiation       EventType = "NEGOTIATE_CONTRACT"
+	// AcceptOffer records the counterparty accepting an inbound offer as-is,
+	// which mints its negotiation task for the round and opens NEGOTIATION. It
+	// changes no contract content, so it ships nothing to the peer.
+	AcceptOffer              EventType = "ACCEPT_OFFER_CONTRACT"
 	AcceptRespond            EventType = "ACCEPT_RESPOND_CONTRACT"
 	RejectRespond            EventType = "REJECT_RESPOND_CONTRACT"
 	IncreaseContractVersion  EventType = "INCREASE_CONTRACT_VERSION"

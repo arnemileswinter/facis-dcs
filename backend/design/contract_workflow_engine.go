@@ -394,6 +394,28 @@ var ContractNegotiationResponse = Type("ContractNegotiationResponse", func() {
 	Required("did")
 })
 
+var ContractOfferAcceptRequest = Type("ContractOfferAcceptRequest", func() {
+	Description("Accept an inbound offer as-is, with no change request (OFFERED -> NEGOTIATION). Distinct from ContractNegotiationRespondRequest, which decides one already-proposed change request.")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("accepted_by", String, "The name of the accepting negotiator")
+
+	Required("did", "updated_at", "accepted_by")
+})
+
+var ContractOfferAcceptResponse = Type("ContractOfferAcceptResponse", func() {
+	Description("Result for accepting an offer")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+
+	Required("did")
+})
+
 var ContractNegotiationDraftSaveRequest = Type("ContractNegotiationDraftSaveRequest", func() {
 	Description("Save (upsert) the calling party's negotiation draft for a contract")
 
@@ -993,6 +1015,34 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		HTTP(func() {
 			POST("/contract/negotiate")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("accept_offer", func() {
+		Description("Accept an inbound offer as-is, with no change request: mints this instance's negotiation task for the offer's current round and moves the contract OFFERED -> NEGOTIATION. Only the counterparty may call it — the origin is refused. Not to be confused with respond (action_flag ACCEPTING), which decides one already-proposed change request.")
+		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-FR-CWE-18")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			// The Responder drives its inbound contracts as Contract Manager
+			// (SRS §4); per-contract authorization is the counterparty gate in
+			// command/acceptoffer.go, not local RBAC.
+			Scope("Contract Manager")
+		})
+
+		Payload(ContractOfferAcceptRequest)
+		Result(ContractOfferAcceptResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/contract/accept-offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

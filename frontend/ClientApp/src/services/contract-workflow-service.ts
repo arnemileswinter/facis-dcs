@@ -9,6 +9,7 @@ import type {
   ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferAcceptRequest,
   ContractOfferRequest,
   ContractRejectRequest,
   ContractRetrieveByIdRequest,
@@ -33,6 +34,7 @@ import type {
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferAcceptResponse,
   ContractOfferResponse,
   ContractRejectResponse,
   ContractRetrieveByIdResponse,
@@ -69,6 +71,13 @@ export const contractWorkflowService: ContractWorkflowService = {
 
   async negotiate(request: ContractNegotiationRequest) {
     return http.post<ContractNegotiationResponse>('/contract/negotiate', request).then((res) => res.data)
+  },
+
+  // Accept an inbound offer unchanged: mints this instance's negotiation task
+  // for the offer's round and takes the contract OFFERED -> NEGOTIATION. Not
+  // respond(), which decides one already-proposed change request.
+  async acceptOffer(request: ContractOfferAcceptRequest) {
+    return http.post<ContractOfferAcceptResponse>('/contract/accept-offer', request).then((res) => res.data)
   },
 
   async saveNegotiationDraft(request: ContractNegotiationDraftSaveRequest) {

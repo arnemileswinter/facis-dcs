@@ -47,16 +47,20 @@ const canOffer = computed(() => {
 
 // An OFFERED contract's only forward move is the counterparty opening the
 // negotiation (contractstate.Transitions: Offered -Negotiate-> Negotiation,
-// SRS §4 — the Responder may accept, negotiate or refuse). The view that does
-// it exists; nothing linked to it, so a received offer showed a read-only page
-// whose only enabled action was Terminate. NEGOTIATION keeps the entry so a
-// round in progress is reachable the same way.
+// SRS §4 — the Responder may accept, negotiate or refuse), and an unaccepted
+// offer carries no negotiation task, so the Negotiations tab cannot reach it —
+// by construction, since a task is minted only once a party engages. From
+// OFFERED this is therefore the sole route into the negotiate view and its
+// Accept offer / Change Proposal actions. From NEGOTIATION the task row in the
+// tab is the discoverable route and this stays as a convenience.
 const canNegotiate = computed(() => {
   const state = props.contract.state
   return (
     (isNegotiator.value || isCreator.value) && (state === ContractState.offered || state === ContractState.negotiation)
   )
 })
+
+const negotiateLabel = computed(() => (props.contract.state === ContractState.offered ? 'Review offer' : 'Negotiate'))
 
 function openNegotiation() {
   void router.push({ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: props.contract.did } })
@@ -191,7 +195,7 @@ const terminate = async () => {
     :class="[filteredClass, 'btn-primary']"
     @click="openNegotiation"
   >
-    Negotiate
+    {{ negotiateLabel }}
   </button>
   <button v-if="canTerminate" :class="[filteredClass, 'btn-error']" @click="terminate">Terminate</button>
   <ConfirmationModal ref="confirmation-modal" />

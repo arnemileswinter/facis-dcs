@@ -73,6 +73,73 @@ export async function openInstanceB(browser: Browser): Promise<Instance> {
 }
 
 /**
+ * The DID's final segment: unique per resource and untouched by the router's
+ * param encoding, so a list row can be picked out by its own View link's href
+ * without depending on how "did:web:..." is escaped into a URL.
+ */
+function didTail(did: string): string {
+  return did.split(':').pop()!
+}
+
+/**
+ * Follows one resource's own View link in whatever list is on screen.
+ *
+ * Arriving this way is the whole point of the helpers below. A hop that
+ * navigates straight to a URL reaches its page even when nothing in the product
+ * links there — which is how a negotiate view no list could reach passed every
+ * run of this vertical while a human clicking through could not get to it at
+ * all. Each stage keeps at least one hop that has to be FOUND.
+ */
+async function followViewLinkFor(inst: Instance, did: string, where: string): Promise<void> {
+  const row = inst.page.locator('.list-row').filter({ has: inst.page.locator(`a[href*="${didTail(did)}"]`) })
+  await expect(row, `${where} on ${inst.origin} shows no row for ${did}`).toHaveCount(1, { timeout: 30_000 })
+  await row.getByRole('link', { name: 'View', exact: true }).click()
+}
+
+/**
+ * Opens a contract from the Contracts list as a human would: searches the list
+ * for it by DID (the list's default search filter) and clicks the row's own View
+ * action.
+ *
+ * Where that lands is the product's decision, not this helper's:
+ * ContractListItem.resolveViewRouteName sends a contract to its task view when
+ * the acting instance holds a task for it, and to the read-only view otherwise.
+ * Callers assert the destination they expect, so a task that was never minted
+ * shows up as a wrong landing page rather than passing silently.
+ */
+export async function openContractFromList(inst: Instance, role: DcsRole, contractDid: string): Promise<void> {
+  await inst.gotoAs(role, '/ui/contracts')
+  const search = inst.page.getByRole('combobox', { name: 'Search contracts' })
+  await expect(search).toBeVisible({ timeout: 30_000 })
+  // The list is paginated and sorted oldest-first, so the contract under test is
+  // not reliably on the page a fresh visit shows; searching is how a human finds
+  // it. Armed before the fill and awaited before the row lookup: the list filters
+  // itself from the search response, and reading rows while it is still in flight
+  // reports "not in the list" for a contract that is.
+  const searched = inst.page.waitForResponse((r) => r.url().includes('/contract/search'), { timeout: 30_000 })
+  await search.fill(contractDid)
+  await search.press('Enter')
+  await searched
+  await followViewLinkFor(inst, contractDid, 'the contract list')
+}
+
+/**
+ * Opens a contract from one of the task tabs by clicking the task's own row.
+ * The tab is the discoverable route into work a party owes an answer on, so a
+ * tab that never grew a row — the federated contract's Negotiations tab, before
+ * accepting an offer minted anything — fails here.
+ */
+export async function openContractFromTaskTab(
+  inst: Instance,
+  role: DcsRole,
+  tab: 'negotiations' | 'reviews' | 'approvals',
+  contractDid: string,
+): Promise<void> {
+  await inst.gotoAs(role, `/ui/tasks/${tab}`)
+  await followViewLinkFor(inst, contractDid, `the ${tab} task tab`)
+}
+
+/**
  * Signs an APPROVED contract on a given instance through that instance's Secure
  * Contract Viewer, exactly as a real signer would (ADR-12): open from the
  * signing list, verify, run the wallet PID+PoA ceremony (the wallet leg arrives
@@ -496,7 +563,11 @@ export async function publishHubShapesOn(
   ttl: string,
   expectedContent: string,
 ): Promise<void> {
-  await inst.gotoAs('Template Manager', '/ui/semantic-hub')
+  // Reached through the sidebar the role actually sees, so a section that is
+  // navigable only by typing its URL fails here.
+  await inst.gotoAs('Template Manager', '/ui/templates')
+  await inst.page.getByRole('link', { name: 'Semantic Hub', exact: true }).click()
+  await expect(inst.page).toHaveURL(/\/ui\/semantic-hub$/)
   await expect(inst.page.getByRole('heading', { name: 'Semantic Hub' })).toBeVisible()
   await inst.page.getByLabel('Entry name').fill(name)
   await inst.page.getByLabel('Entry kind').selectOption('shapes')
@@ -623,7 +694,11 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
   await submitted
   await assertPdfExportOn(inst, 'template', did, `${name} SUBMITTED`)
 
-  await inst.gotoAs('Template Reviewer', `/ui/templates/review/${did}`)
+  // Found in the Review Tasks tab rather than opened by URL: submitting is what
+  // opens the review task, and the tab row is the reviewer's route to it.
+  await inst.gotoAs('Template Reviewer', '/ui/tasks/reviews')
+  await followViewLinkFor(inst, did, 'the reviews task tab')
+  await expect(inst.page).toHaveURL(/\/ui\/templates\/review\//)
   await waitForTemplateLoadedOn(inst, name)
   const verified = inst.page.waitForResponse(
     (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
@@ -636,7 +711,11 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
   await inst.page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
   await forwarded
 
-  await inst.gotoAs('Template Approver', `/ui/templates/approve/${did}`)
+  // Likewise the approver: the row points at the approve view only while its
+  // task is open and the template has been reviewed.
+  await inst.gotoAs('Template Approver', '/ui/tasks/approvals')
+  await followViewLinkFor(inst, did, 'the approvals task tab')
+  await expect(inst.page).toHaveURL(/\/ui\/templates\/approve\//)
   await waitForTemplateLoadedOn(inst, name)
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/template/approve') && r.request().method() === 'POST' && r.ok(),
@@ -862,7 +941,11 @@ export async function resolveDidWeb(inst: Instance): Promise<string> {
  * counterparty did:web input). Returns the created contract's DID.
  */
 export async function createContractViaUi(inst: Instance, templateName: string, counterparty: string): Promise<string> {
-  await inst.gotoAs('Contract Creator', '/ui/contracts/new')
+  // Entered from the Contracts list through its own New Contract action, so the
+  // creator's route in is exercised rather than assumed.
+  await inst.gotoAs('Contract Creator', '/ui/contracts')
+  await inst.page.getByRole('link', { name: 'New Contract', exact: true }).click()
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/new$/)
   const picker = inst.page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })
   await expect(option).toHaveCount(1)
@@ -921,7 +1004,11 @@ export async function fillContractAmountOn(inst: Instance, contractDid: string, 
  * proves the chain grew from the PROPOSE, the save itself ships nothing.
  */
 export async function stagedCounterOffer(inst: Instance, contractDid: string, opts: { value: string }): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  // Now that the party has engaged, the tab row IS the route: the task points at
+  // the round, and following it must land on the negotiate view rather than the
+  // read-only one.
+  await openContractFromTaskTab(inst, 'Contract Negotiator', 'negotiations', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
   await inst.page
     .getByRole('tab', { name: /content/i })
     .or(inst.page.getByText('Contract Content', { exact: true }))
@@ -973,7 +1060,17 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   // role (not Creator), so it cannot /contract/submit (Creator-only) — instead
   // its "Change Proposal" (/contract/negotiate) opens negotiation directly
   // (Offered --EventNegotiate--> Negotiation; SRS DCS-IR-CWE-03/DCS-FR-CWE-18).
-  await inst.gotoAs('Contract Manager', `/ui/contracts/negotiate/${contractDid}`)
+  // Both parties hold a task, so the originator has its own tab row to arrive
+  // by: authoring the contract is its engagement with the first round, and a
+  // re-ship carries that task to each new round rather than dropping it. Its
+  // copy is still OFFERED (a peer's re-ship never moves this instance's own
+  // intrinsic state), so the tab lists the contract on the strength of the
+  // TASK's state — an entry that a filter keyed on the contract's state would
+  // hide, which is how the tab used to look empty here.
+  await openContractFromTaskTab(inst, 'Contract Creator', 'negotiations', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
+  await inst.page.getByTestId('open-negotiation').click()
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
   // The negotiable requirement-field value inputs live under the Contract Content
   // tab (NegotiateContractView renders them via TemplatePreview). Editing the
   // Payment Amount field THERE is what flips changedContractData, so the change
@@ -1008,13 +1105,72 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
  * §1.2 offer→acceptance). The transition ships the PDF to the trusted peer.
  */
 export async function offerToCounterparty(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Creator', `/ui/contracts/view/${contractDid}`)
+  // Found from the contract list rather than opened by URL: A's own route to
+  // the contract it just authored is a row in that list.
+  await openContractFromList(inst, 'Contract Creator', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
   const offered = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/offer') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
   await inst.page.getByRole('button', { name: 'Offer to counterparty' }).click()
   await offered
+}
+
+/**
+ * The Responder takes an inbound offer into negotiation as it stands (SRS §4:
+ * accept, negotiate or refuse), through the real "Accept offer" button.
+ *
+ * Receiving an offer mints nothing — a negotiation task records that a party
+ * ENGAGED with the round, which is what submit's settlement gate reads. So this
+ * is also what puts the contract in the Responder's Negotiations tab, asserted
+ * here: no task, no row, which is how the tab stayed empty for every federated
+ * contract.
+ */
+export async function acceptOfferOn(inst: Instance, contractDid: string): Promise<void> {
+  // Symptom 1, before the accept: the offer has arrived and replicated, and the
+  // Negotiations tab still knows nothing about it. Nothing was minted on
+  // receipt, so there is no row to find.
+  await inst.gotoAs('Contract Negotiator', '/ui/tasks/negotiations')
+  const taskRow = inst.page.locator('.list-row').filter({
+    has: inst.page.locator(`a[href*="${didTail(contractDid)}"]`),
+  })
+  // Absence only means something once the tab has actually rendered its answer:
+  // an empty DOM satisfies toHaveCount(0) while the tasks are still loading.
+  await expect(
+    inst.page.locator('.list-row').or(inst.page.getByText('No negotiation tasks found.')).first(),
+  ).toBeVisible({ timeout: 30_000 })
+  await expect(taskRow, `${inst.origin} holds a negotiation task for an offer it has not accepted`).toHaveCount(0)
+
+  // Symptom 2 — the Responder's route in. With no task there is no tab row, so
+  // the contract list is the only surface the offer appears on and the contract
+  // view's own action is the only way through to the negotiate view. Reaching it
+  // by clicking is what makes a missing or wrongly-gated entry point fail here.
+  await openContractFromList(inst, 'Contract Negotiator', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
+  const intoNegotiation = inst.page.getByTestId('open-negotiation')
+  await expect(intoNegotiation, `${inst.origin} offers no route from the received offer into negotiation`).toHaveText(
+    'Review offer',
+  )
+  await intoNegotiation.click()
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
+
+  // Accepting as it stands: no redline, nothing edited.
+  const accepted = inst.page.waitForResponse(
+    (r) => r.url().includes('/contract/accept-offer') && r.request().method() === 'POST' && r.ok(),
+    { timeout: 30_000 },
+  )
+  await inst.page.getByTestId('accept-offer').click()
+  await accepted
+
+  // Symptom 1, after: the accept minted the task, so the contract is now in the
+  // Responder's Negotiations tab — matched by the row's own link, not counted,
+  // so a row for some other contract cannot stand in for it.
+  await inst.gotoAs('Contract Negotiator', '/ui/tasks/negotiations')
+  await expect(
+    taskRow,
+    `accepting the offer put no negotiation task for ${contractDid} in ${inst.origin}'s Negotiations tab`,
+  ).toHaveCount(1, { timeout: 30_000 })
 }
 
 /**
@@ -1156,8 +1312,11 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   await submit.click()
   await submitted
 
-  // Review: SUBMITTED -> REVIEWED.
-  await inst.gotoAs('Contract Reviewer', `/ui/contracts/review/${contractDid}`)
+  // Review: SUBMITTED -> REVIEWED. The reviewer arrives the way the reviewer
+  // finds work — the Review Tasks tab row, which points at the review view only
+  // while the task is open and the contract is SUBMITTED.
+  await openContractFromTaskTab(inst, 'Contract Reviewer', 'reviews', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/review\//)
   const forwarded = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
@@ -1169,8 +1328,9 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     .click()
   await forwarded
 
-  // Approve: REVIEWED -> APPROVED.
-  await inst.gotoAs('Contract Approver', `/ui/contracts/approve/${contractDid}`)
+  // Approve: REVIEWED -> APPROVED, found the same way in the Approval Tasks tab.
+  await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
@@ -1186,7 +1346,11 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
  * (SIGNED -> ACTIVE, EventDeploy), gated on the Manager role and SIGNED state.
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
-  await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  // The manager finds the signed contract in the list and opens it; a SIGNED
+  // contract carries no open task, so the row leads to the contract view where
+  // the Deploy action lives.
+  await openContractFromList(inst, 'Contract Manager', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
 
   // A contract deploys to the target system it designates (ADR-25), so the
   // manager picks one first. The registry is seeded by the chart

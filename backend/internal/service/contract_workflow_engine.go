@@ -975,6 +975,52 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 	}, nil
 }
 
+// AcceptOffer takes an inbound offer into negotiation unchanged. Not to be
+// confused with Respond(action_flag=ACCEPTING), which decides one already
+// proposed change request.
+func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contractworkflowengine.ContractOfferAcceptRequest) (res *contractworkflowengine.ContractOfferAcceptResponse, err error) {
+
+	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+
+	handler := command.OfferAcceptor{
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		NTRepo:      s.NTRepo,
+		DIDDocument: s.DIDDocument,
+	}
+	err = handler.Handle(ctx, command.AcceptOfferCmd{
+		DID:        req.Did,
+		UpdatedAt:  updatedAt,
+		AcceptedBy: middleware.GetParticipantID(ctx),
+		HolderDID:  middleware.GetHolderDID(ctx),
+		UserRoles:  middleware.GetUserRoles(ctx),
+		CauserDID:  localPeer,
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+
+	return &contractworkflowengine.ContractOfferAcceptResponse{
+		Did: req.Did,
+	}, nil
+}
+
 func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftSaveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())

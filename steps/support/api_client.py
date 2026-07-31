@@ -46,6 +46,14 @@ def contract_negotiate_url(context) -> str:
     return f"{context.base_url}/contract/negotiate"
 
 
+def contract_accept_offer_url(context) -> str:
+    """Accepting an INBOUND offer as-is (backend/design/contract_workflow_engine.go
+    accept_offer): mints the accepting instance's negotiation task for the
+    offer's round and moves OFFERED -> NEGOTIATION. Distinct from
+    /contract/respond, which decides one already-proposed change request."""
+    return f"{context.base_url}/contract/accept-offer"
+
+
 def contract_negotiation_draft_url(context, did: str = None) -> str:
     """PUT saves to the bare path; GET/DELETE address the caller's draft by
     contract DID (backend/design/contract_workflow_engine.go

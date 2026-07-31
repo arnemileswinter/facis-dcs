@@ -9,6 +9,7 @@ import type {
   ContractNegotiationDraftSaveRequest,
   ContractNegotiationRequest,
   ContractNegotiationRespondRequest,
+  ContractOfferAcceptRequest,
   ContractOfferRequest,
   ContractRejectRequest,
   ContractRetrieveByIdRequest,
@@ -33,6 +34,7 @@ import type {
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
+  ContractOfferAcceptResponse,
   ContractOfferResponse,
   ContractRejectResponse,
   ContractRetrieveResponse,
@@ -54,6 +56,7 @@ export interface ContractWorkflowService {
   offer: (request: ContractOfferRequest) => Promise<ContractOfferResponse>
   submit: (request: ContractSubmitRequest) => Promise<ContractSubmitResponse>
   negotiate: (request: ContractNegotiationRequest) => Promise<ContractNegotiationResponse>
+  acceptOffer: (request: ContractOfferAcceptRequest) => Promise<ContractOfferAcceptResponse>
   saveNegotiationDraft: (request: ContractNegotiationDraftSaveRequest) => Promise<ContractNegotiationDraftResponse>
   retrieveNegotiationDraft: (
     request: ContractNegotiationDraftRetrieveRequest,

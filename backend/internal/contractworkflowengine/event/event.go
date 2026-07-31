@@ -537,6 +537,27 @@ func (e NegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// AcceptOfferEvent is emitted when the counterparty accepts an inbound offer
+// as-is (no redline), which mints its negotiation task for the round.
+type AcceptOfferEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	AcceptedBy      string             `json:"accepted_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e AcceptOfferEvent) EventType() string {
+	return eventtype.AcceptOffer.String()
+}
+
+// GetDID implements the Event interface.
+func (e AcceptOfferEvent) GetDID() string {
+	return e.DID
+}
+
 // AcceptNegotiationEvent is emitted when a template is verified.
 type AcceptNegotiationEvent struct {
 	DID             string             `json:"did"`

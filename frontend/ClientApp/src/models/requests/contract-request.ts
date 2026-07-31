@@ -60,6 +60,12 @@ export interface ContractSearchRequest {
   filter?: string
 }
 
+export interface ContractOfferAcceptRequest {
+  did: string
+  updated_at: string
+  accepted_by: string
+}
+
 export interface ContractNegotiationRequest {
   did: string
   updated_at: string

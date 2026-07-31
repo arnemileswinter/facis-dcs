@@ -98,12 +98,21 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// assignment. Local negotiator RBAC governs only contracts this instance
 	// itself authored (Origin == localPeer).
 	if processData.Origin == localPeer {
-		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID, processData.ContractVersion)
 		if err != nil {
 			return fmt.Errorf("could not validate negotiator: %w", err)
 		}
 		if !isValidNegotiator {
 			return ErrNotAParty
+		}
+	} else {
+		// Proposing a redline on an inbound offer is engaging with the round just
+		// as accepting it is, and it may be the counterparty's first act on a
+		// contract whose receipt minted nothing. Without the task, the decision
+		// rows created below name no negotiator and this instance's own submit
+		// has no evidence that it ever took part.
+		if err := mintNegotiationTask(ctx, tx, h.NTRepo, cmd.DID, localPeer, cmd.NegotiatedBy, processData.ContractVersion); err != nil {
+			return err
 		}
 	}
 
@@ -134,6 +143,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	// ChangeRequest carrying a contract_data redline. Only a structured redline
 	// is applied immediately and re-shipped as a PDF; a free-text note (which
 	// does not decode into the struct) has nothing to apply, so it is skipped.
+	roundVersion := processData.ContractVersion
 	if cmd.ChangeRequest != nil {
 		var change negotiationmerging.ChangeRequest
 		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
@@ -169,10 +179,18 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			}); err != nil {
 				return fmt.Errorf("could not apply proposed change to contract data: %w", err)
 			}
+			roundVersion = processData.ContractVersion + 1
 		}
 	}
 
-	err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
+	// A redline replaces the document and bumps the version, which starts a new
+	// round; the tasks key on the round, so they move with it (and reopen). With
+	// no redline the round is unchanged and reopening is all that is owed.
+	if roundVersion != processData.ContractVersion {
+		err = h.NTRepo.RollForward(ctx, tx, cmd.DID, processData.ContractVersion, roundVersion)
+	} else {
+		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, roundVersion)
+	}
 	if err != nil {
 		return fmt.Errorf("could not reopen negotiation: %w", err)
 	}

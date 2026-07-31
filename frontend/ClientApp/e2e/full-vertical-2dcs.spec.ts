@@ -1,5 +1,6 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOfferOn,
   acceptOpenDecisionsOn,
   assertManifestChainGrew,
   assertNotYetSignable,
@@ -43,6 +44,12 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * proposed→agreed→executed on the retrieve API), and cross-instance double
  * signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
  * stays as the local-only lifecycle coverage until this supersedes it.
+ *
+ * Every stage from 4 on ARRIVES at least once the way a human does — a row found
+ * in a list or a task tab, then that page's own action — instead of navigating
+ * straight to the URL. A hop that types the URL reaches its page even when
+ * nothing in the product links there, which is exactly how a negotiate view the
+ * counterparty had no route to passed every run of this vertical.
  *
  * SRS traceability: every stage cites the governing requirement so this reads as
  * a normative, traceable proof rather than an arbitrary script. Federation is
@@ -152,6 +159,15 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // adjustment ships a new PDF and the C2PA ingredient chain grows by one on BOTH
   // parties (the counterparty's provenance is chained, not reset).
   await test.step('Stage 6 [DCS-FR-CWE-18, DCS-IR-CWE-03/-04, DCS-OR-C2PA-002]: negotiation ping-pong 20000 -> 10000 -> 15000', async () => {
+    // B enters the round first, arriving the way its counterparty would: the
+    // offer is found in B's contract list, opened, and taken into negotiation
+    // through the contract's own action, where "Accept offer" fires
+    // Offered --EventNegotiate--> Negotiation. The acceptance is what mints B's
+    // negotiation task and so what puts the contract in B's Negotiations tab —
+    // asserted empty for this contract before the accept and holding its row
+    // after, since a received offer on its own queues nothing.
+    await acceptOfferOn(b, contractDid)
+
     // B redlines 20000 -> 10000 through the SRS §3.1.1 Save-draft leg: the
     // redline is staged as B's party draft, survives leaving the Negotiate
     // view, and only "Change Proposal" makes it real — the chain growth

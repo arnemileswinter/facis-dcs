@@ -11,6 +11,7 @@ export type DcsRole =
   | 'Template Approver'
   | 'Template Manager'
   | 'Contract Creator'
+  | 'Contract Negotiator'
   | 'Contract Reviewer'
   | 'Contract Approver'
   | 'Contract Manager'

@@ -172,7 +172,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("could not reopen review tasks")
 		}
 
-		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
+		err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, processData.ContractVersion)
 		if err != nil {
 			return errors.New("could not reopen negotiation tasks")
 		}
@@ -190,13 +190,17 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("invalid user permission")
 		}
 
-		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID)
+		// The settlement gate. A task exists for this round only because this
+		// instance engaged with it — authored the contract, accepted the inbound
+		// offer, or proposed a redline on it — so its absence is the honest
+		// "nobody has entered this round yet", not a permission fault.
+		isValidNegotiator, err := h.NTRepo.IsValidNegotiator(ctx, tx, cmd.DID, cmd.CauserDID, processData.ContractVersion)
 		if err != nil {
 			return fmt.Errorf("could not validate negotiator: %w", err)
 		}
 
 		if !isValidNegotiator {
-			return errors.New("this peer is not a valid negotiator")
+			return ErrNegotiationNotSettled
 		}
 
 		hasOpenNegotiations, err := h.NRepo.HasOpenNegotiationDecisions(ctx, tx, cmd.DID, processData.ContractVersion, cmd.CauserDID, cmd.SubmittedBy)
@@ -208,12 +212,12 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("not all negotiations are processed")
 		}
 
-		err = h.NTRepo.UpdateState(ctx, tx, processData.DID, cmd.CauserDID, negotiationtaskstate.Accepted.String())
+		err = h.NTRepo.UpdateState(ctx, tx, processData.DID, cmd.CauserDID, processData.ContractVersion, negotiationtaskstate.Accepted.String())
 		if err != nil {
 			return fmt.Errorf("could not update negotiation task: %w", err)
 		}
 
-		existOpenTasks, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, negotiationtaskstate.Open.String())
+		existOpenTasks, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, processData.ContractVersion, negotiationtaskstate.Open.String())
 		if err != nil {
 			return fmt.Errorf("could not check if review task exists: %w", err)
 		}
@@ -257,6 +261,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					return fmt.Errorf("could not update contract version: %w", err)
 				}
 
+				// The merged result starts a new round, and the tasks key on the
+				// round: a party that engaged with this one still owes a response to
+				// the next, so its task travels to the new version and reopens.
+				if err := h.NTRepo.RollForward(ctx, tx, processData.DID, processData.ContractVersion, updatedData.ContractVersion); err != nil {
+					return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+				}
+
 				// The merge does not fold a redline into the stored document, it
 				// replaces the document with the redline (mergeContractDataChange
 				// returns the change), so the merged result is a client-assembled
@@ -282,19 +293,10 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				}
 
 			} else {
-				// No change requests to merge. That is a settlement only if a
-				// negotiator actually accepted: a contract whose counterparty
-				// never received a task has no open tasks and no negotiations
-				// either, so both checks above pass the moment the offer is
-				// opened and the round would end before it began. Settlement is
-				// evidenced by an acceptance, never inferred from absence.
-				accepted, err := h.NTRepo.AnyTasksInState(ctx, tx, processData.DID, negotiationtaskstate.Accepted.String())
-				if err != nil {
-					return fmt.Errorf("could not check accepted negotiation tasks: %w", err)
-				}
-				if !accepted {
-					return ErrNegotiationNotSettled
-				}
+				// Every task minted for this round is accepted and there is nothing
+				// left to merge: the round is settled. "No open tasks" is evidence
+				// here because a task is minted only by an act of engagement, so an
+				// empty round was already refused above.
 				nextState = contractstate.Submitted
 			}
 		}
@@ -333,7 +335,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				if err != nil {
 					return err
 				}
-				err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID)
+				err = h.NTRepo.ReopenTasks(ctx, tx, cmd.DID, processData.ContractVersion)
 				if err != nil {
 					return err
 				}
