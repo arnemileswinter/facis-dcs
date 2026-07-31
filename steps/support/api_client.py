@@ -164,6 +164,23 @@ def pac_audit_url(context) -> str:
     return f"{context.base_url}/pac/audit"
 
 
+def pac_audit_timeline(response) -> list[dict]:
+    """The DCS-procured audit entries of one POST /pac/audit response.
+
+    /pac/audit answers with a single external-audit-executor run envelope
+    (backend/design/process_audit_and_compliance.go, PACExternalAuditResponse),
+    not with a list of per-scope trails: `findings` is the executor's verdict
+    and `timeline` is the evidence the DCS itself gathered and submitted.
+    Entries carry their own `did`, so the per-resource grouping the executor
+    request uses is not reproduced here.
+    """
+    body = response.json()
+    assert isinstance(body, dict) and body.get("audit_id"), (
+        f"Expected an executor-run audit envelope from /pac/audit, got: {body!r}"
+    )
+    return [entry for entry in (body.get("timeline") or []) if isinstance(entry, dict)]
+
+
 def pac_checkpoint_head_url(context) -> str:
     return f"{context.base_url}/pac/audit/checkpoint/head"
 

@@ -363,6 +363,13 @@ export BDD_ORCE_ARCHIVE_NOTARY_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/archive-audit-events.jsonl"
 export BDD_ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN="$ORCE_TOKEN"
 export BDD_ORCE_AUDIT_CONTROL_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit-executor/test"
+# The reference executor endpoint itself, reached through the same port-forward
+# as its control seam above. Its ingress-relative fallback (<origin>/orce/...)
+# cannot be used: the DCS Ingress claims the /orce prefix on the same host for
+# the webhook platform (backend/cmd/dcs/http.go mounts /orce/ on the service
+# root), so an ingress-addressed /orce/audit/run is answered by the DCS mux
+# with "404 page not found" and never reaches Node-RED.
+export BDD_ORCE_AUDIT_EXECUTOR_URL="http://localhost:${ORCE_LOCAL_FORWARD_PORT}/audit/run"
 export BDD_ORCE_NAMESPACE="$K8S_NAMESPACE"
 export BDD_ORCE_DEPLOYMENT="$ORCE_DEPLOYMENT"
 export BDD_KUBECTL="$KUBECTL_BIN"

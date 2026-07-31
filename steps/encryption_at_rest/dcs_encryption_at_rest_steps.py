@@ -38,6 +38,7 @@ from steps.support.api_client import (
     delete_with_params,
     did_document_url,
     get_with_headers,
+    pac_audit_timeline,
     pac_audit_url,
     pac_checkpoint_proof_url,
     post_json,
@@ -113,15 +114,7 @@ def _pac_audit_entries(context, base_url, scope, did):
         f"POST /pac/audit scope={scope} did={did} on {base_url} failed: "
         f"{resp.status_code} {resp.text}"
     )
-    body = resp.json()
-    assert isinstance(body, list), f"expected a list of audit scopes, got: {body}"
-    return [
-        entry
-        for scope_result in body
-        if isinstance(scope_result, dict)
-        for entry in (scope_result.get("audit_trail") or [])
-        if isinstance(entry, dict) and entry.get("did") == did
-    ]
+    return [entry for entry in pac_audit_timeline(resp) if entry.get("did") == did]
 
 
 def _merkle_node(left: bytes, right: bytes) -> bytes:

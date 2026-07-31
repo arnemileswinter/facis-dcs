@@ -37,12 +37,21 @@ BDD_PUBLIC_ORIGIN ?= http://localhost:$(BDD_INGRESS_PORT)
 BDD_DCS_BASE_URL ?= $(BDD_PUBLIC_ORIGIN)$(DCS_API_BASE_PATH)
 KIND_CONFIG ?= $(THIS_DIR)kind-config.yaml
 IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && echo 1)
+# The external audit-checkpoint sink (features/27) is an HTTPS server the behave
+# process runs in-process on the HOST; the ORCE pod posts to it from inside the
+# cluster, so it needs an address the cluster can route to. `host.docker.internal`
+# only exists on Docker Desktop / Rancher Desktop — on a plain Linux Docker engine
+# (which is what the CI runner has) it resolves nowhere and every publication
+# attempt dies before it leaves the pod. The address that always works there is
+# the kind bridge network's gateway, i.e. the host as the node container sees it;
+# it only exists once the cluster does, so BDD_HELM_SET below is expanded lazily.
+KIND_DOCKER_NETWORK ?= kind
 ifeq ($(IS_WSL),1)
 BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
 else
-BDD_CHECKPOINT_SINK_HOST ?= host.docker.internal
+BDD_CHECKPOINT_SINK_HOST ?= $(shell docker network inspect "$(KIND_DOCKER_NETWORK)" --format '{{range .IPAM.Config}}{{println .Gateway}}{{end}}' 2>/dev/null | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$$')
 endif
-BDD_HELM_SET := \
+BDD_HELM_SET = \
 	--set-string hydra.config.selfIssuerURL="$(BDD_PUBLIC_ORIGIN)" \
 	--set-string route.publicBaseURL="$(BDD_DCS_BASE_URL)" \
 	--set-string hydra.config.loginURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/ui/" \
@@ -291,9 +300,11 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 	@KUBECTL_BIN="$(KUBECTL_BIN)" K8S_NAMESPACE="$(KIND_NAMESPACE)" HELM_RELEASE="$(HELM_RELEASE)" \
 		bash "$(ORCE_PERSISTENCE_SCRIPT)"
 	@if [[ -z "$(BDD_CHECKPOINT_SINK_HOST)" ]]; then \
-		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink."; \
+		echo "Could not determine a host address reachable from kind for the BDD checkpoint sink"; \
+		echo "(no IPv4 gateway on docker network '$(KIND_DOCKER_NETWORK)'). Set BDD_CHECKPOINT_SINK_HOST."; \
 		exit 1; \
 	fi
+	@echo "BDD checkpoint sink advertised to the cluster as https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
 	@# Deploy without --wait: Helm defers post-install hooks until all deployments are
 	@# ready, but DCS can't become ready until the devCertChain post-install hook has
 	@# created its Secret — a deadlock. We break the cycle by letting helm return as
