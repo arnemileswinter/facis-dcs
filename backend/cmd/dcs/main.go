@@ -65,6 +65,7 @@ import (
 	"digital-contracting-service/internal/service"
 	smrepo "digital-contracting-service/internal/signingmanagement/db/pg"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
+	pacrepo "digital-contracting-service/internal/processauditandcompliance/db/pg"
 	tplrepo "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/internal/webhookplatform"
 	"digital-contracting-service/migrations"
@@ -159,8 +160,6 @@ func openHSMWithRetry(ctx context.Context) *hsm.HSM {
 }
 
 func main() {
-	// Define command line flags, add any other flag required to configure the
-	// service.
 	var (
 		hostF     = flag.String("host", "local", "Server host (valid values: local)")
 		domainF   = flag.String("domain", "", "Host domain name (overrides host domain specified in service design)")
@@ -189,7 +188,6 @@ func main() {
 		}
 	}
 
-	// Setup logger. Replace logger with your own log package of choice.
 	format := log.FormatJSON
 	if log.IsTerminal() {
 		format = log.FormatTerminal
@@ -363,6 +361,8 @@ func main() {
 	cweCTRepo := cwerepo.PostgresContractTemplateRepo{}
 	cweCronJob := contractworkflowengine2.CronJob{DB: db, CRepo: &cweRepo}
 	cweCronJob.Start(ctx, db)
+
+	pacRiskRepo := pacrepo.PostgresRiskFindingRepo{}
 
 	aRepo := pq.PostgresAuditTrailRepository{}
 
@@ -742,7 +742,7 @@ func main() {
 		credentialVerifier := &provenance.CredentialVerifier{Own: didDocument}
 		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
-		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo)
+		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, &pacRiskRepo)
 		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
@@ -813,8 +813,6 @@ func main() {
 		}
 	}()
 
-	// Wrap the service in endpoints that can be invoked from other service
-	// potentially running in different processes.
 	var (
 		authEndpoints                         *genauth.Endpoints
 		contractStorageArchiveEndpoints       *contractstoragearchive.Endpoints
@@ -873,8 +871,7 @@ func main() {
 		keyInventoryEndpoints.Use(log.Endpoint)
 	}
 
-	// Setup interrupt handler. This optional step configures the process so
-	// that SIGINT and SIGTERM signals cause the service to stop gracefully.
+	// SIGINT/SIGTERM stop the service gracefully.
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
