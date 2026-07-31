@@ -85,6 +85,36 @@ claim (Hydra's OIDC discovery, notably).
 {{- end }}
 
 {{/*
+Where the backend reads the certificate chain that publishes its own signing key
+(ADR-34). An operator-supplied path wins; otherwise it is the chain the
+provisioning job leaves on the shared token volume. Empty when neither exists,
+which leaves the deployment unable to serve a status list and says so at startup
+rather than serving an unverifiable one.
+*/}}
+{{- define "digital-contracting-service.issuerX5ChainPath" -}}
+{{- if .Values.signing.issuerX5ChainPath -}}
+{{- .Values.signing.issuerX5ChainPath -}}
+{{- else if .Values.pkcs11.provisioning.enabled -}}
+{{- printf "%s/c2pa-x5chain.pem" .Values.pkcs11.provisioning.tokenDir -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The origin this deployment serves its own status list under (ADR-34): the
+did:web hostname with publicBaseURL's scheme, and NO api path. The list sits at
+the origin root the way did.json does, because a verifier holding only a
+credential has the URL that credential names and nothing else — it cannot be
+asked to know this deployment's API prefix. This is the `iss` of the served
+token and the identifier its certificate leaf must name.
+*/}}
+{{- define "digital-contracting-service.statusListIssuerURL" -}}
+{{- if .Values.route.publicBaseURL -}}
+{{- $u := urlParse .Values.route.publicBaseURL -}}
+{{- printf "%s://%s" $u.scheme (include "digital-contracting-service.didHostname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Where pdf-core reads the C2PA x5chain from: the projected Secret when the
 provisioning hook publishes one, otherwise the file the hook leaves on the
 shared token volume.
@@ -416,18 +446,6 @@ instead, where the message can say what to set.
 
 {{- define "digital-contracting-service.identitySecretName" -}}
 {{- default (printf "%s-identity" (include "digital-contracting-service.fullname" .)) .Values.identity.secretName -}}
-{{- end }}
-
-{{/*
-STATUSLIST_SERVICE_URL — auto-derived from the statuslistService sub-chart when
-enabled=true, otherwise falls back to the explicit statuslistService.url override.
-*/}}
-{{- define "digital-contracting-service.statuslistServiceURL" -}}
-{{- if .Values.statuslistService.url -}}
-{{- .Values.statuslistService.url -}}
-{{- else if .Values.statuslistService.enabled -}}
-{{- printf "http://%s-statuslist-service:%v" .Release.Name .Values.statuslistService.service.port -}}
-{{- end -}}
 {{- end }}
 
 {{/*

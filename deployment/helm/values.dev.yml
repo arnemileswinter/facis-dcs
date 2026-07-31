@@ -21,12 +21,11 @@
 #   Credential issuer: localhost:30181  (release dcs-issuer, installed by
 #                      dev-stack.sh from values.issuer-base.yml +
 #                      values.issuer.dev.yml — NOT part of this release)
-#   Status List Service : localhost:30821  (C2PA provenance lists only)
+#   Status List Service : localhost:30821  (XFSC; nothing consumes it, ADR-34)
 #   IPFS Gateway: localhost:30480
 #   IPFS API    : localhost:30501
 #
 # Backend .env.dev1 (see that file for the full set):
-#   STATUSLIST_SERVICE_URL=http://localhost:30821
 #   ISSUER_DID=did:web:localhost%3A8991
 # The backend runs natively and provisions its own SoftHSM2 token via
 # dev-stack.sh (scripts/hsm-provision.sh), so no in-cluster PKCS#11 token here.

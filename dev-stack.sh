@@ -79,9 +79,9 @@ kubectl get secret "$TSA_TRUST_SECRET" \
   -o jsonpath='{.data.tsa-cert\.pem}' | base64 --decode > "$TSA_TRUST_CERT_FILE"
 echo "✓ ORCE TSA trust certificate exported"
 
-# Still deployed for the C2PA provenance credentials the DCS issues itself,
-# whose list it reads over this service. The credentials a signatory presents
-# name the issuer's own signed list instead (ADR-34).
+# Still deployed, but nothing reads it: the C2PA provenance credentials the DCS
+# issues now name the DCS's own signed list, served at /status-list/1 by the
+# backend below (ADR-34). Removing the subchart is a separate step.
 echo "Waiting for statuslist-service..."
 kubectl wait --for=condition=ready pod \
   -l "app.kubernetes.io/instance=${HELM_RELEASE},app.kubernetes.io/name=statuslist-service" \
@@ -120,8 +120,14 @@ echo "✓ HSM token provisioned and did-8991.json regenerated"
 
 # Issue the C2PA x5chain binding the dcs-c2pa token key so pdf-core can embed it
 # in the COSE_Sign1 protected header (the signing itself runs in the backend).
+# The same chain publishes the key the backend signs its own status list with, so
+# the leaf carries this instance's origin and did:web as SANs — a verifier
+# refuses a list whose leaf does not name the issuer the token claims to be.
 bash scripts/c2pa-cert-provision.sh "$HSM_TOKEN_DIR" dcs 1234 \
-  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem"
+  "$PDF_CORE_DIR/certs/dev/c2pa-x5chain-8991.pem" \
+  /usr/lib/softhsm/libsofthsm2.so \
+  "http://localhost:8991/crl/dcs-c2pa.crl" \
+  "http://localhost:8991" "did:web:localhost%3A8991"
 echo "✓ C2PA x5chain provisioned for pdf-core"
 
 # Publish an initial (empty) CRL for the dev signing CA so the leaf's

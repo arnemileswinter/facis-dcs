@@ -224,6 +224,14 @@ federation:
 signing:
   # DID of this DCS instance (embedded in C2PA lifecycle assertions as authority).
   issuerDID: ""
+
+  # Path to the PEM certificate chain that publishes this instance's signing key.
+  # It is what the status list this instance serves carries as its x5c header,
+  # and its last certificate is the anchor a verifier — this instance included —
+  # has to hold to accept that list (ADR-34). Empty uses the chain the
+  # provisioning job leaves on the shared token volume; a deployment holding a
+  # real HSM key sets the path its own chain is mounted at.
+  issuerX5ChainPath: ""
   issuerDIDSecretRef:
     name: ""
     key: "ISSUER_DID"
@@ -403,15 +411,16 @@ statusListLocalhostProxy:
   # that require a particular seeded status list can override this path.
   readinessPath: "/statuslist/health"
 
-# XFSC Status List Service (DCS-OR-C2PA-005)
-# Manages verifiable credential status lists (Status List 2021/2023 format).
-# When enabled, STATUSLIST_SERVICE_URL is auto-derived and wired into DCS.
-# See charts/statuslist-service/values.yaml for all configurable fields.
+# XFSC Status List Service.
+# Nothing points at it: the credentials this deployment issues name the status
+# list it serves and signs itself (ADR-34), and they were the last consumer.
+# It is still deployable while its removal is staged; deleting the subchart is a
+# separate step. See charts/statuslist-service/values.yaml for its fields.
 statuslistService:
   enabled: false
   # url overrides the auto-wired ClusterIP URL when enabled=true.
   url: ""
-  # tenantID is the tenant identifier passed as STATUSLIST_TENANT_ID (defaults to "default" when empty).
+  # tenantID is the tenant identifier used by the service itself.
   tenantID: ""
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/status-list-service

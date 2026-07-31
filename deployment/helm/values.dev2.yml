@@ -23,7 +23,6 @@
 #   IPFS API    : localhost:31512
 #
 # Backend .env.dev2 (see that file for the full set):
-#   STATUSLIST_SERVICE_URL=http://localhost:30221
 #   ISSUER_DID=did:web:localhost%3A8992
 # The backend runs natively and provisions its own SoftHSM2 token via
 # dev-stack2.sh (scripts/hsm-provision.sh), so no in-cluster PKCS#11 token here.

@@ -129,6 +129,12 @@ type signatureManagementsrvc struct {
 	// summary, a lifecycle credential — against the key its issuer publishes for
 	// assertions, before anything it claims is used.
 	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// signed status list it names.
+	CredentialStatus *provenance.CredentialStatusVerifier
+	// StatusEntries hands out the contract's entry in that list, for the signing
+	// summary credentials this service issues.
+	StatusEntries provenance.StatusListEntries
 	auth.JWTAuthenticator
 }
 
@@ -138,12 +144,20 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, workflowGate *workflowgate.Coordinator,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
 	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig,
-	credentials *provenance.CredentialVerifier) signaturemanagement.Service {
+	credentials *provenance.CredentialVerifier,
+	credentialStatus *provenance.CredentialStatusVerifier,
+	statusEntries provenance.StatusListEntries) signaturemanagement.Service {
 
 	// Without it every embedded signing summary would be unverifiable, and the
 	// compliance viewer would have nothing it is allowed to report.
 	if credentials == nil {
 		panic("CredentialVerifier is required to verify embedded signing evidence")
+	}
+	// Without it a verified credential's revocation entry could not be resolved
+	// at all, and a signature would verify against a contract nobody checked was
+	// still in force.
+	if credentialStatus == nil {
+		panic("CredentialStatusVerifier is required to resolve embedded credentials' revocation state")
 	}
 	service := &signatureManagementsrvc{
 		JWTAuthenticator: jwtAuth,
@@ -167,6 +181,8 @@ func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db
 		DCQLQuery:        dcqlQuery,
 		Trust:            trust,
 		Credentials:      credentials,
+		CredentialStatus: credentialStatus,
+		StatusEntries:    statusEntries,
 	}
 	if workflowGate != nil {
 		workflowGate.SetReviewContinuation("signature", service.resumeReviewedSignatureGate)
@@ -346,10 +362,11 @@ func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemana
 		UserRoles:  middleware.GetUserRoles(ctx),
 	}
 	handler := query.SignatureVerifier{
-		DB:          s.DB,
-		CRepo:       s.CRepo,
-		PDFCore:     s.PDFCore,
-		Credentials: s.Credentials,
+		DB:               s.DB,
+		CRepo:            s.CRepo,
+		PDFCore:          s.PDFCore,
+		Credentials:      s.Credentials,
+		CredentialStatus: s.CredentialStatus,
 	}
 	result, err := handler.Handle(ctx, qry)
 	if err != nil {
@@ -413,6 +430,7 @@ func (s *signatureManagementsrvc) newApplier() command.Applier {
 		VCSigner:      s.VCSigner,
 		VCIssuer:      s.VCIssuer,
 		IssuerDID:     s.IssuerDID,
+		StatusEntries: s.StatusEntries,
 		ArchiveRepo:   s.ArchiveRepo,
 		IPFSStorer:    s.Artifacts,
 		ArchiveNotary: s.ArchiveNotary,

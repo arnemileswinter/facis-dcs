@@ -300,6 +300,10 @@ type Applier struct {
 	// PDF before signing (DCS-OR-C2PA-004) — see stampActiveLifecycle below.
 	VCIssuer  provenance.VCIssuer
 	IssuerDID string
+	// StatusEntries hands out the contract's entry in the status list this
+	// deployment serves, so the signing summary credentials issued here name the
+	// same entry the contract's lifecycle credentials do.
+	StatusEntries provenance.StatusListEntries
 	// ArchiveRepo, IPFSStorer, ArchiveNotary, and ArchiveTSA back the
 	// archive-entry creation that now happens on reaching SIGNED (DCS-FR-
 	// CWE-20), not on APPROVED. ArchiveRepo is the contractworkflowengine
@@ -995,11 +999,24 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		kbSDHash = *ceremony.KbSdHash
 	}
 	signedAt := time.Now().UTC()
+
+	// The contract's entry in the status list this deployment serves. Read back
+	// rather than derived, so every summary credential this ceremony issues names
+	// the entry the contract's lifecycle credentials already advertise and one
+	// revocation covers all of them (ADR-34).
+	if h.StatusEntries == nil {
+		return nil, fmt.Errorf("no status list entries source: the signing summary for %s would carry no revocation entry", cmd.DID)
+	}
+	statusEntry, err := h.StatusEntries.EntryFor(ctx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("status list entry for %s: %w", cmd.DID, err)
+	}
+
 	var evidence []byte
 	switch {
 	case len(requiredFields) == 0:
 		// Single-signature contract: one summary VC, the established shape.
-		evidence, _, err = provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+		evidence, _, err = provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, statusEntry, provenance.SigningSummary{
 			ContractID:           cmd.DID,
 			SignerDID:            cmd.SignerDID,
 			CeremonyID:           ceremony.ID,
@@ -1053,7 +1070,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				// attestation.
 				credentialType = ""
 			}
-			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+			vc, _, err := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, statusEntry, provenance.SigningSummary{
 				ContractID:           cmd.DID,
 				SignerDID:            fieldSigner,
 				CeremonyID:           c.ID,
@@ -1101,7 +1118,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		// (dcstodcs/counterpartypoa.go signedPartyOf), and this instance's own
 		// compliance viewer from the ceremony the summary was retained against.
 		evidence = nil
-		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, provenance.SigningSummary{
+		vc, _, vcErr := provenance.IssueSigningSummaryVC(ctx, h.VCSigner, h.IssuerDID, statusEntry, provenance.SigningSummary{
 			ContractID:           cmd.DID,
 			SignerDID:            cmd.SignerDID,
 			CeremonyID:           ceremony.ID,

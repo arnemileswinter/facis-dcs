@@ -12,6 +12,15 @@ import (
 
 var statusListVerifier *status.Verifier
 
+// StatusListVerifier returns the verifier ConfigureStatusListVerification wired,
+// for the paths outside OID4VP that also have to resolve a credential's status —
+// the C2PA provenance verification, whose lifecycle credential names this
+// deployment's own list (ADR-34). They share this one so an issuer trusted for a
+// presented credential and an issuer trusted for a provenance credential cannot
+// become two different sets. nil until configuration has run, which every caller
+// must treat as "the state is unknown", never as "not revoked".
+func StatusListVerifier() *status.Verifier { return statusListVerifier }
+
 // ConfigureStatusListVerification wires the status-list verifier used by
 // OID4VP, off the trust config already loaded rather than off a second read of
 // the same file. The status-list path used to re-parse the trust document with

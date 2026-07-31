@@ -90,7 +90,13 @@ func evidenceIssuerDocument(t *testing.T, credentialKey *ecdsa.PublicKey) *ident
 func signingSummary(t *testing.T, key *ecdsa.PrivateKey, signerDID, reportHash string) json.RawMessage {
 	t.Helper()
 	vc, _, err := provenance.IssueSigningSummaryVC(context.Background(),
-		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID, provenance.SigningSummary{
+		provenance.NewHSMVCSigner(key, "dcs-vc"), evidenceIssuerDID,
+		// The contract's entry in the list this deployment serves — the same one
+		// its lifecycle credentials name, so one revocation covers both.
+		provenance.CredentialStatusRef{
+			StatusListCredential: "https://dcs.example.org/status-list/1", Index: 3,
+		},
+		provenance.SigningSummary{
 			ContractID:           "did:example:contract-1",
 			SignerDID:            signerDID,
 			CeremonyID:           "ceremony-1",

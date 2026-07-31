@@ -88,11 +88,13 @@ func TestEvaluateLiveStatusCheckReportsTheFailureItHad(t *testing.T) {
 	}
 }
 
-// The reading comes off an unsigned list, so it is reported as a reading and
-// not as the contract's revocation state. A bare "revoked"/"active" in a
-// verification report is read as established fact, and nothing established it:
-// whoever answered the URL chose it (ADR-34).
-func TestEvaluateLiveStatusCheckReportsTheReadingAsUnverified(t *testing.T) {
+// The state is reported plainly, because the list it came off was verified: its
+// signature checked against the configured anchors and its leaf identified the
+// issuer it names (ADR-34 §3). It used to be qualified as UNVERIFIED — correctly,
+// while the list was fetched unsigned and whoever answered the URL chose the
+// answer. That qualification must not survive the list becoming signed, or every
+// report would keep disclaiming a state that IS established.
+func TestEvaluateLiveStatusCheckReportsTheVerifiedStateAsItIs(t *testing.T) {
 	for _, want := range []string{"active", "revoked"} {
 		t.Run(want, func(t *testing.T) {
 			status, check, failure, passed := evaluateLiveStatusCheck(context.Background(), "active", func() (string, error) {
@@ -101,11 +103,8 @@ func TestEvaluateLiveStatusCheckReportsTheReadingAsUnverified(t *testing.T) {
 			if !passed || check != "passed" || failure != "" {
 				t.Fatalf("got check=%q failure=%q passed=%v", check, failure, passed)
 			}
-			if status == want {
-				t.Fatalf("status = %q, which states an unsigned list's answer as fact", status)
-			}
-			if !strings.Contains(status, want) || !strings.Contains(status, "UNVERIFIED") {
-				t.Fatalf("status = %q, want the %q reading marked UNVERIFIED", status, want)
+			if status != want {
+				t.Fatalf("status = %q, want %q", status, want)
 			}
 		})
 	}

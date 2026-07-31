@@ -644,22 +644,20 @@ func main() {
 		log.Fatalf(ctx, err, "Could not load HSM C2PA signing key")
 	}
 
-	// Initialize OCM-W Status List Service client (DCS-OR-C2PA-005).
-	statusListServiceURL := os.Getenv("STATUSLIST_SERVICE_URL")
-	if statusListServiceURL == "" {
-		log.Fatalf(ctx, nil, "STATUSLIST_SERVICE_URL is required (DCS-OR-C2PA-005)")
+	// The status list for the credentials this deployment issues — the contract
+	// lifecycle credential inside every generated PDF and the signing summary
+	// that travels beside a contract (DCS-OR-C2PA-005, ADR-34). This deployment
+	// mints them, so it publishes their revocation status: allocation and bit in
+	// its own database, served and signed here with the same key and certificate
+	// chain a verifier already has to trust to accept the credential itself.
+	statusListIssuerURL, err := provenance.StatusListIssuerURL(os.Getenv("DCS_PUBLIC_URL"))
+	if err != nil {
+		log.Fatalf(ctx, err, "status list configuration error")
 	}
-	if err := probeHTTPUntilReady(3*time.Minute, func() error {
-		return probeHTTPAny(statusListServiceURL+"/health", statusListServiceURL+"/v1/metrics/health")
-	}); err != nil {
-		log.Fatalf(ctx, err, "status list service not reachable at %s", statusListServiceURL)
-	}
-	statusListTenantID := os.Getenv("STATUSLIST_TENANT_ID") // defaults to "default" when empty
-	// The list new revocation entries are allocated in. It only moves when list
-	// 1 fills up, and then only after the operator has created the successor in
-	// the statuslist-service and registered it in status_list_cursors —
-	// allocation hard-fails on an unregistered list rather than handing out an
-	// entry nothing serves.
+	// The list new revocation entries are allocated in. It only moves when list 1
+	// fills up, and then only after the operator has registered the successor in
+	// status_list_cursors — allocation hard-fails on an unregistered list rather
+	// than handing out an entry nothing serves.
 	statusListID := provenance.DefaultListID
 	if raw := strings.TrimSpace(os.Getenv("STATUSLIST_LIST_ID")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -668,10 +666,32 @@ func main() {
 		}
 		statusListID = parsed
 	}
-	statusListPublisher := provenance.NewOCMWStatusListPublisher(
-		statusListServiceURL, issuerDID, statusListTenantID,
-		provenance.NewPostgresStatusListAllocator(db, statusListID))
+	statusListURI := func(listID int) string {
+		return provenance.StatusListURI(statusListIssuerURL, listID)
+	}
+	statusListRevocations := &provenance.PostgresStatusListRevocations{DB: db}
+	statusListPublisher := provenance.NewDCSStatusListPublisher(
+		statusListURI,
+		provenance.NewPostgresStatusListAllocator(db, statusListID),
+		statusListRevocations)
 	go (&statuspublication.Worker{DB: db, Publisher: statusListPublisher}).Run(ctx)
+
+	// The served token. Its chain is the C2PA one (same PKCS#11 key), and the
+	// leaf has to name statusListIssuerURL or a verifier — ours included —
+	// refuses the list.
+	issuerX5Chain, err := provenance.LoadX5Chain(os.Getenv(issuerX5ChainPathEnv))
+	if err != nil {
+		log.Fatalf(ctx, err, "%s must point at this deployment's certificate chain: the status list it serves carries it", issuerX5ChainPathEnv)
+	}
+	statusListSigner := &provenance.StatusListSigner{
+		Issuer:      statusListIssuerURL,
+		ListURI:     statusListURI,
+		ListID:      statusListID,
+		Chain:       issuerX5Chain,
+		Signer:      c2paSigner,
+		Revocations: statusListRevocations,
+		Size:        provenance.ListSize,
+	}
 
 	// Initialize pdf-core client (PDF rendering + C2PA provenance microservice).
 	pdfCoreURL := os.Getenv("PDF_CORE_URL")
@@ -779,10 +799,17 @@ func main() {
 		// credential — carried inside a verbatim-stored inbound PDF — resolves to
 		// the peer's did:web.
 		credentialVerifier := &provenance.CredentialVerifier{Own: didDocument}
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier)
+		// The revocation state of those same credentials, read from the status
+		// list each one names — ours through the endpoint below, a peer's through
+		// theirs — and only once that list's own signature verified against the
+		// configured anchors (ADR-34). Shares the verifier the OID4VP login path
+		// uses, so an issuer trusted for a presented credential and an issuer
+		// trusted for a provenance credential cannot become two different sets.
+		credentialStatusVerifier := provenance.NewCredentialStatusVerifier(oid4vp.StatusListVerifier())
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier, credentialStatusVerifier)
 		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, &pacRiskRepo, auditExecutorClient, workflowGateCoordinator)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID)
 		didSrv = didService
@@ -927,7 +954,7 @@ func main() {
 	if err := bootstrapSrv.Shutdown(ctx); err != nil {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, webhookPlatform, &wg, errc, *dbgF)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

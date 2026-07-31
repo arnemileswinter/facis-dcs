@@ -40,6 +40,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/service"
 	"digital-contracting-service/internal/webhookplatform"
@@ -139,7 +140,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints,
 	dcsToDcsEndpoints *dcstodcs.Endpoints, pdfGenerationEndpoints *pdfgeneration.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints,
 	signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints,
-	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, wg *sync.WaitGroup,
+	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
 	var (
@@ -220,6 +221,13 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	// Outer mux: routes /orce/* to the webhook platform, everything else to Goa.
 	outerMux := http.NewServeMux()
 	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
+	// The status list for the credentials this deployment issues (ADR-34). It
+	// sits here rather than in the generated API surface for two reasons: it is
+	// served at the origin root, the way did.json is, so a verifier holding only
+	// a credential can reach it without knowing this deployment's API prefix; and
+	// its media type is the routing signal a verifier uses, which Goa's response
+	// encoder would renegotiate to application/json.
+	outerMux.Handle(provenance.StatusListPath, provenance.StatusListHandler(statusList))
 	outerMux.Handle("/metrics", promhttp.Handler())
 	mountReadinessEndpoint(outerMux)
 	outerMux.Handle("/", mux)

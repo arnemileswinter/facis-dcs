@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -48,6 +47,9 @@ type SignatureVerifier struct {
 	// Credentials verifies the lifecycle credential embedded in the stored PDF
 	// against the key its issuer publishes for assertions.
 	Credentials *provenance.CredentialVerifier
+	// CredentialStatus resolves that credential's revocation entry against the
+	// status list it names, and only once that list's own signature verified.
+	CredentialStatus *provenance.CredentialStatusVerifier
 }
 
 // Handle verifies that the contract is APPROVED and returns the count of
@@ -124,18 +126,19 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		vcProofStatus = provenance.CredentialCheck(vcProofErr)
 	}
 
-	// Query live revocation state from the XFSC status list (DCS-OR-C2PA-006).
-	// VC bytes are returned directly by pdf-core — no PDF byte scanning required.
-	// The lookup follows the credential's own credentialStatus, so it runs only
-	// for a credential whose proof verified; otherwise the pointer is the
-	// credential author's choice. An unreachable status service is an UNKNOWN
-	// revocation state, not an absent one. Swallowing the error left
-	// statusListStatus empty, the finding was never appended, and a revoked
-	// contract came back clean for as long as the outage lasted.
+	// Query live revocation state from the status list the credential names
+	// (DCS-OR-C2PA-006). VC bytes are returned directly by pdf-core — no PDF byte
+	// scanning required. The lookup follows the credential's own
+	// credentialStatus, so it runs only for a credential whose proof verified;
+	// otherwise the pointer is the credential author's choice. A list that could
+	// not be fetched, or whose signature did not verify, is an UNKNOWN revocation
+	// state — not an absent one. Swallowing the error left statusListStatus
+	// empty, the finding was never appended, and a revoked contract came back
+	// clean for as long as the outage lasted.
 	statusListStatus := ""
 	switch {
 	case vcProofStatus == provenance.CheckValid:
-		ref, present, refErr := provenance.ExtractCredentialStatus(verifyResult.VCBytes)
+		_, present, refErr := provenance.ExtractCredentialStatus(verifyResult.VCBytes)
 		switch {
 		// An entry this build cannot read leaves the revocation state unknown, the
 		// same as an outage does. Skipping it silently made it read as "nothing to
@@ -143,17 +146,11 @@ func (h *SignatureVerifier) Handle(ctx context.Context, cmd SignatureVerifyQry) 
 		case refErr != nil:
 			statusListStatus = fmt.Sprintf("UNKNOWN (%v)", refErr)
 		case present:
-			httpClient := &http.Client{Timeout: 10 * time.Second}
-			status, statusErr := provenance.ReadUnsignedStatusList(ctx, httpClient, ref.StatusListCredential, ref.Index)
-			switch {
-			case statusErr != nil:
-				statusListStatus = provenance.UnverifiedStatusUnavailable(statusErr)
-			default:
-				// Reported as a reading, not as the contract's revocation
-				// state: this list carries no signature, so "revoked" here is
-				// what an unauthenticated URL said, and a report that prints it
-				// bare has the reader believe it was established.
-				statusListStatus = provenance.UnverifiedStatusReading(status)
+			state, statusErr := h.CredentialStatus.State(ctx, verifyResult.VCBytes)
+			if statusErr != nil {
+				statusListStatus = fmt.Sprintf("UNKNOWN (%v)", statusErr)
+			} else {
+				statusListStatus = state
 			}
 		}
 	case vcProofStatus != provenance.CheckNotAvailable:

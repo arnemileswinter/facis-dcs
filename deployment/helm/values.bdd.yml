@@ -285,7 +285,7 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: required (fatal on startup if STATUSLIST_SERVICE_URL unreachable).
+# XFSC Status List Service: deployed, with nothing consuming it (ADR-34).
 statuslistService:
   enabled: true
   tenantID: c2pa
