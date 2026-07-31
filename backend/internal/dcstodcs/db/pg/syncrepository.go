@@ -125,6 +125,15 @@ func (r PostgresSyncRepository) GetSettlement(ctx context.Context, tx *sqlx.Tx, 
 	return &settlement, nil
 }
 
+func (r PostgresSyncRepository) DeleteSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) error {
+	statement := `
+        DELETE FROM contract_settlements
+        WHERE did = $1 AND from_peer_did = $2
+    `
+	_, err := tx.ExecContext(ctx, statement, did, fromPeerDID)
+	return err
+}
+
 func (r PostgresSyncRepository) GetUndeliveredSettlements(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]db.Settlement, error) {
 	query := `
         SELECT did, from_peer_did, to_peer_did, contract_version, document_digest, settled_at, jades_signature, recorded_at, delivered_at

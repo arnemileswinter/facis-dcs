@@ -82,6 +82,13 @@ type SyncRepository interface {
 	UpsertSettlement(ctx context.Context, tx *sqlx.Tx, settlement Settlement) error
 	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*Settlement, error)
 
+	// DeleteSettlementsBy removes every settlement one party recorded for a
+	// contract, toward any audience. Called with this instance's own did:web
+	// when it withdraws the agreement it settled (the workflow engine's
+	// rejection edges), which is the only way a party may move off a document
+	// it has already agreed to.
+	DeleteSettlementsBy(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) error
+
 	// GetUndeliveredSettlements returns the settlements this instance produced
 	// (fromPeerDID == its own did:web) that no peer has confirmed yet, for the
 	// retry scheduler to re-ship; MarkSettlementDelivered closes one out.

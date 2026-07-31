@@ -85,7 +85,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		return errors.New("contract data can only be submitted in draft or rejected state")
 	}
 	if hasSubmittedContractData {
-		if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+		if err := requireUnsettledAgreement(ctx, tx, h.CRepo, h.SRepo, localPeer, cmd.DID); err != nil {
 			return err
 		}
 	}
@@ -246,11 +246,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				}
 
 				// Only a merge that rewrites the document is refused on a settled
-				// agreement. Redlines accepted before the peer signed are the ones
-				// that can still get here (negotiate refuses new ones), and folding
-				// them in now would move the document off the signed artifact.
+				// agreement. Redlines accepted before this instance committed are
+				// the ones that can still get here (negotiate refuses new ones),
+				// and folding them in now would move the document off the artifact
+				// a party signed, or off the version this instance agreed to and
+				// shipped a settlement for.
 				if updatedData.ContractData != nil {
-					if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+					if err := requireUnsettledAgreement(ctx, tx, h.CRepo, h.SRepo, localPeer, cmd.DID); err != nil {
 						return err
 					}
 				}
@@ -341,6 +343,14 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				}
 				err = h.ATRepo.ReopenTasks(ctx, tx, cmd.DID)
 				if err != nil {
+					return err
+				}
+				// The round this reopens is the one whose close settled the
+				// agreement, so reopening it takes that agreement back: without
+				// this the reviewer's rejection lands in NEGOTIATION where every
+				// document edit is refused for a version this instance still
+				// stands behind.
+				if err := withdrawOwnSettlement(ctx, tx, h.SRepo, localPeer, cmd.DID); err != nil {
 					return err
 				}
 				nextState = contractstate.Negotiation

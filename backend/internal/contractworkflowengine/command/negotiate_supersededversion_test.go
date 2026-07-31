@@ -21,6 +21,7 @@ func negotiator(t *testing.T, process *db.ContractProcessData, tasks *negotiatio
 		CRepo:       contracts,
 		NRepo:       negotiations,
 		NTRepo:      tasks,
+		SRepo:       emptyStore(),
 		DIDDocument: *taskTestDIDDocument(t),
 	}, contracts
 }

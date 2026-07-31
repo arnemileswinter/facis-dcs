@@ -218,6 +218,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
 		errors.Is(err, command.ErrAgreementSettled) ||
+		errors.Is(err, command.ErrOwnAgreementSettled) ||
 		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)

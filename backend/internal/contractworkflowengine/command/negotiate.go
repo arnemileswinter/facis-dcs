@@ -150,10 +150,12 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			// A redline on a settled agreement is the wedge: the document changes
 			// but the artifact is the peer's signed PDF and cannot be re-rendered,
 			// so the proposal would ship the OLD signed bytes while this copy's own
-			// document moved on. Refuse it here — a free-text note (no
+			// document moved on. Before any signature exists the same redline is
+			// this instance rewriting the version it told the counterparty it
+			// agreed to. Refuse both here — a free-text note (no
 			// change.ContractData) leaves the document alone and still carries this
 			// copy out of OFFERED towards its own countersignature.
-			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, h.SRepo, localPeer, cmd.DID); err != nil {
 				return err
 			}
 			proposed := datatype.JSON(*change.ContractData)
