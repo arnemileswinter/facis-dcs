@@ -280,33 +280,12 @@ that pdf-core mounts. SoftHSM2 is a software token for dev/staging/CI only.
 {{- end }}
 
 {{/*
-IPFS_MFS_BASE_URL: explicit value or secret ref.
-*/}}
-{{- define "digital-contracting-service.ipfsMFSBaseURL" -}}
-{{- .Values.ipfs.mfsBaseURL -}}
-{{- end }}
-
-{{/*
 Normalize the vendored fc-service route path (leading slash, no trailing slash).
 */}}
 {{- define "digital-contracting-service.fcserviceRoutePath" -}}
 {{- if .Values.fcservice.route.path -}}
 {{- printf "/%s" (trimAll "/" (.Values.fcservice.route.path | toString)) -}}
 {{- end -}}
-{{- end }}
-
-{{/*
-OID4VP trust ConfigMap name.
-*/}}
-{{- define "digital-contracting-service.oid4vpTrustConfigMapName" -}}
-{{- default (printf "%s-oid4vp-trust" (include "digital-contracting-service.fullname" .)) .Values.oid4vp.trust.configMapName -}}
-{{- end }}
-
-{{/*
-Kubernetes secret holding demo wallet private keys (synced from Vault).
-*/}}
-{{- define "digital-contracting-service.demoWalletSecretName" -}}
-{{- default (printf "%s-demo-wallet" (include "digital-contracting-service.fullname" .)) .Values.oid4vp.demoWallet.secretName -}}
 {{- end }}
 
 {{/*
@@ -400,30 +379,43 @@ operator-supplied ConfigMap wins over the image's baked-in dev fixture, because
 a deployment that must trust a real credential issuer cannot express that in the
 image. The file is at <mountPath>/<key>, matching the volumeMount.
 */}}
+{{/*
+Path to the OID4VP trust document.
+
+The chart default points at the dev fixture baked into the image, which is keyed
+to repository-committed material. The backend refuses to load it without
+DCS_ALLOW_DEV_TRUST, so a release that supplies neither an operator trust
+document nor that flag would install and then crash-loop on a startup error. It
+is the correct refusal reached at the least useful moment, so it is caught here
+instead, where the message can say what to set.
+*/}}
 {{- define "digital-contracting-service.oid4vpTrustDataPath" -}}
 {{- if .Values.oid4vp.trust.existingConfigMap -}}
 {{- printf "%s/%s" (trimSuffix "/" .Values.oid4vp.trust.existingConfigMapMountPath) .Values.oid4vp.trust.existingConfigMapKey -}}
 {{- else -}}
+{{- $devFixture := contains "trust.dev.json" .Values.oid4vp.trust.dataPath -}}
+{{- $devAllowed := false -}}
+{{- range .Values.extraEnv -}}
+{{- if and (eq .name "DCS_ALLOW_DEV_TRUST") (eq (toString .value) "true") -}}
+{{- $devAllowed = true -}}
+{{- end -}}
+{{- end -}}
+{{/* A release supplying env from a ConfigMap or Secret may set the flag there,
+     which is not readable at render time. Refusing then would report a
+     misconfiguration the operator has already corrected, so the check defers to
+     the backend's own content-based guard, which is the real enforcement. */}}
+{{- if .Values.extraEnvFrom -}}
+{{- $devAllowed = true -}}
+{{- end -}}
+{{- if and $devFixture (not $devAllowed) -}}
+{{- fail "oid4vp.trust: this release would run on the dev trust fixture baked into the image, whose issuer keys are committed to the repository. Set oid4vp.trust.existingConfigMap to a ConfigMap holding this deployment's trust document (see deployment/README.md, \"Credential issuers\"), or, for a dev or CI stack only, add DCS_ALLOW_DEV_TRUST=true to extraEnv." -}}
+{{- end -}}
 {{- .Values.oid4vp.trust.dataPath -}}
 {{- end -}}
 {{- end }}
 
 {{- define "digital-contracting-service.identitySecretName" -}}
 {{- default (printf "%s-identity" (include "digital-contracting-service.fullname" .)) .Values.identity.secretName -}}
-{{- end }}
-
-{{/*
-Key within the hsm-c2pa-x5chain Secret for pdf-core PAdES signing (DCS-IR-SI-10).
-The provisioning job issues a second leaf (KEY_LABEL=dcs-contract-pades) bound
-to the token's PAdES key and publishes it into the same Secret object as the
-C2PA x5chain, under this second key, so pdf-core mounts one Secret for both.
-*/}}
-{{- define "digital-contracting-service.pdfCorePadesX5ChainSecretKey" -}}
-{{- if .Values.pdfCore.signing.existingSecretPadesX5ChainKey -}}
-{{- .Values.pdfCore.signing.existingSecretPadesX5ChainKey -}}
-{{- else -}}
-{{- "pades-x5chain-pem" -}}
-{{- end -}}
 {{- end }}
 
 {{/*

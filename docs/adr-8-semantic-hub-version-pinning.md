@@ -37,7 +37,12 @@ enforced — the hub was a write-only ledger.
   - `"sh:shapesGraph"` (`http://www.w3.org/ns/shacl#shapesGraph` — SHACL's
     own data-graph→shapes-graph link) carries the versioned shapes URL
     (`/semantic/shapes/{name}?version=N`) and is the **pin carrier** for
-    revalidation.
+    revalidation. It is multi-valued, as in SHACL: the canonical shapes
+    first, then one anchor per registered SHACL library the document's own
+    data objects are modelled against (ADR-23). A document is validated
+    against exactly the named entries — resolved by name *and* version, not
+    version alone — so an unrelated library someone registered and left
+    active cannot change a verdict.
   - `"dcterms:conformsTo"` (Dublin Core, as used by DCAT/PROF) names the
     versioned validation profile URL
     (`/semantic/profile/{name}?version=N`).
@@ -49,10 +54,11 @@ enforced — the hub was a write-only ledger.
 - **Version pinning**: a document is validated against the hub SHACL shapes
   version that was **active at the document's own creation time**. Anchors
   are written once, at production time, never re-normalized — this ADR
-  makes it load-bearing: `AuditContractContent` parses the pinned version
-  out of the document's own `sh:shapesGraph` anchor
-  (`pinnedHubShapesVersion`) and, when present, revalidates against that
-  exact version via `ShapeSource.ShapesAt`, not whatever is active now.
+  makes it load-bearing: `AuditContractContent` parses the declared entries
+  out of the document's own `sh:shapesGraph` anchors
+  (`declaredShapesGraphs`) and revalidates against exactly those
+  (name, version) hub entries via `ShapeSource.ShapesAt`, not whatever is
+  active now.
   JSON-LD expansion during validation likewise resolves the context version
   pinned in the document's own `@context` URL (`ShapeSource.ContextAt`),
   hermetically (no network fetch). New documents (no existing pin) validate
@@ -91,6 +97,49 @@ enforced — the hub was a write-only ledger.
   explicit policy document is supplied, e.g. the PACM contract-content audit
   trail walk). Ad-hoc/test policies that want to exercise only ODRL
   evaluation leave both unset.
+- **Consequential workflow gates use one central coordinator.** Submission,
+  offer, approval, signature and deployment all pass an immutable contract
+  snapshot through the same PAC workflow-gate coordinator before their
+  transition handler runs
+  (`backend/internal/service/contract_workflow_engine.go:114-140`,
+  `backend/internal/service/contract_workflow_engine.go:410-430`,
+  `backend/internal/service/contract_workflow_engine.go:1212-1220`,
+  `backend/internal/service/contract_workflow_engine.go:1467-1475`,
+  `backend/internal/service/signature_management.go:457-462`,
+  `backend/internal/contractworkflowengine/deployevent/subscriber.go:62-74`).
+  The snapshot identity covers the contract state, version, content hash,
+  complete effective shape set and validation-profile version
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:336-375`,
+  `backend/internal/processauditandcompliance/workflowgate/workflowgate.go:418-426`).
+  The coordinator resolves and evaluates this pinned bundle locally before one
+  correlated dispatch to the configured executor. This preserves ADR-6 and
+  ADR-11's server-side ODRL enforcement and ADR-9's SHACL result mapping in one
+  local evidence set
+  (`backend/internal/base/validation/contractcontentaudit.go:59-123`).
+  Missing, unknown or
+  unavailable bundle members fail closed without an executor fallback
+  (`backend/internal/base/validation/shapesource.go:46-82`,
+  `backend/internal/semantichub/shapesource.go:53-80`,
+  `backend/internal/processauditandcompliance/workflowgate/workflowgate.go:234-282`).
+- **Decision precedence is `BLOCKED > REVIEW > PASSED`.** A blocking local
+  finding prevents dispatch; a failed executor result or finding blocks the
+  transition; any review result holds it for a Compliance Officer; only the
+  remaining case passes
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:304-333`).
+  The database admits one run per immutable snapshot and gate, which arbitrates
+  concurrent callers and prevents a second executor dispatch
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:429-456`,
+  `backend/migrations/sql/20260729_external_checkpoint_workflow_gates.sql:1-23`).
+- A manual review decision is persistent and immutable per run, includes actor
+  and justification, and an approval resumes the stored transition directly;
+  it does not call the workflow-gate executor again
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:534-634`,
+  `backend/migrations/sql/20260729_external_checkpoint_workflow_gates.sql:28-51`).
+  A separate recovery/lease mechanism for a continuation attempt left in
+  `DISPATCHING` by a hard process termination is intentionally deferred to a
+  future ticket; the current implementation refuses a second continuation
+  while that durable state exists
+  (`backend/internal/processauditandcompliance/workflowgate/workflowgate.go:581-599`).
 
 ## Consequences
 
@@ -108,3 +157,9 @@ enforced — the hub was a write-only ledger.
   outright: this is a greenfield system with no deployed rows depending on
   the old behavior, so there is no dual-engine flag to keep it alive as a
   fallback).
+- The same active shapes, independently versioned shape libraries and active
+  profile are pinned when a new contract artifact is produced. Activation and
+  rollback therefore affect only snapshots created afterward; already persisted
+  workflow runs keep resolving their original bundle
+  (`backend/internal/base/validation/documentdata.go:46-78`,
+  `backend/internal/semantichub/shapesource.go:64-80`).

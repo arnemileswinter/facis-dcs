@@ -4,27 +4,36 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
 
-// ShapeSource is the enforcement-time source for the SHACL shapes,
-// validation profile, and JSON-LD context AuditContractContent checks
-// produced documents against. HubShapeSource (internal/semantichub) is the
-// production implementation.
+// ShapeSource is the source for the SHACL shapes, validation profile, and
+// JSON-LD context AuditContractContent checks produced documents against.
+// HubShapeSource (internal/semantichub) is the production implementation.
+//
+// Only the shapes half is enforcement-time: RequireHubConformance blocks at
+// offer, submit and signing. The validation profile is NOT a gate on any
+// path — AuditContractContent's only non-test caller is the read-only
+// audit-trail query, so profile findings are reported, never blocking. Do not
+// read "EnforceValidationProfile" as a blocking switch.
 type ShapeSource interface {
-	// ActiveShapes returns the SHACL shapes document (hub kind="shapes")
-	// currently active, and its version.
-	ActiveShapes(ctx context.Context) (content string, version int, err error)
+	// CanonicalShapesName is the hub entry name of the canonical DCS envelope
+	// shapes graph — the one graph every document is validated against
+	// whether or not it declares it (declaredShapes).
+	CanonicalShapesName() string
 	// ActiveProfile returns the validation profile document (hub
 	// kind="profile") currently active, and its version.
 	ActiveProfile(ctx context.Context) (content string, version int, err error)
 	// ActiveContext returns the JSON-LD context (hub kind="context")
 	// currently active, and its version.
 	ActiveContext(ctx context.Context) (content string, version int, err error)
-	// ShapesAt returns the SHACL shapes document at a specific version —
-	// the version a document's sh:shapesGraph anchor pins.
-	ShapesAt(ctx context.Context, version int) (content string, err error)
+	// ShapesAt returns one shapes graph a document's sh:shapesGraph
+	// declares: the hub entry called name at the pinned version, or that
+	// entry's active version when version is 0. Also returns the version it
+	// resolved to.
+	ShapesAt(ctx context.Context, name string, version int) (content string, resolved int, err error)
 	// ContextAt returns the JSON-LD context at a specific version — the
 	// version a document's "@context" hub URL pins.
 	ContextAt(ctx context.Context, version int) (content string, err error)
@@ -36,6 +45,50 @@ type ShapeSource interface {
 	// name="facis-sla" kind="ontology") currently active, and its
 	// version — the source of the dcs:DomainField index.
 	ActiveDomainOntology(ctx context.Context) (content string, version int, err error)
+}
+
+type VersionedShapeRef struct {
+	Name    string
+	Version int
+}
+
+// EffectiveBundleShapeSource is implemented by the production Semantic Hub.
+// It keeps independently-versioned shape libraries immutable for produced
+// artifacts without widening ShapeSource for remote/fixture implementations.
+type EffectiveBundleShapeSource interface {
+	ShapesBundleAt(context.Context, []VersionedShapeRef) (string, error)
+	ProfileAt(context.Context, int) (string, error)
+}
+
+func effectiveShapeRefs(contract map[string]any) ([]VersionedShapeRef, error) {
+	raw, ok := contract["dcs:effectiveShapes"]
+	if !ok {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil, errors.New("dcs:effectiveShapes must be a non-empty array")
+	}
+	refs := make([]VersionedShapeRef, 0, len(items))
+	for _, item := range items {
+		iri := anchorIRI(item)
+		version := anchorVersion(iri)
+		const marker = "/semantic/shapes/"
+		index := strings.Index(iri, marker)
+		if index < 0 || version <= 0 {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		name := strings.SplitN(iri[index+len(marker):], "?", 2)[0]
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("invalid effective shapes reference %q", iri)
+		}
+		refs = append(refs, VersionedShapeRef{Name: name, Version: version})
+	}
+	return refs, nil
+}
+
+func pinnedHubProfileVersion(contract map[string]any) int {
+	return anchorVersion(anchorIRI(contract["dcterms:conformsTo"]))
 }
 
 // activeShapeSource is the process-wide enforcement source, installed at
@@ -62,10 +115,80 @@ func requireShapeSource() (ShapeSource, error) {
 // parameter semantichub.AnchorURL encodes into a hub-served schema URL.
 var pinnedVersionPattern = regexp.MustCompile(`[?&]version=(\d+)`)
 
-// pinnedHubShapesVersion reads the hub SHACL shapes version pinned by the
-// document's sh:shapesGraph anchor; 0 when there is no versioned anchor.
-func pinnedHubShapesVersion(contract map[string]any) int {
-	return anchorVersion(anchorIRI(contract["sh:shapesGraph"]))
+// pinnedHubShapesVersion reads the canonical shapes version a document pins.
+// sh:shapesGraph is multi-valued — a document names the shape libraries its
+// data is modelled against beside the canonical DCS shapes (ADR-23) — so the
+// canonical anchor is located by name among every declared anchor rather than
+// assumed to be the sole value.
+func pinnedHubShapesVersion(contract map[string]any, canonicalName string) int {
+	for _, anchor := range declaredShapesGraphs(contract) {
+		if anchor.Name == canonicalName {
+			return anchor.Version
+		}
+	}
+	return 0
+}
+
+// hubShapesAnchorPath marks a hub-served shapes URL
+// (semantichub.AnchorURL) among a document's sh:shapesGraph values.
+const hubShapesAnchorPath = "/semantic/shapes/"
+
+// shapesGraphAnchor is one shapes graph a document declares: a hub entry
+// name plus the version it pins (0 = that entry's active version).
+type shapesGraphAnchor struct {
+	Name    string
+	Version int
+}
+
+// declaredShapesGraphs reads the shapes graphs a document declares in
+// sh:shapesGraph — SHACL's own data-graph→shapes-graph link, multi-valued,
+// so a document whose data is modelled against a registered hub library
+// names that library beside the canonical DCS shapes (ADR-8 pin, ADR-23
+// libraries). A document is validated against exactly these graphs and
+// nothing else; anchors that are not hub-served shapes URLs (the
+// compile-time w3id default an unanchored document carries) declare nothing.
+func declaredShapesGraphs(data map[string]any) []shapesGraphAnchor {
+	var anchors []shapesGraphAnchor
+	seen := map[shapesGraphAnchor]bool{}
+	collect := func(value any) {
+		iri := anchorIRI(value)
+		name, ok := anchorShapesName(iri)
+		if !ok {
+			return
+		}
+		anchor := shapesGraphAnchor{Name: name, Version: anchorVersion(iri)}
+		if seen[anchor] {
+			return
+		}
+		seen[anchor] = true
+		anchors = append(anchors, anchor)
+	}
+	if declared, ok := data["sh:shapesGraph"].([]any); ok {
+		for _, entry := range declared {
+			collect(entry)
+		}
+		return anchors
+	}
+	collect(data["sh:shapesGraph"])
+	return anchors
+}
+
+// anchorShapesName reads the hub entry name out of a shapes anchor URL
+// (/semantic/shapes/{name}?version=N).
+func anchorShapesName(iri string) (string, bool) {
+	start := strings.Index(iri, hubShapesAnchorPath)
+	if start < 0 {
+		return "", false
+	}
+	name := iri[start+len(hubShapesAnchorPath):]
+	if end := strings.IndexAny(name, "?#"); end >= 0 {
+		name = name[:end]
+	}
+	decoded, err := url.PathUnescape(name)
+	if err != nil || decoded == "" {
+		return "", false
+	}
+	return decoded, true
 }
 
 // hubContextAnchorPath marks a hub-served context URL
@@ -73,7 +196,7 @@ func pinnedHubShapesVersion(contract map[string]any) int {
 const hubContextAnchorPath = "/semantic/context/"
 
 func isHubContextAnchor(iri string) bool {
-	return strings.Contains(iri, hubContextAnchorPath) || iri == SchemaJSONLDContextV1 || iri == schemaRefJSONLDContext
+	return strings.Contains(iri, hubContextAnchorPath) || iri == SchemaJSONLDContextV1 || iri == currentJSONLDContextRef()
 }
 
 // pinnedHubContextVersion reads the hub context version pinned by the

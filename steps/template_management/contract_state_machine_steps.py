@@ -232,7 +232,8 @@ def _advance_to_reviewed(context, name):
     reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
     assert retrieve.status_code == 200, retrieve.text
-    updated_at = retrieve.json().get("updated_at")
+    retrieved = retrieve.json()
+    updated_at = retrieved.get("updated_at")
     review_submit = post_json(
         context,
         contract_submit_url(context),
@@ -241,7 +242,8 @@ def _advance_to_reviewed(context, name):
     )
     assert review_submit.status_code == 200, (
         f"Reviewer submit (forward_to=approval) failed while preparing REVIEWED state for "
-        f"'{name}': {review_submit.status_code} {review_submit.text}"
+        f"'{name}' from retrieved state {retrieved.get('state')!r} with "
+        f"updated_at token {updated_at!r}: {review_submit.status_code} {review_submit.text}"
     )
     ContractService._refresh_contract(context, name)
 
@@ -317,7 +319,11 @@ def _revoke_signature(context, name):
     resp = post_json(
         context,
         signature_revoke_url(context),
-        {"did": did, "signer_did": signatures[0]["signer_did"]},
+        {
+            "did": did,
+            "signer_did": signatures[0]["signer_did"],
+            "reason": "BDD setup to reach REVOKED state",
+        },
         headers=manager_h,
     )
     assert resp.status_code == 200, (
@@ -837,6 +843,58 @@ def _parse_rfc3339(value):
         text = text[:-1] + "+00:00"
     text = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), text)
     return datetime.fromisoformat(text)
+
+
+@then("the CREATE_CONTRACT audit event for the created contract has a non-zero RFC3339 occurred_at timestamp")
+def step_then_create_event_has_effective_timestamp(context):
+    creation = context.requests_response
+    assert creation.status_code == 200, (
+        "Contract creation must succeed before its audit event can be checked, "
+        f"got {creation.status_code}: {creation.text}"
+    )
+    did = creation.json().get("did")
+    assert did, f"Contract creation response has no DID: {creation.text}"
+
+    auditor_h = AuthService.get_headers_for_roles(["Auditor"])
+    create_event = None
+    events = []
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        assert resp.status_code == 200, (
+            f"Audit query failed for created contract '{did}': "
+            f"{resp.status_code} {resp.text}"
+        )
+        events = resp.json()
+        assert isinstance(events, list), f"Expected audit response to be a list, got: {events}"
+        create_event = next(
+            (
+                entry
+                for entry in events
+                if str(entry.get("event_type", "")).upper() == "CREATE_CONTRACT"
+            ),
+            None,
+        )
+        if create_event is not None:
+            break
+        time.sleep(1)
+
+    assert create_event is not None, (
+        f"Expected a CREATE_CONTRACT audit event for contract '{did}', "
+        f"got event types: {[entry.get('event_type') for entry in events]}"
+    )
+    event_data = create_event.get("event_data") or {}
+    occurred_at = event_data.get("occurred_at")
+    assert occurred_at, f"occurred_at missing from CREATE_CONTRACT event data: {event_data}"
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})",
+        str(occurred_at),
+    ), f"occurred_at is not RFC3339: {occurred_at!r}"
+    parsed = _parse_rfc3339(occurred_at)
+    assert parsed.year > 1, (
+        "CREATE_CONTRACT occurred_at must be an effective timestamp, "
+        f"not Go's zero time: {occurred_at!r}"
+    )
 
 
 @then('the TERMINATE_CONTRACT audit event for contract "{name}" records reason "{reason}", the terminating identity and role, and an effective timestamp')

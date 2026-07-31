@@ -24,6 +24,7 @@ import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -60,7 +61,9 @@ const isAuditingAuthorized = computed(
 
 const tabs = computed(() => contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft))
 
-const story = computed(() => contractStory(contract.value?.state))
+const story = computed(() =>
+  contractStory(contract.value?.state, { extrinsicLifecycle: contract.value?.extrinsic_lifecycle }),
+)
 
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 
@@ -78,7 +81,7 @@ watch(
           applyContractDataToDraft(contract.value?.contract_data)
         }
       } catch (err: unknown) {
-        console.error('Failed to load contract', err)
+        reportActionError(err, 'Load contract approval')
       }
     }
   },
@@ -113,7 +116,7 @@ const approve = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
-    console.error('Failed to approve', err)
+    reportActionError(err, 'Approve contract')
   } finally {
     isSubmitting.value = false
   }
@@ -138,7 +141,7 @@ const resubmit = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
-    console.error('Failed to resubmit', err)
+    reportActionError(err, 'Resubmit contract')
   } finally {
     isSubmitting.value = false
   }
@@ -154,7 +157,7 @@ const reject = async () => {
     if (confirmationResult?.isCanceled) return
     const comment = confirmationResult?.data?.trim()
     if (!comment) {
-      console.error('Reason is required for rejection')
+      reportActionError(new Error('A reason is required.'), 'Reject contract')
       return
     }
     isSubmitting.value = true
@@ -167,7 +170,7 @@ const reject = async () => {
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
-    console.error('Failed to reject', err)
+    reportActionError(err, 'Reject contract')
   } finally {
     isSubmitting.value = false
   }

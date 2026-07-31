@@ -2,8 +2,10 @@
 import { ref, useId } from 'vue'
 import type { Contract } from '@/models/contract/contract'
 
-defineProps<{
+const props = defineProps<{
   disabled?: boolean
+  nameError?: string
+  descriptionError?: string
 }>()
 
 const contract = defineModel<Contract>('contract', { required: true })
@@ -28,6 +30,8 @@ interface ContractDetailData {
 
 const nameId = useId()
 const descriptionId = useId()
+const nameErrorId = useId()
+const descriptionErrorId = useId()
 const exp_notice_periodId = useId()
 const exp_policyId = useId()
 const responsiblesId = useId()
@@ -60,10 +64,13 @@ const originalContract = ref(Object.assign({}, contract.value))
           :id="nameId"
           v-model="contract.name"
           class="input-bordered input w-full"
+          data-testid="contract-global-name"
           :class="{ 'border-2 input-primary': !!inserted && originalContract.name !== contract.name }"
           type="text"
           :disabled="disabled"
           required
+          :aria-invalid="!!props.nameError"
+          :aria-describedby="props.nameError ? nameErrorId : undefined"
         />
         <input
           v-else
@@ -74,6 +81,9 @@ const originalContract = ref(Object.assign({}, contract.value))
           type="text"
           disabled
         />
+        <p v-if="props.nameError && !inserted?.name" :id="nameErrorId" class="text-sm text-error">
+          {{ props.nameError }}
+        </p>
       </fieldset>
 
       <fieldset class="fieldset border-none p-0">
@@ -84,9 +94,12 @@ const originalContract = ref(Object.assign({}, contract.value))
           :id="descriptionId"
           v-model="contract.description"
           class="textarea-bordered textarea h-24 w-full"
+          data-testid="contract-base-description"
           :class="{ 'border-2 textarea-primary': originalContract.description !== contract.description }"
           :disabled="disabled"
           required
+          :aria-invalid="!!props.descriptionError"
+          :aria-describedby="props.descriptionError ? descriptionErrorId : undefined"
         />
         <textarea
           v-else
@@ -96,6 +109,9 @@ const originalContract = ref(Object.assign({}, contract.value))
           :class="{ 'text-red-400': !!inserted && inserted.description !== contract.description }"
           disabled
         />
+        <p v-if="props.descriptionError && !inserted?.description" :id="descriptionErrorId" class="text-sm text-error">
+          {{ props.descriptionError }}
+        </p>
       </fieldset>
 
       <fieldset class="fieldset border-none p-0">

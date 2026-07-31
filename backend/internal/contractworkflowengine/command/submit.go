@@ -84,6 +84,11 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 	if hasSubmittedContractData && !canSubmitUpdatedContractData(processData.State) {
 		return errors.New("contract data can only be submitted in draft or rejected state")
 	}
+	if hasSubmittedContractData {
+		if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
+	}
 
 	// The transition table (contractstate.Transitions) is the single source
 	// of truth for which states Submit may be called from at all. It does
@@ -125,25 +130,17 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return fmt.Errorf("contract submission blocked: %w", err)
 		}
 
-		existing, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
-		if err != nil {
-			return fmt.Errorf("could not read contract: %w", err)
-		}
-		updateData := db.ContractUpdateData{DID: cmd.DID}
-
-		// Submission into NEGOTIATION finalizes the participating parties, so
-		// seed one AcroForm signature field per party — origin and counterparty
+		// Submission into NEGOTIATION finalizes the participating parties, so seed
+		// the signable structure for them — one party node per party (origin and
+		// counterparty) and the AcroForm signature field naming it
 		// (dcs:signatoryName == the party's DCS instance DID) — which prepare
 		// renders and the signatory's wallet signs (ADR-13).
-		seeded, changed, err := seedSignatureFields(*contractData, existing.Responsible.GetParties())
-		if err != nil {
-			return fmt.Errorf("could not seed signature fields: %w", err)
-		}
-		if changed {
-			updateData.ContractData = &seeded
-			if err := h.CRepo.Update(ctx, tx, updateData); err != nil {
-				return fmt.Errorf("could not update contract: %w", err)
-			}
+		//
+		// A submitted draft (persisted just above) is the document the client
+		// assembled, which is where the party nodes go missing, so this reads back
+		// what was stored and puts them back.
+		if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
 		}
 
 		nextState = contractstate.Negotiation
@@ -244,10 +241,30 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					return fmt.Errorf("could not merge change requests: %w", err)
 				}
 
+				// Only a merge that rewrites the document is refused on a settled
+				// agreement. Redlines accepted before the peer signed are the ones
+				// that can still get here (negotiate refuses new ones), and folding
+				// them in now would move the document off the signed artifact.
+				if updatedData.ContractData != nil {
+					if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+						return err
+					}
+				}
+
 				updatedData.ContractVersion = processData.ContractVersion + 1
 				err = h.CRepo.Update(ctx, tx, *updatedData)
 				if err != nil {
 					return fmt.Errorf("could not update contract version: %w", err)
+				}
+
+				// The merge does not fold a redline into the stored document, it
+				// replaces the document with the redline (mergeContractDataChange
+				// returns the change), so the merged result is a client-assembled
+				// document like any other and needs its party nodes back.
+				if updatedData.ContractData != nil {
+					if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
+						return err
+					}
 				}
 
 				evt := contractevents.IncreaseContractVersionEvent{

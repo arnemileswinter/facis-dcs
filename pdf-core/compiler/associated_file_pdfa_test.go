@@ -22,12 +22,11 @@ func TestVCAttachmentListedInCatalogAF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	off := findLastObjectHeaderOffset(upd, 1)
-	if off < 0 {
+	start, end, ok := lastObjectBody(upd, 1)
+	if !ok {
 		t.Fatal("superseded catalog (obj 1) not found in updated PDF")
 	}
-	end := bytes.Index(upd[off:], []byte("\nendobj"))
-	cat := upd[off : off+end]
+	cat := upd[start:end]
 	m := regexp.MustCompile(`/AF \[([^\]]*)\]`).FindSubmatch(cat)
 	if m == nil {
 		t.Fatal("no /AF array in the superseded catalog")

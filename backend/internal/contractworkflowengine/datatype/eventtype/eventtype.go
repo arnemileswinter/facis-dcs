@@ -5,11 +5,6 @@
 // triggering a further peer sync, to avoid sync loops).
 package eventtype
 
-import (
-	"fmt"
-	"strings"
-)
-
 type EventType string
 
 const (
@@ -58,61 +53,15 @@ const (
 	// stored a contract's PDF. The DCS-to-DCS synchronizer ships that PDF to the
 	// counterparty on shippable transitions (ADR-13).
 	PDFRegenerated EventType = "PDF_REGENERATED"
+
+	// KeyShredded records the destruction of a contract's wrapped
+	// content-encryption keys (DCS-NFR-SEC-13, DCS-NFR-COMP-03) — locally on
+	// archive deletion or on an authenticated peer's erase request. Its body
+	// carries no contract content and is anchored under the instance scope so
+	// the destruction record survives the shredding it documents.
+	KeyShredded EventType = "KEY_SHREDDED"
 )
 
-var validStates = map[EventType]bool{
-	Create:                   true,
-	Submit:                   true,
-	Negotiation:              true,
-	AcceptRespond:            true,
-	RejectRespond:            true,
-	IncreaseContractVersion:  true,
-	Approve:                  true,
-	Reject:                   true,
-	Verify:                   true,
-	Update:                   true,
-	RetrieveAll:              true,
-	RetrieveArchived:         true,
-	StoreArchived:            true,
-	DeleteArchived:           true,
-	AnnotateArchived:         true,
-	RetrieveByID:             true,
-	AccessDenied:             true,
-	RetrieveHistoryByDID:     true,
-	Search:                   true,
-	Review:                   true,
-	Audit:                    true,
-	Terminate:                true,
-	Renew:                    true,
-	RecordEvidence:           true,
-	ContractExpired:          true,
-	RetrieveAllTemplates:     true,
-	RemoteSync:               true,
-	RemoteSyncRequest:        true,
-	OutdatedPeer:             true,
-	RemoteActionRequestEvent: true,
-	Offer:                    true,
-	Withdraw:                 true,
-	Revoke:                   true,
-	Export:                   true,
-	PDFRegenerated:           true,
-}
-
-func NewEventType(s string) (EventType, error) {
-	ts := EventType(strings.ToUpper(s))
-	if !ts.IsValid() {
-		return "", fmt.Errorf("invalid event type: %s", s)
-	}
-	return ts, nil
-}
-
-// IsValid checks if the EventType is a valid role
-func (s EventType) IsValid() bool {
-	upper := EventType(strings.ToUpper(string(s)))
-	return validStates[upper]
-}
-
-// String returns the string representation of the EventType
 func (s EventType) String() string {
 	return string(s)
 }

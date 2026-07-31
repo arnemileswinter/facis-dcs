@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,9 @@ type ContractContentPolicy struct {
 	// into the Semantic Hub's canonical SHACL shapes / SLA validation
 	// profile (the default disk policy document sets both; ad-hoc/test
 	// policies that want to exercise only ODRL evaluation leave them unset).
+	// "Enforce" here means "include in this audit's findings", not "block":
+	// AuditContractContent is only reached from the read-only audit-trail
+	// query. The blocking SHACL gate is RequireHubConformance, elsewhere.
 	// The hub is the only source for their content — there is no
 	// alternative/inline shape format anymore (ADR-8, ADR-9).
 	EnforceCanonicalShapes   bool `json:"enforceCanonicalShapes"`
@@ -59,11 +63,39 @@ func AuditContractContent(ctx context.Context, contractDocument any, policyDocum
 	if err != nil {
 		return nil, err
 	}
-	// The domain-field ontology backs value normalization during profile
-	// audits (compactEntityRole); loading it here hard-fails the audit when
-	// the hub cannot serve it.
+	// This load is a hub-liveness probe, nothing more: it hard-fails the audit
+	// when the hub cannot serve the domain-field ontology. The parsed ontology
+	// is NOT consulted on this path. (An earlier comment here named a value-
+	// normalization function `compactEntityRole` as the reason; no such
+	// function exists anywhere in the repository, and the value normalization
+	// it implies was never written — which is why facis.sla.basic.v1.yaml has
+	// to list both the bare `provider` and the full taxonomy IRI in one
+	// `values` list.)
 	if _, err := requireDomainOntology(ctx); err != nil {
 		return nil, err
+	}
+	if policy.EnforceValidationProfile {
+		pinnedProfile := pinnedHubProfileVersion(contract)
+		if pinnedProfile <= 0 {
+			if _, hasBundle := contract["dcs:effectiveShapes"]; hasBundle {
+				return nil, errors.New("immutable semantic bundle is missing dcterms:conformsTo")
+			}
+		} else {
+			bundleSource, ok := source.(EffectiveBundleShapeSource)
+			if !ok {
+				return nil, errors.New("shape source cannot resolve immutable validation profile")
+			}
+			profileContent, loadErr := bundleSource.ProfileAt(ctx, pinnedProfile)
+			if loadErr != nil {
+				return nil, fmt.Errorf("load pinned validation profile v%d: %w", pinnedProfile, loadErr)
+			}
+			hubProfile, parseErr := LoadValidationProfileYAML([]byte(profileContent))
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse pinned validation profile v%d: %w", pinnedProfile, parseErr)
+			}
+			policy.profiles = []ValidationProfile{hubProfile}
+			policy.ProfileVersion = pinnedProfile
+		}
 	}
 
 	findings := []PolicyFinding{}
@@ -208,12 +240,10 @@ func normalizeContractContentPolicy(ctx context.Context, raw any, metadata Contr
 		}
 	}
 
-	// EnforceCanonicalShapes drives validateAgainstHubShapes (called from
-	// AuditContractContent, where the document being audited — needed for
-	// ADR-8 version pinning — is in scope). Here, only the validation
-	// profile: content always comes from the hub (ADR-8/ADR-9 — no disk
-	// fallback), the currently-active version (profile pinning is not part
-	// of the ShapeSource contract, unlike shapes).
+	// At this normalization stage the contract is not yet in scope, so load the
+	// hub's active profile as the provisional policy. AuditContractContent
+	// replaces it with the document's pinned ProfileAt version when an immutable
+	// effective bundle is present. There is no disk or executor-side fallback.
 	if policy.EnforceValidationProfile {
 		profileContent, profileVersion, err := activeShapeSource.ActiveProfile(ctx)
 		if err != nil {
@@ -575,6 +605,9 @@ type odrlFieldInfo struct {
 	label    string
 	value    any
 	hasValue bool
+	// units are the distinct odrl:unit IRIs the document's constraints
+	// denominate this field's boundaries in (applyDeclaredUnits).
+	units []string
 }
 
 func contractFinding(ruleID, title, severity, message, path, ontologyTerm string) PolicyFinding {

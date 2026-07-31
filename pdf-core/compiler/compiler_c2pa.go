@@ -34,60 +34,25 @@ func exclusionsEqual(a, b []c2paExclusion) bool {
 	return true
 }
 
+// findObjectStreamRange returns the offset and length of the stream data of
+// objectID's genesis definition — the C2PA exclusion window, which must name
+// the manifest's own bytes and no other object's.
 func findObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
-	marker := []byte(fmt.Sprintf("%d 0 obj\n", objectID))
-	objPos := bytes.Index(pdf, marker)
-	if objPos < 0 {
+	start, end, ok := firstObjectStreamData(pdf, objectID)
+	if !ok {
 		return 0, 0, false
 	}
-	streamStartRel := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStartRel < 0 {
-		return 0, 0, false
-	}
-	streamStart := objPos + streamStartRel + len("stream\n")
-	streamEndRel := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEndRel < 0 {
-		return 0, 0, false
-	}
-	streamEnd := streamStart + streamEndRel
-	return streamStart, streamEnd - streamStart, true
+	return start, end - start, true
 }
 
+// findLastObjectStreamRange is findObjectStreamRange for the definition a
+// reader resolves, after an incremental update has superseded the manifest.
 func findLastObjectStreamRange(pdf []byte, objectID int) (int, int, bool) {
-	objPos := findLastObjectHeaderOffset(pdf, objectID)
-	if objPos < 0 {
+	start, end, ok := lastObjectStreamData(pdf, objectID)
+	if !ok {
 		return 0, 0, false
 	}
-	streamStartRel := bytes.Index(pdf[objPos:], []byte("stream\n"))
-	if streamStartRel < 0 {
-		return 0, 0, false
-	}
-	streamStart := objPos + streamStartRel + len("stream\n")
-	streamEndRel := bytes.Index(pdf[streamStart:], []byte("\nendstream"))
-	if streamEndRel < 0 {
-		return 0, 0, false
-	}
-	streamEnd := streamStart + streamEndRel
-	return streamStart, streamEnd - streamStart, true
-}
-
-func findLastObjectHeaderOffset(pdf []byte, objID int) int {
-	headerAtStart := []byte(fmt.Sprintf("%d 0 obj\n", objID))
-	headerWithNewline := []byte(fmt.Sprintf("\n%d 0 obj\n", objID))
-	best := -1
-	if bytes.HasPrefix(pdf, headerAtStart) {
-		best = 0
-	}
-	searchFrom := 0
-	for {
-		rel := bytes.Index(pdf[searchFrom:], headerWithNewline)
-		if rel < 0 {
-			break
-		}
-		best = searchFrom + rel + 1
-		searchFrom = best + 1
-	}
-	return best
+	return start, end - start, true
 }
 
 func sha256WithExclusions(data []byte, exclusions []c2paExclusion) [32]byte {
@@ -222,6 +187,18 @@ func extractLabeledChildJUMBFBox(parentJumbBox []byte, label string) ([]byte, er
 	return nil, fmt.Errorf("child JUMBF box %s not found", label)
 }
 
+// The dcs.lifecycle statuses pdf-core itself decides (DCS-OR-C2PA-003). Every
+// other status a manifest carries is read off the lifecycle credential the
+// update attaches (lifecycleStatusFromVC).
+const (
+	// lifecycleStatusDraft is what a freshly compiled document is: an unsigned
+	// contract with no lifecycle event behind it yet.
+	lifecycleStatusDraft = "draft"
+	// lifecycleStatusAmended is what an update that records no lifecycle event
+	// is: the document changed, the contract's state did not.
+	lifecycleStatusAmended = "amended"
+)
+
 func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash string, hardBindingHash []byte, exclusions []c2paExclusion, compiledAt time.Time) ([]byte, error) {
 	// Build a deterministic, syntactically valid JUMBF C2PA manifest-store:
 	//   jumb(c2pa) -> jumb(c2ma)
@@ -237,7 +214,7 @@ func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash
 	actionsAssertionBox := renderJUMBFSuperbox(cborUUID, 0x03, "c2pa.actions.v2", [][]byte{renderBMFFBox("cbor", actionsAssertionPayload)})
 	actionsAssertionHash := sha256.Sum256(actionsAssertionBox[8:])
 
-	lifecycleAssertionPayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "draft", "", lifecycleAuthorityFromContext(ctx), "", "", compiledAt)
+	lifecycleAssertionPayload := renderLifecycleAssertionCBOR(contractID, payloadHash, lifecycleStatusDraft, "", lifecycleAuthorityFromContext(ctx), "", "", compiledAt)
 	lifecycleAssertionBox := renderJUMBFSuperbox(cborUUID, 0x03, "dcs.lifecycle", [][]byte{renderBMFFBox("cbor", lifecycleAssertionPayload)})
 	lifecycleAssertionHash := sha256.Sum256(lifecycleAssertionBox[8:])
 
@@ -274,7 +251,7 @@ func renderC2PAManifestStore(ctx context.Context, contractID string, payloadHash
 	return renderJUMBFSuperbox(c2paStoreUUID, 0x03, "c2pa", [][]byte{manifestBox}), nil
 }
 
-func renderVerificationManifestStore(ctx context.Context, originalC2PA []byte, manifestLabel string, contractID string, payloadHash string, hardBindingHash []byte, exclusions []c2paExclusion, compiledAt time.Time, remoteManifestURL string) ([]byte, error) {
+func renderVerificationManifestStore(ctx context.Context, originalC2PA []byte, manifestLabel string, contractID string, payloadHash string, lifecycleStatus string, hardBindingHash []byte, exclusions []c2paExclusion, compiledAt time.Time, remoteManifestURL string) ([]byte, error) {
 	manifestBoxes, err := extractTopLevelManifestBoxes(originalC2PA)
 	if err != nil {
 		return nil, err
@@ -294,7 +271,7 @@ func renderVerificationManifestStore(ctx context.Context, originalC2PA []byte, m
 	originalManifestHash := sha256.Sum256(originalManifestBox[8:])
 	originalSignatureHash := sha256.Sum256(originalSignatureBox[8:])
 
-	updateManifestBox, err := renderVerificationUpdateManifest(ctx, manifestLabel, contractID, payloadHash, originalManifestLabel, originalManifestHash[:], originalSignatureHash[:], hardBindingHash, exclusions, compiledAt, remoteManifestURL)
+	updateManifestBox, err := renderVerificationUpdateManifest(ctx, manifestLabel, contractID, payloadHash, lifecycleStatus, originalManifestLabel, originalManifestHash[:], originalSignatureHash[:], hardBindingHash, exclusions, compiledAt, remoteManifestURL)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +281,7 @@ func renderVerificationManifestStore(ctx context.Context, originalC2PA []byte, m
 	return renderJUMBFSuperbox(c2paStoreUUID, 0x03, "c2pa", children), nil
 }
 
-func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string, contractID string, payloadHash string, parentManifestLabel string, parentManifestHash []byte, _ []byte, hardBindingHash []byte, exclusions []c2paExclusion, compiledAt time.Time, remoteManifestURL string) ([]byte, error) {
+func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string, contractID string, payloadHash string, lifecycleStatus string, parentManifestLabel string, parentManifestHash []byte, _ []byte, hardBindingHash []byte, exclusions []c2paExclusion, compiledAt time.Time, remoteManifestURL string) ([]byte, error) {
 	updateLabel := manifestLabel
 	hardBindingLabel := "c2pa.hash.data"
 	hardBindingPayload := renderMinimalDataHashAssertionCBOR(hardBindingHash, exclusions)
@@ -328,7 +305,7 @@ func renderVerificationUpdateManifest(ctx context.Context, manifestLabel string,
 	var lifecycleURI string
 	var lifecycleHash [32]byte
 	if contractID != "" {
-		lifecyclePayload := renderLifecycleAssertionCBOR(contractID, payloadHash, "amended", "", lifecycleAuthorityFromContext(ctx), "", hex.EncodeToString(parentManifestHash), compiledAt)
+		lifecyclePayload := renderLifecycleAssertionCBOR(contractID, payloadHash, lifecycleStatus, "", lifecycleAuthorityFromContext(ctx), "", hex.EncodeToString(parentManifestHash), compiledAt)
 		lifecycleBox := renderJUMBFSuperbox(cborUUID, 0x03, "dcs.lifecycle", [][]byte{renderBMFFBox("cbor", lifecyclePayload)})
 		lifecycleHash = sha256.Sum256(lifecycleBox[8:])
 		lifecycleURI = absoluteAssertionURI(updateLabel, "dcs.lifecycle")
@@ -494,6 +471,12 @@ func renderMinimalDataHashAssertionCBOR(hashBytes []byte, exclusions []c2paExclu
 	return cborMap(pairs...)
 }
 
+// renderLifecycleAssertionCBOR renders the dcs.lifecycle assertion
+// (DCS-OR-C2PA-003). fileHash is the SHA-256 of the contract.jsonld this
+// manifest's document embeds — not of the PDF, which an assertion living inside
+// that PDF cannot hash; c2pa.hash.data binds the file itself. The lifecycle VC's
+// credentialSubject.file_hash is the artifact hash and is deliberately a
+// different value (see provenance.LifecycleAssertion.FileHash).
 func renderLifecycleAssertionCBOR(contractID, fileHash, status, reason, authority, vcID, prevManifestHash string, compiledAt time.Time) []byte {
 	return cborMap(
 		cborText("contract_id"), cborText(contractID),

@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,9 +78,19 @@ type httpError struct {
 	status  int
 	name    string
 	message string
+	// digests are merged into the error body when the refusal is a verification
+	// verdict, so a caller sees the evidence the refusal rests on rather than a
+	// message it can only quote.
+	digests verifyDigests
 }
 
 func (e *httpError) Error() string { return e.message }
+
+// withDigests attaches the digests a verification verdict was reached on.
+func (e *httpError) withDigests(d verifyDigests) *httpError {
+	e.digests = d
+	return e
+}
 
 func prettyLog(m map[string]interface{}) {
 	b, err := json.MarshalIndent(m, "", "  ")
@@ -106,6 +118,18 @@ func writeError(w http.ResponseWriter, err error) {
 		"temporary": false,
 		"timeout":   false,
 		"fault":     false,
+	}
+	for key, digest := range map[string]string{
+		"jsonld_hash":          he.digests.JSONLDHash,
+		"base_pdf_hash":        he.digests.BasePDFHash,
+		"stored_base_pdf_hash": he.digests.StoredBasePDFHash,
+	} {
+		// A digest that could not be computed is left out entirely: an empty
+		// string under a hash key reads as "the hash is blank", which is a claim
+		// about the content rather than about the check.
+		if digest != "" {
+			body[key] = digest
+		}
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(he.status)
@@ -210,21 +234,87 @@ func (s *service) render(w http.ResponseWriter, r *http.Request) {
 	writePrepared(w, pdf, signer.Captured())
 }
 
+// verifyDigests are the SHA-256 digests (hex, the digest every other DCS
+// component records) that the /verify match verdict is reached on. They are the
+// evidence for the verdict rather than a restatement of it: on the reproduction
+// check BasePDFHash and StoredBasePDFHash are equal exactly when the submitted
+// document re-renders to its stored bytes.
+//
+// Both PDF digests are taken over compiler.ZeroCOSESignatures output, the same
+// normalization the comparison itself uses. A fresh compile produces a fresh
+// randomized ECDSA COSE claim signature, so digesting the raw bytes would report
+// two different hashes for a document the verdict calls intact.
+//
+// Absent digests are omitted rather than sent empty — an empty hash field states
+// something about the content, not about the check.
+type verifyDigests struct {
+	// JSONLDHash is the SHA-256 of the machine-readable payload embedded in the
+	// submitted PDF — the latest one on an amended document, i.e. the payload
+	// that governs its current visible state.
+	JSONLDHash string `json:"jsonld_hash,omitempty"`
+	// BasePDFHash is the SHA-256 of the deterministic re-render produced from
+	// JSONLDHash's payload: a bare recompile for a plain document, the replay of
+	// the last amendment hop for an incrementally updated one.
+	BasePDFHash string `json:"base_pdf_hash,omitempty"`
+	// StoredBasePDFHash is the SHA-256 of the stored bytes that re-render was
+	// compared against — the leading span of the submitted PDF it must reproduce,
+	// excluding the append-only PAdES signature layers that legitimately follow.
+	StoredBasePDFHash string `json:"stored_base_pdf_hash,omitempty"`
+}
+
+// reproductionDigests digests the two sides of the reproduction check plus the
+// payload it was driven from. reproduced may be nil when the check failed before
+// producing one, and payload nil when none could be extracted; the corresponding
+// digests are then left unset rather than reporting the digest of nothing.
+func reproductionDigests(payload, stored, reproduced []byte) verifyDigests {
+	var d verifyDigests
+	if payload != nil {
+		d.JSONLDHash = sha256Hex(payload)
+	}
+	if reproduced == nil {
+		return d
+	}
+	fresh := compiler.ZeroCOSESignatures(reproduced)
+	storedBase := compiler.ZeroCOSESignatures(stored)
+	if len(storedBase) > len(fresh) {
+		storedBase = storedBase[:len(fresh)]
+	}
+	d.BasePDFHash = sha256Hex(fresh)
+	d.StoredBasePDFHash = sha256Hex(storedBase)
+	return d
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // verifyResponse is the JSON body returned by POST /verify.
 type verifyResponse struct {
+	verifyDigests
 	Match bool `json:"match"`
-	// C2PASignatureValid reports that the manifest chain verified and the
-	// document reproduces its embedded payload. On a PAdES-signed contract the
-	// last manifest's whole-file hard binding does NOT cover the appended
-	// signature revisions — the signature is applied after the manifest so that
-	// it commits to the provenance (ADR-26) — so PAdESSigned states how far the
-	// binding reaches rather than leaving a consumer to assume it covers
-	// everything.
+	// C2PASignatureValid is the outcome of compiler.VerifyC2PAClaimSignatures:
+	// every manifest's COSE_Sign1 claim signature verified against its own
+	// x5chain leaf and every assertion the signed claim commits to still hashes
+	// to the recorded value. C2PASignatureError carries the reason it did not, so
+	// a consumer reports the finding rather than a bare false.
+	//
+	// On a PAdES-signed contract the last manifest's whole-file hard binding does
+	// NOT cover the appended signature revisions — the signature is applied after
+	// the manifest so that it commits to the provenance (ADR-26) — so PAdESSigned
+	// states how far the binding reaches rather than leaving a consumer to assume
+	// it covers everything.
 	C2PASignatureValid bool   `json:"c2pa_signature_valid"`
+	C2PASignatureError string `json:"c2pa_signature_error,omitempty"`
 	PAdESSigned        bool   `json:"pades_signed"`
 	VCBytes            string `json:"vc_bytes,omitempty"` // base64-encoded VC JSON
-	VCProofValid       bool   `json:"vc_proof_valid"`
-	Artifact           string `json:"artifact"` // base64-encoded verification-witness PDF
+	// VCPresent says only that the PDF carries a lifecycle-credential attachment,
+	// which is the whole of what pdf-core can say about it: verifying the
+	// credential's proof means resolving its issuer to a key it publishes for
+	// assertions, and pdf-core holds no key material and resolves no DID. The
+	// caller gets VCBytes and verifies them against the issuer itself.
+	VCPresent bool   `json:"vc_present"`
+	Artifact  string `json:"artifact"` // base64-encoded verification-witness PDF
 }
 
 // renderReanchor appends a provenance-only C2PA manifest binding the submitted
@@ -263,17 +353,25 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload []byte
+	var digests verifyDigests
 
 	if _, ok := compiler.SplitAtIncrementalUpdate(raw); ok {
-		if err := compiler.VerifyIncrementalUpdate(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw); err != nil {
-			writeError(w, errConflict(err))
+		reproduced, chainErr := compiler.VerifyIncrementalUpdate(
+			compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw)
+		// The payload is read whatever the chain verdict, so a rejected document
+		// still names which machine-readable content was on the table. A payload
+		// that cannot be read is reported only when the chain itself held —
+		// otherwise the chain failure is the finding, and stays the status.
+		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
+		if chainErr != nil {
+			writeError(w, errConflict(chainErr).withDigests(reproductionDigests(payload, raw, reproduced)))
 			return
 		}
-		payload, err = compiler.ExtractLatestEmbeddedJSONLD(raw)
 		if err != nil {
 			writeError(w, errBadRequest(err))
 			return
 		}
+		digests = reproductionDigests(payload, raw, reproduced)
 	} else {
 		payload, err = compiler.ExtractEmbeddedJSONLD(raw)
 		if err != nil {
@@ -293,9 +391,10 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		verifyCtx := compiler.WithLifecycleAuthority(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), authority)
 		recompiled, err := compiler.CompilePDF(verifyCtx, payload, compiledAt)
 		if err != nil {
-			writeError(w, errUnprocessableEntity(err))
+			writeError(w, errUnprocessableEntity(err).withDigests(verifyDigests{JSONLDHash: sha256Hex(payload)}))
 			return
 		}
+		digests = reproductionDigests(payload, raw, recompiled)
 		// The compiled base must reproduce the leading bytes of the submitted
 		// PDF. A PAdES signature (and the signing evidence embedded before it)
 		// is an append-only incremental update written after the base's %%EOF —
@@ -303,7 +402,7 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// /ByteRange — so the base is a byte-prefix of a signed PDF rather than
 		// byte-equal to it (DCS-OR-C2PA-010).
 		if !bytes.HasPrefix(compiler.ZeroCOSESignatures(raw), compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")))
+			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")).withDigests(digests))
 			return
 		}
 		// An unsigned base must be byte-EQUAL to its deterministic recompile. The
@@ -312,17 +411,25 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 		// (handled by the branch above via its marker). Trailing content on an
 		// otherwise-unsigned PDF is an offline amendment made outside /update —
 		// reject it (DCS-OR-C2PA-002 tamper-evidence).
+		//
+		// The digests agree here — the divergence is in the trailing bytes, not in
+		// the base the digests cover — so they are reported as the record of what
+		// was checked, and the message names what actually failed.
 		if !compiler.IsPAdESSigned(raw) &&
 			len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
-			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")))
+			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")).withDigests(digests))
 			return
 		}
 	}
 
-	// Extract VC attachment if present — returned to the caller so it can
-	// perform status-list checks without parsing PDF bytes itself.
+	// Extract VC attachment if present — returned to the caller so it can verify
+	// its proof and check the status list without parsing PDF bytes itself.
 	vcBytes, vcFound, _ := compiler.ExtractEmbeddedVC(raw)
-	vcProofValid := vcFound && len(vcBytes) > 0 && isVCProofStructurallyValid(vcBytes)
+
+	c2paSignatureError := ""
+	if err := compiler.VerifyC2PAClaimSignatures(raw); err != nil {
+		c2paSignatureError = err.Error()
+	}
 
 	// Append a verification witness and embed the resulting PDF as artifact.
 	witness, err := compiler.AppendVerificationWitness(compiler.WithSigner(r.Context(), compiler.NewCapturingSigner()), raw, payload)
@@ -332,10 +439,12 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := verifyResponse{
+		verifyDigests:      digests,
 		Match:              true,
-		C2PASignatureValid: true,
+		C2PASignatureValid: c2paSignatureError == "",
+		C2PASignatureError: c2paSignatureError,
 		PAdESSigned:        compiler.IsPAdESSigned(raw),
-		VCProofValid:       vcProofValid,
+		VCPresent:          vcFound && len(vcBytes) > 0,
 		Artifact:           base64.StdEncoding.EncodeToString(witness),
 	}
 	if vcFound && len(vcBytes) > 0 {
@@ -390,15 +499,59 @@ func (s *service) verifyContent(w http.ResponseWriter, r *http.Request) {
 	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
-// isVCProofStructurallyValid returns true when the VC JSON contains a
-// recognisable proof field, without performing cryptographic verification.
-func isVCProofStructurallyValid(vcBytes []byte) bool {
-	var vc map[string]json.RawMessage
-	if err := json.Unmarshal(vcBytes, &vc); err != nil {
-		return false
+// verifyContentMatch compares a submitted PDF's visible page content against a
+// REFERENCE PDF's, resolving the LAST definition of every object on both sides.
+// Neither side is re-rendered — the reference is the exact document the caller
+// committed to — so this is free of the render determinism /verify/content
+// depends on, and it answers a different question: not "does this PDF render its
+// own embedded payload" (an attacker who supersedes both the pages and the
+// attachment passes that) but "does this PDF still render the document we
+// prepared". An appended revision that supersedes a page content stream diverges
+// here; append-only signature, C2PA, evidence and timestamp layers do not.
+func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
+	ct := r.Header.Get("Content-Type")
+	if err := checkMediaType(ct, "multipart/form-data"); err != nil {
+		writeError(w, err)
+		return
 	}
-	_, ok := vc["proof"]
-	return ok
+	defer r.Body.Close()
+
+	_, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		writeError(w, errBadRequest(fmt.Errorf("invalid multipart content type: %w", err)))
+		return
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		writeError(w, errBadRequest(errors.New("multipart boundary missing from Content-Type")))
+		return
+	}
+	parts, err := readMultipartParts(r.Body, boundary)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	submitted, ok := parts["pdf"]
+	if !ok || len(submitted) == 0 {
+		writeError(w, errBadRequest(errors.New("pdf field required")))
+		return
+	}
+	reference, ok := parts["reference"]
+	if !ok || len(reference) == 0 {
+		writeError(w, errBadRequest(errors.New("reference field required")))
+		return
+	}
+
+	var mismatch string
+	if err := compiler.MatchPageContent(submitted, reference); err != nil {
+		mismatch = err.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(struct {
+		Match    bool   `json:"match"`
+		Mismatch string `json:"mismatch,omitempty"`
+	}{Match: mismatch == "", Mismatch: mismatch})
 }
 
 func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
@@ -722,11 +875,6 @@ func (s *service) ontologyContext(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(ontologyContext)
 }
 
-func (s *service) ontologyOwl(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/turtle; charset=utf-8")
-	_, _ = w.Write(ontologyOWL)
-}
-
 // readMultipartParts reads all parts from a multipart body into a map keyed by form field name.
 func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, error) {
 	parts := make(map[string][]byte)
@@ -741,7 +889,7 @@ func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, err
 		}
 		name := part.FormName()
 		var limit int64 = 8 << 20
-		if name == "pdf" {
+		if name == "pdf" || name == "reference" {
 			limit = 32 << 20
 		}
 		data, err := io.ReadAll(io.LimitReader(part, limit))

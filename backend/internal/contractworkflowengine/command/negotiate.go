@@ -137,6 +137,15 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	if cmd.ChangeRequest != nil {
 		var change negotiationmerging.ChangeRequest
 		if err := json.Unmarshal(*cmd.ChangeRequest, &change); err == nil && change.ContractData != nil {
+			// A redline on a settled agreement is the wedge: the document changes
+			// but the artifact is the peer's signed PDF and cannot be re-rendered,
+			// so the proposal would ship the OLD signed bytes while this copy's own
+			// document moved on. Refuse it here — a free-text note (no
+			// change.ContractData) leaves the document alone and still carries this
+			// copy out of OFFERED towards its own countersignature.
+			if err := requireUnsettledAgreement(ctx, tx, h.CRepo, cmd.DID); err != nil {
+				return err
+			}
 			proposed := datatype.JSON(*change.ContractData)
 			normalized, err := validation.NormalizeContractDataForPersistence(&proposed, cmd.DID, true)
 			if err != nil {
@@ -158,22 +167,18 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	}
 
 	// Negotiation is where the participating DCS instances are finalized, so it
-	// is where the contract's signature fields are materialized: one
-	// dcs:SignatureField per instance, the AcroForm field the wallet-driven
-	// signing ceremony signs (ADR-12). Without a pre-placed field, the
-	// deterministic two-call remote signing has nothing to sign.
-	contract, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
-	if err != nil {
-		return fmt.Errorf("could not read contract for signature-field seeding: %w", err)
-	}
-	seeded, changed, err := seedSignatureFields(*contract.ContractData, contract.Responsible.GetParties())
-	if err != nil {
-		return fmt.Errorf("could not seed signature fields: %w", err)
-	}
-	if changed {
-		if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{DID: cmd.DID, ContractData: &seeded}); err != nil {
-			return fmt.Errorf("could not persist seeded signature fields: %w", err)
-		}
+	// is where the contract's signable structure is materialized: one party node
+	// per instance and one dcs:SignatureField naming it, the AcroForm field the
+	// wallet-driven signing ceremony signs (ADR-12). Without a pre-placed field
+	// the deterministic two-call remote signing has nothing to sign, and without
+	// the party node behind it the signature it applies is attributed to nobody.
+	//
+	// A redline applied just above replaced the document with the one the
+	// proposing client assembled, which is where the party nodes go missing, so
+	// this runs on the result — and on every negotiation, redline or free-text
+	// note, since an earlier round may have dropped them.
+	if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
+		return err
 	}
 
 	// The Responder choosing to negotiate an offered contract starts the
@@ -214,7 +219,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 	return tx.Commit()
 }
 
-// seedSignatureFields adds one dcs:SignatureField per participating DCS
+// SeedSignatureFields adds one dcs:SignatureField per participating DCS
 // instance to the contract document, its dcs:signatoryName set to that
 // instance's DID — the value pdf-core renders as the AcroForm field's /T name,
 // which the wallet-driven signing ceremony targets (ADR-12). An explicit
@@ -224,7 +229,7 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 // field per instance and is idempotent — re-running over its own output adds
 // nothing. It reports whether the document changed so the caller only persists
 // real additions.
-func seedSignatureFields(raw datatype.JSON, instanceDIDs []string) (datatype.JSON, bool, error) {
+func SeedSignatureFields(raw datatype.JSON, instanceDIDs []string) (datatype.JSON, bool, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, false, fmt.Errorf("decode contract data: %w", err)

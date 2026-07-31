@@ -90,19 +90,17 @@ async function submitReviewApproveTemplate(page: Page, loginAs: LoginAs, did: st
     await gotoAs(page, loginAs, 'Template Reviewer', `/ui/templates/review/${did}`)
     await waitForTemplateLoaded(page, name)
     await assertPdfExport(page, 'template', did, `${name} REVIEWED (in review)`)
-    // The backend accepts the reviewer recommendation only after a
-    // verification run — the Verify dialog is part of the review flow.
+    // Approve performs the mandatory verification before it offers the
+    // forwarding confirmation.
     const verified = page.waitForResponse(
       (r) => r.url().includes('/template/verify') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Verify', exact: true }).click()
-    await verified
-    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
     const forwarded = page.waitForResponse(
       (r) => r.url().includes('/template/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await verified
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm approval', exact: true }).click()
     await forwarded
   })
 
@@ -330,7 +328,10 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await confirmModal(page, 'Submit')
+    await page
+      .getByRole('dialog', { name: /lokale semantische vorprüfung/i })
+      .getByRole('button', { name: 'Confirm approval', exact: true })
+      .click()
     await forwarded
     await assertPdfExport(page, 'contract', contractDid, 'contract REVIEWED')
   })

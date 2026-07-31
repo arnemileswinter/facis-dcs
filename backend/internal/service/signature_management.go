@@ -2,14 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
-	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 
@@ -25,6 +27,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
 	"digital-contracting-service/internal/signingmanagement/dss"
@@ -49,7 +52,13 @@ func mapSignatureCommandError(err error) error {
 	// a shared signature_invalid — the frontend's validation-failure view
 	// (item 11) distinguishes these by CODE, never by matching error text.
 	switch {
-	case errors.Is(err, command.ErrDocumentMismatch):
+	// All three halves of "the submission is the document we prepared" report
+	// the same client-facing code: ErrDocumentMismatch is the append-only half,
+	// ErrContentMismatch the visible-content half, ErrPayloadMismatch the
+	// machine-readable half, and the message carries which one fired and — for
+	// the latter two — the page that diverged or the two payload digests.
+	case errors.Is(err, command.ErrDocumentMismatch), errors.Is(err, command.ErrContentMismatch),
+		errors.Is(err, command.ErrPayloadMismatch):
 		return signaturemanagement.MakeDocumentMismatch(err)
 	case errors.Is(err, command.ErrNonceMismatch):
 		return signaturemanagement.MakeNonceMismatch(err)
@@ -63,6 +72,7 @@ func mapSignatureCommandError(err error) error {
 		return signaturemanagement.MakeSignatureInvalid(err)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
+		errors.Is(err, command.ErrRevocationReasonRequired) ||
 		errors.Is(err, command.ErrUnknownSignatureField) ||
 		errors.Is(err, command.ErrFieldAlreadySigned) ||
 		errors.Is(err, command.ErrCeremonyNotPrepared) ||
@@ -83,27 +93,23 @@ type signatureManagementsrvc struct {
 	VCSigner      provenance.VCSigner
 	VCIssuer      provenance.VCIssuer
 	IssuerDID     string
-	IPFSClient    *ipfs.APIClient
+	Artifacts     *artifactstore.Store
 	ArchiveRepo   cwedb.ContractRepo
 	ArchiveNotary cwecommand.ArchiveNotary
 	ArchiveTSA    *tsa.APIClient
-	// RequestSigner signs the pending-ceremony PID/PoA presentation request
-	// object (JAR) — the SAME HSM JAR signer + Hydra client_id the auth
-	// service's login flow uses (jwk header, no x509_san_dns claim).
+	WorkflowGate  *workflowgate.Coordinator
+	// RequestSigner signs both request objects a ceremony publishes — the
+	// pending-stage PID/PoA presentation request and the Document-Retrieval
+	// request — with the DCS's own certificate chain in the header, the same
+	// signer the login flow uses. A wallet verifies either against the SAN the
+	// client identifier names.
 	RequestSigner oid4vprequest.Signer
-	// OID4VPClientID is the Hydra client_id the pending-ceremony (PID/PoA
-	// presentation) request object declares.
+	// OID4VPClientID is the prefixed x509_san_dns client identifier BOTH request
+	// objects a ceremony publishes declare — the pending PID/PoA presentation
+	// request and the Document-Retrieval request — and therefore the audience the
+	// presented KB-JWTs must be bound to. One ceremony is reached through one
+	// request_uri, so it must name one verifier.
 	OID4VPClientID string
-	// DocRetrievalSigner signs the published Document-Retrieval request object
-	// (JAR) a real wallet consumes to fetch and sign the prepared documents
-	// (ADR-12). Distinct from RequestSigner: this request declares
-	// client_id_scheme=x509_san_dns, which requires an x5c certificate chain
-	// in the header, not a bare jwk — see oid4vprequest.X5CSigner.
-	DocRetrievalSigner oid4vprequest.Signer
-	// DocRetrievalClientID is the DNS hostname DocRetrievalSigner's own
-	// certificate identifies (x509_san_dns requires client_id to be that DNS
-	// name, and to equal the leaf certificate's SAN).
-	DocRetrievalClientID string
 	// PublicAPIBase is the externally-resolvable API base the request object's
 	// request_uri, document_locations, and response_uri are built from.
 	PublicAPIBase string
@@ -119,40 +125,82 @@ type signatureManagementsrvc struct {
 	// presentations at the ceremony callback. Same trust anchors the auth login
 	// and PID-verify flows use.
 	Trust *oid4vp.TrustConfig
+	// Credentials verifies a credential read out of a stored PDF — a signing
+	// summary, a lifecycle credential — against the key its issuer publishes for
+	// assertions, before anything it claims is used.
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
 func NewSignatureManagement(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, ceremonyRepo db.CeremonyRepo,
 	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string,
-	ipfsClient *ipfs.APIClient, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
-	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer,
+	artifacts *artifactstore.Store, pdfCore *pdfcore.Client, archiveRepo cwedb.ContractRepo, archiveNotary cwecommand.ArchiveNotary,
+	archiveTSA *tsa.APIClient, vcIssuer provenance.VCIssuer, workflowGate *workflowgate.Coordinator,
 	requestSigner oid4vprequest.Signer, oid4vpClientID, publicAPIBase string,
-	docRetrievalSigner oid4vprequest.Signer, docRetrievalClientID string,
-	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig) signaturemanagement.Service {
+	pidDCQLQuery, dcqlQuery any, trust *oid4vp.TrustConfig,
+	credentials *provenance.CredentialVerifier) signaturemanagement.Service {
 
-	return &signatureManagementsrvc{
-		JWTAuthenticator:     jwtAuth,
-		DB:                   db,
-		CRepo:                cRepo,
-		CeremonyRepo:         ceremonyRepo,
-		PDFCore:              pdfCore,
-		ATrailReader:         auditTrailReader,
-		VCSigner:             vcSigner,
-		VCIssuer:             vcIssuer,
-		IssuerDID:            issuerDID,
-		IPFSClient:           ipfsClient,
-		ArchiveRepo:          archiveRepo,
-		ArchiveNotary:        archiveNotary,
-		ArchiveTSA:           archiveTSA,
-		RequestSigner:        requestSigner,
-		OID4VPClientID:       oid4vpClientID,
-		PublicAPIBase:        publicAPIBase,
-		DocRetrievalSigner:   docRetrievalSigner,
-		DocRetrievalClientID: docRetrievalClientID,
-		PIDDCQLQuery:         pidDCQLQuery,
-		DCQLQuery:            dcqlQuery,
-		Trust:                trust,
+	// Without it every embedded signing summary would be unverifiable, and the
+	// compliance viewer would have nothing it is allowed to report.
+	if credentials == nil {
+		panic("CredentialVerifier is required to verify embedded signing evidence")
 	}
+	service := &signatureManagementsrvc{
+		JWTAuthenticator: jwtAuth,
+		DB:               db,
+		CRepo:            cRepo,
+		CeremonyRepo:     ceremonyRepo,
+		PDFCore:          pdfCore,
+		ATrailReader:     auditTrailReader,
+		VCSigner:         vcSigner,
+		VCIssuer:         vcIssuer,
+		IssuerDID:        issuerDID,
+		Artifacts:        artifacts,
+		ArchiveRepo:      archiveRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
+		WorkflowGate:     workflowGate,
+		RequestSigner:    requestSigner,
+		OID4VPClientID:   oid4vpClientID,
+		PublicAPIBase:    publicAPIBase,
+		PIDDCQLQuery:     pidDCQLQuery,
+		DCQLQuery:        dcqlQuery,
+		Trust:            trust,
+		Credentials:      credentials,
+	}
+	if workflowGate != nil {
+		workflowGate.SetReviewContinuation("signature", service.resumeReviewedSignatureGate)
+	}
+	return service
+}
+
+func (s *signatureManagementsrvc) resumeReviewedSignatureGate(ctx context.Context, run workflowgate.Run) error {
+	stringValue := func(name string) string {
+		value, _ := run.Continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	if values, ok := run.Continuation["user_roles"].([]any); ok {
+		for _, value := range values {
+			if role, ok := value.(string); ok {
+				roles = append(roles, userrole.UserRole(role))
+			}
+		}
+	}
+	signedPDF, err := base64.StdEncoding.DecodeString(stringValue("signed_pdf"))
+	if err != nil {
+		return fmt.Errorf("decode reviewed signed PDF: %w", err)
+	}
+	applier := s.newApplier()
+	return applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
+		ApplyCmd: command.ApplyCmd{
+			DID: stringValue("did"), SignerDID: stringValue("signer_did"),
+			FieldName: stringValue("field_name"), CeremonyID: stringValue("ceremony_id"),
+			CredentialType: stringValue("credential_type"), AppliedBy: stringValue("requested_by"),
+			HolderDID: stringValue("holder_did"), UserRoles: roles,
+		},
+		SignedPDF: signedPDF, JAdESSignature: stringValue("jades_signature"),
+	})
 }
 
 func (s *signatureManagementsrvc) Retrieve(ctx context.Context, req *signaturemanagement.SMContractRetrieveRequest) (res *signaturemanagement.SMContractRetrieveResponse, err error) {
@@ -298,16 +346,33 @@ func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemana
 		UserRoles:  middleware.GetUserRoles(ctx),
 	}
 	handler := query.SignatureVerifier{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
-	_, err = handler.Handle(ctx, qry)
+	result, err := handler.Handle(ctx, qry)
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
 
-	return &signaturemanagement.SMContractVerifyResponse{}, nil
+	return verifyResponseFrom(req.Did, result), nil
+}
+
+// verifyResponseFrom carries the verifier's verdict — the re-render match, the
+// active signature count, and the findings that hold the C2PA claim-signature,
+// lifecycle-credential and revocation results — onto the wire response.
+func verifyResponseFrom(did string, result *query.SignatureVerifyResult) *signaturemanagement.SMContractVerifyResponse {
+	res := &signaturemanagement.SMContractVerifyResponse{Did: did}
+	if result == nil {
+		return res
+	}
+	res.Match = result.Match
+	res.SigCount = result.SigCount
+	res.Findings = result.Findings
+	res.JsonldHash = result.JsonldHash
+	res.BasePdfHash = result.BasePdfHash
+	return res
 }
 
 func (s *signatureManagementsrvc) Provenance(ctx context.Context, req *signaturemanagement.SMProvenanceRequest) (res *signaturemanagement.SMProvenanceResponse, err error) {
@@ -344,12 +409,12 @@ func (s *signatureManagementsrvc) newApplier() command.Applier {
 		CRepo:         s.CRepo,
 		CeremonyRepo:  s.CeremonyRepo,
 		PDFCore:       s.PDFCore,
-		IPFSClient:    s.IPFSClient,
+		Artifacts:     s.Artifacts,
 		VCSigner:      s.VCSigner,
 		VCIssuer:      s.VCIssuer,
 		IssuerDID:     s.IssuerDID,
 		ArchiveRepo:   s.ArchiveRepo,
-		IPFSStorer:    s.IPFSClient,
+		IPFSStorer:    s.Artifacts,
 		ArchiveNotary: s.ArchiveNotary,
 		ArchiveTSA:    s.ArchiveTSA,
 		Validator:     validator,
@@ -418,6 +483,24 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 		ceremonyID = *req.CeremonyID
 	}
 
+	if s.WorkflowGate != nil {
+		if _, _, err := s.WorkflowGate.Execute(ctx, workflowgate.Input{
+			Gate: "signature", ContractDID: req.Did,
+			Requester: middleware.GetParticipantID(ctx), Roles: workflowRoles(ctx),
+			Continuation: map[string]any{
+				"did": req.Did, "signer_did": req.SignerDid, "field_name": fieldName,
+				"ceremony_id": ceremonyID, "credential_type": credentialType,
+				"requested_by":    middleware.GetParticipantID(ctx),
+				"holder_did":      middleware.GetHolderDID(ctx),
+				"user_roles":      workflowRoles(ctx),
+				"signed_pdf":      req.SignedPdf,
+				"jades_signature": jadesSignature,
+			},
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	handler := s.newApplier()
 	if err := handler.SubmitSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{
@@ -473,9 +556,10 @@ func (s *signatureManagementsrvc) Validate(ctx context.Context, req *signaturema
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 	queryHandler := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)
@@ -508,6 +592,10 @@ func mapDSSReport(r *dss.Report) *signaturemanagement.SMDSSReport {
 }
 
 func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemanagement.SMContractRevokeRequest) (res *signaturemanagement.SMContractRevokeResponse, err error) {
+	reason, err := command.NormalizeRevocationReason(req.Reason)
+	if err != nil {
+		return nil, signaturemanagement.MakeBadRequest(err)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -515,6 +603,7 @@ func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemana
 	qry := command.RevokeCmd{
 		DID:       req.Did,
 		SignerDID: req.SignerDid,
+		Reason:    reason,
 		RevokedBy: middleware.GetParticipantID(ctx),
 		HolderDID: middleware.GetHolderDID(ctx),
 		UserRoles: middleware.GetUserRoles(ctx),
@@ -580,8 +669,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		UserRoles: middleware.GetUserRoles(ctx),
 	}
 	queryHandler := command.ComplianceValidator{
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		DB:           s.DB,
+		CRepo:        s.CRepo,
+		CeremonyRepo: s.CeremonyRepo,
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)
@@ -606,9 +696,10 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	defer cancel()
 
 	validator := query.Validator{
-		DB:      s.DB,
-		CRepo:   s.CRepo,
-		PDFCore: s.PDFCore,
+		DB:          s.DB,
+		CRepo:       s.CRepo,
+		PDFCore:     s.PDFCore,
+		Credentials: s.Credentials,
 	}
 	validation, err := validator.Handle(ctx, query.ValidateQry{
 		DID:         req.Did,
@@ -745,6 +836,7 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 		FieldName:   req.FieldName,
 		RequestedBy: middleware.GetParticipantID(ctx),
 		BaseURL:     baseURL,
+		ClientID:    s.OID4VPClientID,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)

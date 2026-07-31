@@ -71,16 +71,22 @@ func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID strin
 		Issuer:    issuerDID,
 		ValidFrom: s.SignedAt.UTC().Format(time.RFC3339),
 		CredentialSubject: map[string]interface{}{
-			"id":              normalizeSubjectID(s.SignerDID),
-			"contract_id":     s.ContractID,
-			"ceremony_id":     s.CeremonyID,
-			"field_name":      s.FieldName,
-			"content_hash":    s.ContentHash,
-			"pdf_hash":        s.PDFHash,
-			"credential_type": s.CredentialType,
-			"kb_sd_hash":      s.KBSDHash,
-			"signed_at":       s.SignedAt.UTC().Format(time.RFC3339),
+			"id":           normalizeSubjectID(s.SignerDID),
+			"contract_id":  s.ContractID,
+			"ceremony_id":  s.CeremonyID,
+			"field_name":   s.FieldName,
+			"content_hash": s.ContentHash,
+			"pdf_hash":     s.PDFHash,
+			"kb_sd_hash":   s.KBSDHash,
+			"signed_at":    s.SignedAt.UTC().Format(time.RFC3339),
 		},
+	}
+	// A field whose signatory has not signed yet has no established level, so
+	// the caller leaves CredentialType empty. Emitting "" would seal an empty
+	// eIDAS level claim into an issuer-signed credential inside a PAdES byte
+	// range that can never be corrected; omitting the key states the absence.
+	if s.CredentialType != "" {
+		unsignedVC.CredentialSubject["credential_type"] = s.CredentialType
 	}
 	if s.ValidationReportHash != "" {
 		unsignedVC.CredentialSubject["schema_version"] = s.SchemaVersion

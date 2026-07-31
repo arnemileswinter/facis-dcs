@@ -69,11 +69,20 @@ func loadAuthConfig(ctx context.Context) (service.AuthConfig, error) {
 		trustCfg.SetX5CTrustRoots(x5cRoots)
 	}
 
+	// Optional: the endpoint the `orce` mechanism delegates key resolution to.
+	// It is what lets a deployment trust an issuer published through a registry
+	// this build knows nothing about — the flow resolves the identifier and
+	// answers with a JWKS. An issuer configured for `orce` without this set is
+	// refused at first use with that reason named.
+	if orceResolver := strings.TrimSpace(os.Getenv("OID4VP_ORCE_RESOLVER_URL")); orceResolver != "" {
+		trustCfg.ORCEResolverURL = orceResolver
+	}
+
 	xfscAllowUnsignedFallback := false
 	if v := strings.TrimSpace(os.Getenv("OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK")); strings.EqualFold(v, "true") {
 		xfscAllowUnsignedFallback = true
 	}
-	if err := oid4vp.ConfigureStatusListVerification(trustDataPath, xfscAllowUnsignedFallback); err != nil {
+	if err := oid4vp.ConfigureStatusListVerification(trustCfg, xfscAllowUnsignedFallback); err != nil {
 		return service.AuthConfig{}, fmt.Errorf("oid4vp configuration error: %w", err)
 	}
 

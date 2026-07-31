@@ -441,6 +441,30 @@ func (e DeleteArchivedEvent) GetDID() string {
 	return e.DID
 }
 
+// KeyShreddedEvent records the destruction of a contract's wrapped
+// content-encryption keys (DCS-NFR-SEC-13, DCS-NFR-COMP-03). ShreddedBy is a
+// local participant on the archive-deletion path or the requesting peer's DID
+// on the federation erase path. The event carries no contract content.
+type KeyShreddedEvent struct {
+	DID          string    `json:"did"`
+	ScopeKind    string    `json:"scope_kind"`
+	ScopeID      string    `json:"scope_id"`
+	ShreddedBy   string    `json:"shredded_by"`
+	Reason       string    `json:"reason"`
+	RowsShredded int64     `json:"rows_shredded"`
+	OccurredAt   time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e KeyShreddedEvent) EventType() string {
+	return eventtype.KeyShredded.String()
+}
+
+// GetDID implements [event.Event].
+func (e KeyShreddedEvent) GetDID() string {
+	return e.DID
+}
+
 // AnnotateArchivedEvent is emitted when an archive entry's summary/tags
 // annotation is set (DCS-FR-CSA-11).
 type AnnotateArchivedEvent struct {

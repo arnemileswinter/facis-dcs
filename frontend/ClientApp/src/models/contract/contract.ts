@@ -1,4 +1,4 @@
-import type { ContractData } from '../contract-data'
+import type { ContractData } from './contract-data'
 import type { ContractNegotiation } from './contract-negotiation'
 import type { ContractResponsible } from './contract-responsible'
 import type { ContractState } from '@/types/contract-state'
@@ -22,6 +22,13 @@ export interface Contract {
   did: string
   contract_version: number
   state: ContractState
+  /**
+   * Peer-facing lifecycle inferred by the backend (ADR-13): one of
+   * ExtrinsicLifecycle, or a lowercased off-ramp state. Only 'executed' claims
+   * every declared signature is collected — the intrinsic SIGNED state does
+   * not, it is written on the first signature.
+   */
+  extrinsic_lifecycle?: string
   name?: string
   description?: string
   created_by: string
@@ -51,5 +58,8 @@ export interface Contract {
 }
 
 export type ContractChangeRequest = Pick<Contract, 'name' | 'description' | 'exp_notice_period' | 'exp_policy'> & {
-  contract_data?: Partial<Contract['contract_data']>
+  /** A content redline is a complete canonical contract document. The backend
+   *  validates and replaces contract_data atomically; nested partial patches
+   *  are not part of the negotiation contract. */
+  contract_data?: ContractData
 }

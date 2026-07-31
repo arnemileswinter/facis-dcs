@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -17,6 +18,12 @@ import (
 // URLs for the JSON-LD context ("@context") and the SHACL shapes
 // ("sh:shapesGraph"). Re-pointed at startup and on every hub activation
 // (SetSchemaAnchorRefs).
+//
+// All four are written together by one hub-activation request handler while
+// normalization and validation read them on other request goroutines, so they
+// share anchorsMu. The maps are only ever replaced wholesale, never mutated in
+// place, which lets a reader take a snapshot under the read lock and walk it
+// after releasing.
 //
 // No validation profile is stamped. The anchor named one hardcoded entry
 // whose rules are about the DCS envelope — a contract root and its party
@@ -30,11 +37,40 @@ var (
 	// canonicalOntologyIRIs is the active hub context's prefix -> IRI map;
 	// documents redefining one of these prefixes are rejected.
 	canonicalOntologyIRIs map[string]string
+	// shapeLibraryAnchors maps a class targeted by an ACTIVE registered hub
+	// shapes library to that library's anchor (SetShapeLibraryAnchors).
+	shapeLibraryAnchors map[string]ShapeLibraryAnchor
+	anchorsMu           sync.RWMutex
 )
+
+// ShapeLibraryAnchor is a registered hub SHACL library's name and the
+// versioned anchor URL a document declaring it carries.
+type ShapeLibraryAnchor struct {
+	Name string
+	URL  string
+}
+
+// SetShapeLibraryAnchors installs the class -> registered-library index used
+// to declare, in a produced document's sh:shapesGraph, the shape libraries
+// its own data objects are governed by (ADR-23). Re-installed on every hub
+// activation alongside SetSchemaAnchorRefs.
+func SetShapeLibraryAnchors(byTargetClass map[string]ShapeLibraryAnchor) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
+	shapeLibraryAnchors = byTargetClass
+}
+
+func currentShapeLibraryAnchors() map[string]ShapeLibraryAnchor {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return shapeLibraryAnchors
+}
 
 // SetSchemaAnchorRefs re-points the anchors of newly produced documents at
 // the Semantic Hub's served URLs.
 func SetSchemaAnchorRefs(contextRef, shapesRef string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	if contextRef != "" {
 		schemaRefJSONLDContext = contextRef
 	}
@@ -43,26 +79,87 @@ func SetSchemaAnchorRefs(contextRef, shapesRef string) {
 	}
 }
 
+func currentJSONLDContextRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefJSONLDContext
+}
+
+func currentSHACLShapesRef() string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return schemaRefSHACLShapes
+}
+
+// PinSemanticBundle stamps the immutable Semantic Hub bundle selected while a
+// new artifact is created.
+func PinSemanticBundle(raw *datatype.JSON, contextRef, canonicalShapesRef string, effectiveShapeRefs []string, profileRef string) (*datatype.JSON, error) {
+	if raw == nil || strings.TrimSpace(contextRef) == "" || strings.TrimSpace(canonicalShapesRef) == "" ||
+		len(effectiveShapeRefs) == 0 || strings.TrimSpace(profileRef) == "" {
+		return nil, errors.New("complete semantic bundle references are required")
+	}
+	var data documentData
+	if err := json.Unmarshal(*raw, &data); err != nil {
+		return nil, fmt.Errorf("decode semantic bundle document: %w", err)
+	}
+	contextEntries := []any{contextRef}
+	switch current := data["@context"].(type) {
+	case []any:
+		for _, entry := range current {
+			if iri, ok := entry.(string); ok && isHubContextAnchor(iri) {
+				continue
+			}
+			contextEntries = append(contextEntries, entry)
+		}
+	case map[string]any:
+		contextEntries = append(contextEntries, current)
+	}
+	data["@context"] = contextEntries
+	// Anchors a document already declares are never rewritten (ADR-8): a
+	// federated template names the shape libraries its author modelled against,
+	// and those graphs are what must validate it on a peer. The bundle is only
+	// stamped here when the document declares no shapes graph of its own.
+	if _, declared := data["sh:shapesGraph"]; !declared {
+		data["sh:shapesGraph"] = map[string]any{"@id": canonicalShapesRef}
+	}
+	refs := make([]any, 0, len(effectiveShapeRefs))
+	for _, ref := range effectiveShapeRefs {
+		refs = append(refs, map[string]any{"@id": ref})
+	}
+	data["dcs:effectiveShapes"] = refs
+	data["dcterms:conformsTo"] = map[string]any{"@id": profileRef}
+	return encodeDocumentData(data)
+}
+
 // SetCanonicalOntologyIRIs installs the ACTIVE hub context's prefix -> IRI
 // map for enforcement during normalization.
 func SetCanonicalOntologyIRIs(iris map[string]string) {
+	anchorsMu.Lock()
+	defer anchorsMu.Unlock()
 	canonicalOntologyIRIs = iris
+}
+
+func currentCanonicalOntologyIRIs() map[string]string {
+	anchorsMu.RLock()
+	defer anchorsMu.RUnlock()
+	return canonicalOntologyIRIs
 }
 
 // enforceCanonicalOntologyIRIs rejects documents whose @context redefines a
 // hub-declared prefix to a different IRI (DCS-FR-TR-03: templating and
 // contracting validate against the Semantic Hub's active schema).
 func enforceCanonicalOntologyIRIs(data documentData) error {
-	if len(canonicalOntologyIRIs) == 0 {
+	canonical := currentCanonicalOntologyIRIs()
+	if len(canonical) == 0 {
 		return nil
 	}
 	switch context := data["@context"].(type) {
 	case map[string]any:
-		return enforceCanonicalOntologyIRIMap(context)
+		return enforceCanonicalOntologyIRIMap(context, canonical)
 	case []any:
 		for _, entry := range context {
 			if inline, ok := entry.(map[string]any); ok {
-				if err := enforceCanonicalOntologyIRIMap(inline); err != nil {
+				if err := enforceCanonicalOntologyIRIMap(inline, canonical); err != nil {
 					return err
 				}
 			}
@@ -71,13 +168,13 @@ func enforceCanonicalOntologyIRIs(data documentData) error {
 	return nil
 }
 
-func enforceCanonicalOntologyIRIMap(context map[string]any) error {
+func enforceCanonicalOntologyIRIMap(context map[string]any, canonicalIRIs map[string]string) error {
 	for prefix, iri := range context {
 		supplied, ok := iri.(string)
 		if !ok {
 			continue
 		}
-		canonical, known := canonicalOntologyIRIs[prefix]
+		canonical, known := canonicalIRIs[prefix]
 		if known && supplied != canonical {
 			return fmt.Errorf(
 				"%w: document @context redefines prefix %q to %q, but the Semantic Hub's active context declares %q",
@@ -389,8 +486,9 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 	// Anchors are set once, at production time: a document keeps the hub
 	// versions it was authored under.
 	if _, exists := data["sh:shapesGraph"]; !exists {
-		data["sh:shapesGraph"] = map[string]any{"@id": schemaRefSHACLShapes}
+		data["sh:shapesGraph"] = map[string]any{"@id": currentSHACLShapesRef()}
 	}
+	declareShapeLibraries(data)
 	if _, ok := topLevelValue(data, "contractData").([]any); !ok {
 		if _, exists := topLevelValueExists(data, "contractData"); !exists {
 			setTopLevelValue(data, "dcs:contractData", []any{})
@@ -407,6 +505,93 @@ func normalizeCanonicalEnvelope(data documentData, documentType string) {
 		}
 	}
 	typeLayoutNodes(data)
+}
+
+// declareShapeLibraries adds to the document's own sh:shapesGraph the
+// versioned anchor of every registered hub shapes library that governs a
+// class the document's data uses. Validation loads exactly the declared
+// graphs, so this declaration is what keeps a data object modelled against a
+// registered library under that library's constraints (ADR-23) — and what
+// keeps every other registered library out of the verdict.
+//
+// A library the document already declares keeps the version it was authored
+// under: anchors are added, never rewritten (ADR-8). "Already declared" is
+// name AND version, so a document that arrives pre-declaring an OLD version of
+// a library still gets the active anchor added: a submitter cannot pick which
+// version of a library governs its data by naming a laxer one first, and the
+// document ends up validated against both.
+func declareShapeLibraries(data documentData) {
+	anchors := currentShapeLibraryAnchors()
+	if len(anchors) == 0 {
+		return
+	}
+	declared := map[shapesGraphAnchor]bool{}
+	for _, anchor := range declaredShapesGraphs(data) {
+		declared[anchor] = true
+	}
+	var added []any
+	for _, class := range assertedTypeIRIs(data) {
+		anchor, governed := anchors[class]
+		if !governed {
+			continue
+		}
+		declaration := shapesGraphAnchor{Name: anchor.Name, Version: anchorVersion(anchor.URL)}
+		if declared[declaration] {
+			continue
+		}
+		declared[declaration] = true
+		added = append(added, map[string]any{"@id": anchor.URL})
+	}
+	if len(added) == 0 {
+		return
+	}
+	existing, isList := data["sh:shapesGraph"].([]any)
+	if !isList {
+		existing = []any{data["sh:shapesGraph"]}
+	}
+	data["sh:shapesGraph"] = append(existing, added...)
+}
+
+// assertedTypeIRIs collects every @type the document asserts anywhere in its
+// graph, sorted — the anchor list a document ends up with must not depend on
+// map iteration order.
+func assertedTypeIRIs(data documentData) []string {
+	seen := map[string]bool{}
+	var types []string
+	collect := func(value any) {
+		iri, ok := value.(string)
+		if !ok || seen[iri] {
+			return
+		}
+		seen[iri] = true
+		types = append(types, iri)
+	}
+	var walk func(node any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			switch asserted := typed["@type"].(type) {
+			case string:
+				collect(asserted)
+			case []any:
+				for _, entry := range asserted {
+					collect(entry)
+				}
+			}
+			for key, value := range typed {
+				if key != "@type" {
+					walk(value)
+				}
+			}
+		case []any:
+			for _, entry := range typed {
+				walk(entry)
+			}
+		}
+	}
+	walk(map[string]any(data))
+	slices.Sort(types)
+	return types
 }
 
 // typeLayoutNodes asserts rdf:type on the document's layout nodes — the
@@ -441,23 +626,24 @@ func typeLayoutNodes(data documentData) {
 // it in JSON-LD array form. A document whose @context already carries a
 // URL entry keeps it.
 func normalizeCanonicalContext(data documentData) {
+	anchor := currentJSONLDContextRef()
 	switch context := data["@context"].(type) {
 	case string:
 		if isHubContextAnchor(context) {
 			return
 		}
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	case []any:
 		for _, entry := range context {
 			if url, ok := entry.(string); ok && isHubContextAnchor(url) {
 				return
 			}
 		}
-		data["@context"] = append([]any{schemaRefJSONLDContext}, context...)
+		data["@context"] = append([]any{anchor}, context...)
 	case map[string]any:
-		data["@context"] = []any{schemaRefJSONLDContext, context}
+		data["@context"] = []any{anchor, context}
 	default:
-		data["@context"] = schemaRefJSONLDContext
+		data["@context"] = anchor
 	}
 }
 
@@ -680,6 +866,7 @@ func validateBlockFieldReferences(block map[string]any, fieldIDs map[string]bool
 // reference must resolve in-document — the graph stays self-contained, so
 // SHACL traversal and rendering never consult anything outside the document.
 func validateContractDataGraph(data documentData, fieldIDs map[string]bool) error {
+	documentID, _ := data["@id"].(string)
 	contractData, _ := topLevelValue(data, "contractData").([]any)
 	objectIDs := map[string]bool{}
 	for index, rawObject := range contractData {
@@ -707,7 +894,7 @@ func validateContractDataGraph(data documentData, fieldIDs map[string]bool) erro
 				values = []any{rawValue}
 			}
 			for _, value := range values {
-				if err := validateContractDataValue(value, fieldIDs, objectIDs); err != nil {
+				if err := validateContractDataValue(value, documentID, fieldIDs, objectIDs); err != nil {
 					return fmt.Errorf("contractData.%d.%s %w", index, property, err)
 				}
 			}
@@ -716,24 +903,41 @@ func validateContractDataGraph(data documentData, fieldIDs map[string]bool) erro
 	return nil
 }
 
-// validateContractDataValue admits the three value kinds of the contract-data
-// graph — a JSON literal, a typed {"@value"} literal, or a single-key {"@id"}
-// reference into the document — and nothing else.
-func validateContractDataValue(value any, fieldIDs, objectIDs map[string]bool) error {
+// validateContractDataValue admits the value kinds of the contract-data
+// graph — a JSON literal, a typed {"@value"} literal, a single-key {"@id"}
+// reference into the document, or a single-key {"@id"} absolute IRI naming an
+// external resource (an sh:nodeKind sh:IRI leaf) — and nothing else. A
+// document-scoped @id must resolve within the document: it is a dangling
+// internal reference, not an external resource.
+func validateContractDataValue(value any, documentID string, fieldIDs, objectIDs map[string]bool) error {
 	object, ok := value.(map[string]any)
 	if !ok {
 		return nil // a bare JSON literal: fixed data
 	}
 	if id, isRef := object["@id"].(string); isRef && len(object) == 1 {
-		if !fieldIDs[id] && !objectIDs[id] {
-			return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
+		if fieldIDs[id] || objectIDs[id] || isExternalResourceIRI(id, documentID) {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("references %q, which is neither a declared contract field nor a domain object in this document", id)
 	}
 	if _, isLiteral := object["@value"]; isLiteral {
 		return nil // a typed literal
 	}
 	return errors.New("must be a literal, a contract-field reference, or a {\"@id\"} reference to another domain object — an embedded blank node is not addressable")
+}
+
+// isExternalResourceIRI reports whether an unresolved @id names a resource
+// outside the document: an absolute IRI that is neither draft-scoped
+// (urn:uuid:, the editor's pre-registration node scheme) nor scoped to the
+// document's own IRI.
+func isExternalResourceIRI(id, documentID string) bool {
+	if strings.HasPrefix(id, "urn:uuid:") {
+		return false
+	}
+	if documentID != "" && (id == documentID || strings.HasPrefix(id, documentID+"#")) {
+		return false
+	}
+	return strings.Contains(id, "://") || strings.HasPrefix(id, "did:") || strings.HasPrefix(id, "urn:")
 }
 
 func validatePolicyOperands(data documentData, fieldIDs map[string]bool) error {
@@ -798,7 +1002,7 @@ func compactConstraintLeaves(constraint map[string]any) []map[string]any {
 }
 
 // dutyConstraints collects the constraint nodes carried by a rule's duties and,
-// recursively, their consequence duties (ODRL IM §2.5) — so a duty constraint
+// recursively, their consequence duties (ODRL IM §2.6.6) — so a duty constraint
 // referencing a nonexistent data field is caught wherever it nests.
 func dutyConstraints(raw any) []map[string]any {
 	out := []map[string]any{}
@@ -955,10 +1159,10 @@ func validateODRLRuleShape(rule map[string]any) error {
 	if strings.TrimSpace(proseID) == "" {
 		return errors.New("rule is missing dcs:prose — every machine-readable rule must reference the human-readable clause it is backed by")
 	}
-	// A Permission may carry duties (ODRL IM §2.5): obligations the assignee
+	// A Permission may carry duties (ODRL IM §2.6.5): obligations the assignee
 	// must fulfil to exercise it. Each is a fragment — its own odrl:action (and
 	// optional constraints/consequence), inheriting the enclosing rule's
-	// parties, so it declares no assigner/assignee/target/prose of its own.
+	// parties, so it declares no assigner/assignee/target of its own.
 	if rawDuty, hasDuty := rule["odrl:duty"]; hasDuty {
 		if compactTerm(fmt.Sprint(rule["@type"])) != "Permission" {
 			return errors.New("odrl:duty may only be attached to a Permission (a duty nests under the rule it obliges); a policy-level Duty belongs under odrl:obligation")
@@ -973,9 +1177,10 @@ func validateODRLRuleShape(rule map[string]any) error {
 }
 
 // validateODRLDutyFragment validates a Duty nested under a Permission (ODRL IM
-// §2.5). Unlike a top-level rule, a duty fragment inherits its parties from the
-// enclosing rule, so it needs only an odrl:action; its consequence is itself a
-// duty, validated the same way (recursively).
+// §2.6.5). A duty fragment inherits its parties from the enclosing rule, so it
+// needs an odrl:action and the prose backing every odrl:Duty owes (the hub's
+// dcs:OdrlDutyProseShape refuses a document at submit otherwise); its
+// consequence is itself a duty, validated the same way (recursively).
 func validateODRLDutyFragment(duty map[string]any) error {
 	if t := compactTerm(fmt.Sprint(duty["@type"])); t != "" && t != "Duty" {
 		return fmt.Errorf("a duty must be an odrl:Duty, got %v", duty["@type"])
@@ -986,6 +1191,10 @@ func validateODRLDutyFragment(duty map[string]any) error {
 	}
 	if items, ok := action.([]any); ok && len(items) == 0 {
 		return errors.New("duty must declare at least one odrl:action")
+	}
+	prose, _ := duty["dcs:prose"].(map[string]any)
+	if proseID, _ := prose["@id"].(string); strings.TrimSpace(proseID) == "" {
+		return errors.New("duty is missing dcs:prose — a nested duty is a machine-readable rule too, so it must reference the human-readable clause it is backed by")
 	}
 	if rawConsequence, ok := duty["odrl:consequence"]; ok {
 		for index, consequence := range policyConstraints(rawConsequence) {

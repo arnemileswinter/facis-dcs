@@ -35,6 +35,10 @@ pdfCore:
     pullPolicy: Never
 
 extraEnv:
+  # This stack trusts the issuer fixture committed to the repo. It has to
+  # declare that, so no deployment inherits it by omission.
+  - name: DCS_ALLOW_DEV_TRUST
+    value: "true"
   - name: JWT_ALG_NONE_SUPPORTED
     value: "true"
   - name: AUTH_INSECURE_COOKIES
@@ -46,11 +50,24 @@ extraEnv:
   # orce release).
   - name: DCS_TRUST_PDP_URL
     value: "http://dcs-orce:1880/trust-pdp"
+  # did:web is https, and the resolver makes that exception only for loopback on
+  # its own. The synthetic peers the ADR-19 scenarios use are in-cluster Services
+  # on plain http under names that are not loopback, so they are named here
+  # rather than reinstating a silent http fallback that would also apply on the
+  # internet. See identity.DIDWebSchemes.
+  - name: DCS_DIDWEB_INSECURE_HOSTS
+    value: "dcs-orce:1880,dcs-orce-mismatch:1880,dcs-orce-trusted:1880"
   # DB-backed sync-fail retry cadence (conf.SyncFailCronJobTimeOut). The prod
   # default is minutes; BDD/e2e run it fast so a peer PDF ship that fires before
   # the async regenerator stored the CID (or that transiently failed) is
   # re-attempted and delivered well within the scenarios' replication wait.
   - name: DCS_SYNC_FAIL_RETRY_INTERVAL
+    value: "10s"
+  # Background regeneration retry cadence (conf.PDFRegenerationRetryTimeOut).
+  # The prod default is minutes; BDD/e2e run it fast so a PDF whose regeneration
+  # failed transiently (pdf-core or IPFS) is re-rendered and stored — and the
+  # deferred peer ship then has something to send — within the scenarios' waits.
+  - name: DCS_PDF_REGENERATION_RETRY_INTERVAL
     value: "10s"
   # Real deployment dispatch to the shipped ORCE contract-target-flow
   # (UC-05-01): the flow verifies the payload hash, acks synchronously, and
@@ -72,6 +89,8 @@ identity:
 
 oid4vp:
   trust:
+    enabled: true
+    dataPath: /app/config/oid4vp/trust.dev.json
     xfscAllowUnsignedFallback: true
     # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
     # issuer" scenarios) verifies against this baked-in dev cert.
@@ -292,6 +311,11 @@ statuslistService:
     tenantIDs:
       - credential
       - c2pa
+      # Instance B shares this service but not this instance's database, and a
+      # revocation entry is allocated out of that database (migration 20260734).
+      # Two instances allocating into one list would hand the same bit to two
+      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
+      - c2pa2
 
 statusListLocalhostProxy:
   enabled: true
@@ -364,9 +388,16 @@ systemClients:
 
 orce:
   enabled: true
-  # The ADR-19 AC5 mismatched-federation-rules scenario resolves this second
-  # did:web against the same ORCE pod; off by default in the chart because it is
-  # a test fixture.
+  checkpointSink:
+    enabled: true
+    url: "https://host.docker.internal:18443/checkpoints"
+    timeoutSeconds: 2
+    internalTimeoutSeconds: 30
+    allowInsecureTLS: true
+    bearerToken: "bdd-checkpoint-sink-token"
+  # The ADR-19 mismatched-federation-rules (AC5) and trusted-peer (AC7/AC8/AC9)
+  # scenarios resolve their did:web identities against the same ORCE pod; off by
+  # default in the chart because they are test fixtures.
   syntheticPeer:
     enabled: true
   persistence:
@@ -376,6 +407,8 @@ orce:
   # own registered OAuth2 client (ADR-27): the callback proves WHICH target is
   # reporting, so a target can acknowledge its own deployments and no others.
   extraEnv:
+    - name: ORCE_AUDIT_EXECUTOR_TEST_CONTROLS_ENABLED
+      value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
     # legs append /contract/deployment/callback to it.
@@ -414,6 +447,16 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
+      - host: "localhost"
+        path: /orce
+
+auditExecutor:
+  url: "http://dcs-orce:1880/customer-audit/run"
+  timeout: "2s"
+
+workflowGateExecutor:
+  url: "http://dcs-orce:1880/workflow-gate/run"
+  timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.
@@ -481,3 +524,8 @@ contractTargets:
     # admin UI, because the suite has no operator to click through it. A real
     # deployment issues the credential once and rotates it (ADR-27).
     oauth_client_id: "dcs-orce-target"
+
+# In-cluster service credential for the background PDF regenerator, which runs on
+# NATS events with no user JWT. Never a shared or committed value in a real
+# deployment: the chart refuses to render without one.
+systemToken: "dcs-local-dev-system-token"

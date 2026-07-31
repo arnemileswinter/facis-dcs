@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	db2 "digital-contracting-service/internal/dcstodcs/db"
 )
 
 // ErrSigningIncomplete rejects deployment of a multi-signer contract whose
@@ -75,6 +76,18 @@ type Deployer struct {
 	DeploymentRepo db.DeploymentRepo
 	TargetRepo     db.ContractTargetRepo
 	Target         ContractTargetClient
+	// PeerSigs supplies the counterparty signature evidence the multi-signer
+	// gate needs for a federated contract. Required: a deployer without it
+	// cannot tell a countersigned contract from a half-signed one.
+	PeerSigs PeerSignatures
+}
+
+// PeerSignatures reads the cross-instance signature artifact a peer ships with
+// its own signed copy of a contract (DCS-FR-SM-02): a JAdES over the contract
+// payload, verified against the peer's published assertion key before it is
+// stored (internal/service/dcs_to_dcs.go verifyShippedJades).
+type PeerSignatures interface {
+	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db2.SyncSignature, error)
 }
 
 func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, error) {
@@ -109,29 +122,14 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 			if err != nil {
 				return nil, fmt.Errorf("could not read signed signature fields: %w", err)
 			}
-			signed := make(map[string]bool, len(signedFields))
-			for _, f := range signedFields {
-				signed[f] = true
+			if h.PeerSigs == nil {
+				return nil, fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", cmd.DID)
 			}
-			var missing []string
-			for _, f := range required {
-				if signed[f] {
-					continue
-				}
-				// A counterparty signs in ITS deployment and its signature record
-				// never reaches ours, so requiring it here means a federated
-				// contract can never be activated on either side. Activation is a
-				// local act on a local copy: this instance gates on its OWN slot,
-				// while the peer's signature is carried by the artifact we
-				// received and content-verified (the fatal /verify/content gate).
-				// Fields that are not a party DID — the single-instance
-				// multi-signer flow names them per signatory — are never skipped.
-				if isRemotePartyField(data.Responsible, cmd.LocalPeer, f) {
-					continue
-				}
-				missing = append(missing, f)
+			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, cmd.DID)
+			if err != nil {
+				return nil, fmt.Errorf("could not read the counterparty signature for %s: %w", cmd.DID, err)
 			}
-			if len(missing) > 0 {
+			if missing := signatureEvidence(required, signedFields, data.Responsible, cmd.LocalPeer, peerSig).Unsigned(); len(missing) > 0 {
 				return nil, fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
 			}
 		}
@@ -283,14 +281,29 @@ func hashDeploymentPayload(payload map[string]any) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// isRemotePartyField reports whether a declared signature field belongs to a
-// party other than this instance. Slots are named by the signing party's DID, so
-// a slot naming the counterparty is one whose signature is produced, recorded
-// and activated in the peer's own deployment. A field that is not a party DID is
-// never remote.
-func isRemotePartyField(resp *db.Responsible, localPeer, field string) bool {
-	if resp == nil || localPeer == "" || field == "" || field == localPeer {
-		return false
+// signatureEvidence expresses what this instance holds about a contract's
+// signatures in the shared form the "have all declared signatures been
+// collected" predicate takes (contractstate.SignatureEvidence). The predicate
+// itself lives there and is answered once, for the extrinsic lifecycle
+// projection and for this gate alike: the same rule stated twice is how a
+// half-signed contract came to be deployable on one path while a fully
+// countersigned one was undeployable on the other.
+//
+// Only the mapping is local. A contract with no recorded parties has no remote
+// slot to exempt, and only one cross-instance signature is stored per contract
+// (contract_sync_signatures is keyed by contract, with no field column), so at
+// most one remote party can be evidenced and any further one stays unsigned.
+func signatureEvidence(required, signedLocally []string, resp *db.Responsible, localPeer string, peerSig *db2.SyncSignature) contractstate.SignatureEvidence {
+	evidence := contractstate.SignatureEvidence{
+		Declared:      required,
+		SignedLocally: signedLocally,
+		LocalPeer:     localPeer,
 	}
-	return field == resp.Creator || field == resp.Counterparty
+	if resp != nil {
+		evidence.Parties = []string{resp.Creator, resp.Counterparty}
+	}
+	if peerSig != nil {
+		evidence.PeerSigners = []string{peerSig.FromPeerDID}
+	}
+	return evidence
 }

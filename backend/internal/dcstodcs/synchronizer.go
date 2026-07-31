@@ -12,23 +12,26 @@ package dcstodcs
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
-	"digital-contracting-service/internal/base/ipfs"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -42,9 +45,13 @@ type DCSToDCSSynchronizer struct {
 	DB          *sqlx.DB
 	CRepo       db.ContractRepo
 	SRepo       db2.SyncRepository
-	IPFSClient  *ipfs.APIClient
+	Artifacts   *artifactstore.Store
 	DIDDocument identity.DIDDocument
 	TrustGate   TrustGate
+	// PoAs supplies the Power of Attorney behind each signature this instance
+	// applied, shipped so the counterparty can verify the authority to sign
+	// rather than read an unbacked claim off the contract (ADR-31).
+	PoAs SignatoryPoAs
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
@@ -208,21 +215,35 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return s.recordShipOutcome(ctx, did,
 			fmt.Errorf("contract %s is shippable but its PDF is not stored yet; deferring ship to the retry scheduler", did), nil)
 	}
+	// The receiver adopts the JSON-LD carried in the shipped PDF as its own copy
+	// (ADR-13), so the PDF must be a render of the document as it now stands. A
+	// contract filled and offered while its genesis render is still in flight
+	// stores that render afterwards, and the render's own PDF-regenerated event
+	// would ship the pre-fill document. Defer to the retry scheduler as for a
+	// PDF not stored yet: the re-render's own ship carries the current document.
+	if holdsSupersededPDF(pdfState, contractData) {
+		return s.recordShipOutcome(ctx, did,
+			fmt.Errorf("contract %s holds a PDF rendered from a superseded document; deferring ship until it is re-rendered", did), nil)
+	}
 
 	recipients := contractData.Responsible.GetParties()
 
-	pdfResult, err := s.IPFSClient.FetchFile(pdfState.IPFSCID)
-	if err != nil || len(pdfResult.Data) == 0 {
+	pdfBytes, err := s.Artifacts.Get(ctx, artifactstore.ContractScope(did), pdfState.IPFSCID)
+	if err != nil || len(pdfBytes) == 0 {
 		return fmt.Errorf("fetch PDF %s from IPFS for %s: %w", pdfState.IPFSCID, did, err)
 	}
-	pdfBytes := []byte(pdfResult.Data)
 
 	jadesSignature, err := s.jadesForSignedContract(state, contractData)
 	if err != nil {
 		return err
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, recipients)
+	signatoryPoAs, err := s.poaEvidenceForSignedContract(ctx, state, did)
+	if err != nil {
+		return err
+	}
+
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -247,7 +268,8 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 
 // clearSyncFailWithIncident deletes any sync_fails retry entry for did and
 // records the terminal policy-endpoint denial incident in the same
-// transaction (ADR-19 AC10) — deduped per (did, peer, direction), since a
+// transaction (ADR-19 makes every trust-gate denial auditable through the
+// incident-report flow) — deduped per (did, peer, direction), since a
 // single offer's Offer and PDF_REGENERATED events each independently trigger
 // a ship attempt a few hundred ms apart and both can hit the same denial.
 func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, did string, gateErr *GateError) error {
@@ -268,6 +290,32 @@ func (s *DCSToDCSSynchronizer) clearSyncFailWithIncident(ctx context.Context, di
 		return fmt.Errorf("could not record trust gate denial incident: %w", err)
 	}
 	return tx.Commit()
+}
+
+// holdsSupersededPDF reports whether the stored PDF was rendered from a
+// document the contract has since moved past, which is what makes it unfit to
+// ship. A frozen artifact answers false — signed bytes are never re-rendered,
+// so their recorded hash is the one signing wrote, not a render's. So does a
+// contract whose PDF predates payload-hash recording: nothing is known about
+// what it was rendered from, and refusing to ship it would strand it.
+func holdsSupersededPDF(pdfState *db.ContractPDFState, contract *db.Contract) bool {
+	if pdfState == nil || provenance.IsFrozenC2PAState(pdfState.C2PAState) || pdfState.PayloadHash == "" {
+		return false
+	}
+	return pdfState.PayloadHash != contractDataHash(contract)
+}
+
+// contractDataHash is the payload hash of a contract's stored document, taken
+// exactly as the regenerator takes the one it records against a render
+// (pdfgeneration/event.Subscriber.appendC2PA) — the two are only comparable
+// while they hash the same bytes the same way.
+func contractDataHash(contract *db.Contract) string {
+	var payload []byte
+	if contract.ContractData != nil {
+		payload = []byte(*contract.ContractData)
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }
 
 // jadesForSignedContract returns the JAdES a signed contract's ship carries, or
@@ -291,7 +339,24 @@ func (s *DCSToDCSSynchronizer) jadesForSignedContract(state string, contractData
 	return signature, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, recipients []string) error {
+// poaEvidenceForSignedContract returns the Power of Attorney behind every
+// signature this instance applied, for the ships where a signature exists at
+// all (ADR-31). A proposal carries none because nothing has been signed yet.
+func (s *DCSToDCSSynchronizer) poaEvidenceForSignedContract(ctx context.Context, state, did string) ([]SignatoryPoA, error) {
+	if s.PoAs == nil {
+		return nil, nil
+	}
+	if state != contractstate.Signed.String() && state != contractstate.Revoked.String() {
+		return nil, nil
+	}
+	evidence, err := s.PoAs.ForContract(ctx, did)
+	if err != nil {
+		return nil, fmt.Errorf("read power-of-attorney evidence for %s: %w", did, err)
+	}
+	return evidence, nil
+}
+
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, recipients []string) error {
 	for _, peer := range recipients {
 		if peer == localPeer {
 			continue
@@ -299,6 +364,33 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		if err := s.TrustGate.Check(ctx, peer, Outbound, did, state); err != nil {
 			return err
 		}
+
+		// Ship the contract CEK wrapped to the peer's keyAgreement key
+		// (DCS-NFR-SEC-14): the receiver re-wraps it to its own key, so both
+		// instances hold the same CEK for the contract. Sent with every ship —
+		// the receiver adopts it only when it has none yet, so repeats are
+		// idempotent. A peer without a resolvable keyAgreement key cannot
+		// receive the CEK and the ship hard-fails into the retry queue.
+		//
+		// The wrap carries the id of the method it was made for, so a peer that
+		// publishes several key-agreement keys knows which one to unwrap with.
+		remoteDIDDocument, err := identity.FetchDIDDocument(peer)
+		if err != nil {
+			return fmt.Errorf("fetch did document of peer %s: %w", peer, err)
+		}
+		peerKeyAgreement, err := remoteDIDDocument.PeerKeyAgreementMethod()
+		if err != nil {
+			return fmt.Errorf("resolve keyAgreement key of peer %s: %w", peer, err)
+		}
+		peerKeyAgreementPub, err := peerKeyAgreement.ECPublicKey()
+		if err != nil {
+			return fmt.Errorf("keyAgreement key %q of peer %s: %w", peerKeyAgreement.ID, peer, err)
+		}
+		wrappedCEK, err := s.Artifacts.WrapForPeer(ctx, artifactstore.ContractScope(did), peer, peerKeyAgreement.ID, peerKeyAgreementPub)
+		if err != nil {
+			return fmt.Errorf("wrap contract cek of %s for peer %s: %w", did, peer, err)
+		}
+
 		hostname, segments, err := identity.DIDWebPath(peer)
 		if err != nil {
 			return err
@@ -321,6 +413,8 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			SecretHash:     secretHash,
 			JadesSignature: &jadesSignature,
 			ContractState:  &state,
+			WrappedCek:     WireWrappedCEK(wrappedCEK),
+			SignatoryPoas:  WireSignatoryPoAs(signatoryPoAs),
 		}); err != nil {
 			return err
 		}
