@@ -78,6 +78,7 @@ vi.mock('@/services/contract-workflow-service', () => ({
         contract_data: contractDocument,
         negotiations: [],
       }),
+    retrieveHistoryByDid: () => Promise.resolve([]),
     retrieveNegotiationDraft: () => Promise.resolve(null),
     negotiate: (...args: unknown[]) => negotiate(...(args as [])),
   },

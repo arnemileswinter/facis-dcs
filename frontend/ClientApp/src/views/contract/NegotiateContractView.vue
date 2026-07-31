@@ -36,6 +36,7 @@ import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
+import type { ContractHistoryItem } from '@/models/responses/contract-response'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
@@ -102,6 +103,13 @@ interface ProposalComparison {
 
 const proposalComparison = ref<ProposalComparison | null>(null)
 
+// A structured redline is applied to the contract the moment it is proposed and
+// the version it replaced is snapshotted to contract_history, keyed by the same
+// contract_version the negotiation row carries. That snapshot is what the
+// proposal asks to change FROM — the live contract already carries the proposal,
+// so comparing against it would show the proposed document on both sides.
+const supersededVersions = ref<Map<number, ContractHistoryItem>>(new Map())
+
 const hasChangeRequest = computed(() => {
   return (
     changedName.value ||
@@ -163,6 +171,8 @@ const loadContract = async () => {
       contract.value = await contractWorkflowService.retrieveById({ did: id })
       editedContract.value = !!contract.value ? { ...contract.value } : null
       applyContractDataToDraft(contract.value?.contract_data)
+      const history = await contractWorkflowService.retrieveHistoryByDid({ did: id })
+      supersededVersions.value = new Map(history.map((entry) => [entry.contract_version, entry]))
       await restoreNegotiationDraft()
     }
   } catch (err: unknown) {
@@ -428,7 +438,19 @@ const handleSelectedNegotiation = (negotiation: ContractNegotiation | null) => {
     return
   }
 
-  const current = immutableSnapshot(contract.value)
+  const live = immutableSnapshot(contract.value)
+  const superseded = supersededVersions.value.get(negotiation.contract_version)
+  const current: Contract = superseded
+    ? immutableSnapshot({
+        ...live,
+        contract_version: superseded.contract_version,
+        name: superseded.name ?? live.name,
+        description: superseded.description ?? live.description,
+        exp_notice_period: superseded.exp_notice_period ?? live.exp_notice_period,
+        exp_policy: superseded.exp_policy ?? live.exp_policy,
+        contract_data: superseded.contract_data ?? live.contract_data,
+      })
+    : live
   const currentContractData = current.contract_data ? immutableSnapshot(current.contract_data) : undefined
   const proposedContractData = negotiation.change_request.contract_data
     ? immutableSnapshot(negotiation.change_request.contract_data)

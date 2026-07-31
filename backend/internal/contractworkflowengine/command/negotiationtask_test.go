@@ -9,6 +9,7 @@ import (
 	"database/sql/driver"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -136,31 +137,67 @@ type taskContractRepoFake struct {
 	db.ContractRepo
 	process        *db.ContractProcessData
 	stored         *db.Contract
+	pdfState       db.ContractPDFState
 	states         []string
 	updates        []db.ContractUpdateData
 	historyEntries int
+	// writes logs the version-bearing writes in order: a snapshot only
+	// preserves the superseded document if it precedes the write replacing it.
+	writes []string
 }
 
+// ReadProcessDataByDID hands out a copy, as the repository does: a handler
+// holds the state it read for the length of its transaction, so a write it
+// makes later must not retroactively change what it read.
 func (r *taskContractRepoFake) ReadProcessDataByDID(context.Context, *sqlx.Tx, string) (*db.ContractProcessData, error) {
-	return r.process, nil
+	snapshot := *r.process
+	return &snapshot, nil
 }
 
 func (r *taskContractRepoFake) ReadDataByDID(context.Context, *sqlx.Tx, string) (*db.Contract, error) {
 	return r.stored, nil
 }
 
+// Update stands in for the row: a later read in the same sequence sees what an
+// earlier write left, so a propose-then-submit test runs against the document
+// and the version the handlers actually produced.
 func (r *taskContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.ContractUpdateData) error {
 	r.updates = append(r.updates, data)
+	if data.ContractData != nil {
+		r.stored.ContractData = data.ContractData
+	}
+	if data.ContractVersion != 0 {
+		r.process.ContractVersion = data.ContractVersion
+		r.writes = append(r.writes, "update")
+	}
 	return nil
+}
+
+func (r *taskContractRepoFake) ReadPDFState(context.Context, *sqlx.Tx, string) (*db.ContractPDFState, error) {
+	return &r.pdfState, nil
+}
+
+// versionBumps returns the contract versions the handlers wrote, in order. A
+// reseed writes contract data without a version and is not a bump.
+func (r *taskContractRepoFake) versionBumps() []int {
+	var out []int
+	for _, update := range r.updates {
+		if update.ContractVersion != 0 {
+			out = append(out, update.ContractVersion)
+		}
+	}
+	return out
 }
 
 func (r *taskContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
 	r.historyEntries++
+	r.writes = append(r.writes, "history")
 	return nil
 }
 
 func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
 	r.states = append(r.states, state)
+	r.process.State = state
 	return nil
 }
 
@@ -172,13 +209,62 @@ type negotiationRepoFake struct {
 	negotiations  bool
 	// accepted is what a merge folds in, keyed by the round it was accepted on.
 	accepted map[int][]db.NegotiationChangeData
+	// proposed are the rows negotiate recorded, each on the round it was
+	// proposed against.
+	proposed []proposedChange
+}
+
+// proposedChange is one contract_negotiations row: the change request and the
+// id an accept addresses it by.
+type proposedChange struct {
+	id   string
+	data db.NegotiationCreateData
+}
+
+func (r *negotiationRepoFake) Create(_ context.Context, _ *sqlx.Tx, data db.NegotiationCreateData, _ []string) (*time.Time, error) {
+	r.proposed = append(r.proposed, proposedChange{id: fmt.Sprintf("negotiation-%d", len(r.proposed)+1), data: data})
+	now := time.Now().UTC()
+	return &now, nil
+}
+
+func (r *negotiationRepoFake) Accept(_ context.Context, _ *sqlx.Tx, id string, _ string) error {
+	for _, row := range r.proposed {
+		if row.id != id {
+			continue
+		}
+		if r.accepted == nil {
+			r.accepted = map[int][]db.NegotiationChangeData{}
+		}
+		r.accepted[row.data.ContractVersion] = append(r.accepted[row.data.ContractVersion],
+			db.NegotiationChangeData{ID: row.id, ChangeRequest: row.data.ChangeRequest})
+		return nil
+	}
+	return db.ErrNoMatchingDecision
+}
+
+func (r *negotiationRepoFake) ReadCreatedByByNegotiationID(_ context.Context, _ *sqlx.Tx, id string) (string, error) {
+	for _, row := range r.proposed {
+		if row.id == id {
+			return row.data.CreatedBy, nil
+		}
+	}
+	return "", db.ErrNoMatchingDecision
+}
+
+func (r *negotiationRepoFake) DeleteDraft(context.Context, *sqlx.Tx, string, string) error {
+	return nil
 }
 
 func (r *negotiationRepoFake) HasOpenNegotiationDecisions(context.Context, *sqlx.Tx, string, int, string, string) (bool, error) {
 	return r.openDecisions, nil
 }
 
-func (r *negotiationRepoFake) HasNegotiationForContractVersion(context.Context, *sqlx.Tx, string, int) (bool, error) {
+func (r *negotiationRepoFake) HasNegotiationForContractVersion(_ context.Context, _ *sqlx.Tx, _ string, contractVersion int) (bool, error) {
+	for _, row := range r.proposed {
+		if row.data.ContractVersion == contractVersion {
+			return true, nil
+		}
+	}
 	return r.negotiations, nil
 }
 

@@ -172,6 +172,15 @@ func (h *Negotiator) Handle(ctx context.Context, cmd NegotiationCmd) error {
 			if err != nil {
 				return fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
 			}
+			// The redline replaces the document, and the negotiation row recorded
+			// above keys on the version it replaces. Snapshot that version to
+			// contract_history first, exactly as the merge on accept does
+			// (submit.go), so the superseded document stays retrievable: it is the
+			// "from" side a reviewer is asked to change, and without it the
+			// proposal comparison has the proposed document on both sides.
+			if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
+				return fmt.Errorf("could not snapshot the superseded contract version: %w", err)
+			}
 			if err := h.CRepo.Update(ctx, tx, db.ContractUpdateData{
 				DID:             cmd.DID,
 				ContractData:    normalized,
