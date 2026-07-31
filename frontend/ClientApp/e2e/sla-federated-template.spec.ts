@@ -1,10 +1,10 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOfferOn,
   acceptPeerProposalOn,
   assertReceivedInState,
   authorContractTemplate,
   contractDocumentOn,
-  counterOffer,
   createContractViaUi,
   expectSubmitRefusedOn,
   fillContractValuesOn,
@@ -16,6 +16,7 @@ import {
   registerCatalogueTemplateOn,
   registerTemplateOn,
   resolveDidWeb,
+  stagedCounterOffer,
   submitReviewApproveTemplateOn,
 } from './multi-dcs-helpers'
 import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
@@ -477,10 +478,14 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
   // The redline is the inline fee rather than a service level: the negotiate
   // view renders only the clause preview, so a value that lives on a
   // dcs:contractData object has no input there (see the reported gap) — and
-  // the fee reuses the vertical's own counter-offer helper unchanged.
+  // the fee reuses the vertical's own counter-offer helpers unchanged.
   await test.step('Stage 9 [DCS-FR-CWE-18]: A counter-offers, B accepts, the policy is untouched', async () => {
     const before = policyShapeOf(await contractDocumentOn(a, contractDid))
-    await counterOffer(a, contractDid, { value: '18500' })
+    // A is the Responder here (B authored and offered), so it takes the offer
+    // into negotiation before it can redline it: receiving queues no task, and
+    // the Negotiations tab is the route the redline helper arrives by.
+    await acceptOfferOn(a, contractDid)
+    await stagedCounterOffer(a, contractDid, { value: '18500' })
     // B answers the inbound redline while its own copy is still OFFERED — a
     // received proposal does not move the peer's intrinsic state.
     await acceptPeerProposalOn(b, contractDid)

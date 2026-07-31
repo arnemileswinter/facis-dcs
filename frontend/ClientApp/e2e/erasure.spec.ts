@@ -1,5 +1,6 @@
 import { expect, test } from './dcs-test'
 import {
+  acceptOfferOn,
   acceptOpenDecisionsOn,
   apiAuthHeaders,
   assertManifestChainGrew,
@@ -141,6 +142,12 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     // polls double as the replication barrier between the two sides.
     let aChain = await assertManifestChainGrew(a, contractDid, 0)
     let bChain = await assertManifestChainGrew(b, contractDid, 0)
+
+    // B enters the round before it can redline it: receiving the offer queues
+    // nothing, so B holds no negotiation task and its Negotiations tab — the
+    // route stagedCounterOffer takes into the negotiate view — has no row yet.
+    // Accepting the offer is what mints it.
+    await acceptOfferOn(b, contractDid)
 
     await stagedCounterOffer(b, contractDid, { value: '10000' })
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
