@@ -36,6 +36,32 @@ var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {
 	Required("party", "presentation")
 })
 
+var DCSToDCSPinnedShapes = Type("DCSToDCSPinnedShapes", func() {
+	Description("One Semantic Hub SHACL shape LIBRARY the shipped contract pins in dcs:effectiveShapes, carried at exactly the version the pin names. The receiver installs what it does not already hold into its peer-shapes namespace under this version, so the contract is evaluated against the libraries it was authored under while nothing a peer ships can reach, shadow or activate the receiver's own vocabulary. The DCS envelope graphs (facis-dcs, clause-catalog) never travel: every deployment seeds and enforces its own.")
+
+	Attribute("name", String, "The hub entry name, as the pin's /semantic/shapes/<name> segment names it", func() {
+		MinLength(1)
+		// The semantic_schemas.name column.
+		MaxLength(255)
+	})
+	Attribute("version", Int, "The exact version the pin names; the receiver stores the content under this number, not its own next one", func() {
+		Minimum(1)
+	})
+	Attribute("media_type", String, "Media type of the content (text/turtle)", func() {
+		MinLength(1)
+		MaxLength(128)
+	})
+	Attribute("content", String, "The shapes graph verbatim as the shipping hub stores it", func() {
+		MinLength(1)
+		// A registered library can legitimately be a large imported vocabulary
+		// (a Gaia-X trust-framework entry), but a ship must not be able to push
+		// an unbounded body into semantic_schemas.
+		MaxLength(4194304)
+	})
+
+	Required("name", "version", "media_type", "content")
+})
+
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Description("A contract PDF shipped to the counterparty (ADR-13). The PDF is the wire format: it carries the machine-readable JSON-LD, the C2PA provenance chain, and any signatures. A bare PDF is a proposal (offer or negotiation counter); a PDF accompanied by a JAdES is a signature (acceptance).")
 
@@ -49,6 +75,9 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
 	Attribute("signatory_poas", ArrayOf(DCSToDCSSignatoryPoA), "The Power of Attorney behind each signature the shipping instance applied, sent once the contract carries signatures. Present-but-unverifiable evidence is refused (ADR-31); absent evidence is accepted and left to the compliance viewer, so a peer that retains none can still federate")
+	Attribute("pinned_shapes", ArrayOf(DCSToDCSPinnedShapes), "The SHACL shape libraries the shipped contract pins in dcs:effectiveShapes (ADR-8). Sent with every ship so the receiver can judge the contract against the libraries it was authored under; a pin the receiver can neither resolve locally nor find here refuses the ship rather than falling back to the receiver's own shapes", func() {
+		MaxLength(32)
+	})
 
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })

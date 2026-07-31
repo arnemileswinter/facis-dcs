@@ -68,8 +68,14 @@ type Creator struct {
 type semanticBundleRefs struct {
 	Context         string
 	CanonicalShapes string
-	Shapes          []string
-	Profile         string
+	// Shapes are the DCS envelope graphs the new contract is pinned to,
+	// canonical first.
+	Shapes []string
+	// Libraries are the hub's other active shapes entries. They are not pinned;
+	// they only supply a version to a library the document declares without
+	// one.
+	Libraries []string
+	Profile   string
 }
 
 func withCreationTimestamp(data db.Contract, evt contractevents.CreateEvent) (db.Contract, contractevents.CreateEvent) {
@@ -79,6 +85,12 @@ func withCreationTimestamp(data db.Contract, evt contractevents.CreateEvent) (db
 	return data, evt
 }
 
+// effectiveBundleRefs turns the hub's active bundle into the anchors a new
+// contract is pinned to. The pin covers the DCS envelope and, through
+// PinSemanticBundle, the libraries the contract's own document declares —
+// nothing else. Pinning every registered library instead judged a contract
+// against graphs it has no relation to, and made those graphs part of what its
+// ship had to carry to the counterparty.
 func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs, error) {
 	if bundle.ContextVersion <= 0 || bundle.ProfileVersion <= 0 || len(bundle.Shapes) == 0 {
 		return semanticBundleRefs{}, errors.New("complete versioned semantic bundle is required")
@@ -86,19 +98,32 @@ func effectiveBundleRefs(bundle semantichub.EffectiveBundle) (semanticBundleRefs
 	if bundle.Shapes[0].Name != semantichub.ShapesName || bundle.Shapes[0].Version <= 0 {
 		return semanticBundleRefs{}, errors.New("canonical shapes must be the first versioned bundle entry")
 	}
-	shapeRefs := make([]string, 0, len(bundle.Shapes))
-	for _, shape := range bundle.Shapes {
-		if strings.TrimSpace(shape.Name) == "" || shape.Version <= 0 {
-			return semanticBundleRefs{}, errors.New("every effective shape requires a name and version")
-		}
-		shapeRefs = append(shapeRefs, semantichub.AnchorURL("shapes", shape.Name, shape.Version))
+	envelopeRefs, err := shapeAnchors(bundle.Shapes)
+	if err != nil {
+		return semanticBundleRefs{}, err
+	}
+	libraryRefs, err := shapeAnchors(bundle.Libraries)
+	if err != nil {
+		return semanticBundleRefs{}, err
 	}
 	return semanticBundleRefs{
 		Context:         semantichub.AnchorURL("context", semantichub.ContextName, bundle.ContextVersion),
-		CanonicalShapes: shapeRefs[0],
-		Shapes:          shapeRefs,
+		CanonicalShapes: envelopeRefs[0],
+		Shapes:          envelopeRefs,
+		Libraries:       libraryRefs,
 		Profile:         semantichub.AnchorURL("profile", semantichub.ProfileName, bundle.ProfileVersion),
 	}, nil
+}
+
+func shapeAnchors(entries []semantichub.Schema) ([]string, error) {
+	anchors := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Name) == "" || entry.Version <= 0 {
+			return nil, errors.New("every effective shape requires a name and version")
+		}
+		anchors = append(anchors, semantichub.AnchorURL("shapes", entry.Name, entry.Version))
+	}
+	return anchors, nil
 }
 
 // createReviewAndApprovalTasks opens this instance's own review and approval
@@ -194,6 +219,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		bundleRefs.Context,
 		bundleRefs.CanonicalShapes,
 		bundleRefs.Shapes,
+		bundleRefs.Libraries,
 		bundleRefs.Profile,
 	)
 	if err != nil {

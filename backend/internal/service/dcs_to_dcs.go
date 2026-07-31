@@ -24,6 +24,7 @@ import (
 
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/semantichub"
 
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 
@@ -195,6 +196,20 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
 	}
 
+	// Semantic bundle (ADR-8): the shipped contract's dcs:effectiveShapes pin was
+	// written from the SENDER's hub, so the shape libraries it names travel with
+	// the ship. Settled here as a pure read — a pin that resolves neither from
+	// this hub nor from the ship refuses the exchange rather than storing a copy
+	// no workflow transition can evaluate — and written only once the rest of
+	// the exchange has been accepted, so a refusal further down leaves nothing
+	// behind.
+	pinnedShapes := semantichub.DBPinnedShapes{DB: s.DB}
+	installShapes, err := trustgate.PlanPinnedShapes(ctx, pinnedShapes, req.FromPeerDid, payload, req.PinnedShapes)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: the shapes contract %s is pinned to cannot be assembled on this instance: %w", req.ContractIri, err))
+	}
+
 	// The sender's declared contract state is informational except for
 	// REVOKED: the authenticated counterparty revoking its own signature
 	// voids the agreement, so the receiver must adopt it (DCS-NFR-BR-06) —
@@ -249,6 +264,14 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		if err := tx.Commit(); err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
+	}
+
+	// Last write of the exchange: nothing after it can refuse the ship and
+	// strand the imported rows. A failure here errors the ship, and the peer's
+	// retry carries the identical bundle, so the install is reached again.
+	if err := trustgate.InstallPinnedShapes(ctx, pinnedShapes, installShapes); err != nil {
+		return nil, contractworkflowengine.MakeInternalError(
+			fmt.Errorf("install the shapes contract %s is pinned to: %w", req.ContractIri, err))
 	}
 
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil

@@ -33,6 +33,7 @@ import (
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/semantichub"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -285,7 +286,18 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return err
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, recipients)
+	pinnedShapes, err := s.pinnedShapesForContract(ctx, contractData)
+	if err != nil {
+		// Unlike the reads above, this fails for stable data-dependent reasons —
+		// a pin naming a graph neither namespace resolves — so the event that
+		// triggered this ship is the only attempt unless the failure is
+		// recorded. Route it through the retry queue like the two deferrals
+		// above: a dropped ship with no record and no retry is a correctness
+		// bug, not merely a timing race.
+		return s.recordShipOutcome(ctx, did, err, nil)
+	}
+
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, pinnedShapes, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -398,7 +410,24 @@ func (s *DCSToDCSSynchronizer) poaEvidenceForSignedContract(ctx context.Context,
 	return evidence, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, recipients []string) error {
+// pinnedShapesForContract reads the shape libraries the contract pins in
+// dcs:effectiveShapes (ADR-8). They ship with every PDF: the pin is what the
+// receiver's workflow gate resolves, and a library published on this instance
+// alone exists nowhere else, so without them the receiver holds a copy no
+// transition can evaluate.
+func (s *DCSToDCSSynchronizer) pinnedShapesForContract(ctx context.Context, contractData *db.Contract) ([]semantichub.Schema, error) {
+	document := []byte(`{}`)
+	if contractData.ContractData != nil && contractData.ContractData.IsNotNullValue() {
+		document = []byte(*contractData.ContractData)
+	}
+	entries, err := PinnedShapesForDocument(ctx, semantichub.DBPinnedShapes{DB: s.DB}, document)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the pinned shapes of %s: %w", contractData.DID, err)
+	}
+	return entries, nil
+}
+
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, pinnedShapes []semantichub.Schema, recipients []string) error {
 	for _, peer := range recipients {
 		if peer == localPeer {
 			continue
@@ -457,6 +486,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			ContractState:  &state,
 			WrappedCek:     WireWrappedCEK(wrappedCEK),
 			SignatoryPoas:  WireSignatoryPoAs(signatoryPoAs),
+			PinnedShapes:   WirePinnedShapes(pinnedShapes),
 		}); err != nil {
 			return err
 		}

@@ -669,6 +669,7 @@ func TestClientReplacedDocumentKeepsTheSnapshotBuildable(t *testing.T) {
 			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
 			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
 		},
+		nil,
 		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1")
 	require.NoError(t, err)
 	require.NoError(t, requireConsistentShapesBundle(decodeContent(t, created)))
