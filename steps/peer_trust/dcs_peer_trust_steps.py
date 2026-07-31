@@ -863,17 +863,28 @@ def step_then_contract_offered_on_b(context, expected):
     )
 
 
-@when("instance A drives the contract to APPROVED through its own local workflow")
-def step_when_drive_to_approved_locally(context):
-    """OFFERED -> NEGOTIATION -> SUBMITTED -> REVIEWED -> APPROVED, entirely
-    on instance A (ADR-13: each DCS runs its own workflow; a counterparty
-    create assigns all RBAC roles to A's own peer). Same two-submit pattern
-    as the single-instance state-machine pack: A is the sole negotiator and
-    there are no open negotiation decisions."""
+def _close_the_round_on_a(context):
+    """OFFERED (or NEGOTIATION) -> SUBMITTED on instance A, by the participant
+    that created the contract (ADR-13: each DCS runs its own workflow; a
+    counterparty create assigns all RBAC roles to A's own peer).
+
+    Driven on the STATE rather than on a fixed number of submits, the same way
+    the instance-B step is. A round that has a redline to fold in stays in
+    NEGOTIATION for one extra submit while the merge bumps contract_version
+    (submit.go's NEGOTIATION branch), and one submit too many would land in the
+    reviewer's branch and be refused for the role — so a caller that reaches
+    this after proposing a change cannot pass a fixed count.
+
+    NEGOTIATION -> SUBMITTED is also the transition that SETTLES: it is where
+    this instance states it agrees to the document as it stands, and the
+    outbox handler behind it signs and ships that statement to every
+    counterparty (dcstodcs shipSettlement)."""
     c_did = context.cross_instance_contract_did
+    creator_h = context.cross_instance_creator_headers
     with _as_instance(context, context.base_url_a):
-        creator_h = context.cross_instance_creator_headers
-        for _ in range(2):
+        for _ in range(4):
+            if _cross_instance_state(context, context.base_url_a) == "SUBMITTED":
+                break
             retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
             assert retrieve.status_code == 200, retrieve.text
             resp = post_json(
@@ -883,7 +894,19 @@ def step_when_drive_to_approved_locally(context):
                 headers=creator_h,
             )
             assert resp.status_code == 200, f"submit failed: {resp.status_code} {resp.text}"
+            context.requests_response = resp
+    state = _cross_instance_state(context, context.base_url_a)
+    assert state == "SUBMITTED", (
+        f"expected instance A to close its negotiation round and reach SUBMITTED, got {state!r}"
+    )
 
+
+def _review_and_approve_on_a(context):
+    """SUBMITTED -> REVIEWED -> APPROVED on instance A. Review and approval are
+    peer-scoped tasks, so the suite's shared role tokens are the right
+    callers."""
+    c_did = context.cross_instance_contract_did
+    with _as_instance(context, context.base_url_a):
         reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_a)
         retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=reviewer_h)
         assert retrieve.status_code == 200, retrieve.text
@@ -908,6 +931,226 @@ def step_when_drive_to_approved_locally(context):
         )
         assert approve.status_code == 200, f"approve failed: {approve.status_code} {approve.text}"
         context.requests_response = approve
+
+
+@when("instance A drives the contract to APPROVED through its own local workflow")
+def step_when_drive_to_approved_locally(context):
+    """OFFERED -> NEGOTIATION -> SUBMITTED -> REVIEWED -> APPROVED, entirely
+    on instance A."""
+    _close_the_round_on_a(context)
+    _review_and_approve_on_a(context)
+
+
+@when("instance A drives the contract to SUBMITTED through its own local workflow")
+def step_when_drive_to_submitted_locally(context):
+    """The same workflow stopped at the transition that settles, so the
+    scenario can act while instance A stands behind the version it just agreed
+    to and its reviewer has not yet decided."""
+    _close_the_round_on_a(context)
+
+
+# ---------------------------------------------------------------------------
+# Reopening a settled round (contractworkflowengine/command/settledagreement.go
+# withdrawOwnSettlement).
+#
+# The settlement rows themselves are read straight from instance A's database:
+# no API exposes them, and the alternative — inferring them from the signing
+# gate's answer — cannot be used here, because reaching that gate needs
+# APPROVED, which is past both edges that reopen a round. `context.db` is
+# instance A's database in the two-instance harness (the same connection the
+# sync_fails assertion above reads), so these steps are A-side only by
+# construction.
+# ---------------------------------------------------------------------------
+
+
+def _own_settlements_of_the_cross_instance_contract(context):
+    """The settlement rows instance A produced for this scenario's contract:
+    contract_settlements is keyed by the SETTLING party, so this instance's own
+    are the ones whose from_peer_did is its own did:web. The counterparty's
+    rows in the same table are the signing gate's evidence and are deliberately
+    not read here — withdrawing an agreement must not touch them."""
+    cursor = context.db.cursor()
+    try:
+        cursor.execute(
+            "SELECT to_peer_did, document_digest FROM contract_settlements "
+            "WHERE did = %s AND from_peer_did = %s",
+            (context.cross_instance_contract_did, context.peer_did_a),
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        # psycopg2 opens a transaction for the read and the connection is
+        # shared across the whole suite, so it is closed again here rather
+        # than left idle-in-transaction across this step's polling loop.
+        context.db.rollback()
+
+
+def _stored_document_digest(context, base_url: str) -> str:
+    """The digest a settlement of the document as it currently stands would
+    carry: SHA-256 over the RFC 8785 canonicalization, prefixed "sha256:"
+    (base/jades.ContractDocumentDigest). Re-derived here from the document the
+    API returns rather than read from the row under test, so the assertion is
+    that the row names THIS version and not merely that a row exists."""
+    body, _ = _cross_instance_contract(context, base_url)
+    document = body.get("contract_data")
+    if document is None:
+        document = {}
+    return "sha256:" + hashlib.sha256(jcs.canonicalize(document)).hexdigest()
+
+
+@then("instance A holds its own settlement of the contract as it stands")
+def step_then_a_holds_own_settlement(context):
+    """The premise every later step in this scenario rests on. Without it the
+    rejection has nothing to withdraw and the redline that follows proves
+    nothing: it would be permitted because no agreement was ever recorded,
+    not because rejecting took one back.
+
+    Polled, because the settlement is written by the outbox handler that ships
+    it and therefore trails the SUBMITTED transition that produced it."""
+    expected = _stored_document_digest(context, context.base_url_a)
+    rows = []
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        rows = _own_settlements_of_the_cross_instance_contract(context)
+        if any(digest == expected for _to_peer, digest in rows):
+            return
+        time.sleep(2)
+    raise AssertionError(
+        f"Expected instance A to hold its own settlement of {context.cross_instance_contract_did} "
+        f"naming the document it just submitted ({expected}) — the statement its "
+        f"NEGOTIATION -> SUBMITTED transition signs and ships to the counterparty. Rows held: {rows}"
+    )
+
+
+@then("instance A holds no settlement of its own for the contract")
+def step_then_a_holds_no_own_settlement(context):
+    """Withdrawal, read directly: the rejection above took the agreement back
+    rather than leaving a statement instance A no longer stands behind. Deleted
+    rather than superseded on purpose — between the withdrawal and the next
+    submit the truth is that this instance has not settled anything, and the
+    signing gate says so."""
+    rows = _own_settlements_of_the_cross_instance_contract(context)
+    assert rows == [], (
+        "Expected the reopened round to have withdrawn instance A's own settlement of "
+        f"{context.cross_instance_contract_did}, but it still holds: {rows}"
+    )
+
+
+@when("instance A's reviewer rejects the submission back into negotiation")
+def step_when_a_reviewer_rejects(context):
+    """SUBMITTED -> NEGOTIATION (submit.go's actionflag.Reject branch): the
+    reviewer sends the submission back, which reopens the review, negotiation
+    and approval tasks — and undoes the transition that settled."""
+    c_did = context.cross_instance_contract_did
+    with _as_instance(context, context.base_url_a):
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"], api_base=context.base_url_a)
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=reviewer_h)
+        assert retrieve.status_code == 200, retrieve.text
+        reject = post_json(
+            context,
+            f"{context.base_url_a}/contract/submit",
+            {
+                "did": c_did,
+                "updated_at": retrieve.json().get("updated_at"),
+                "forward_to": "reject",
+                "comments": ["Reopening the round to change the document before anyone signs."],
+            },
+            headers=reviewer_h,
+        )
+        assert reject.status_code == 200, (
+            f"reviewer rejection failed on instance A: {reject.status_code} {reject.text}"
+        )
+        context.requests_response = reject
+    state = _cross_instance_state(context, context.base_url_a)
+    assert state == "NEGOTIATION", (
+        f"expected the reviewer's rejection to reopen the round on instance A, got state {state!r}"
+    )
+
+
+_REDLINED_CLAUSE_TEXT = "Confidentiality clause, as reworded after the round was reopened"
+
+
+def _first_clause_content(document: dict):
+    """The clause content list of the canonical envelope every contract in this
+    pack is instantiated from (TemplateService.canonical_document_data): one
+    dcs:Clause block whose dcs:content is an explicit {"@list": [...]} of
+    strings. Located rather than assumed at a fixed index, since a reseed may
+    have added party and signature-field nodes around it."""
+    blocks = ((document or {}).get("dcs:documentStructure") or {}).get("dcs:blocks") or {}
+    for block in blocks.get("@list") or []:
+        content = (block or {}).get("dcs:content") or {}
+        items = content.get("@list")
+        if isinstance(items, list) and items and isinstance(items[0], str):
+            return content
+    raise AssertionError(
+        "could not find a clause with textual content in the cross-instance contract document; "
+        f"this step redlines the canonical envelope's single clause. Document: {json.dumps(document)[:800]}"
+    )
+
+
+@when("instance A redlines the reopened contract")
+def step_when_a_redlines_reopened_contract(context):
+    """A structured redline (a change_request carrying contract_data), which
+    negotiate.go applies to the document immediately and the regenerator
+    re-ships to the counterparty as a fresh PDF (ADR-13).
+
+    This is the call requireUnsettledAgreement gates. It is made by the same
+    participant that submitted the round — the negotiation decision it records
+    is keyed by participant, and a decision left open under another identity
+    would block the submit that closes the new round for a reason this
+    scenario is not about."""
+    c_did = context.cross_instance_contract_did
+    with _as_instance(context, context.base_url_a):
+        creator_h = context.cross_instance_creator_headers
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+        assert retrieve.status_code == 200, retrieve.text
+        body = retrieve.json()
+        document = body.get("contract_data")
+        _first_clause_content(document)["@list"] = [_REDLINED_CLAUSE_TEXT]
+        resp = post_json(
+            context,
+            f"{context.base_url_a}/contract/negotiate",
+            {
+                "did": c_did,
+                "updated_at": body.get("updated_at"),
+                "negotiated_by": AuthService.username_for_roles(["Contract Creator"]),
+                "change_request": {"contract_data": document},
+            },
+            headers=creator_h,
+        )
+        context.requests_response = resp
+    assert resp.status_code == 200, (
+        "Expected the reopened round to accept a redline on instance A. A refusal naming the "
+        "agreement this instance already made means the rejection above reopened the round without "
+        "taking that agreement back (settledagreement.go withdrawOwnSettlement), which leaves the "
+        f"party that rejected unable to change anything: {resp.status_code} {resp.text}"
+    )
+
+
+@then("the redlined document reaches instance B within a few seconds")
+def step_then_redline_reaches_b(context):
+    """The redline travels as a re-rendered PDF over the DCS-to-DCS exchange,
+    and instance B has to hold it BEFORE it runs its own round: B settles
+    whatever document it holds, and a B that settled the pre-redline version
+    would name a digest instance A's settlement never matches — the signing
+    gate would then refuse both parties forever, for a divergence this scenario
+    did not intend to create."""
+    deadline = time.monotonic() + 120
+    observed = None
+    while time.monotonic() < deadline:
+        body, _ = _cross_instance_contract(context, context.base_url_b)
+        try:
+            observed = _first_clause_content(body.get("contract_data")).get("@list")
+        except AssertionError:
+            observed = None
+        if observed == [_REDLINED_CLAUSE_TEXT]:
+            return
+        time.sleep(3)
+    raise AssertionError(
+        f"Expected instance A's redline to reach instance B's copy of "
+        f"{context.cross_instance_contract_did} over the PDF exchange, last observed clause "
+        f"content: {observed!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

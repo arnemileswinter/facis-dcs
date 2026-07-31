@@ -406,3 +406,47 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     When instance B drives its own copy of the contract to APPROVED through its own local workflow
     And instance B attempts a ceremony-backed signature on the contract
     Then the signature attempt on instance B is refused because the counterparty has not settled
+
+  # ---------------------------------------------------------------------
+  # TAKING AN AGREEMENT BACK (contractworkflowengine/command/
+  # settledagreement.go withdrawOwnSettlement, on submit.go's reviewer-reject
+  # branch and on reject.go's approver rejection).
+  #
+  # A party that settled is held to the version it settled: while its own
+  # settlement names the document it stores, every command that would persist
+  # a different one is refused (requireUnsettledAgreement, from /contract/
+  # submit's new contract_data and from a structured redline alike). That
+  # refusal is only legitimate because the party has a way to change its mind,
+  # and this scenario is that way — without it the gate is a deadlock rather
+  # than a gate, and the round that reached SUBMITTED could never be reopened
+  # to say anything new.
+  #
+  # The way out is the rejection the workflow already had: sending the
+  # submission back reopens the negotiation tasks, so it also withdraws the
+  # agreement whose transition it undoes. Read directly from
+  # contract_settlements on both sides of the rejection, because the row IS
+  # the statement — a scenario that only observed the redline succeeding would
+  # equally pass on an instance that had never settled at all.
+  #
+  # The rest of the scenario is what makes the withdrawal correct rather than
+  # merely permissive: the next round settles the REDLINED document, both
+  # parties settle that same version, and the signature the mutual gate then
+  # allows is a signature over the document both of them last agreed to.
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-CWE-03 @DCS-FR-SM-02 @two-instance
+  Scenario: Reopening a round takes instance A's agreement back, and the version it settles instead is the one that signs
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A drives the contract to SUBMITTED through its own local workflow
+    Then instance A holds its own settlement of the contract as it stands
+    When instance A's reviewer rejects the submission back into negotiation
+    Then instance A holds no settlement of its own for the contract
+    When instance A redlines the reopened contract
+    Then the redlined document reaches instance B within a few seconds
+    When instance A drives the contract to APPROVED through its own local workflow
+    Then instance A holds its own settlement of the contract as it stands
+    When instance B drives its own copy of the contract to APPROVED through its own local workflow
+    And instance A applies a ceremony-backed signature to the contract
+    Then instance A holds an applied signature for its own party field
