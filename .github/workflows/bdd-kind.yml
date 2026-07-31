@@ -17,7 +17,12 @@ jobs:
       contents: read
       checks: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The suite grew from 31 to 50 minutes when the mutual-settlement scenarios
+    # gained a full counterparty drive to APPROVED each, and 60 killed it
+    # mid-run with the diagnostic dump skipped — a suite that cannot finish
+    # reports nothing at all. Raised to leave headroom; the growth itself is
+    # worth reducing rather than absorbing indefinitely.
+    timeout-minutes: 90
     concurrency:
       group: bdd-kind-${{ github.ref }}
       cancel-in-progress: true
