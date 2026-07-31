@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +61,69 @@ func BuildContractPayload(did string, contractVersion int, contractData []byte) 
 		return nil, err
 	}
 	return jcs.Transform(encoded)
+}
+
+// SettlementType is the @type of the settlement artifact a peer signs and
+// ships on reaching its own settled state.
+const SettlementType = "dcs:ContractSettlement"
+
+// Settlement is the peer's statement that it settled a contract: which
+// contract, which document (by digest — the load-bearing binding, since
+// contract_version is a per-instance counter), who settled, toward whom, and
+// when.
+type Settlement struct {
+	ContractDID     string
+	ContractVersion int
+	DocumentDigest  string
+	SettledBy       string
+	SettledWith     string
+	SettledAt       time.Time
+}
+
+// BuildSettlementPayload canonicalizes the settlement artifact with JCS
+// (RFC 8785), exactly as BuildContractPayload canonicalizes a signed
+// contract, so the receiver re-derives the bytes from the claimed fields
+// instead of trusting the sender's serialization.
+func BuildSettlementPayload(s Settlement) ([]byte, error) {
+	payload := map[string]any{
+		"@context":                   map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
+		"@type":                      SettlementType,
+		"dcs:contractDid":            s.ContractDID,
+		"dcs:contractVersion":        s.ContractVersion,
+		"dcs:contractDocumentDigest": s.DocumentDigest,
+		"dcs:settledBy":              s.SettledBy,
+		"dcs:settledWith":            s.SettledWith,
+		"dcs:settledAt":              s.SettledAt.UTC().Format(time.RFC3339Nano),
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return jcs.Transform(encoded)
+}
+
+// ContractDocumentDigest is the version identity of a contract document that
+// both instances can compute from their own copy: the SHA-256 of its JCS
+// canonicalization. Canonicalizing first is what makes it survive the
+// serialization each side's jsonb column applies to the same document.
+func ContractDocumentDigest(contractData []byte) (string, error) {
+	if len(contractData) == 0 {
+		contractData = []byte(`{}`)
+	}
+	var document any
+	if err := json.Unmarshal(contractData, &document); err != nil {
+		return "", fmt.Errorf("decode contract document: %w", err)
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := jcs.Transform(encoded)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // Sign produces a JAdES baseline-B compact JWS over payload using the DID

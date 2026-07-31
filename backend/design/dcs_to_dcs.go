@@ -53,6 +53,27 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Required("from_peer_did", "contract_iri", "pdf", "secret_value", "secret_hash")
 })
 
+var DCSToDCSContractSettlementRequest = Type("DCSToDCSContractSettlementRequest", func() {
+	Description("The counterparty's evidence that it reached its own settled state (NEGOTIATION -> SUBMITTED) on a named version of the contract document. Shipped over the same channel and authenticated the same way as a contract PDF; the receiver holds it as the locally-verifiable proof that the peer agreed to the document, which signing requires. No contract content travels — the artifact binds the document by digest.")
+
+	Attribute("secret_value", String, "Secret value")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the peer that settled")
+	Attribute("contract_iri", String, "IRI of the contract that was settled")
+	Attribute("settlement_jades", String, "The sender's JAdES baseline-B compact JWS over the dcs:ContractSettlement artifact ({dcs:contractDid, dcs:contractVersion, dcs:contractDocumentDigest, dcs:settledBy, dcs:settledWith, dcs:settledAt}), signed with the same instance key as the contract signature ship")
+
+	Required("from_peer_did", "contract_iri", "secret_value", "secret_hash", "settlement_jades")
+})
+
+var DCSToDCSContractSettlementResponse = Type("DCSToDCSContractSettlementResponse", func() {
+	Description("Result for receiving a counterparty settlement artifact")
+
+	Attribute("from_peer_did", String, "Decentralized Identifier of the receiving peer")
+
+	Required("from_peer_did")
+})
+
 var DCSToDCSContractEraseRequest = Type("DCSToDCSContractEraseRequest", func() {
 	Description("A counterparty's request to shred this instance's wrapped CEKs for a contract (DCS-NFR-COMP-03, DCS-NFR-SEC-13): erasure of a federated contract completes only when both instances have destroyed their key records. Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
 
@@ -107,6 +128,23 @@ var _ = Service("DcsToDcs", func() {
 
 		HTTP(func() {
 			POST("/peer/contracts/pdf")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("post_settlement", func() {
+		Description("Receive the counterparty's settlement artifact: its signed statement that it reached NEGOTIATION -> SUBMITTED on a named version of the contract document. Authenticated by the same did:web challenge-response as post_pdf, then the JAdES is verified against the peer's published assertion key and the artifact must name this contract, this instance as its audience, and the digest of the contract document this instance itself holds. Stored as the local evidence the signing gate requires — absence of it is never agreement. No PDF and no contract state cross the boundary (ADR-13).")
+
+		Payload(DCSToDCSContractSettlementRequest)
+		Result(DCSToDCSContractSettlementResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/settlement")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

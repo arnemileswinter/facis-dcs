@@ -537,6 +537,7 @@ var _ = Service("SignatureManagement", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -544,6 +545,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -567,6 +569,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -574,6 +577,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("signature_invalid", StatusUnprocessableEntity)
 			Response("document_mismatch", StatusUnprocessableEntity)
 			Response("nonce_mismatch", StatusUnprocessableEntity)
@@ -647,6 +651,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -655,6 +660,7 @@ var _ = Service("SignatureManagement", func() {
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
 			Response("ceremony_required", StatusUnprocessableEntity)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -763,6 +769,7 @@ var _ = Service("SignatureManagement", func() {
 		Error("level_below_required", ErrorResult, "The submitted signature's level does not meet the contract's required signature level (SM-01)")
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
+		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -771,6 +778,7 @@ var _ = Service("SignatureManagement", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
+			Response("counterparty_not_settled", StatusBadRequest)
 			Response("signature_invalid", StatusUnprocessableEntity)
 			Response("document_mismatch", StatusUnprocessableEntity)
 			Response("nonce_mismatch", StatusUnprocessableEntity)

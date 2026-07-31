@@ -30,6 +30,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
@@ -52,6 +53,9 @@ type DCSToDCSSynchronizer struct {
 	// applied, shipped so the counterparty can verify the authority to sign
 	// rather than read an unbacked claim off the contract (ADR-31).
 	PoAs SignatoryPoAs
+	// SettlementSender delivers this instance's settlement artifact — the
+	// evidence the counterparty needs before it may sign.
+	SettlementSender SettlementSender
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
@@ -81,6 +85,26 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		// signed PDF directly). shipContractPDF gates on the shippable state.
 		switch source {
 		case componenttype.ContractWorkflowEngine:
+			// Settlement (NEGOTIATION -> SUBMITTED) is a statement about BOTH
+			// parties — this instance agreed the document — so the counterparty
+			// must hold verified evidence of it before it may sign. No PDF and no
+			// state cross the boundary here (ADR-13): the artifact binds the
+			// document by digest. SUBMITTED is also reached from REVIEWED (an
+			// approver sending it back for more review), which settles nothing,
+			// so the previous state is what distinguishes the two.
+			if evt.Type() == eventtype.Submit.String() {
+				settledDID, settled, err := settlementFromEvent(evt)
+				if err != nil {
+					log.Errorf(ctx, err, "could not read submit event %s", evt.Data())
+					return
+				}
+				if settled {
+					if err := s.shipSettlement(ctx, settledDID); err != nil {
+						log.Errorf(ctx, err, "failed to ship contract settlement, %s", evt.Data())
+					}
+				}
+				return
+			}
 			// Ship when the regenerator produced a fresh PDF (a content or C2PA
 			// state change) OR when the contract entered the shippable OFFERED
 			// state. An offer is a pure state transition that changes neither the
@@ -124,6 +148,22 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 	go s.startSyncFailScheduler(ctx, conf.SyncFailCronJobTimeOut())
 }
 
+// settlementFromEvent reports which contract a SUBMIT_CONTRACT event settled.
+// Only NEGOTIATION -> SUBMITTED is a settlement: it is the transition that
+// says every negotiator accepted the document as it stands.
+func settlementFromEvent(evt cloudevent.Event) (string, bool, error) {
+	var submitted contractevents.SubmitEvent
+	if err := json.Unmarshal(evt.Data(), &submitted); err != nil {
+		return "", false, fmt.Errorf("unmarshal submit event: %w", err)
+	}
+	if submitted.DID == "" {
+		return "", false, errors.New("submit event carries no did")
+	}
+	settled := submitted.PreviousState == contractstate.Negotiation.String() &&
+		submitted.NewState == contractstate.Submitted.String()
+	return submitted.DID, settled, nil
+}
+
 func didFromEvent(evt cloudevent.Event) (string, error) {
 	var data map[string]interface{}
 	if err := json.Unmarshal(evt.Data(), &data); err != nil {
@@ -164,13 +204,15 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		syncFails, err := readSyncFails()
 		if err != nil {
 			log.Printf(ctx, "could not read sync fails: %v", err)
-			continue
 		}
 		for _, syncFail := range syncFails {
 			if err := s.shipContractPDF(ctx, syncFail.DID); err != nil {
 				log.Printf(ctx, "contract PDF ship retry was not successful: %v", err)
 			}
 		}
+		// Settlements have their own queue: sync_fails is keyed by contract and
+		// its retry re-ships the PDF, which would never deliver a settlement.
+		s.retryUndeliveredSettlements(ctx)
 	}
 }
 

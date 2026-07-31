@@ -29,6 +29,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cweevent "digital-contracting-service/internal/contractworkflowengine/event"
+	dcsdb "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/signingmanagement/db"
@@ -52,6 +53,18 @@ var ErrCeremonyRequired = errors.New("a completed PID presentation ceremony is r
 // into the PDF before any PAdES signature freezes it (embedding an
 // attachment after a signature trips standards-compliant diff analysis).
 var ErrCeremoniesIncomplete = errors.New("all declared signature fields need a completed PID presentation ceremony before the first signature")
+
+// ErrCounterpartyNotSettled refuses a signature while this instance holds no
+// verified evidence that the OTHER party agreed to the version about to be
+// signed (the settlement artifact the peer ships over the DCS-to-DCS channel,
+// internal/dcstodcs/settlement.go).
+//
+// It is deliberately distinct from contractstate.ErrInvalidTransition: that
+// one says the signer may not sign, this one says nobody may sign yet. The
+// contract is waiting for the counterparty, and the wait ends without anyone
+// here doing anything — which is what a viewer must be able to tell a signer
+// instead of showing them a dead button.
+var ErrCounterpartyNotSettled = errors.New("the counterparty has not settled the version of the contract about to be signed")
 
 // ErrUnknownSignatureField rejects a ceremony/signature for a field the
 // contract document does not declare.
@@ -286,6 +299,90 @@ func assertPreparedPayload(ctx context.Context, extractor PayloadExtractor, subm
 	return nil
 }
 
+// PeerSettlements reads the settlement artifact a counterparty instance ships
+// on reaching its own settled state (NEGOTIATION -> SUBMITTED): a JAdES naming
+// the contract and the digest of the document that party agreed to, verified
+// against the peer's published assertion key before it is stored
+// (internal/dcstodcs/settlement.go, internal/service/dcs_to_dcs_settlement.go).
+// The same store holds the settlements this instance produced, keyed by its own
+// did:web, which is how the gate below knows which version WE agreed to.
+type PeerSettlements interface {
+	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*dcsdb.Settlement, error)
+}
+
+// assertCounterpartiesSettled refuses to sign until this instance holds, for
+// every other party the contract declares a signature slot for, that party's
+// verified settlement artifact naming the same document this instance itself
+// settled.
+//
+// Deployment already refuses without the peer's shipped SIGNATURE
+// (contractworkflowengine/command/deploy.go). That gate sits one step later
+// than the one that matters: a signature binds the moment it is made, so
+// refusing to deploy afterwards does not undo a commitment to a version the
+// counterparty never agreed to. Local state cannot stand in for the peer's —
+// ADR-13 keeps intrinsic state local, so this instance can run its own
+// submit/review/approve to APPROVED while the peer is still negotiating, which
+// is exactly what the live demo instances did.
+//
+// The version binding is the settlement's document digest, never
+// contract_version: that counter is per-instance (the sender bumps it when it
+// merges a redline, the receiver on every inbound ship) and says nothing across
+// the boundary. The reference digest is the one in THIS instance's own
+// settlement row rather than the digest of the contract as it stands now,
+// because the first signature seals the offer into an odrl:Agreement — from
+// prepare onwards the stored document is no longer the negotiated one, while
+// both settlement rows go on naming it. That also keeps the answer stable
+// across a second prepare and identical at prepare and at submit.
+//
+// A contract that declares no remote party's slot has no peer to wait for and
+// passes untouched: that is the single-instance multi-signer flow, whose fields
+// are named per signatory rather than per party (contractstate.IsRemotePartyField).
+func assertCounterpartiesSettled(
+	ctx context.Context, tx *sqlx.Tx, settlements PeerSettlements,
+	did, localPeer string, resp *db.Responsible, declaredFields []string,
+) error {
+	var remote []string
+	for _, field := range declaredFields {
+		if contractstate.IsRemotePartyField(partyDIDs(resp), localPeer, field) {
+			remote = append(remote, field)
+		}
+	}
+	if len(remote) == 0 {
+		return nil
+	}
+	if settlements == nil {
+		return fmt.Errorf("could not check the counterparty settlement of %s: no settlement store is configured", did)
+	}
+
+	own, err := settlements.GetSettlement(ctx, tx, did, localPeer)
+	if err != nil {
+		return fmt.Errorf("could not read this instance's settlement of %s: %w", did, err)
+	}
+	// No own settlement means this instance never stated which version it
+	// agreed to, and never shipped that statement — so the counterparty's own
+	// gate is refusing it in the same way. Refusing here adds no new stuck
+	// contract; it just says so at the party that can act on it.
+	if own == nil {
+		return fmt.Errorf("%w: this instance has not settled %s as %s, so it holds no agreed version to hold %s to",
+			ErrCounterpartyNotSettled, did, localPeer, strings.Join(remote, ", "))
+	}
+
+	for _, party := range remote {
+		settlement, err := settlements.GetSettlement(ctx, tx, did, party)
+		if err != nil {
+			return fmt.Errorf("could not read the settlement of %s by %s: %w", did, party, err)
+		}
+		if settlement == nil {
+			return fmt.Errorf("%w: no settlement from %s is held", ErrCounterpartyNotSettled, party)
+		}
+		if settlement.DocumentDigest != own.DocumentDigest {
+			return fmt.Errorf("%w: %s settled document %s, this instance settled %s",
+				ErrCounterpartyNotSettled, party, settlement.DocumentDigest, own.DocumentDigest)
+		}
+	}
+	return nil
+}
+
 // Applier runs the signing command flow: prepare the to-be-signed document,
 // and — after the signatory signs it externally (ADR-12) — validate and
 // finalize. The DCS holds no contract-signing key.
@@ -304,6 +401,17 @@ type Applier struct {
 	// deployment serves, so the signing summary credentials issued here name the
 	// same entry the contract's lifecycle credentials do.
 	StatusEntries provenance.StatusListEntries
+	// LocalPeer is this instance's own did:web, read from the DID document.
+	// It is the identity the DCS-to-DCS channel writes into the settlement
+	// artifacts, and the one that tells a counterparty's signature slot from
+	// ours — not the separately configured ISSUER_DID, which names the
+	// credential issuer and would silently disable both when left unset.
+	LocalPeer string
+	// Settlements holds the counterparty-settlement evidence the signing gate
+	// requires (assertCounterpartiesSettled). Required for a federated
+	// contract: without it an instance cannot tell a peer that agreed to this
+	// version from one still negotiating.
+	Settlements PeerSettlements
 	// ArchiveRepo, IPFSStorer, ArchiveNotary, and ArchiveTSA back the
 	// archive-entry creation that now happens on reaching SIGNED (DCS-FR-
 	// CWE-20), not on APPROVED. ArchiveRepo is the contractworkflowengine
@@ -447,14 +555,26 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	}
 
 	// Safety net against staleness between prepare and submit: the contract
-	// must still be in a state signing is valid from, and this field must
+	// must still be in a state signing is valid from, the counterparty must
+	// still be settled on the version this instance agreed, and this field must
 	// still be unsigned. Re-checking is a cheap read, not a re-derivation of
 	// prepare's business logic (sealing, evidence, SHACL/policy gates).
-	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
+	data, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("could not read process data: %w", err)
+		return fmt.Errorf("could not read contract %s: %w", cmd.DID, err)
 	}
-	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventSign); err != nil {
+	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventSign); err != nil {
+		return err
+	}
+	// A settlement the peer replaced between prepare and submit — because it
+	// reopened the negotiation and settled a different document — leaves the
+	// pinned bytes covering a version nobody agreed to any more. The digest
+	// comparison catches that; it is not a repeat of prepare's answer.
+	var declaredFields []string
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		declaredFields = validation.RequiredSignatureFields(*data.ContractData)
+	}
+	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, declaredFields); err != nil {
 		return err
 	}
 	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
@@ -803,6 +923,14 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// completed BEFORE the first signature so all signers' evidence is
 	// embedded ahead of the signature that freezes the document.
 	requiredFields := validation.RequiredSignatureFields(*data.ContractData)
+
+	// Signing is a mutual milestone: it claims both parties settled this
+	// version. Checked before anything below mutates or persists, so a contract
+	// the counterparty has not settled leaves prepare with no trace.
+	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, requiredFields); err != nil {
+		return nil, err
+	}
+
 	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not load existing signatures: %w", err)
@@ -846,7 +974,7 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				// shipped signature for it. Here there is nothing to demand:
 				// a peer ships that signature only once its copy is SIGNED,
 				// which is after this point, not before it.
-				if contractstate.IsRemotePartyField(partyDIDs(data.Responsible), h.IssuerDID, f) {
+				if contractstate.IsRemotePartyField(partyDIDs(data.Responsible), h.LocalPeer, f) {
 					continue
 				}
 				c, err := h.CeremonyRepo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, f)

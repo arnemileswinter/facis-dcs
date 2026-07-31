@@ -82,6 +82,73 @@ func (r PostgresSyncRepository) UpsertSyncSignature(ctx context.Context, tx *sql
 	return err
 }
 
+// UpsertSettlement replaces an earlier settlement for the same (contract,
+// settling party, audience), delivery state included: a settlement of a new
+// document supersedes the previous one and has not been delivered yet. The
+// producer only writes when the artifact actually changed, so this never
+// resets the delivery state of a settlement already in the peer's hands.
+func (r PostgresSyncRepository) UpsertSettlement(ctx context.Context, tx *sqlx.Tx, s db.Settlement) error {
+	statement := `
+        INSERT INTO contract_settlements (did, from_peer_did, to_peer_did, contract_version, document_digest, settled_at, jades_signature, recorded_at, delivered_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $8)
+        ON CONFLICT (did, from_peer_did, to_peer_did) DO UPDATE SET
+            contract_version = EXCLUDED.contract_version,
+            document_digest  = EXCLUDED.document_digest,
+            settled_at       = EXCLUDED.settled_at,
+            jades_signature  = EXCLUDED.jades_signature,
+            recorded_at      = CURRENT_TIMESTAMP,
+            delivered_at     = EXCLUDED.delivered_at
+    `
+	_, err := tx.ExecContext(ctx, statement, s.DID, s.FromPeerDID, s.ToPeerDID, s.ContractVersion, s.DocumentDigest, s.SettledAt.UTC(), s.JadesSignature, s.DeliveredAt)
+	return err
+}
+
+// GetSettlement returns what fromPeerDID settled for the contract. The key
+// also carries the audience, and an own settlement is stored once per
+// recipient, so the newest is the answer.
+func (r PostgresSyncRepository) GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*db.Settlement, error) {
+	query := `
+        SELECT did, from_peer_did, to_peer_did, contract_version, document_digest, settled_at, jades_signature, recorded_at, delivered_at
+        FROM contract_settlements
+        WHERE did = $1 AND from_peer_did = $2
+        ORDER BY settled_at DESC
+        LIMIT 1
+    `
+	var settlement db.Settlement
+	err := tx.GetContext(ctx, &settlement, query, did, fromPeerDID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &settlement, nil
+}
+
+func (r PostgresSyncRepository) GetUndeliveredSettlements(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]db.Settlement, error) {
+	query := `
+        SELECT did, from_peer_did, to_peer_did, contract_version, document_digest, settled_at, jades_signature, recorded_at, delivered_at
+        FROM contract_settlements
+        WHERE from_peer_did = $1 AND delivered_at IS NULL
+        ORDER BY recorded_at
+    `
+	var settlements []db.Settlement
+	if err := tx.SelectContext(ctx, &settlements, query, fromPeerDID); err != nil {
+		return nil, err
+	}
+	return settlements, nil
+}
+
+func (r PostgresSyncRepository) MarkSettlementDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error {
+	statement := `
+        UPDATE contract_settlements
+        SET delivered_at = CURRENT_TIMESTAMP
+        WHERE did = $1 AND from_peer_did = $2 AND to_peer_did = $3
+    `
+	_, err := tx.ExecContext(ctx, statement, did, fromPeerDID, toPeerDID)
+	return err
+}
+
 func (r PostgresSyncRepository) GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db.SyncSignature, error) {
 	query := `
         SELECT did, contract_version, from_peer_did, jades_signature, received_at, poa_evidence, poa_revalidated_at

@@ -36,6 +36,27 @@ type SyncSignature struct {
 	PoARevalidatedAt *time.Time `db:"poa_revalidated_at"`
 }
 
+// Settlement is one party's verified statement that it reached its own
+// settled state (NEGOTIATION -> SUBMITTED) on a named version of a contract
+// document — the evidence the signing gate requires about the counterparty.
+//
+// The same row shape records both directions: FromPeerDID is the party that
+// settled, ToPeerDID the instance it settled toward. A row this instance
+// produced (FromPeerDID == own did:web) additionally carries the delivery
+// bookkeeping — DeliveredAt stays NULL until the peer has accepted it, which
+// is what lets a failed ship be re-delivered instead of vanishing.
+type Settlement struct {
+	DID             string     `db:"did"`
+	FromPeerDID     string     `db:"from_peer_did"`
+	ToPeerDID       string     `db:"to_peer_did"`
+	ContractVersion int        `db:"contract_version"`
+	DocumentDigest  string     `db:"document_digest"`
+	SettledAt       time.Time  `db:"settled_at"`
+	JadesSignature  string     `db:"jades_signature"`
+	RecordedAt      time.Time  `db:"recorded_at"`
+	DeliveredAt     *time.Time `db:"delivered_at"`
+}
+
 type SyncRepository interface {
 	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx) ([]SyncFail, error)
 	// CreateOrUpdateSyncFailEntry upserts a sync_fails entry for did.
@@ -53,4 +74,17 @@ type SyncRepository interface {
 	// for a synced contract; GetSyncSignature returns nil when none exists.
 	UpsertSyncSignature(ctx context.Context, tx *sqlx.Tx, sig SyncSignature) error
 	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*SyncSignature, error)
+
+	// UpsertSettlement stores a settlement artifact, replacing an earlier one
+	// for the same (contract, settling party, audience). GetSettlement returns
+	// what the named party settled for the contract, or nil when it has not
+	// settled — the signing gate reads absence as "not agreed".
+	UpsertSettlement(ctx context.Context, tx *sqlx.Tx, settlement Settlement) error
+	GetSettlement(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID string) (*Settlement, error)
+
+	// GetUndeliveredSettlements returns the settlements this instance produced
+	// (fromPeerDID == its own did:web) that no peer has confirmed yet, for the
+	// retry scheduler to re-ship; MarkSettlementDelivered closes one out.
+	GetUndeliveredSettlements(ctx context.Context, tx *sqlx.Tx, fromPeerDID string) ([]Settlement, error)
+	MarkSettlementDelivered(ctx context.Context, tx *sqlx.Tx, did, fromPeerDID, toPeerDID string) error
 }

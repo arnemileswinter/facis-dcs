@@ -5,6 +5,7 @@ import {
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
+  assertSigningRefusedUntilCounterpartySettles,
   authorContractTemplate,
   authorSemanticComponent,
   counterOffer,
@@ -41,8 +42,10 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
  * Exercises the merged backend R5/R5c work: the negotiation counter-offer
  * round-trip (each adjustment ships a new PDF, chain grows), the
  * settle/consolidation gate (signing refused pre-settle; extrinsic phase
- * proposed→agreed→executed on the retrieve API), and cross-instance double
- * signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
+ * proposed→agreed→executed on the retrieve API), the mutual settlement gate
+ * (signing refused while the counterparty has not settled this version, and
+ * opening once its shipped settlement artifact arrives), and cross-instance
+ * double signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
  * stays as the local-only lifecycle coverage until this supersedes it.
  *
  * Every stage from 4 on ARRIVES at least once the way a human does — a row found
@@ -75,12 +78,13 @@ test.afterEach(async () => {
 })
 
 test('full two-instance negotiation vertical (A <-> B)', async ({ page, context, browser }) => {
-  // Ten stages across two instances, including two full wallet signing
-  // ceremonies in Stage 8 — an earlier, shorter budget left no headroom once
-  // the ceremony waits were sized to span the wallet leg. Halved from 25min:
-  // still generous for the real ceremony waits, but a genuine hang here
-  // shouldn't cost 25 minutes (+ a CI retry) to surface.
-  test.setTimeout(750_000)
+  // Ten stages across two instances, including three full wallet signing
+  // ceremonies — the two that sign in Stage 8, plus the one Stage 7 runs to the
+  // point of refusal — an earlier, shorter budget left no headroom once the
+  // ceremony waits were sized to span the wallet leg. Still well under the
+  // original 25min: generous for the real ceremony waits, but a genuine hang
+  // here shouldn't cost 25 minutes (+ a CI retry) to surface.
+  test.setTimeout(840_000)
   const a = instanceA(page, context, E2E_FRONTEND_ORIGIN)
   const b = await openInstanceB(browser)
   bInstance = b
@@ -194,9 +198,11 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // ADR-2 state machine gates EventSign until APPROVED; ADR-13 extrinsic lifecycle
   // → agreed]: consolidation/settle = reaching APPROVED via the real submit →
   // review → approve flow on each instance (not a fabricated /contract/settle
-  // route). Signing is refused before APPROVED (ACCEPTED = signing gate); the
-  // extrinsic lifecycle flips proposed → agreed on both sides.
-  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle', async () => {
+  // route). Signing is refused twice over — before APPROVED by the local state
+  // machine, and after it while the COUNTERPARTY has not settled, which local
+  // state cannot answer; the extrinsic lifecycle flips proposed → agreed on both
+  // sides.
+  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle and pre-counterparty', async () => {
     // The signing gate holds pre-settle: B's signer cannot sign an unapproved
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
@@ -213,6 +219,19 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // is local RBAC, so A approving says nothing about B's copy — B's reviewer
     // and approver still have to act, and the signing gate is per instance.
     await settleToApprovedOn(a, contractDid)
+
+    // A is now APPROVED and has shipped its own settlement, but B has not
+    // settled: A's signer is offered the contract and is still refused, because
+    // signing claims BOTH parties agreed this version and A holds no evidence
+    // that B did. Absence of that evidence is not agreement — this is the gate
+    // the live demo instances went straight past, signing while the peer was
+    // still negotiating.
+    await assertSigningRefusedUntilCounterpartySettles(a, contractDid, 'Instance A Signatory')
+
+    // B settles the same document, which ships B's settlement to A. Stage 8
+    // then signs on both instances: that it succeeds at all is the other half
+    // of this assertion — the gate opens on the peer's evidence arriving, not
+    // on anything A does.
     await settleToApprovedOn(b, contractDid)
     await assertReceivedInState(a, contractDid, 'APPROVED')
     await assertReceivedInState(b, contractDid, 'APPROVED')

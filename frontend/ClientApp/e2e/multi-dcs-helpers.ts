@@ -12,7 +12,7 @@ import {
   E2E_ISSUER_BASE_URL,
 } from '../playwright.config'
 import { formatNumberInput } from '../src/modules/template-repository/utils/number-format'
-import type { Browser, BrowserContext, Page } from '@playwright/test'
+import type { Browser, BrowserContext, Page, Response } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -70,6 +70,16 @@ export async function openInstanceB(browser: Browser): Promise<Instance> {
   const context = await browser.newContext({ baseURL: E2E_FRONTEND_B_ORIGIN })
   const page = await context.newPage()
   return makeInstance(page, context, E2E_FRONTEND_B_ORIGIN, E2E_API_BASE_B)
+}
+
+/** What one run of the Secure Contract Viewer's signing ceremony produced: the
+ *  ceremony it started, the signature field it bound, and the /signature/prepare
+ *  response the viewer received — asserted by the caller, because whether that
+ *  response is a document or a refusal is the whole subject of some of them. */
+interface PreparedCeremony {
+  ceremonyId: string
+  signField: string
+  prepared: Response
 }
 
 /**
@@ -140,15 +150,17 @@ export async function openContractFromTaskTab(
 }
 
 /**
- * Signs an APPROVED contract on a given instance through that instance's Secure
- * Contract Viewer, exactly as a real signer would (ADR-12): open from the
- * signing list, verify, run the wallet PID+PoA ceremony (the wallet leg arrives
- * over OpenID4VP direct_post against this instance's API base),
- * download the to-be-signed PDF, sign it externally with the test wallet's key
- * via the DSS SCA, upload it, and confirm SIGNED. The signature field is the
- * signing party's own DCS DID slot; the wallet discovers it from the PDF.
+ * Drives one signing ceremony on an instance through the real Secure Contract
+ * Viewer (ADR-12): open the contract from the signing list, verify it, run the
+ * wallet PID+PoA ceremony (the wallet leg arrives over OpenID4VP direct_post
+ * against this instance's API base), and wait for the viewer's own
+ * /signature/prepare response.
+ *
+ * Stops there deliberately. Preparation is where the DCS decides whether this
+ * contract may be signed at all, so the two callers below share every step up
+ * to that answer and differ only in what they assert about it.
  */
-export async function signOnInstance(inst: Instance, contractDid: string, signatory: string): Promise<void> {
+async function runSigningCeremonyOn(inst: Instance, contractDid: string, signatory: string): Promise<PreparedCeremony> {
   await inst.gotoAs('Contract Signer', '/ui/signing')
   const row = inst.page.getByRole('row').filter({ hasText: contractDid })
   await expect(row).toBeVisible()
@@ -219,13 +231,27 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     stdio: 'pipe',
   })
 
-  const preparedPath = path.join(tmpdir(), `prepared-${ceremony.ceremony_id}.pdf`)
   const prepared = await preparedResponse.catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(
       `${message}\nviewer signature calls:\n  ${viewerCalls.join('\n  ') || '(none)'}\nviewer console errors:\n  ${viewerErrors.join('\n  ') || '(none)'}`,
     )
   })
+  return { ceremonyId: ceremony.ceremony_id, signField, prepared }
+}
+
+/**
+ * Signs an APPROVED contract on a given instance through that instance's Secure
+ * Contract Viewer, exactly as a real signer would (ADR-12): run the ceremony
+ * above, download the to-be-signed PDF, sign it externally with the test
+ * wallet's key via the DSS SCA, upload it, and confirm SIGNED. The signature
+ * field is the signing party's own DCS DID slot; the wallet discovers it from
+ * the PDF.
+ */
+export async function signOnInstance(inst: Instance, contractDid: string, signatory: string): Promise<void> {
+  const { ceremonyId, signField, prepared } = await runSigningCeremonyOn(inst, contractDid, signatory)
+
+  const preparedPath = path.join(tmpdir(), `prepared-${ceremonyId}.pdf`)
   expect(
     prepared.ok(),
     `prepare the to-be-signed document on ${inst.origin}: HTTP ${prepared.status()} ${await prepared.text().catch(() => '')}`,
@@ -237,7 +263,7 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
   const preparedBytes = Buffer.from(preparedEnvelope.document, 'base64')
   expect(preparedBytes.subarray(0, 5).toString('latin1'), 'prepared document is a PDF').toBe('%PDF-')
   fs.writeFileSync(preparedPath, preparedBytes)
-  const signedPath = path.join(tmpdir(), `signed-${ceremony.ceremony_id}.pdf`)
+  const signedPath = path.join(tmpdir(), `signed-${ceremonyId}.pdf`)
   execFileSync(python, [path.join(here, 'sign_prepared_pdf.py'), preparedPath, signedPath], {
     cwd: repoRoot,
     env: {
@@ -260,6 +286,57 @@ export async function signOnInstance(inst: Instance, contractDid: string, signat
     `submit signature on ${inst.origin}: HTTP ${submitResponse.status()} ${await submitResponse.text().catch(() => '')}`,
   ).toBeTruthy()
   await expect(inst.page.getByText('SIGNED', { exact: true })).toBeVisible({ timeout: 60_000 })
+}
+
+/**
+ * Stage 7 mutual-milestone gate — a signer whose OWN instance has finished its
+ * workflow still cannot sign while the counterparty has not settled this
+ * version.
+ *
+ * Distinct from assertNotYetSignable, which covers the local state gate before
+ * approval (ADR-2 allows EventSign only from APPROVED) and is satisfied by the
+ * contract simply not being offered. Here the instance is APPROVED and the
+ * contract IS offered to its signer: the state machine is content, the signatory
+ * presents their PID, and the refusal comes from the one thing local state
+ * cannot supply — locally-held, verified evidence that the OTHER party agreed to
+ * the document about to be signed (a settlement artifact the peer signs and
+ * ships over the DCS-to-DCS channel). Intrinsic state is local (ADR-13), so an
+ * instance reaching APPROVED says nothing at all about its counterparty, and a
+ * signature binds the moment it is made — refusing to deploy afterwards would
+ * not undo it.
+ *
+ * The refusal is asserted twice over: as the typed API code the frontend
+ * dispatches on, and as what the signer is actually told — a signer looking at
+ * a dead button with no explanation is the failure mode the code exists to
+ * prevent.
+ */
+export async function assertSigningRefusedUntilCounterpartySettles(
+  inst: Instance,
+  contractDid: string,
+  signatory: string,
+): Promise<void> {
+  const { prepared } = await runSigningCeremonyOn(inst, contractDid, signatory)
+
+  const body = await prepared.text().catch(() => '')
+  expect(
+    prepared.ok(),
+    `signing ${contractDid} on ${inst.origin} was allowed while the counterparty had not settled: HTTP ${prepared.status()} ${body}`,
+  ).toBeFalsy()
+  // By code, never by matching the message: bad_request also carries "you may
+  // not sign this contract", which is a different answer to the signer.
+  let refusal: { name?: string }
+  try {
+    refusal = JSON.parse(body) as { name?: string }
+  } catch {
+    throw new Error(`signing refusal on ${inst.origin} is not a typed error envelope: ${body}`)
+  }
+  expect(refusal.name, `signing refusal on ${inst.origin} must name the counterparty settlement, got ${body}`).toBe(
+    'counterparty_not_settled',
+  )
+
+  await expect(inst.page.getByText(/Waiting for the counterparty to settle this version/)).toBeVisible({
+    timeout: 30_000,
+  })
 }
 
 /**
