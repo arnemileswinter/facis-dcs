@@ -423,8 +423,7 @@ def _content_audit_trail_rule_severities(context, name, rule_id, *, require_entr
     did, _ = ContractService._contract_data(context, name)
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
-    # DCS-FR-PACM-02 flags DETECTED risks, DCS-FR-PACM-03 attaches its
-    # obligation to contracts FAILING a check, and UC-08's acceptance reads
+    # DCS-FR-PACM-02 flags DETECTED risks, and UC-08's acceptance reads
     # "violations (if any) flagged with reasons" — so nothing requires a
     # compliant contract to carry a finding, and "(if any)" says outright that
     # there may be none. ADR-9 is how that shows up here: SHACL reports only
