@@ -1203,17 +1203,25 @@ def step_then_sla_state_on_instance(context, label, expected):
     expected = expected.strip().upper()
     deadline = time.monotonic() + 90
     actual = None
+    # The read raises while the contract is not replicated yet, which is the
+    # normal case for most of this wait. Keep the last reason: swallowing it
+    # left a timeout reporting only "last observed: None", which cannot
+    # distinguish a ship that never arrived from one whose copy this reader is
+    # not allowed to see.
+    last_refusal = None
     while time.monotonic() < deadline:
         try:
             actual = _contract_state(context, label)
-        except AssertionError:
-            actual = None  # not replicated yet
+        except AssertionError as not_replicated_yet:
+            actual = None
+            last_refusal = str(not_replicated_yet)
         if actual == expected:
             return
         time.sleep(2)
     raise AssertionError(
         f"expected the SLA contract to reach state {expected} on instance {label} within a few "
         f"seconds of the peer ship, last observed: {actual!r}"
+        + (f"; last read refused with: {last_refusal}" if last_refusal else "")
     )
 
 

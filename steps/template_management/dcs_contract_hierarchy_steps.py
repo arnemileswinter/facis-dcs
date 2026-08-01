@@ -439,7 +439,7 @@ def step_then_ac5_isolation(context):
     assert context.ac5_child_b_did in dids, (
         f"Expected the offered/replicated child {context.ac5_child_b_did} to appear in "
         f"instance B's parent_did-filtered search results within 45s, got dids: {dids} "
-        f"(last response {last_resp.status_code if last_resp else 'n/a'})"
+        f"(last response {last_resp.status_code if last_resp is not None else 'no request made'})"
     )
     assert context.ac5_child_c_did not in dids, (
         f"Expected the sibling child {context.ac5_child_c_did} (created locally on instance "
