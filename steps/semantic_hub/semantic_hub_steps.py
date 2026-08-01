@@ -415,28 +415,29 @@ def step_when_register_stricter_shapes(context):
     )
 
 
-def _content_audit_trail_rule_severities(context, name, rule_id, *, require_entries=True):
+def _content_audit_trail_rule_severities(context, name, rule_id):
     assert context.requests_response.status_code == 200, (
         f"Expected 200 from /pac/audit, got {context.requests_response.status_code}: "
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
+    # Positive proof this contract was AUDITED, which is what the caller needs
+    # before reading anything into an absent finding. The run echoes the
+    # resource it was scoped to (PACExternalAuditResponse.resource), so an
+    # audit that never looked at this contract cannot satisfy "reports no
+    # error for this rule".
+    #
+    # The previous precondition asserted a finding EXISTED, which proves
+    # something weaker and is unsatisfiable by exactly the contracts this is
+    # asked about: ADR-9 — SHACL reports only non-conformance, so a fully
+    # compliant document produces ZERO findings, not N conforming ones.
+    audited = (context.requests_response.json().get("resource") or {}).get("did")
+    assert audited == did, (
+        f"Expected the audit run to be scoped to '{name}' (did={did}) so an absent "
+        f"finding means something; got resource: {context.requests_response.json().get('resource')!r}"
+    )
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
-    # DCS-FR-PACM-02 flags DETECTED risks, and UC-08's acceptance reads
-    # "violations (if any) flagged with reasons" — so nothing requires a
-    # compliant contract to carry a finding, and "(if any)" says outright that
-    # there may be none. ADR-9 is how that shows up here: SHACL reports only
-    # non-conformance, so a fully compliant document produces ZERO findings
-    # rather than N conforming ones. Demanding an entry before checking
-    # severities therefore made "reports no error for this rule" unsatisfiable
-    # by exactly the contracts the requirement calls compliant; callers
-    # asserting absence pass require_entries=False.
-    if require_entries:
-        assert entries, (
-            f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-            f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
-        )
     severities = []
     for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
@@ -466,9 +467,7 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # passing severity. A contract clean on EVERY rule has no entry at all:
     # under DCS-FR-PACM-02/-03 and UC-08 ("violations (if any)") that IS the
     # compliant outcome, not a missing precondition.
-    did, severities = _content_audit_trail_rule_severities(
-        context, name, rule_id, require_entries=False
-    )
+    did, severities = _content_audit_trail_rule_severities(context, name, rule_id)
     assert "error" not in severities, (
         f"Expected contract '{name}' (did={did}) to report no error for rule {rule_id!r}, "
         f"got severities: {severities}"
