@@ -197,25 +197,17 @@ def _self_peer_action_credentials(context):
 
 
 def _offer_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    headers = _seed_headers(context, name)
-    resp = post_json(context, contract_offer_url(context), {"did": did, "updated_at": updated_at}, headers=headers)
-    assert resp.status_code == 200, (
-        f"Offer failed while preparing OFFERED state for '{name}': {resp.status_code} {resp.text}"
+    return _post_reissuing_on_conflict(
+        context, contract_offer_url(context), {}, _seed_headers(context, name), name,
+        "Offer while preparing OFFERED state",
     )
-    ContractService._refresh_contract(context, name)
-    return resp
 
 
 def _withdraw_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    headers = _seed_headers(context, name)
-    resp = post_json(context, contract_withdraw_url(context), {"did": did, "updated_at": updated_at}, headers=headers)
-    assert resp.status_code == 200, (
-        f"Withdraw failed while preparing WITHDRAWN state for '{name}': {resp.status_code} {resp.text}"
+    return _post_reissuing_on_conflict(
+        context, contract_withdraw_url(context), {}, _seed_headers(context, name), name,
+        "Withdraw while preparing WITHDRAWN state",
     )
-    ContractService._refresh_contract(context, name)
-    return resp
 
 
 def _advance_to_submitted(context, name):
@@ -255,13 +247,10 @@ def _advance_to_approved(context, name):
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=approver_h)
     assert retrieve.status_code == 200, retrieve.text
     updated_at = retrieve.json().get("updated_at")
-    approve = post_json(
-        context, contract_approve_url(context), {"did": did, "updated_at": updated_at}, headers=approver_h
+    _post_reissuing_on_conflict(
+        context, contract_approve_url(context), {}, approver_h, name,
+        "Approve while preparing APPROVED state",
     )
-    assert approve.status_code == 200, (
-        f"Approve failed while preparing APPROVED state for '{name}': {approve.status_code} {approve.text}"
-    )
-    ContractService._refresh_contract(context, name)
 
 
 def _apply_signature(context, name):
@@ -357,6 +346,7 @@ def _post_reissuing_on_conflict(context, url, payload, headers, name, what):
         f"{resp.text if resp is not None else ''}"
     )
     ContractService._refresh_contract(context, name)
+    return resp
 
 
 def _terminate_contract(context, name):
