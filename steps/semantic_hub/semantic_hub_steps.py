@@ -415,7 +415,7 @@ def step_when_register_stricter_shapes(context):
     )
 
 
-def _content_audit_trail_rule_severities(context, name, rule_id):
+def _content_audit_trail_rule_severities(context, name, rule_id, *, require_entries=True):
     assert context.requests_response.status_code == 200, (
         f"Expected 200 from /pac/audit, got {context.requests_response.status_code}: "
         f"{context.requests_response.text}"
@@ -423,10 +423,15 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
     did, _ = ContractService._contract_data(context, name)
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
-    assert entries, (
-        f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
-    )
+    # goRDFlib reports only non-conformance, so a fully conformant contract
+    # yields no entry at all. Demanding one before checking made "reports no
+    # error for this rule" unsatisfiable by exactly the contracts that are
+    # clean — the callers asserting absence pass require_entries=False.
+    if require_entries:
+        assert entries, (
+            f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
+            f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
+        )
     severities = []
     for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
@@ -453,8 +458,11 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # goRDFlib (ADR-9) only reports non-conformance — a fully compliant
     # contract has NO finding for a conformant rule at all (not an "info"
     # one), so this asserts absence-of-violation rather than a specific
-    # passing severity.
-    did, severities = _content_audit_trail_rule_severities(context, name, rule_id)
+    # passing severity. A contract clean on EVERY rule has no entry at all,
+    # which is the strongest form of this claim, not a missing precondition.
+    did, severities = _content_audit_trail_rule_severities(
+        context, name, rule_id, require_entries=False
+    )
     assert "error" not in severities, (
         f"Expected contract '{name}' (did={did}) to report no error for rule {rule_id!r}, "
         f"got severities: {severities}"
