@@ -421,6 +421,8 @@ func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusNotFound}
 		case "service_unavailable":
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusServiceUnavailable}
+		case "conflict":
+			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusConflict}
 		}
 	}
 

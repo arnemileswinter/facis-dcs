@@ -332,19 +332,42 @@ def _revoke_signature(context, name):
     ContractService._refresh_contract(context, name)
 
 
-def _terminate_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    resp = post_json(
-        context,
-        contract_terminate_url(context),
-        {"did": did, "reason": "BDD setup", "updated_at": updated_at},
-        headers=manager_h,
-    )
-    assert resp.status_code == 200, (
-        f"Terminate failed while preparing TERMINATED state for '{name}': {resp.status_code} {resp.text}"
+def _post_reissuing_on_conflict(context, url, payload, headers, name, what):
+    """POST a lifecycle setup command, re-reading updated_at immediately before
+    each attempt.
+
+    These helpers only exist to put a contract into a given state; the token
+    they hold was read a step or more earlier, and a background writer (the PDF
+    regenerator, an arriving peer ship) can advance updated_at in between. The
+    backend answers that with a retryable conflict, so re-read and reissue
+    rather than fail a scenario on a race it is not testing. Steps that
+    deliberately present a stale token to prove the guard bites do NOT use this.
+    """
+    did, _ = ContractService._contract_data(context, name)
+    resp = None
+    for _ in range(4):
+        ContractService._refresh_contract(context, name)
+        _, updated_at = ContractService._contract_data(context, name)
+        resp = post_json(context, url, dict(payload, did=did, updated_at=updated_at), headers=headers)
+        if resp.status_code != 409:
+            break
+        time.sleep(1)
+    assert resp is not None and resp.status_code == 200, (
+        f"{what} failed for '{name}': {resp.status_code if resp is not None else 'no request made'} "
+        f"{resp.text if resp is not None else ''}"
     )
     ContractService._refresh_contract(context, name)
+
+
+def _terminate_contract(context, name):
+    _post_reissuing_on_conflict(
+        context,
+        contract_terminate_url(context),
+        {"reason": "BDD setup"},
+        AuthService.get_headers_for_roles(["Contract Manager"]),
+        name,
+        "Terminate while preparing TERMINATED state",
+    )
 
 
 def _reach_state(context, name, state):
