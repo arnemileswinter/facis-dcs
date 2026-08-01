@@ -423,10 +423,16 @@ def _content_audit_trail_rule_severities(context, name, rule_id, *, require_entr
     did, _ = ContractService._contract_data(context, name)
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
-    # goRDFlib reports only non-conformance, so a fully conformant contract
-    # yields no entry at all. Demanding one before checking made "reports no
-    # error for this rule" unsatisfiable by exactly the contracts that are
-    # clean — the callers asserting absence pass require_entries=False.
+    # DCS-FR-PACM-02 flags DETECTED risks, DCS-FR-PACM-03 attaches its
+    # obligation to contracts FAILING a check, and UC-08's acceptance reads
+    # "violations (if any) flagged with reasons" — so nothing requires a
+    # compliant contract to carry a finding, and "(if any)" says outright that
+    # there may be none. ADR-9 is how that shows up here: SHACL reports only
+    # non-conformance, so a fully compliant document produces ZERO findings
+    # rather than N conforming ones. Demanding an entry before checking
+    # severities therefore made "reports no error for this rule" unsatisfiable
+    # by exactly the contracts the requirement calls compliant; callers
+    # asserting absence pass require_entries=False.
     if require_entries:
         assert entries, (
             f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
@@ -458,8 +464,9 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # goRDFlib (ADR-9) only reports non-conformance — a fully compliant
     # contract has NO finding for a conformant rule at all (not an "info"
     # one), so this asserts absence-of-violation rather than a specific
-    # passing severity. A contract clean on EVERY rule has no entry at all,
-    # which is the strongest form of this claim, not a missing precondition.
+    # passing severity. A contract clean on EVERY rule has no entry at all:
+    # under DCS-FR-PACM-02/-03 and UC-08 ("violations (if any)") that IS the
+    # compliant outcome, not a missing precondition.
     did, severities = _content_audit_trail_rule_severities(
         context, name, rule_id, require_entries=False
     )
