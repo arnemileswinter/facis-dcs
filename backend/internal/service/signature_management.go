@@ -35,6 +35,7 @@ import (
 	"digital-contracting-service/internal/signingmanagement/query"
 
 	"github.com/jmoiron/sqlx"
+	goa "goa.design/goa/v3/pkg"
 )
 
 // mapSignatureCommandError classifies a signing command error for the HTTP
@@ -45,6 +46,14 @@ import (
 func mapSignatureCommandError(err error) error {
 	if err == nil {
 		return nil
+	}
+	// The background regenerator still holds the contract, so the base document
+	// the signature would cover is not settled yet. The caller is not wrong and
+	// nothing failed: reported as a temporary service_unavailable (503) so a
+	// client can retry, where internal_error (500, temporary:false) told it the
+	// request would never succeed.
+	if errors.Is(err, command.ErrRegenerationInFlight) {
+		return goa.NewServiceError(err, "service_unavailable", false, true, false)
 	}
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
 		return signaturemanagement.MakeCeremonyRequired(err)
