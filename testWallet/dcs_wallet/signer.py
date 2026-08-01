@@ -134,11 +134,22 @@ def ensure_signing_material(
     crt_path = sdir / f"{user}.signing.crt.pem"
 
     def _load() -> tuple[dict[str, Any], bytes] | None:
-        if jwk_path.exists() and crt_path.exists():
-            jwk = load_json(jwk_path)
-            cert = x509.load_pem_x509_certificate(crt_path.read_bytes())
-            return jwk, cert.public_bytes(serialization.Encoding.DER)
-        return None
+        if not (jwk_path.exists() and crt_path.exists()):
+            return None
+        jwk = load_json(jwk_path)
+        cert = x509.load_pem_x509_certificate(crt_path.read_bytes())
+        # The cache is keyed by `user` alone, so a certificate minted under an
+        # older subject schema — before GIVEN_NAME/SURNAME were carried at all —
+        # was handed back forever to callers that now require them, and the
+        # signature was refused with no way forward but deleting the file by
+        # hand. A cached artifact that does not answer the request is a miss.
+        def _attr(oid: x509.ObjectIdentifier) -> str | None:
+            values = cert.subject.get_attributes_for_oid(oid)
+            return values[0].value if values else None
+
+        if _attr(NameOID.GIVEN_NAME) != given_name or _attr(NameOID.SURNAME) != family_name:
+            return None
+        return jwk, cert.public_bytes(serialization.Encoding.DER)
 
     cached = _load()
     if cached is not None:
