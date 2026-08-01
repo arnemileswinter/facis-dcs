@@ -77,7 +77,7 @@ type SettlementWithdrawal struct {
 }
 
 type SyncRepository interface {
-	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx) ([]SyncFail, error)
+	GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx, backoffBase, maxBackoff time.Duration, limit int) ([]SyncFail, error)
 	// CreateOrUpdateSyncFailEntry upserts a sync_fails entry for did.
 	// isGateFailure marks this particular attempt as caused by the ADR-19
 	// trust gate's agreement-credential check (as opposed to e.g. the PDF not

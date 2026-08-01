@@ -190,6 +190,17 @@ func didFromEvent(evt cloudevent.Event) (string, error) {
 	return did, nil
 }
 
+// shipRetriesPerPass bounds one retry pass. The pass is serial and every entry
+// costs a did:web resolution, a trust-gate call and a peer POST, so an
+// unbounded pass could take longer than the interval between passes — and the
+// ship of a contract offered in the meantime waits behind every hopeless entry
+// ahead of it.
+const shipRetriesPerPass = 25
+
+// maxShipRetryBackoff caps the exponential backoff so an entry that recovers
+// after a long outage is still retried within a bounded time.
+const maxShipRetryBackoff = 10 * time.Minute
+
 func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, interval time.Duration) {
 	readSyncFails := func() ([]db2.SyncFail, error) {
 		tx, err := s.DB.BeginTxx(ctx, nil)
@@ -202,7 +213,7 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 			}
 		}(tx)
 
-		attempts, err := s.SRepo.GetPendingSyncFails(ctx, tx)
+		attempts, err := s.SRepo.GetPendingSyncFails(ctx, tx, interval, maxShipRetryBackoff, shipRetriesPerPass)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read sync fail entries: %w", err)
 		}
