@@ -20,15 +20,15 @@ from steps.support.api_client import post_json
 from steps.support.services.auth_service import AuthService
 
 # The backend refuses to prepare or accept a signature while the background PDF
-# regenerator still holds the contract, and reports it as a temporary
-# service_unavailable. It resolves on its own within seconds, so a caller that
+# regenerator still holds the contract, and reports that as a temporary
+# service_unavailable. It clears on its own within seconds, so a caller that
 # only wants a signed contract retries instead of failing the scenario. Each
 # attempt already absorbs the backend's own 15s wait for the regeneration lock.
-_REGENERATION_ATTEMPTS = 3
-_REGENERATION_PAUSE_SECONDS = 2
+_TEMPORARY_ATTEMPTS = 3
+_TEMPORARY_PAUSE_SECONDS = 2
 
 
-def _is_regeneration_in_flight(response) -> bool:
+def _is_temporarily_unavailable(response) -> bool:
     if response.status_code != 503:
         return False
     try:
@@ -70,7 +70,7 @@ def wallet_sign(
     knows its ceremony_id (almost always true for BDD, which just ran the
     ceremony itself) should always pass it.
     """
-    for attempt in range(_REGENERATION_ATTEMPTS):
+    for attempt in range(_TEMPORARY_ATTEMPTS):
         response = _wallet_sign_once(
             context,
             did,
@@ -84,10 +84,10 @@ def wallet_sign(
             family_name=family_name,
             ceremony_id=ceremony_id,
         )
-        if not _is_regeneration_in_flight(response):
+        if not _is_temporarily_unavailable(response):
             return response
-        if attempt < _REGENERATION_ATTEMPTS - 1:
-            time.sleep(_REGENERATION_PAUSE_SECONDS)
+        if attempt < _TEMPORARY_ATTEMPTS - 1:
+            time.sleep(_TEMPORARY_PAUSE_SECONDS)
     return response
 
 
