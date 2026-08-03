@@ -148,6 +148,22 @@ Gegenseite übermittelt; deren Unterzeichner leistet seine Signatur zusätzlich
 auf demselben Dokument. Erst wenn alle vorgesehenen Unterschriften nachweisbar
 vorliegen, gilt der Vertrag als vollständig unterzeichnet.
 
+### Verträge mit mehreren Unterschriftsfeldern
+
+Ein Vertrag kann mehrere Unterschriftsfelder vorsehen, etwa für zwei
+Zeichnungsberechtigte. Dann gilt:
+
+- Jedes Feld unterzeichnet die dafür vorgesehene Person, ein Feld nach dem
+  anderen. Ein bereits unterzeichnetes Feld lässt sich kein zweites Mal
+  signieren.
+- Die erste Unterschrift wird erst angenommen, wenn **alle** vorgesehenen
+  Unterzeichner ihre Identität nachgewiesen haben (Schritt 3). Stimmen Sie
+  sich also zuerst ab, dass jeder diesen Schritt abgeschlossen hat, bevor die
+  erste Person ihr signiertes Dokument hochlädt.
+- In Kraft gesetzt wird der Vertrag erst, wenn alle vorgesehenen Felder
+  unterzeichnet sind. Ein Versuch, ihn vorher bereitzustellen, wird
+  abgelehnt.
+
 Tragen Sie die Rolle Contract Manager statt Contract Signer, sind Öffnen,
 Prüfen und Validieren verfügbar, das Signieren selbst dagegen nicht. Die
 Ansicht weist darauf hin.
@@ -164,6 +180,18 @@ sich zuvor mit der Wallet ausgewiesen hat. Diese Fälle können Ihnen begegnen:
   verified signatory"); der Vertrag wird nicht auf **SIGNED** gesetzt.
   Verwenden Sie ein Signaturmittel, dessen Zertifikat auf Ihren eigenen Namen
   ausgestellt ist, und laden Sie erneut hoch.
+- **Das hochgeladene Dokument ist nicht das bereitgestellte.** Weicht der
+  Inhalt des signierten Dokuments von dem ab, was der DCS zum Signieren
+  bereitgestellt hat, wird der Upload abgewiesen. Signieren Sie genau die
+  heruntergeladene Datei und verändern Sie sie dabei nicht.
+- **Das Signaturniveau reicht nicht aus.** Verlangt der Vertrag für Ihr
+  Unterschriftsfeld ein höheres Signaturniveau (z. B. eine qualifizierte
+  Signatur, QES), wird eine Signatur eines niedrigeren Niveaus abgewiesen.
+  Verwenden Sie ein Signaturmittel des geforderten Niveaus.
+- **Ihr Identitätsnachweis ist widerrufen.** Ein widerrufener
+  Identitätsnachweis wird bereits bei der Vorlage in der Wallet abgewiesen;
+  der Signaturvorgang geht nicht weiter. Lassen Sie sich einen gültigen
+  Nachweis ausstellen.
 - **Die Vollmacht führt nicht auf einen zugelassenen Vertrauensanker
   zurück.** Die Vollmacht wird abgelehnt, der Signaturvorgang bleibt
   unverifiziert. Wenden Sie sich an die Stelle, die Ihre Vollmacht ausgestellt

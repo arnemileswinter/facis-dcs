@@ -1,24 +1,19 @@
 # Anhang A Schnittstellenreferenz
 
-Dieser Anhang listet die Schnittstellen einer DCS-Instanz auf drei Ebenen:
-die HTTP-API-Gruppen des Backends, die Ereignisse auf dem internen
-Event-Bus und die öffentlichen well-known-Endpunkte, über die andere
-Instanzen und externe Prüfer die Instanz auflösen.
-
-Die Referenz beschreibt Gruppen und Zweck, nicht einzelne Parameter. Die
+Dieser Anhang listet die Schnittstellen einer DCS-Instanz auf drei
+Ebenen: die HTTP-API-Gruppen des Backends, die Ereignisse auf dem
+internen Event-Bus und die öffentlichen well-known-Endpunkte. Er
+beschreibt Gruppen und Zweck, nicht einzelne Parameter; die
 vollständige, maschinenlesbare API-Beschreibung liefert jede laufende
-Instanz selbst: eine Swagger-Oberfläche und eine
-OpenAPI-3-Spezifikation.
+Instanz selbst (Swagger-Oberfläche und OpenAPI-3-Spezifikation).
 
 Alle fachlichen APIs sind, sofern nicht anders vermerkt, durch das
 OIDC-Bearer-Token geschützt; die Scopes im Access Token entsprechen den
-Rollen-Claims des Nutzers. Maschinelle Aufrufer (Maschinen-Identitäten
-und Contract Target Systems) authentifizieren sich mit
-Client-Credentials-Tokens ihrer eigenen, über die Registry ausgestellten
-OAuth2-Clients; ihre Rollen liest das Backend anhand der Client-ID aus
-der Registry, nie aus Token-Claims. Öffentlich (ohne Login) sind die
-well-known-Endpunkte, der C2PA-Manifestabruf, die
-Semantic-Hub-Auflösungsendpunkte sowie die von Wallets und
+Rollen-Claims des Nutzers. Maschinelle Aufrufer authentifizieren sich
+mit Client-Credentials-Tokens ihrer eigenen OAuth2-Clients; ihre Rollen
+liest das Backend anhand der Client-ID aus der Registry, nie aus
+Token-Claims. Öffentlich sind die well-known-Endpunkte, der
+C2PA-Manifestabruf, die Semantic-Hub-Auflösung sowie die von Wallets und
 Peer-Instanzen aufgerufenen Callback-Pfade.
 
 ## A.1 HTTP-API-Gruppen
@@ -42,16 +37,13 @@ Peer-Instanzen aufgerufenen Callback-Pfade.
 
 ### Auth (`/auth/...`)
 
-Zwei Ablauffamilien: der OIDC-Login mit OpenID4VP-Presentation
-(Session-basierte Anmeldung am DCS) und die davon unabhängige, einmalige
-PID-Presentation (Identitätsnachweis ohne Session).
+Zwei Ablauffamilien: der OIDC-Login mit OpenID4VP-Presentation und die
+davon unabhängige, einmalige PID-Presentation ohne Session.
 
 | Endpunktgruppe | Endpunkte | Zweck |
 | --- | --- | --- |
-| Login-Flow | `POST /auth/login`, `POST /auth/login/renew`, `POST /auth/login/challenge`, `GET /auth/login/status` | OID4VP-Login starten/verlängern, Login-Challenge binden, Status-Polling für das Frontend |
-| OIDC-Session | `GET /auth/consent`, `GET /auth/callback`, `POST /auth/refresh`, `GET /auth/logout`, `GET /auth/logout-complete` | Consent und Callback, Token-Refresh über HttpOnly-Cookie, Abmeldung |
-| Wallet-Presentation | `GET/POST /auth/presentation/request/{state}`, `POST /auth/presentation/callback` | Signiertes Authorization-Request-Objekt (Request-by-Reference) für die Wallet; Direct-Post-Rückkanal |
-| PID-Presentation | `POST /auth/pid/presentation`, `POST /auth/pid/presentation/renew`, `GET/POST /auth/pid/presentation/request/{state}`, `POST /auth/pid/presentation/callback`, `GET /auth/pid/presentation/status` | Einmalige PID-Vorlage ohne Session, gleiche Request-/Callback-/Polling-Mechanik |
+| Login und OIDC-Session | `POST /auth/login`, `/auth/login/renew`, `/auth/login/challenge`, `GET /auth/login/status`; `GET /auth/consent`, `/auth/callback`, `POST /auth/refresh`, `GET /auth/logout`, `/auth/logout-complete` | OID4VP-Login starten, verlängern und an die Hydra-Challenge binden; Status-Polling; Consent und Callback; Token-Refresh über HttpOnly-Cookie; Abmeldung |
+| Wallet- und PID-Presentation | `GET/POST /auth/presentation/request/{state}`, `POST /auth/presentation/callback`; gleiche Mechanik sessionlos unter `/auth/pid/presentation/…` | Signiertes Authorization-Request-Objekt (Request-by-Reference) und Direct-Post-Rückkanal; die PID-Variante ohne Session (Kapitel 05) |
 
 ### TemplateRepository (`/template/...`)
 
@@ -67,14 +59,14 @@ PID-Presentation (Identitätsnachweis ohne Session).
 
 Sämtliche lesenden Endpunkte dieser Gruppe sind öffentlich: Erzeugte
 Artefakte tragen Hub-Anker, die externe Prüfer ohne DCS-Login auflösen
-können müssen. Schreibend ist nur die Schema-Verwaltung, und die
-ausschließlich für den Template Manager.
+können müssen. Schreibend ist nur die Schema-Verwaltung (Template
+Manager).
 
 | Endpunktgruppe | Endpunkte | Zweck |
 | --- | --- | --- |
-| Schema-Verwaltung | `POST /semantic/schema/register`, `POST /semantic/schema/rollback` | Neue Schema-Version registrieren, auf eine frühere zurücksetzen (Template Manager) |
+| Schema-Verwaltung | `POST /semantic/schema/register`, `POST /semantic/schema/rollback` | Neue Schema-Version registrieren, auf eine frühere zurücksetzen |
 | Schema-Abruf | `GET /semantic/schema/retrieve`, `GET /semantic/schema/versions`, `GET /semantic/schema/list` | Aktive oder benannte Version abrufen, Versions- und Schemaliste |
-| Artefakt-Auflösung | `GET /semantic/context/{name}`, `GET /semantic/shapes/{name}`, `GET /semantic/ontology/{name}`, `GET /semantic/profile/{name}` | Kontext, Shapes, geparste RDF-Konfiguration und Validierungsprofil unter stabilen Ankern ausliefern |
+| Artefakt-Auflösung | `GET /semantic/context/{name}`, `GET /semantic/shapes/{name}`, `GET /semantic/ontology/{name}`, `GET /semantic/profile/{name}` | Kontext, Shapes, RDF-Konfiguration und Validierungsprofil unter stabilen Ankern |
 | Klausel-Katalog | `GET /semantic/clauses` | Klauseltypen für die Palette des Vorlagen-Builders |
 
 ### TemplateCatalogueIntegration (`/catalogue/template/...`)
@@ -93,8 +85,8 @@ ausschließlich für den Template Manager.
 | Entscheidung | `POST /contract/approve`, `POST /contract/reject`, `GET /contract/review` | Freigeben oder ablehnen, Review-Sicht der offenen Aufgaben |
 | Abruf und Suche | `GET /contract/retrieve`, `GET /contract/retrieve/{did}`, `GET /contract/{did}`, `GET /contract/history/{did}`, `GET /contract/search`, `GET /contract/templates` | Verträge listen, per DID auflösen (parteibeschränkt), Historie, Suche, verfügbare Vorlagen |
 | Abschluss und Betrieb | `POST /contract/store`, `POST /contract/terminate`, `GET /contract/kpis/{did}`, `POST /contract/audit` | Evidenz sichern, beenden, KPI-Beobachtungen einsehen, Audit-Auszug |
-| Deployment | `POST /contract/deploy`, `POST /contract/target/designate`, `POST /contract/deployment/callback` | An das designierte (oder ein explizit gewähltes) Zielsystem ausrollen; Designation setzen oder löschen; Rückmeldung des Zielsystems (Ack/Status, KPI-Werte), authentifiziert als dessen eigener OAuth2-Client und nur für Deployments, die an genau dieses Ziel gingen |
-| Zielsystem-Registry | `GET/POST/PUT/DELETE /contract/targets`, `POST /contract/targets/{id}/credential` | Registry administrieren (Schreibzugriff Sys. Administrator und Integration Manager, Lesen zusätzlich Contract Manager); Löschen wird verweigert, solange ein Vertrag das Ziel designiert; Callback-Credential ausstellen/rotieren, wobei das Secret genau einmal erscheint und das vorherige sofort seine Gültigkeit verliert |
+| Deployment | `POST /contract/deploy`, `POST /contract/target/designate`, `POST /contract/deployment/callback` | An das designierte (oder ein explizit gewähltes) Zielsystem ausrollen; Designation setzen oder löschen; Rückmeldung des Zielsystems (Ack/Status, KPI-Beobachtungen samt Urteil und Regelbezug, ADR-33), authentifiziert als dessen eigener OAuth2-Client und nur für Deployments an genau dieses Ziel |
+| Zielsystem-Registry | `GET/POST/PUT/DELETE /contract/targets`, `POST /contract/targets/{id}/credential` | Registry administrieren (Schreibzugriff Sys. Administrator und Integration Manager, Lesen zusätzlich Contract Manager); Löschen wird verweigert, solange ein Vertrag das Ziel designiert; Callback-Credential ausstellen/rotieren (Secret genau einmal sichtbar) |
 | Maschinen-Identitäten | `GET/POST /machine-identities`, `PUT/DELETE /machine-identities/{id}`, `POST /machine-identities/{id}/credential` | Registry verwalten: Anlegen provisioniert den OAuth2-Client und liefert das Secret genau einmal; Deaktivieren weist Aufrufe sofort ab; Löschen entfernt auch den Client; Rotation invalidiert das alte Secret unmittelbar (Sys. Administrator) |
 
 ### SignatureManagement (`/signature/...`)
@@ -104,7 +96,7 @@ ausschließlich für den Template Manager.
 | Wallet-Ceremony | `POST /signature/request`, `GET /signature/request/{ceremony_id}`, `POST /signature/request/{ceremony_id}/publish`, `GET/POST /signature/request/{ceremony_id}/object`, `GET /signature/request/{ceremony_id}/document`, `GET /signature/request/{ceremony_id}/payload`, `POST /signature/request/{ceremony_id}/callback` | Ceremony starten, Status abfragen, Request-Objekt, zu signierendes PDF und kanonische JSON-LD-Payload an die Wallet ausliefern, Ergebnis über den nonce-gebundenen Callback entgegennehmen |
 | Direkter Signaturfluss | `POST /signature/prepare`, `POST /signature/submit` | Vorbereitetes, byte-gepinntes PDF ausliefern und fertige externe Signatur einreichen |
 | Prüfung | `POST /signature/verify`, `POST /signature/validate`, `POST /signature/compliance` | Integrität und Provenance verifizieren, DSS-gestützte Validierung, Niveau-Prüfung |
-| Abruf und Nachweis | `GET /signature/retrieve`, `GET /signature/retrieve/{did}`, `GET /signature/provenance/{did}`, `GET /signature/view`, `GET /signature/audit` | Signierliste, Signaturumschlag je Vertrag, Provenance-Kette, Compliance-Viewer mit Detail je Signatur, Audit-Einträge |
+| Abruf und Nachweis | `GET /signature/retrieve`, `GET /signature/retrieve/{did}`, `GET /signature/provenance/{did}`, `GET /signature/view`, `GET /signature/audit` | Signierliste, Signaturumschlag je Vertrag, Provenance-Kette, Compliance-Viewer, Audit-Einträge |
 | Verwaltung | `POST /signature/revoke` | Signatur widerrufen |
 
 ### PDFGeneration (`/pdf/...`, Export-Bundles)
@@ -122,9 +114,9 @@ ausschließlich für den Template Manager.
 | `POST /archive/store` | Abgeschlossenen Vertrag mit Evidenz archivieren |
 | `GET /archive/retrieve`, `GET /archive/search` | Archiveinträge abrufen und strukturiert durchsuchen (Volltext, Name, Zustand, Partei, Gültigkeitszeitraum, Annotations-Tag) |
 | `POST /archive/annotate` | Eintrag mit Zusammenfassung/Tags versehen |
-| `DELETE /archive/delete` | Eintrag mit Begründung löschen: Soft-Delete des Eintrags, Entfernen der Snapshots und Vernichtung der Inhaltsschlüssel auf beiden Instanzen (ADR-28) |
+| `DELETE /archive/delete` | Eintrag mit Begründung löschen: Soft-Delete, Entfernen der Snapshots und Vernichtung der Inhaltsschlüssel auf beiden Instanzen (ADR-28) |
 | `GET /archive/erasure-status` | Stand der Schlüsselvernichtung: lokale Zerstörungsnachweise und offene Peer-Anforderungen |
-| `GET /archive/statistics` | Archiv-Dashboard: Bestands- und Speicherstatistik, letzte Archivaktionen, demnächst auslaufende Verträge, Evidenz-Vollständigkeit |
+| `GET /archive/statistics` | Archiv-Dashboard: Bestands- und Speicherstatistik, letzte Aktionen, demnächst auslaufende Verträge, Evidenz-Vollständigkeit |
 | `GET /archive/audit` | Audit-Einträge des Archivs |
 
 ### ProcessAuditAndCompliance (`/pac/...`)
@@ -149,13 +141,13 @@ im Request-Body authentifiziert, nicht per Session-Token.
 | --- | --- |
 | `POST /peer/contracts/pdf` | Eingang eines Vertrags-PDFs mit Zustand, optional JAdES, Vollmachtsnachweis und gewickeltem Inhaltsschlüssel |
 | `POST /peer/contracts/erase` | Löschanforderung: Vernichtung der Inhaltsschlüssel dieses Vertrags auf der empfangenden Instanz |
-| `GET /peer/contracts/provenance` | Gespeicherte JAdES-Provenienz eines empfangenen Vertrags |
+| `GET /peer/contracts/provenance` | Gespeicherte JAdES-Provenienz eines empfangenen Vertrags (JWT-geschützt, für lokale Nutzer) |
 
 ### KeyInventory (`/admin/hsm-keys`)
 
 | Endpunkt | Zweck |
 | --- | --- |
-| `GET /admin/hsm-keys` | Lesendes Inventar: Label, Zweck und aktive Version jedes HSM-Schlüssels der Instanz (Sys. Administrator). Rotation selbst ist ein Betriebsverfahren, keine API-Handlung |
+| `GET /admin/hsm-keys` | Lesendes Inventar: Label, Zweck und aktive Version jedes HSM-Schlüssels (Sys. Administrator). Rotation ist ein Betriebsverfahren, keine API-Handlung |
 
 ### C2PAService (`/c2pa/...`)
 
@@ -166,43 +158,31 @@ im Request-Body authentifiziert, nicht per Session-Token.
 ## A.2 Ereignisse auf dem Event-Bus
 
 Alle Backend-Domänen publizieren ihre Ereignisse als CloudEvents über
-einen gemeinsamen NATS-Topic. Die Zustellung folgt dem
-Transactional-Outbox-Muster: Der Handler persistiert das Ereignis in
-derselben Datenbanktransaktion wie seine Änderung; ein Outbox-Prozessor
-publiziert es auf dem Bus und verankert es als hash-verketteten
-Audit-Trail-Eintrag. Konsumenten unterscheiden Ereignisse über den
-CloudEvent-Typ, nicht über Subtopics.
+einen gemeinsamen NATS-Topic, zugestellt nach dem
+Transactional-Outbox-Muster (Kapitel 09). Konsumenten unterscheiden
+Ereignisse über den CloudEvent-Typ.
 
 Abonnenten innerhalb der Instanz:
 
 | Konsument | Reagiert auf | Wirkung |
 | --- | --- | --- |
-| DCS-to-DCS-Synchronizer | Lebenszyklus- und Remote-Sync-Ereignisse, `PDF_REGENERATED` | Versand des Vertrags-PDFs an die Peer-Instanz bei versandpflichtigen Zuständen |
-| PDF-/C2PA-Regenerator | Lebenszyklusereignisse von Verträgen und Vorlagen | Hintergrund-Neurendering und Anfügen einer C2PA-Lifecycle-Assertion; Exporte werden nie on demand erzeugt |
+| DCS-to-DCS-Synchronizer | `OFFER_CONTRACT`, `PDF_REGENERATED`, `APPLIED_SIGNATURE`, `REVOKE_SIGNATURE` | Versand des Vertrags-PDFs an die Peer-Instanz bei versandpflichtigen Zuständen |
+| PDF-/C2PA-Regenerator | Lebenszyklusereignisse von Verträgen und Vorlagen | Hintergrund-Neurendering und Anfügen einer C2PA-Lifecycle-Assertion |
 | Webhook-Plattform | Domänenereignisse mit Webhook-Abbildung | Weiterleitung an registrierte externe Abonnenten |
 | Auto-Deployment | `APPLIED_SIGNATURE` | Anstoß der Zielsystem-Auslieferung über dasselbe Kommando wie der manuelle Deploy |
 | Event-Logger (optional) | alle Ereignisse | Diagnose-Mitschnitt, nur wenn ausdrücklich eingeschaltet |
 
-Ereignistypen je Domäne (CloudEvent-Typ auf dem Bus; zugleich der
-Ereignistyp im Audit-Trail):
-
-| Domäne | Ereignistypen |
-| --- | --- |
-| Contract Workflow Engine | `CREATE_CONTRACT`, `UPDATE_CONTRACT`, `SUBMIT_CONTRACT`, `OFFER_CONTRACT`, `WITHDRAW_CONTRACT`, `NEGOTIATE_CONTRACT`, `ACCEPT_RESPOND_CONTRACT`, `REJECT_RESPOND_CONTRACT`, `INCREASE_CONTRACT_VERSION`, `APPROVE_CONTRACT`, `REJECT_CONTRACT`, `VERIFY_CONTRACT`, `REVIEW_CONTRACT`, `TERMINATE_CONTRACT`, `RENEW_CONTRACT`, `CONTRACT_EXPIRED`, `RECORD_EVIDENCE`, `AUDIT_CONTRACT`, `EXPORT`, `SEARCH_CONTRACT`, `RETRIEVE_ALL_CONTRACTS`, `RETRIEVE_CONTRACT_BY_ID`, `RETRIEVE_CONTRACT_HISTORY_BY_DID`, `RETRIEVE_ALL_TEMPLATES`, `CONTRACT_ACCESS_DENIED` |
-| Föderation und Synchronisation | `REMOTE_SYNC`, `REMOTE_SYNC_REQUEST`, `REMOTE_ACTION_REQUEST`, `OUTDATED_PEER`, `PDF_REGENERATED` |
-| Archiv und Löschung | `STORE_ARCHIVED_CONTRACT`, `RETRIEVE_ARCHIVED_CONTRACTS`, `DELETE_ARCHIVED_CONTRACT`, `ANNOTATE_ARCHIVED_CONTRACT`, `KEY_SHREDDED` |
-| Template Repository | `CREATE_CONTRACT_TEMPLATE`, `COPY_CONTRACT_TEMPLATE`, `UPDATE_CONTRACT_TEMPLATE`, `SUBMIT_CONTRACT_TEMPLATE`, `VERIFY_CONTRACT_TEMPLATE`, `APPROVE_CONTRACT_TEMPLATE`, `REJECT_CONTRACT_TEMPLATE`, `REGISTER_CONTRACT_TEMPLATE`, `PUBLISH_CONTRACT_TEMPLATE`, `ARCHIVE_CONTRACT_TEMPLATE`, `AUDIT_CONTRACT_TEMPLATE`, `SEARCH_CONTRACT_TEMPLATE`, `RETRIEVE_ALL_CONTRACT_TEMPLATES`, `RETRIEVE_CONTRACT_TEMPLATE_BY_ID` |
-| Signature Management | `SIGNING_REQUEST`, `APPLY_SIGNATURE`, `APPLIED_SIGNATURE`, `VERIFY_SIGNATURE`, `VALIDATE_SIGNATURE`, `REVOKE_SIGNATURE`, `COMPLIANCE_VALIDATION` |
-| Process Audit & Compliance | `PAC_AUDIT_EXECUTED`, `PAC_REPORT_GENERATED`, `PAC_COMPLIANCE_MONITOR`, `PAC_COMPLIANCE_RISK`, `PAC_INCIDENT_REPORT`, `PAC_TRUST_GATE_DENIAL`, `CONFIG_INTEGRITY_ATTESTATION`, `TEMPLATE_POLICY_AUDIT_FINDING`, `TEMPLATE_APPROVAL_PROVENANCE_AUDIT_FINDING`, `CONTRACT_CONTENT_POLICY_AUDIT_FINDING` |
-| Catalogue Integration | `RETRIEVE_ALL_TEMPLATE_CATALOGUE`, `RETRIEVE_TEMPLATE_CATALOGUE_BY_ID`, `SEARCH_TEMPLATE_CATALOGUE` |
-| Auth | `OID4VP_PRESENTATION_SUCCEEDED`, `OID4VP_PRESENTATION_FAILED` |
+Die CloudEvent-Typen folgen dem Kommando-Vokabular ihrer Domäne
+(`CREATE_CONTRACT`, `PUBLISH_CONTRACT_TEMPLATE`, `APPLIED_SIGNATURE`,
+`KEY_SHREDDED`, `PAC_COMPLIANCE_RISK`, …) und sind zugleich der
+Ereignistyp im Audit-Trail. Maßgeblich ist der Typ auf dem Bus; reine
+Lesezugriffe erzeugen Lookup-Ereignisse, die nicht im Trail verankert
+werden (Kapitel 09).
 
 ### Webhook-Plattform (`/orce/...`)
 
-Die Webhook-Plattform liegt außerhalb der generierten API und übersetzt
-interne Ereignisse in benannte, abonnierbare Alert-Ereignisse.
-
-Abonnierbare Ereignisse: `contract.created`, `contract.submitted`,
+Die Webhook-Plattform übersetzt interne Ereignisse in benannte,
+abonnierbare Alert-Ereignisse: `contract.created`, `contract.submitted`,
 `contract.approved`, `contract.rejected`, `contract.negotiated`,
 `contract.terminated`, `contract.expired`, `template.created`,
 `template.approved`, `template.updated`, `template.registered`,
@@ -222,24 +202,20 @@ Subscriptions und Zustellprotokoll liegen im Prozessspeicher und
 
 Öffentliche, nicht authentifizierte Endpunkte an der Origin-Wurzel der
 Instanz; dieselben Dokumente sind zusätzlich unter dem API-Präfix
-erreichbar. Sie sind die Auflösungsbasis des Föderations-Trust-Modells:
-Peer-Instanzen und externe Prüfer holen sich hier Identität,
-Regelakzeptanz und Regeln einer Instanz, bevor Vertragsdaten fließen.
+erreichbar. Sie sind die Auflösungsbasis des Föderations-Trust-Modells.
 
 | Endpunkt | Inhalt | Zweck |
 | --- | --- | --- |
 | `GET /.well-known/did.json` | DID-Dokument der Instanz (did:web) | Instanzidentität; öffentliche Schlüssel zu den im HSM gehaltenen privaten Schlüsseln, einschließlich des Schlüsselvereinbarungs-Schlüssels |
-| `GET /.well-known/dcs-agreement-credential.json` | Selbstsigniertes Agreement Credential | Nachweis, dass die Instanz die Föderationsregeln akzeptiert hat; Prüfgegenstand des Trust Gates auf Ein- und Ausgangspfad |
+| `GET /.well-known/dcs-agreement-credential.json` | Selbstsigniertes Agreement Credential | Nachweis der Regelakzeptanz; Prüfgegenstand des Trust Gates auf Ein- und Ausgangspfad |
 | `GET /.well-known/dcs-federation-rules.md` | Föderationsregeln | Das Regeldokument, auf das sich das Agreement Credential per Hash bezieht |
 
 Ergänzend zur Auflösung durch Dritte:
 
 - **OID4VP-Metadaten** werden nicht als eigenes well-known-Dokument
   ausgeliefert: Die Verifier-Metadaten stecken im signierten
-  Authorization-Request-Objekt, das die Wallet per Request-by-Reference
-  abruft; der Verifikationsschlüssel wird über die im JAR-Header
-  mitgelieferte Zertifikatskette und den DNS-gebundenen Client-Identifier
-  verankert.
+  Authorization-Request-Objekt, verankert über die Zertifikatskette im
+  JAR-Header und den DNS-gebundenen Client-Identifier.
 - Die **OIDC-Discovery** liefert nicht das DCS-Backend, sondern der
   mitbetriebene OAuth2-Provider.
 - `GET /c2pa/manifest/{contract_did}` ist das öffentliche Gegenstück für

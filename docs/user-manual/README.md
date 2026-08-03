@@ -38,7 +38,7 @@ führen Sie zu den angrenzenden Schritten.
 | [Verträge verwalten](contract-manager.md) | Contract Manager | Vertragsübersicht, Zielsystem, Inkraftsetzung, Signaturprüfung, Beendigung |
 | [Audits durchführen](auditor.md) | Auditor | Begründete, protokollierte Prüfungen über Verträge, Vorlagen, Signaturen und Archiv |
 | [Archiv verwalten und Verträge abrufen](archive-manager.md) | Archive Manager | Archivübersicht, archivierte Verträge abrufen, Löschung von Vertragsinhalten |
-| [Compliance überwachen](compliance-officer.md) | Compliance Officer | Risiko-Überwachung, Vorfallmeldung, zurückgestellte Prüfungen entscheiden |
+| [Compliance überwachen](compliance-officer.md) | Compliance Officer | Risiko-Überwachung, Vorfallmeldung, Signatur-Prüfhistorie |
 | [Systemverwaltung](systemadministrator.md) | Sys. Administrator | Zielsysteme, Systembenutzer und deren Zugangsdaten, Schlüsselverzeichnis |
 | [Störungen und häufige Fragen](troubleshooting-faq.md) | alle | Fehlermeldungen, Randfälle und bekannte Einschränkungen |
 
@@ -79,8 +79,8 @@ der Anwendung gibt es nicht.
   Verträge, Signaturen und Archivvorgänge aus und exportiert Prüfberichte.
 - **Archive Manager:** überblickt das Vertragsarchiv, ruft archivierte
   Verträge ab und führt Löschersuchen aus.
-- **Compliance Officer:** überwacht das System auf Regelverstöße, meldet
-  Vorfälle und entscheidet zurückgestellte Prüfungen.
+- **Compliance Officer:** überwacht das System auf Regelverstöße und meldet
+  Vorfälle als formale Berichte.
 - **Sys. Administrator:** registriert Zielsysteme, verwaltet Systembenutzer
   und deren Zugangsdaten und sieht das Schlüsselverzeichnis ein.
 - **Integration Manager:** verwaltet die Zielsysteme für die Anbindung

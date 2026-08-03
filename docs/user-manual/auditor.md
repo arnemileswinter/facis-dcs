@@ -120,10 +120,10 @@ eigener Prüflauf ist dafür nicht nötig. Drei Ausgänge sind möglich:
 
 - **Bestanden:** der angeforderte Übergang wird fortgesetzt.
 - **Manuelle Prüfung erforderlich:** der Vertrag bleibt im bisherigen
-  Zustand. Ein Compliance Officer prüft den gespeicherten Lauf und genehmigt
-  oder verwirft ihn mit einer Begründung (siehe
-  [Compliance überwachen](compliance-officer.md)). Nach einer Genehmigung wird
-  genau der zurückgestellte Übergang fortgesetzt.
+  Zustand. Ein Compliance Officer genehmigt oder verwirft den gespeicherten
+  Lauf mit einer Begründung; diese Entscheidung fällt außerhalb der
+  Weboberfläche (siehe [Compliance überwachen](compliance-officer.md)). Nach
+  einer Genehmigung wird genau der zurückgestellte Übergang fortgesetzt.
 - **Blockiert:** der Vertrag bleibt im bisherigen Zustand. Ein neuer Versuch
   ist erst sinnvoll, nachdem der angezeigte Regelverstoß oder technische
   Fehler behoben wurde.

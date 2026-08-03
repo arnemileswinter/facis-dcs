@@ -252,3 +252,10 @@ Solange eine Vorlage im Status DRAFT ist, können Sie sie über **Edit** weiter
 bearbeiten und mit **Update** speichern; der Status bleibt dabei unverändert.
 **Copy** legt eine Kopie der Vorlage als neuen Entwurf an, wenn Sie eine
 Variante brauchen, statt die vorhandene zu verändern.
+
+## Wenn eine Vorlage zurückgewiesen wird
+
+Weist die Prüfung oder die Freigabe Ihre Vorlage zurück, trägt sie den Status
+**REJECTED**. In der Detailansicht steht dann erneut **Submit** bereit, um
+die Vorlage wieder in die Prüfung zu geben. Sind inhaltliche Änderungen
+nötig, legt **Copy** eine bearbeitbare Kopie als neuen Entwurf an.

@@ -21,6 +21,23 @@ Der Server hat eine einzelne Aktion abgelehnt. Die Sichtbarkeit einer
 Schaltfläche allein verschafft keine Berechtigung; jede Aktion wird zusätzlich
 serverseitig geprüft.
 
+**Die Anmeldung kommt trotz Vorlage in der Wallet nicht zustande.**
+Der vorgelegte Nachweis ist abgelaufen oder widerrufen. Der Sperrstatus wird
+bei jeder Anmeldung geprüft; ein widerrufener oder abgelaufener Nachweis wird
+abgewiesen. Lassen Sie sich von der ausstellenden Stelle einen gültigen
+Nachweis ausstellen.
+
+**Wiederholte Fehlversuche sperren den Zugang.**
+Nach mehreren abgewiesenen Versuchen mit einem ungültigen Nachweis weist der
+DCS weitere Versuche ab, auch mit einem inzwischen gültigen Nachweis. Wenden
+Sie sich an den Betrieb Ihrer Installation, wenn die Sperre bestehen bleibt.
+
+**„not authorized to access this contract".**
+Ihre Organisation ist an diesem Vertrag nicht beteiligt. Verträge sind nur
+für die beteiligten Parteien einsehbar. Der abgewiesene Zugriff wird
+dauerhaft protokolliert und erscheint in der Compliance-Überwachung als
+Risiko der Art UNAUTHORIZED_ACCESS.
+
 ## Vorlagen
 
 **„Global Name is required." / „Base Description is required."**
@@ -103,6 +120,11 @@ vollständig zu behandeln. Verwenden Sie Verträge mit zwei Parteien.
 Der Bestätigungsdialog verlangt eine Begründung (**Reason**). Ohne Begründung
 wird nichts ausgeführt.
 
+**Das Gesamtpaket („Export bundle") wird abgelehnt.**
+Das Paket wird nur vollständig ausgegeben. Fehlt ein Bestandteil, etwa weil
+zu einem der Verträge noch kein Vertragsdokument erzeugt wurde, nennt die
+rote Meldung den Grund; ein unvollständiges Paket wird nicht erzeugt.
+
 ## Signieren
 
 **Der Vertrag steht nicht in meiner Signierliste.**
@@ -155,9 +177,10 @@ unmittelbar nach einer Änderung kann ein einzelner Eintrag noch nicht abrufbar
 sein. Wiederholen Sie die Prüfung.
 
 **Ein Vertragsübergang bleibt hängen („manuelle Prüfung erforderlich").**
-Ein Compliance Officer muss den gespeicherten Prüflauf entscheiden. Ändern Sie
-den Vertrag in der Zwischenzeit nicht. Sonst wird die Fortsetzung abgelehnt,
-und der Übergang muss für den aktuellen Stand neu angefordert werden.
+Ein Compliance Officer muss den gespeicherten Prüflauf entscheiden; diese
+Entscheidung fällt außerhalb der Weboberfläche. Ändern Sie den Vertrag in der
+Zwischenzeit nicht. Sonst wird die Fortsetzung abgelehnt, und der Übergang
+muss für den aktuellen Stand neu angefordert werden.
 
 **„Content erased" beim Export.**
 Für diesen Vertrag wurde ein Löschersuchen ausgeführt, und die

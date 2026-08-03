@@ -58,7 +58,31 @@ Verhandlung.
   wird. Unmittelbar nach einer Änderung kann der Export kurz warten, bis das
   Dokument neu erzeugt wurde.
 - **Export bundle** erzeugt ein Gesamtpaket des Vertrags mit allen
-  zugehörigen Verträgen der Hierarchie, die diese Installation kennt.
+  zugehörigen Verträgen der Hierarchie, die diese Installation kennt. Das
+  Paket wird nur vollständig ausgegeben: Fehlt ein Bestandteil, etwa weil zu
+  einem der Verträge noch kein Vertragsdokument erzeugt wurde, wird der
+  Export abgelehnt, und eine rote Meldung nennt den Grund.
+
+## Vertragshierarchie (Reiter „Structure")
+
+Ein Vertrag kann als Untervertrag eines übergeordneten Vertrags angelegt sein
+(die Zuordnung trifft der Contract Creator beim Anlegen, siehe
+[Verträge erstellen und verhandeln](contract-creator.md)). Die Detailansicht
+zeigt diese Zusammenhänge an zwei Stellen:
+
+- Im Reiter **Contract Details** nennt die Karte **Part of Contract** den
+  übergeordneten Vertrag und die Karte **Component Contracts** die
+  zugeordneten Unterverträge, jeweils als Verweis auf deren Detailansicht.
+- Der Reiter **Structure** stellt dieselbe Zuordnung als Baum dar: darüber
+  die übergeordneten Verträge, darunter die Unterverträge, jeder Eintrag mit
+  seinem Statusabzeichen. Ein Vertrag ohne Zuordnung meldet „This contract
+  has no parent or child contracts."
+
+Jeder Vertrag hat höchstens einen übergeordneten Vertrag. **Export bundle**
+nimmt die dieser Installation bekannten Verträge der Hierarchie in das
+Gesamtpaket auf.
+
+<!-- Screenshot fehlt: Reiter Structure mit über- und untergeordneten Verträgen sowie die Karten Part of Contract und Component Contracts. Grund: in diesem Lauf wurden keine Screenshots erzeugt. -->
 
 ## Das Zielsystem eines Vertrags festlegen
 
@@ -107,8 +131,9 @@ Sie geschieht auf zwei Wegen:
 
 Die Detailansicht eines Vertrags: das Statusabzeichen **(1)** und die
 Aktionsleiste mit **Back**, **Export PDF** **(2)** und **Export bundle**.
-Sobald der Vertrag signiert ist, treten dort **Deploy** (bei einem aktiven
-Vertrag: **Redeploy**) und **Terminate** hinzu.
+**Terminate** steht Ihnen dort in jedem Zustand zur Verfügung, solange der
+Vertrag nicht bereits beendet ist. Sobald der Vertrag signiert ist, tritt
+zusätzlich **Deploy** hinzu (bei einem aktiven Vertrag: **Redeploy**).
 
 <!-- Screenshot fehlt: Aktionsleiste eines SIGNED/ACTIVE-Vertrags mit Deploy bzw. Redeploy und Terminate. Grund: auf der bereitgestellten Instanz existiert kein signierter Vertrag. Die automatische Regelprüfung weist dort sowohl das Einreichen eines Entwurfs als auch das Hochladen des signierten Dokuments ab („workflow gate blocked: immutable workflow snapshot has no effective shapes"), weil ein Vertrag beim Speichern den bei seiner Erzeugung hinterlegten Regelstand verliert. Die Aktionen sind durch die End-to-End-Tests belegt. -->
 
@@ -134,11 +159,17 @@ in der Compliance-Überwachung (siehe
 
 ## Einen Vertrag beenden
 
-**Terminate** beendet einen Vertrag. Der Bestätigungsdialog fragt „Proceed
-with terminating?" und verlangt eine **Reason**; ohne Begründung bleibt
-**Submit** wirkungslos. Nach dem Beenden kehrt die Ansicht in die
-Vertragsübersicht zurück; der Vertrag trägt dort und in der Detailansicht den
-Status **TERMINATED** und lässt sich nicht mehr ändern.
+**Terminate** beendet einen Vertrag. Die Aktion setzt keine Signatur voraus:
+Auch ein erst freigegebener Vertrag lässt sich beenden, etwa wenn das
+Vorhaben vor der Unterzeichnung aufgegeben wird. Der Bestätigungsdialog fragt
+„Proceed with terminating?" und verlangt eine **Reason**; ohne Begründung
+bleibt **Submit** wirkungslos. Begründung, ausführende Person und Zeitpunkt
+werden dauerhaft im Prüfprotokoll des Vertrags festgehalten.
+
+Nach dem Beenden kehrt die Ansicht in die Vertragsübersicht zurück; der
+Vertrag trägt dort und in der Detailansicht den Status **TERMINATED**. Er
+bleibt lesbar und exportierbar, lässt sich aber nicht mehr ändern und kein
+zweites Mal beenden.
 
 ## Signature Compliance Viewer
 

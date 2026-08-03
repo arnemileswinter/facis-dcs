@@ -70,8 +70,10 @@ returns no findings."
 ## Eine Vorlage zurückweisen
 
 **Reject** öffnet den Dialog **Confirmation** mit der Frage „Add comment?".
-Der Kommentar ist freiwillig und geht zusammen mit der Rückgabe an den
-Template Creator. **Submit** führt die Rückgabe aus, **Cancel** bricht ab.
+Der Kommentar ist freiwillig und wird mit der Rückgabe dauerhaft im
+Prüfprotokoll der Vorlage festgehalten. **Submit** führt die Rückgabe aus,
+**Cancel** bricht ab. Die Vorlage trägt danach den Status **REJECTED** und
+kann vom Template Creator erneut eingereicht werden.
 
 Nach der Weiterleitung wechselt die Vorlage in den Status REVIEWED und
 erscheint beim Template Approver unter **Approval Tasks**.

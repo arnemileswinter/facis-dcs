@@ -34,9 +34,11 @@ maschinenlesbare Ansicht aufklappen.
 
 1. **Approve** **(1)** prüft den Vertrag und leitet ihn zur Freigabe an den
    Contract Approver weiter (Status SUBMITTED → REVIEWED).
-2. **Reject** **(2)** gibt den Vertrag in die Verhandlung zurück. Der Dialog
-   **Comment findings** nimmt dabei Ihre Anmerkungen auf; ein Text ist
-   freiwillig, **Submit** führt die Rückgabe aus.
+2. **Reject** **(2)** gibt den Vertrag in die Verhandlung zurück (Status
+   SUBMITTED → NEGOTIATION). Der Dialog **Comment findings** nimmt dabei Ihre
+   Anmerkungen auf; ein Text ist freiwillig, **Submit** führt die Rückgabe
+   aus. Die Anmerkung wird mit der Rückgabe dauerhaft im Prüfprotokoll des
+   Vertrags festgehalten.
 
 Zusätzlich stehen **Export PDF** und **Back** zur Verfügung.
 

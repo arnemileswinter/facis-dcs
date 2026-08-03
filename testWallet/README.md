@@ -14,7 +14,6 @@ wallet is a configuration change, not a code change (see
 cd testWallet
 pip install -r requirements.txt
 python3 scripts/generate_keys.py --yes   # wallet.jwk, issuer-dev.jwk, wallet-ca (signing certs)
-python3 scripts/ensure_statuslist_for_dev.py
 python3 scripts/issue_credentials.py     # PoA + self-issued PID credentials from credentials/*.template.json
 ```
 
@@ -43,8 +42,7 @@ DCS. PID credentials for dev/test are **self-issued locally**:
   status check (`checkStatusList` in `VerifyPID`) runs for real. Revoke one
   for the negative test with `scripts/revoke_statuslist_index.py <index>`
   (look up the index in the issued `*.pid.jwt`'s `status.status_list.idx`
-  claim, or pass `--credential <file>` to resolve it automatically) — run
-  `scripts/ensure_statuslist_for_dev.py` first so the tenant exists.
+  claim, or pass `--credential <file>` to resolve it automatically).
 
 ### Cert↔PID name alignment
 

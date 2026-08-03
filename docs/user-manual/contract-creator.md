@@ -20,7 +20,10 @@ existiert mindestens eine registrierte Vertragsvorlage.
    **Builder**, **Data** und **Meta Data** zur Kontrolle. Rechts daneben
    ordnen Sie den neuen Vertrag über **Add to existing contract (optional)**
    bei Bedarf einem bestehenden Vertrag als Untervertrag zu; der oberste
-   Eintrag der Liste („none") steht für einen eigenständigen Vertrag.
+   Eintrag der Liste („none") steht für einen eigenständigen Vertrag. Die
+   Zuordnung erscheint später in der Detailansicht des Vertrags in der Karte
+   **Part of Contract** und im Reiter **Structure** (siehe
+   [Verträge verwalten](contract-manager.md)).
 2. **Create** **(2)** startet die Erstellung.
 
 Erscheint die gewünschte Vorlage nicht in der Auswahl, ist sie noch nicht
@@ -128,7 +131,9 @@ Sie verhandelbare Werte.
 1. **Save draft** **(1)** speichert geänderte Werte als **privaten
    Verhandlungsentwurf**: Die Gegenseite sieht davon nichts, und der Entwurf
    bleibt erhalten, auch wenn Sie die Ansicht verlassen. Beim nächsten Öffnen
-   sind die Werte wiederhergestellt.
+   sind die Werte wiederhergestellt. Privat heißt dabei: privat für Ihre
+   Organisation. Kolleginnen und Kollegen mit Zugang zur Verhandlung sehen
+   denselben Entwurf und können ihn fortführen oder verwerfen.
 2. **Change Proposal** **(2)** macht die Änderung verbindlich: Sie wird als
    Änderungsvorschlag an die Gegenseite übermittelt. Ein gespeicherter Entwurf
    wird dabei aufgebraucht. Jede angenommene Änderung erzeugt eine neue

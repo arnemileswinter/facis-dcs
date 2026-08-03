@@ -69,9 +69,6 @@ kubectl wait --for=condition=ready pod \
 echo "Installing testWallet dependencies..."
 make -C testWallet install
 
-echo "Initializing statuslist for dev (NATS create when list is empty)..."
-make -C testWallet ensure-statuslist
-
 # Setup backend .env
 cp backend/.env.dev1 backend/.env
 echo "✓ .env updated from .env.dev1"

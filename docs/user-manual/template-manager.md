@@ -39,7 +39,38 @@ Gebrauch, die sie einbettet.
 
 An einer registrierten Vorlage tritt die Schaltfläche **Publish** hinzu. Sie
 stellt die Vorlage in den Verbundkatalog, sodass andere Organisationen sie
-finden können; auch hier bestätigen Sie mit **Confirm**.
+finden können; auch hier bestätigen Sie mit **Confirm**. Die Vorlage trägt
+danach den Status PUBLISHED und bleibt weiterhin für Verträge verwendbar.
+
+## Eine Vorlage stilllegen (Archive)
+
+**Archive** nimmt eine Vorlage aus dem aktiven Bestand; der
+Bestätigungsdialog fragt „Proceed with archiving?" und wird mit **Confirm**
+abgeschlossen. Die Wirkung hängt vom Stand der Vorlage ab:
+
+- Eine **registrierte** (oder bereits veröffentlichte) Vorlage erhält den
+  Status **DEPRECATED**. Aus ihr lassen sich keine neuen Verträge mehr
+  ableiten; sie verschwindet aus der Vorlagenauswahl der Contract Creators.
+  Bestehende Verträge laufen unverändert weiter und tragen in der
+  Vertragsübersicht das Abzeichen „This contract uses a deprecated template".
+- Eine noch nicht registrierte Vorlage erhält den Status **DELETED** und ist
+  damit aus dem aktiven Bestand entfernt.
+
+Bei einer bereits stillgelegten Vorlage (DELETED oder DEPRECATED) wird
+**Archive** nicht mehr angeboten; ein erneutes Stilllegen ist nicht möglich.
+
+## Eine registrierte Vorlage aktualisieren
+
+Eine registrierte Vorlage wird nicht direkt geändert. Legen Sie über **Copy**
+eine Kopie als neuen Entwurf an; sie durchläuft Prüfung und Freigabe und wird
+anschließend als nächste Version derselben Vorlage registriert. Ältere
+Fassungen bleiben über die Historie erhalten und bereits erzeugte Verträge
+unverändert gültig.
+
+Sobald die neue Version registriert ist, trägt die Vorgängerfassung in der
+Vorlagenübersicht das Abzeichen „A newer template version is available" als
+Verweis auf die neue Fassung. Dasselbe Abzeichen erscheint in der
+Vertragsübersicht an Verträgen, die noch auf der Vorgängerfassung beruhen.
 
 ## Vorlagenkatalog
 
@@ -81,9 +112,30 @@ veröffentlichen, ohne Softwareänderung.
 Links unter **Entries** listet die Ansicht die registrierten Einträge mit
 ihrer Art (**context**, **ontology**, **shapes**, **profile**) und ihrem
 Versionsstand, etwa „active v1" und „latest v1"; ohne freigeschaltete Version
-steht dort „no active version". Ein Klick auf einen Eintrag zeigt rechts seine
-Versionen. Solange nichts gewählt ist, steht dort „Select an entry to inspect
-its versions."
+steht dort „no active version". Solange kein Eintrag gewählt ist, steht
+rechts „Select an entry to inspect its versions."
+
+Ein Klick auf einen Eintrag zeigt rechts seine Versionen als Tabelle mit
+**Version**, **Status** (das Abzeichen **active** an der wirksamen Version),
+**Registered by** und **Registered at**. Je Version stehen zwei Aktionen
+bereit:
+
+- **View** blendet den gespeicherten Inhalt der Version ein.
+- **Activate** macht eine andere Version zur wirksamen. So kehren Sie auch zu
+  einer früheren Version zurück: Neue Dokumente entstehen dann wieder gegen
+  diesen Stand, während bereits erzeugte Dokumente an die Version gebunden
+  bleiben, unter der sie entstanden sind.
+
+Unter der Tabelle registriert **Register new version** eine weitere Version
+desselben Eintrags; das Formular entspricht dem Veröffentlichen-Formular
+unten, mit dem Kontrollkästchen **Activate immediately**.
+
+<!-- Screenshot fehlt: Versionstabelle eines Semantic-Hub-Eintrags mit den Aktionen View und Activate. Grund: in diesem Lauf wurden keine Screenshots erzeugt. -->
+
+Welche Regelfassung bei einem Vertrag geprüft wird, richtet sich nicht nach
+der gerade aktiven Version: Jeder Vertrag ist an den Regelstand gebunden, der
+bei seiner Erzeugung aktiv war, und wird auch später genau dagegen geprüft.
+Eine strengere neue Fassung wirkt daher nur auf danach erzeugte Dokumente.
 
 Unterhalb der Liste veröffentlichen Sie unter **Publish new entry** neue
 Einträge:

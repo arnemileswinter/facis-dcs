@@ -1,9 +1,8 @@
 # Compliance überwachen (Compliance Officer)
 
 Als Compliance Officer überwachen Sie das System auf Regelverstöße: Sie lassen
-den DCS den Bestand auf Risiken durchsuchen, melden festgestellte Vorfälle als
-formale Berichte und entscheiden über Vertragsübergänge, die zur manuellen
-Prüfung zurückgestellt wurden.
+den DCS den Bestand auf Risiken durchsuchen und melden festgestellte Vorfälle
+als formale Berichte.
 
 Der Bereich **Non-Compliance Investigation** ist ausschließlich für Ihre Rolle
 zugänglich; andere Rollen werden beim Aufruf automatisch umgeleitet.
@@ -79,22 +78,24 @@ Nach erfolgreicher Übermittlung bestätigt die Ansicht die Meldung **(1)**
 („Incident report submitted successfully."). Der Bericht ist damit dauerhaft
 dem Vertrag zugeordnet und für Prüfungen nachvollziehbar.
 
-## Zurückgestellte Vertragsübergänge entscheiden
+## Zurückgestellte Vertragsübergänge
 
 Ergibt die automatische Prüfung bei einem Vertragsübergang (Einreichen,
 Anbieten, Freigeben, Signieren, Bereitstellen) das Ergebnis „manuelle Prüfung
-erforderlich", bleibt der Vertrag im bisherigen Zustand stehen und wartet auf
-Ihre Entscheidung.
+erforderlich", bleibt der Vertrag im bisherigen Zustand stehen, bis ein
+Compliance Officer den gespeicherten Prüflauf mit einer Begründung genehmigt
+oder verwirft. Nach einer Genehmigung wird genau der zurückgestellte Übergang
+fortgesetzt; der Prüfdienst wird dafür nicht erneut aufgerufen. Eine zweite
+Genehmigung startet keine parallele Fortsetzung.
 
-- Sie sehen den gespeicherten Prüflauf und entscheiden mit einer Begründung:
-  **genehmigen** oder **verwerfen**.
-- Nach einer Genehmigung wird genau der zurückgestellte Übergang fortgesetzt;
-  der Prüfdienst wird dafür nicht erneut aufgerufen.
-- Solange die Prüfung offen ist, darf der Vertrag weder inhaltlich noch im
-  Zustand geändert werden. Wurde er dennoch geändert, wird die Fortsetzung
-  abgelehnt, weil die frühere Genehmigung nicht für den geänderten Vertrag
-  gilt. Der Übergang muss dann für den aktuellen Stand neu angefordert werden.
-- Eine zweite Genehmigung startet keine parallele Fortsetzung.
+Solange die Prüfung offen ist, darf der Vertrag weder inhaltlich noch im
+Zustand geändert werden. Wurde er dennoch geändert, wird die Fortsetzung
+abgelehnt, weil die frühere Genehmigung nicht für den geänderten Vertrag
+gilt. Der Übergang muss dann für den aktuellen Stand neu angefordert werden.
+
+Eine Ansicht für diese Entscheidung gibt es in der Weboberfläche nicht; sie
+wird über die Systemschnittstelle des DCS getroffen. Das Vorgehen dazu klären
+Sie mit dem Betrieb Ihrer Installation.
 
 ## Signaturprüfungen
 

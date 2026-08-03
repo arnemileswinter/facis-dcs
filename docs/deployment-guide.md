@@ -225,7 +225,7 @@ CronJobs. Alles Weitere kommt aus Subcharts.
 | `fc-postgres` | `fcPostgres` | `fcservice.enabled` | Datenbank für fc-service und dessen Keycloak |
 | `ipfs` | `ipfs` | `ipfs.enabled` | Kubo-Knoten, hält alle Artefakt-Chiffrate |
 | `ipfs-document-manager` | `ipfsDocumentManager` | `ipfsDocumentManager.enabled` | Tenant-Gateway vor IPFS |
-| `statuslist-service` | `statuslistService` | `statuslistService.enabled` | Status-Listen für Credential-Widerruf |
+| `statuslist-service` | `statuslistService` | `statuslistService.enabled` | XFSC-Status-Listen-Dienst. Per ADR-34 zur Entfernung bestimmt, derzeit noch Startvoraussetzung des Backends (A5.6) |
 | `kube-prometheus-stack` | kein Alias | `monitoring.enabled` | Prometheus/Grafana/Alertmanager |
 | `traefik` | kein Alias | `traefik.enabled` | Ingress-Controller, nur für Testcluster |
 
@@ -513,7 +513,6 @@ Gate über eine Föderation hinweg gibt es nicht.
 | `oid4vp.trust.existingConfigMapMountPath` | Mount-Pfad im Container |
 | `oid4vp.trust.dataPath` | Pfad ohne ConfigMap |
 | `oid4vp.trust.x5cAnchorsPath` | `OID4VP_X5C_TRUST_ANCHORS_PATH` |
-| `oid4vp.trust.xfscAllowUnsignedFallback` | `OID4VP_XFSC_ALLOW_UNSIGNED_FALLBACK=true` |
 
 Ohne `oid4vp.trust.enabled` kennt die Instanz kein Vertrauensdokument und weist
 jede vorgelegte Credential ab. Der vorgesehene Weg ist die eigene ConfigMap.
@@ -528,8 +527,13 @@ wird, die ihre Schlüssel als x5c-Kette mitbringt. Bleibt der Pfad leer, wird
 eine solche Credential abgewiesen. Die Instanz glaubt nie dem Blattzertifikat,
 das die Credential selbst mitliefert.
 
-`xfscAllowUnsignedFallback` nimmt unsignierte Self-Descriptions an und gehört
-ausschließlich in Entwicklung und CI (B5).
+Gegen dieselben Anker prüft die Instanz auch signierte Statuslisten, die ihre
+Schlüssel als x5c-Kette im Token-Header mitbringen; das Blattzertifikat muss
+dabei den Issuer identifizieren, den das Token nennt. Eine unsignierte
+Statusliste wird in keiner Konfiguration akzeptiert (ADR-34); einen Schalter,
+der das erlaubt, gibt es im Backend nicht. Das Anker-Bündel muss deshalb die
+Roots **aller** Issuer enthalten, deren Credentials oder Statuslisten die
+Instanz prüft, nicht nur den des PID-Issuers (A7.2).
 
 Der inhaltliche Aufbau des Vertrauensdokuments (Zwecke, Organisationen,
 Mechanismen) steht in A7.3.
@@ -628,10 +632,35 @@ wie beim System-Token (A6.6).
 | `global.auditExecutorTokenSecretRef` bzw. `.auditExecutorToken` | `PAC_AUDIT_EXECUTOR_BEARER_TOKEN` | Nur gerendert, wenn eines von beiden gesetzt ist |
 | `workflowGateExecutor.url`, `.path`, `.timeout` | `PAC_WORKFLOW_GATE_EXECUTOR_URL`, `PAC_WORKFLOW_GATE_EXECUTOR_TIMEOUT` | Ein ungültiger Timeout-Wert bricht den Start ab |
 | `global.workflowGateTokenSecretRef` bzw. `.workflowGateToken` | `PAC_WORKFLOW_GATE_EXECUTOR_BEARER_TOKEN` | Nur gerendert, wenn eines von beiden gesetzt ist. Ohne Token wird der Gate-Aufruf nicht autorisiert |
+| `orce.checkpointSink.enabled`, `.url`, `.timeoutSeconds`, `.internalTimeoutSeconds`, `.bearerToken` bzw. `.bearerTokenSecretRef`, `.allowInsecureTLS` | `CHECKPOINT_SINK_*` im ORCE-Container | Publiziert Audit-Checkpoints in Reihenfolge an einen externen HTTPS-Sink. Eingeschaltet verweigert das Chart den Render ohne HTTPS-URL, ohne positiven internen Timeout oder ohne Bearer-Token. Ein vom Sink gemeldeter `sequence_gap` oder `previous_root_mismatch` blockiert die Publikation dauerhaft und ist als Integritäts-Incident zu behandeln; das Verfahren steht in `docs/audit-checkpoint-workflow-gate-operations.md`. `allowInsecureTLS` wirkt nur zusammen mit den Test-Controls und bleibt in Produktion aus. |
 | `contractTargets` | ConfigMap plus `CONTRACT_TARGETS_FILE` = `/etc/dcs/contract-targets/targets.json` | Startbestand der Zielsystem-Registry. Seeding ist **anlegend, nicht abgleichend**, gematcht über `name`: ein in der Oberfläche umgehängter Eintrag wird beim nächsten Start nicht zurückgesetzt, und ein hier entfernter Eintrag verschwindet nicht aus einer laufenden Instanz. |
 | `sharedServices.enabled`, `.host`, `.services[]`, `.ingressClassName`, `.tls`, `.proxyBodySize`, `.annotations` | Ingress unter `https://<host>/shared/<name>` | Veröffentlicht die zustandslosen Dienste dieser Instanz für einen Peer, der keine eigenen betreiben kann. Das verringert die Unabhängigkeit dieses Peers und ist eine bewusste Entscheidung. |
 | `acmeRenewal.enabled`, `.host`, `.email`, `.secretName`, `.server`, `.schedule`, `.image`, `.challengePort`, `.rbac.create`, `.serviceAccountName`, `.ingressClassName`, `.ingressAnnotations`, `.resources`, `.persistence` | CronJob, Service, Ingress und optional RBAC für eine HTTP-01-Erneuerung | Fallback für Cluster, in denen cert-manager den Solver-Pod nicht schedulen kann. `host`, `email` und `secretName` sind Pflicht, sonst bricht der Render ab. Wo cert-manager funktioniert, bleibt das aus. |
 | `complianceMonitor.enabled`, `.schedule`, `.startingDeadlineSeconds`, `.timeout`, `.resources` | CronJob `<fullname>-pac-monitor` | Fährt den Compliance-Durchlauf planmäßig statt auf Anfrage. Vorgabe alle fünf Minuten mit `concurrencyPolicy: Forbid`. Ausgeschaltet werden Risiken nur noch gefunden, wenn jemand fragt. |
+
+#### Der Status-Listen-Dienst und ADR-34
+
+An dieser Stelle laufen Chart und Architekturentscheidung auseinander, und
+beides gehört gesagt. ADR-34 nimmt den XFSC-Status-Listen-Dienst aus dem
+Projekt: Er lieferte in jeder hiesigen Konfiguration unsignierte Listen aus,
+und eine unsignierte Statusliste behauptet einen Widerrufsstatus, für den
+niemand bürgt. Beschlossen ist, dass jeder Issuer seine Statusliste selbst
+signiert und selbst ausliefert und dass eine unsignierte Liste nirgends mehr
+akzeptiert wird.
+
+Umgesetzt ist davon die prüfende Seite: Das Backend kennt keinen Schalter,
+der unsignierte Listen zulässt, und die mitgelieferten Issuer liefern ihre
+Statuslisten signiert selbst aus (A7). Die betreibende Seite ist noch nicht
+nachgezogen: Das Subchart liegt weiter im Chart, die BDD- und Dev-Werte
+betreiben den Dienst weiter, und das Backend verlangt
+`STATUSLIST_SERVICE_URL` unverändert als Startgatter, weil es die
+Widerrufseinträge seiner Vertragsdokumente dort vergibt. Die drei Zeilen oben
+beschreiben diesen Ist-Zustand.
+
+Bis Chart und Backend dem ADR folgen, gilt: Der Dienst bleibt eine
+Startvoraussetzung, seine Listen sind aber unsigniert und werden von jedem
+konformen Verifier abgewiesen, dem eigenen eingeschlossen. Ein Widerruf, der
+nur in einer solchen Liste steht, ist für niemanden prüfbar.
 
 ### A5.7 Plattform und Betriebsmechanik
 
@@ -844,6 +873,7 @@ Verbraucher und die Wirkung des Fehlens.
 | `ipfs.tenantBaseURLSecretRef` | Betreiber | Backend | IPFS-Konfiguration unvollständig, Start bricht ab |
 | `global.archiveAuditTokenSecretRef` | Betreiber | Backend | Archiv-Integritätsprüfung nicht möglich |
 | `global.auditExecutorTokenSecretRef`, `global.workflowGateTokenSecretRef` | Betreiber | Backend | Der jeweilige Executor-Aufruf wird nicht autorisiert |
+| `orce.checkpointSink.bearerTokenSecretRef` (oder `.bearerToken`) | Betreiber | ORCE | Bei aktiviertem Checkpoint-Sink verweigert das Chart ohne Token den Render (A5.6) |
 | `signing.tsaTrustCertSecret` (Schlüssel `tsa-cert.pem`) | Betreiber bzw. ORCE-TSA-Hook | Backend | Es gilt das im Binary eingebettete TSA-Zertifikat |
 | `<release>-orce-tsa-material` (Schlüssel `tsa-cert.pem`, `tsa-key.pem`) | ORCE-Subchart-Hook (`localTSA.autoProvision`) oder vorab angelegt | ORCE | Der lokale TSA-Flow signiert nicht |
 | Hydra-Systemsecret und Client-Secrets | Betreiber über `--set` | Hydra | Diese Chart-Version hat dafür keine `secretKeyRef` |
@@ -974,6 +1004,13 @@ Volume, eigenem Schlüssel und eigener DID.
 Vollmachts-Issuer, `flows-pid-issuer` der PID-Issuer. Ein Release fährt genau
 einen Satz, weil die Sätze überlappende Routen beanspruchen.
 
+Jeder Issuer liefert auch die Statusliste seiner eigenen Credentials aus
+(ADR-34): unter seinem Pfadpräfix als `GET /status-list/1`, signiert mit
+seinem eigenen Schlüssel als `statuslist+jwt` mit eingebetteter x5c-Kette,
+dazu ein `/admin`-Flow, über den ein Widerruf gesetzt wird. Die Widerrufsbits
+liegen auf dem Issuer-Volume und überleben einen Pod-Neustart. Einen
+separaten Status-Listen-Dienst brauchen die Issuer nicht.
+
 Der PID-Issuer ist Dritter gegenüber **jeder** Instanz. Eine Instanz, die den
 Identitätsnachweis selbst ausstellt, den sie später als Beweis ihrer
 Unterzeichnenden akzeptiert, hat nichts bezeugt. Beim Vollmachts-Issuer liegt
@@ -1022,6 +1059,7 @@ laufen ohne Vertrauensdokument.
    ```bash
    curl https://<host>/issuer/.well-known/did.json
    curl https://<host>/issuer/pki/jwks.json
+   curl https://<host>/issuer/pki/root-ca.pem
    curl https://<pid-host>/pid-issuer/pki/root-ca.pem
    ```
 
@@ -1042,8 +1080,16 @@ laufen ohne Vertrauensdokument.
        x5cAnchorsPath: /etc/dcs/oid4vp-x5c/root-ca.pem
    ```
 
-   Den Root-CA des PID-Issuers über `volumes`/`volumeMounts` an genau diesen
-   Pfad mounten.
+   An genau diesen Pfad wird über `volumes`/`volumeMounts` ein PEM-Bündel mit
+   den Root-CAs **aller** Issuer gemountet, des Vollmachts- wie des
+   PID-Issuers. Das Bündel wird aus dem zusammengesetzt, was jeder laufende
+   Issuer unter `pki/root-ca.pem` tatsächlich ausliefert, und nach Fingerprint
+   verglichen, nicht nach Subject: Die Demo-Issuer prägen ihre Roots beim
+   ersten Start, alle tragen dasselbe Subject `CN = FACIS Demo Root CA`, und
+   ein Bündel mit nur einem Root weist die Listen und Credentials der übrigen
+   ab, während jede Fehlermeldung denselben CA-Namen nennt. Prägt ein Issuer
+   seinen Root neu, etwa nach einem gelöschten Volume, ist das Bündel neu zu
+   bauen; bis dahin schlägt die Prüfung fail-closed fehl.
 
 **Verifikation:**
 
@@ -1064,6 +1110,7 @@ Vertrauensdokuments zeigen.
 | Pod bleibt in `ContainerCreating`, Event nennt eine fehlende ConfigMap | `existingConfigMap` zeigt auf einen nicht existierenden Namen | ConfigMap anlegen. Der Mount ist bewusst nicht `optional`: Ein fehlendes Vertrauensdokument ist beim Start ohnehin fatal, und der Mount-Fehler lässt sich leichter diagnostizieren. |
 | Backend beendet sich beim Laden des Vertrauensdokuments | Ein `mechanism`-Wert, den dieser Build nicht auflösen kann | Nur `jwks`, `x5c`, `did:jwk`, `did:web` oder `orce` verwenden. Die Prüfung erfolgt beim Laden, nicht beim ersten Wallet-Kontakt. |
 | Login funktioniert, Signaturzeremonie weist die Vollmacht ab | Dem eigenen Issuer fehlt der Zweck `peer` | Zweck ergänzen und das Backend neu ausrollen |
+| Login oder Zeremonie scheitert an der Statuslisten- oder x5c-Prüfung, obwohl das Vertrauensdokument stimmt und die Liste korrekt signiert ist | Dem Anker-Bündel fehlt der Root eines Issuers. Alle Demo-Roots tragen dasselbe Subject; die Fehlermeldung nennt also einen CA-Namen, der im Bündel scheinbar vorhanden ist | Bündel aus den tatsächlich servierten Roots neu zusammensetzen und nach Fingerprint abgleichen (Schritt 5) |
 
 ### A7.3 Aufbau des Vertrauensdokuments
 
@@ -1121,7 +1168,10 @@ Regeln, die aus dem Modell folgen:
   überhaupt verkehrt wird, entscheidet der Trust-Gate über
   `DCS_TRUST_PDP_URL`, dynamisch und fail-closed.
 - **Der Widerruf wird bei jeder akzeptierten Credential und jedem Zweck
-  geprüft** und schlägt bei unerreichbarer Liste fehl.
+  geprüft** und schlägt bei unerreichbarer Liste fehl. Eine unsignierte
+  Statusliste wird nie akzeptiert (ADR-34). Eine Liste mit x5c-Kette wird
+  gegen die Anker aus `x5cAnchorsPath` geprüft, eine ohne Kette gegen den im
+  Vertrauensdokument hinterlegten JWKS ihres Issuers.
 
 Das Dokument bindet Issuer-Schlüssel. Wird ein Issuer-Schlüssel neu erzeugt,
 verliert das Dokument stillschweigend seine Gültigkeit: Anmeldungen scheitern,
@@ -1342,6 +1392,7 @@ in A8.3, vor allem die externen `/.well-known`-Abrufe, die ArgoCD nicht kennt.
 | `publish.yml` | Veröffentlichter Release, manuell | Baut das DCS-Image und das pdf-core-Image über den `eclipse-xfsc/dev-ops`-Dockerbuild-Workflow nach Harbor; packt das Chart und pusht es als OCI-Artefakt nach `oci://<HARBOR_HOST>/dcs/charts` |
 | `bdd-kind.yml` | Pull Request, Push auf `main`, manuell | Drei parallele Jobs: die vollständige BDD-Suite auf einem eigenen kind-Cluster, ein isolierter Audit-Gate, und die Playwright-E2E-Suite auf einem weiteren kind-Cluster. Berichte werden als Check-Annotationen und Artefakte veröffentlicht. |
 | `lint-and-format.yml` | siehe Workflow-Datei | Statische Prüfungen |
+| `build-node-red-package.yml` | Veröffentlichter Release, Pull Request, Push auf `main`, manuell | Baut das Node-RED-Deployment-Paket aus `deployment/node-red`; bei einem Release wird das `.tgz` an diesen angehängt |
 | `sbom.yml` | Veröffentlichter Release, monatlich, manuell | Ruft den zentralen SBOM-Workflow auf |
 | `eclipse-dash.yml` | Veröffentlichter Release, monatlich, manuell | Lizenz-Scan über Eclipse Dash |
 
@@ -1781,7 +1832,10 @@ diesem Teil darf in einem erreichbaren Cluster verwendet werden.
   `pkcs11-tool`. Die Entwicklungsschlüssel liegen in einem PKCS#11-Token, nicht
   in Dateien.
 - `helm`, `kubectl`, `docker`
-- Für die BDD-Suite zusätzlich `kind` (die CI verwendet v0.23.0)
+- Für die BDD-Suite zusätzlich `kind` (die CI verwendet v0.23.0), `git` (der
+  Runner klont den `bdd-executor`, falls er nicht neben dem Repository liegt)
+  sowie `nc` und `fuser` (der Runner prüft und räumt damit seine lokalen
+  Ports)
 
 ## B2 Vollständiger Stack mit einem Befehl
 
@@ -1807,7 +1861,13 @@ Das Skript, in dieser Reihenfolge:
    gestarteter Backend-Prozess stirbt daran
 3. exportiert das TSA-Zertifikat aus dem Secret `dcs-orce-tsa-material` nach
    `backend/certs/dev/orce-tsa-cert.pem`
-4. wartet auf den Status-List-Dienst und initialisiert die Liste
+4. wartet auf den Status-List-Dienst, installiert das testWallet-venv
+   (`make -C testWallet install`) und ruft dessen Listen-Initialisierung auf.
+   **Dieser Aufruf ist derzeit tot:** `make -C testWallet ensure-statuslist`
+   startet ein Skript (`testWallet/scripts/ensure_statuslist_for_dev.py`),
+   das nicht mehr existiert. Der Aufruf schlägt fehl, und `dev-stack.sh`
+   bricht wegen `set -e` an dieser Stelle ab. Bis das im Skript behoben ist,
+   kommt der Stack-Start über diesen Schritt nicht hinaus
 5. kopiert `backend/.env.dev1` nach `backend/.env`
 6. provisioniert das lokale SoftHSM2-Token unter `$HOME/.dcs/softhsm-8991` mit
    den fünf Instanzschlüsseln und erzeugt `backend/certs/dev/did-8991.json` mit
@@ -1816,7 +1876,8 @@ Das Skript, in dieser Reihenfolge:
 8. startet pdf-core mit `air`, wartet auf `http://localhost:8080/version`
 9. startet das EU-DSS-Demo-Image auf `http://localhost:18099` (abschaltbar mit
    `DCS_DEV_DSS=0`)
-10. startet den Vite-Dev-Server und das Backend mit `air`
+10. startet den Vite-Dev-Server, generiert die Goa-Schicht (`goa gen`) und
+    startet das Backend mit `air`
 
 Backend: `http://localhost:8991`. Vite: `http://localhost:5173`, proxied `/api`
 auf das Backend. Beenden mit `Strg+C` im selben Terminal.
@@ -1838,12 +1899,14 @@ SOFTHSM2_CONF=$HOME/.dcs/softhsm-8991/softhsm2.conf softhsm2-util --show-slots |
 ```
 
 Ein Slot mit dem Label `dcs` muss erscheinen. Beendet sich einer der drei
-Prozesse, gibt `dev-stack.sh` die letzten 200 Logzeilen des betroffenen
-Prozesses aus und beendet sich selbst mit dessen Status.
+Prozesse, beendet sich `dev-stack.sh` mit dessen Status; bei Backend und
+pdf-core gibt es vorher die letzten 200 Logzeilen des betroffenen Prozesses
+aus.
 
 **Wer den Stack von Hand statt über `dev-stack.sh` startet**, muss die
-Reihenfolge einhalten; drei Abhängigkeiten sind harte Startgatter des
-Backends und führen sonst zu einem Prozess, der sofort wieder stirbt:
+Reihenfolge einhalten. Auf ein fehlendes Token wartet das Backend nur (es
+pollt, siehe A12.1); die übrigen drei Abhängigkeiten sind harte Startgatter
+und führen sonst zu einem Prozess, der sofort wieder stirbt:
 
 1. Das SoftHSM-Token muss existieren, bevor das Backend startet. Von Hand:
    `bash scripts/hsm-provision.sh $HOME/.dcs/softhsm-8991 dcs 1234 12345678`.
@@ -1896,19 +1959,55 @@ auf, das der Makefile nicht definiert; der Aufruf bricht mit
 `No rule to make target` ab. Und ein `run_bdd_helm_dev` gibt es nicht. Gegen
 ein bereits laufendes Release ist `run_bdd_helm` das richtige Ziel (B4.2).
 
-Während eines Laufs richtet `run_bdd_helm` Port-Weiterleitungen für
-**PostgreSQL, den DCS-Service, DSS und ORCE** ein. Keycloak wird nicht
-weitergeleitet; der Testcode erreicht es über den Ingress.
+`run_bdd_helm` prüft vor dem Testlauf, dass der Stack wirklich antwortet, und
+bricht sonst mit einer Diagnose ab. Die Wartebedingungen sind erprobte
+Startsignale; wer den Stack von Hand prüft, kann sich an derselben Reihenfolge
+orientieren:
 
-Der Ablauf von `kind_deploy` in Kurzform: DCS- und pdf-core-Image bauen,
-DSS-Image laden, kind-Cluster anlegen, Images hineinladen,
-Prometheus-Stack-CRDs anwenden, Namespace `dcs-bdd` anlegen, ORCE-Volume
-vorbereiten, `helm upgrade --install dcs` mit `values.bdd.yml`, CoreDNS-Rewrite
+1. Deployment und Backend-Pod von Instanz A sind verfügbar bzw. `ready`
+   (je 180 s Frist); scheitert das, folgt eine Federated-Catalogue-Diagnose.
+2. Der Login-Endpunkt antwortet **durch den Traefik-Ingress** auf Port 18080.
+   Eine Go-Standard-404-Antwort wird als eigenes Fehlerbild erkannt: Der
+   Host-Port erreicht den Ingress nicht.
+3. Instanz B, falls vorhanden: Deployment verfügbar (300 s) und HTTP über
+   `dcs-b.localhost` (bis 120 s). Fehlt sie, warnt der Runner ausdrücklich,
+   statt still zu übergehen; die `@two-instance`-Szenarien schlagen dann fehl.
+4. Das DSS-Deployment ist verfügbar (Frist 420 s; das Tomcat-Bundle bootet
+   langsam, seine Readiness-Probe beginnt erst nach 90 s).
+5. ORCE ist verfügbar, das Archiv-Audit-Token ist aus dem laufenden Pod
+   lesbar, der Audit-Log-Endpunkt antwortet, und der Contract-Target-Flow
+   antwortet durch den Ingress nicht mit 404.
+
+Danach richtet der Runner Port-Weiterleitungen für **PostgreSQL (5432), den
+DCS-Service (18991), DSS (18099) und ORCE (18880)** ein. Die
+DCS-Weiterleitung dient den Endpunkten, die der Ingress nicht routet, etwa
+`/metrics`. Keycloak wird nicht weitergeleitet. Vorher beendet der Runner
+jeden Prozess, der die Ports 5432, 18991 oder 18880 belegt; ein lokal
+laufender PostgreSQL auf 5432 wird dabei mit beendet. Der Standardlauf
+schließt `@isolated_stack`-Szenarien aus, sie laufen nur in ihren eigenen
+Zielen. Ein Lauf, der null Szenarien ausgeführt hat, gilt als Fehlschlag,
+nicht als grün.
+
+Der Ablauf von `kind_deploy` in Kurzform: kind-Cluster anlegen oder
+wiederverwenden, die vorab gebauten DCS- und pdf-core-Images sowie das
+DSS-Image hineinladen, Helm-Repositories aktualisieren und Abhängigkeiten
+bauen, Prometheus-Stack-CRDs anwenden, Namespace `dcs-bdd` anlegen,
+ORCE-Volume vorbereiten, Host-Adresse für den Checkpoint-Sink bestimmen,
+`helm upgrade --install dcs` mit `values.bdd.yml` (öffentliche Origin-,
+Hydra- und Checkpoint-Sink-Adressen kommen per `--set` dazu), CoreDNS-Rewrite
 für `dcs-a.localhost`/`dcs-b.localhost`, Rollout-Restart der frisch gebauten
-Workloads, warten auf das x5chain-Secret, warten auf den Rollout.
-`kind_deploy_b` legt anschließend Instanz B mit `values.bdd2.yml` in denselben
-Namespace, strikt danach, weil B mehrere von A bereitgestellte Dienste beim
-eigenen Start anfragt.
+Workloads, warten auf das x5chain-Secret (bis zu 20 Minuten), warten auf den
+Rollout. `kind_deploy_b` legt anschließend Instanz B mit `values.bdd2.yml` in
+denselben Namespace, strikt danach, weil B mehrere von A bereitgestellte
+Dienste nutzt (Traefik, ORCE samt TSA und Trust-PDP, Federated Catalogue,
+Status-Listen-Dienst, DSS) und einige davon beim eigenen Start aktiv anfragt.
+
+Den HTTPS-Sink für die Checkpoint-Szenarien betreibt die Suite selbst: ein
+Listener im behave-Prozess auf Host-Port 18443 (`BDD_CHECKPOINT_SINK_PORT`).
+`kind_deploy` setzt `orce.checkpointSink.url` auf eine vom Cluster aus
+erreichbare Adresse dieses Hosts (`host.docker.internal`, unter WSL die
+Rancher-Desktop-veth-Adresse) und bricht ab, wenn sich keine bestimmen
+lässt. Port 18443 muss auf dem Host frei sein.
 
 Das Deployment läuft bewusst **ohne** `--wait`: Helm hält
 `post-install`-Hooks zurück, bis alle Deployments bereit sind, und das Backend
@@ -1979,7 +2078,6 @@ verlangsamt jeden Python-Import erheblich. `VENV_PATH=<pfad>` überschreibt das.
 | Mechanismus | Warum er lokal existiert | Warum er in Produktion unzulässig ist |
 | --- | --- | --- |
 | `DCS_ALLOW_DEV_TRUST=true` | Erlaubt das im Image liegende Trust-Fixture | Dessen Issuer-Schlüssel liegen im Repository; jeder mit einer Kopie kann akzeptierte Credentials prägen |
-| `oid4vp.trust.xfscAllowUnsignedFallback` | Nimmt unsignierte Self-Descriptions an | Hebt eine Signaturprüfung auf |
 | `JWT_ALG_NONE_SUPPORTED`, `AUTH_INSECURE_COOKIES` | Vereinfachen den Testaufbau | Beide entfernen Sicherheitseigenschaften |
 | `image.pullPolicy: Never` | Nutzt lokal in kind geladene Images | Kein Pod startet in einem Cluster ohne diese Images |
 | `hydra.config.dev: true` | Erlaubt `http`-Issuer-URLs | Erlaubt unverschlüsselte OIDC-Endpunkte |

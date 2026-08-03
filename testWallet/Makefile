@@ -3,7 +3,7 @@ PYTHON := $(VENV_DIR)/bin/python
 PIP := $(VENV_DIR)/bin/pip
 VENV_STAMP := $(VENV_DIR)/.install-stamp
 
-.PHONY: install ensure-statuslist test sign
+.PHONY: install test sign
 
 # Sign a contract as the test wallet+QTSP (prepare -> sign via DSS -> submit).
 # The DCS holds no key; this plays the signatory (ADR-12). Example:
@@ -25,9 +25,6 @@ $(VENV_STAMP): $(PYTHON) requirements.txt
 	touch $@
 
 install: $(VENV_STAMP)
-
-ensure-statuslist: $(VENV_STAMP)
-	$(PYTHON) scripts/ensure_statuslist_for_dev.py
 
 test: $(VENV_STAMP)
 	$(PYTHON) -m unittest discover -s dcs_wallet -p "test_*.py"
