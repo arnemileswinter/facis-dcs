@@ -6,10 +6,10 @@ import { CONTRACT_PARTY_ROLE_OPTIONS } from './ontology-domain-fields'
 describe('Semantic Hub contract party vocabulary', () => {
   it('derives the role picker from ContractPartyRoleCode and its value constraint', () => {
     expect(CONTRACT_PARTY_ROLE_OPTIONS).toEqual([
-      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-provider', label: 'Provider' },
-      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-customer', label: 'Customer' },
-      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-supplier', label: 'Supplier' },
-      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-client', label: 'Client' },
+      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-provider', label: 'provider' },
+      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-customer', label: 'customer' },
+      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-supplier', label: 'supplier' },
+      { value: 'https://w3id.org/facis/dcs/taxonomy/v1#role-client', label: 'client' },
     ])
   })
 
@@ -20,7 +20,7 @@ describe('Semantic Hub contract party vocabulary', () => {
 
     expect(store.partyAnchors[0]).toEqual({
       id: `urn:uuid:template#party-${encodeURIComponent(CONTRACT_PARTY_ROLE_OPTIONS[0]!.value)}`,
-      label: 'Provider',
+      label: 'provider',
     })
   })
 })

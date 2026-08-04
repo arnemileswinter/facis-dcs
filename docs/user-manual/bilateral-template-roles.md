@@ -29,10 +29,10 @@ einheitlich.
 
    | Anzeige | Gespeicherter Rollenbegriff |
    |---|---|
-   | Provider | `https://w3id.org/facis/dcs/taxonomy/v1#role-provider` |
-   | Customer | `https://w3id.org/facis/dcs/taxonomy/v1#role-customer` |
-   | Supplier | `https://w3id.org/facis/dcs/taxonomy/v1#role-supplier` |
-   | Client | `https://w3id.org/facis/dcs/taxonomy/v1#role-client` |
+   | provider | `https://w3id.org/facis/dcs/taxonomy/v1#role-provider` |
+   | customer | `https://w3id.org/facis/dcs/taxonomy/v1#role-customer` |
+   | supplier | `https://w3id.org/facis/dcs/taxonomy/v1#role-supplier` |
+   | client | `https://w3id.org/facis/dcs/taxonomy/v1#role-client` |
 
    Die Oberfläche zeigt die verständliche Bezeichnung, speichert aber immer
    den vollständigen Rollenbegriff.

@@ -69,8 +69,8 @@ describe('contract creation participants', () => {
 
   it('submits the originator role and the reading organizations', async () => {
     const wrapper = await openDialog([
-      { value: ROLE_SUPPLIER, label: 'Supplier' },
-      { value: ROLE_CLIENT, label: 'Client' },
+      { value: ROLE_SUPPLIER, label: 'supplier' },
+      { value: ROLE_CLIENT, label: 'client' },
     ])
 
     expect(wrapper.find('select').element.value).toBe('')

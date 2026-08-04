@@ -142,13 +142,13 @@ dcst:constraint-contract-party-role a dcs:ValueConstraint ;
   rdfs:label "Contract Party Role Vocabulary Constraint"@en .
 
 dcst:role-provider a skos:Concept ;
-  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "provider" ; skos:prefLabel "Provider"@en .
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "provider" ; skos:prefLabel "provider"@en .
 dcst:role-customer a skos:Concept ;
-  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "customer" ; skos:prefLabel "Customer"@en .
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "customer" ; skos:prefLabel "customer"@en .
 dcst:role-supplier a skos:Concept ;
-  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "supplier" ; skos:prefLabel "Supplier"@en .
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "supplier" ; skos:prefLabel "supplier"@en .
 dcst:role-client a skos:Concept ;
-  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "client" ; skos:prefLabel "Client"@en .
+  skos:inScheme dcst:catalog-contract-party-role ; skos:notation "client" ; skos:prefLabel "client"@en .
 
 dcst:country-DEU a skos:Concept ;
   skos:inScheme dcst:catalog-iso3166-alpha3-country ; skos:notation "DEU" ; skos:prefLabel "Germany"@en .
