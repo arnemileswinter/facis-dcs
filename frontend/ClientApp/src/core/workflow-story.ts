@@ -42,7 +42,7 @@ const TEMPLATE_STEPS: StoryStep[] = [
 ]
 
 const COMPONENT_NOTE =
-  'This is a Component — it is composed into Contract Templates and cannot be instantiated directly.'
+  'This Component can be added to Contract Templates but cannot be used to create contracts directly.'
 
 export function templateStory(
   state: ContractTemplateState | null | undefined,
@@ -90,7 +90,7 @@ export function templateStory(
         'APPROVED',
         'This template is approved',
         isComponent
-          ? `Approved — one step left: a Template Manager registers it in the Template Catalogue. ${COMPONENT_NOTE}`
+          ? `Approved. ${COMPONENT_NOTE}`
           : 'Approved — one step left: a Template Manager registers it in the Template Catalogue; only registered templates can be used to create contracts.',
         [{ label: 'Open Template Catalogue', routeName: 'template.catalogues.list' }],
       )
