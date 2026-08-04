@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { nextTick, ref, useTemplateRef } from 'vue'
 import type { ParticipantSelection } from '@/utils/participant-selection'
+import type { ContractPartyRoleOption } from '@template-repository/utils/ontology-domain-fields'
 
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(
   defineProps<{
-    /** Contractual roles the chosen template declares, if it declares any. */
-    partyRoles?: string[]
+    /** Two catalogued contractual roles declared by the fully loaded template. */
+    partyRoles?: ContractPartyRoleOption[]
+    roleState?: 'loading' | 'ready' | 'empty' | 'error'
   }>(),
-  { partyRoles: () => [] },
+  { partyRoles: () => [], roleState: 'loading' },
 )
 
 const emit = defineEmits<{
@@ -23,7 +25,7 @@ const readingOrganizations = ref('')
 
 async function openModal() {
   counterparty.value = ''
-  originatorRole.value = props.partyRoles[0] ?? ''
+  originatorRole.value = ''
   readingOrganizations.value = ''
   await nextTick()
   counterpartyModal.value?.showModal()
@@ -37,6 +39,12 @@ function focusDialog() {
 }
 
 function onModalSubmit() {
+  if (
+    props.roleState !== 'ready' ||
+    props.partyRoles.length !== 2 ||
+    !props.partyRoles.some((role) => role.value === originatorRole.value)
+  )
+    return
   const parties = readingOrganizations.value
     .split(',')
     .map((name) => name.trim())
@@ -88,18 +96,23 @@ function onModalClose() {
             Binds your organization to that role's party in the contract's machine-readable rules. The counterpart role
             stays open until the counterparty accepts by signing.
           </span>
-          <select v-if="partyRoles.length" v-model="originatorRole" class="select-bordered select w-full select-sm">
-            <option value="">Not declared</option>
-            <option v-for="role in partyRoles" :key="role" :value="role">{{ role }}</option>
-          </select>
-          <input
-            v-else
+          <select
             v-model="originatorRole"
-            type="text"
-            class="input-bordered input input-sm w-full"
-            placeholder="e.g. provider"
-            @keydown.enter.prevent="onModalSubmit"
-          />
+            class="select-bordered select w-full select-sm"
+            :disabled="roleState !== 'ready' || partyRoles.length !== 2"
+          >
+            <option value="" disabled>Select your role</option>
+            <option v-for="role in partyRoles" :key="role.value" :value="role.value">{{ role.label }}</option>
+          </select>
+          <span v-if="roleState === 'loading'" role="status" aria-live="polite" class="text-xs text-base-content/70">
+            Loading template roles…
+          </span>
+          <span v-else-if="roleState === 'error'" role="alert" class="text-xs text-error">
+            Template roles could not be loaded.
+          </span>
+          <span v-else-if="roleState === 'empty'" role="status" aria-live="polite" class="text-xs text-warning">
+            Contract creation requires exactly two catalogued roles in the selected template.
+          </span>
         </label>
 
         <label class="mt-4 flex flex-col gap-2">
@@ -119,7 +132,14 @@ function onModalClose() {
 
         <div class="modal-action mt-4">
           <button type="button" class="btn btn-outline" @click="onModalClose">Cancel</button>
-          <button type="button" class="btn btn-primary" @click="onModalSubmit">Apply</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="roleState !== 'ready' || partyRoles.length !== 2 || !originatorRole"
+            @click="onModalSubmit"
+          >
+            Apply
+          </button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">

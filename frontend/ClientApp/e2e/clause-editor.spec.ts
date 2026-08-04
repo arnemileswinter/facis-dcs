@@ -66,7 +66,19 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
   await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
-  await ruleSelect('Applies to').selectOption({ label: 'The counterparty' })
+  // Party roles are supplied by the Semantic Hub catalog. Pick two distinct
+  // enabled catalog entries without coupling this test to a particular role
+  // vocabulary or its ordering labels.
+  const assigner = ruleSelect('Granted by')
+  const assignee = ruleSelect('Applies to')
+  const partyRoleValues = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  expect(partyRoleValues.length, 'the role catalog exposes a bilateral choice').toBeGreaterThanOrEqual(2)
+  const [assignerRole, assigneeRole] = partyRoleValues
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
   // The target is the accessed asset — a declared object, not the contract.
   await ruleSelect('Toward').selectOption({ label: 'Service Description' })
 

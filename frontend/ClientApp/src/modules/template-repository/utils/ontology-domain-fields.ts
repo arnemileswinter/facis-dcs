@@ -25,6 +25,7 @@ const OWL_CLASS = 'http://www.w3.org/2002/07/owl#Class'
 const SKOS = 'http://www.w3.org/2004/02/skos/core#'
 const DCS = 'https://w3id.org/facis/dcs/ontology/v1#'
 const SH = 'http://www.w3.org/ns/shacl#'
+const CONTRACT_PARTY_ROLE_CODE = `${DCS}ContractPartyRoleCode`
 
 export class OntologyGraph {
   private bySubject = new Map<string, Quad[]>()
@@ -189,6 +190,27 @@ function parseValueConstraints(graph: OntologyGraph): ReadonlyMap<string, Semant
     })
   }
   return constraints
+}
+
+export interface ContractPartyRoleOption {
+  value: string
+  label: string
+}
+
+function parseContractPartyRoles(
+  graph: OntologyGraph,
+  constraints = parseValueConstraints(graph),
+): ContractPartyRoleOption[] {
+  const roles = new Map<string, ContractPartyRoleOption>()
+  for (const subject of graph.subjects()) {
+    if (graph.first(subject, `${RDFS}range`) !== CONTRACT_PARTY_ROLE_CODE) continue
+    const constraint = constraints.get(graph.first(subject, `${DCS}hasValueConstraint`))
+    for (const option of constraint?.valueOptions ?? []) {
+      if (!option.iri || !option.label) continue
+      roles.set(option.iri, { value: option.iri, label: option.label })
+    }
+  }
+  return [...roles.values()]
 }
 
 function parseClassLabels(graph: OntologyGraph): ReadonlyMap<string, string> {
@@ -376,6 +398,7 @@ async function loadHub(): Promise<{
   fields: DomainFieldDefinition[]
   assets: HubAsset[]
   constraints: SemanticValueConstraint[]
+  partyRoleOptions: ContractPartyRoleOption[]
 }> {
   const inventory = await fetchHubJson<SchemaListEntry[]>('/api/semantic/schema/list')
   hubFingerprint = fingerprintOf(inventory)
@@ -423,6 +446,7 @@ async function loadHub(): Promise<{
     fields: [...fieldsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
     assets: [...assetsById.values()].sort((l, r) => bySource(l.source, r.source) || l.label.localeCompare(r.label)),
     constraints: [...constraints.values()],
+    partyRoleOptions: parseContractPartyRoles(ontologyGraph, constraints),
   }
 }
 
@@ -441,7 +465,7 @@ type HubVocabulary = Awaited<ReturnType<typeof loadHub>>
 // shapes are ~2.4 MB), and this module re-parses them on every full page
 // load — so the parsed vocabulary rides sessionStorage, keyed by the hub
 // inventory fingerprint. A quota failure just means parsing again next load.
-const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v1'
+const HUB_CACHE_KEY = 'dcs.hub.vocabulary.v3'
 
 function readHubCache(fingerprint: string): HubVocabulary | null {
   try {
@@ -480,10 +504,12 @@ const hub = await loadHubCached()
 const reactiveFields = shallowReactive<DomainFieldDefinition[]>(hub.fields)
 const reactiveAssets = shallowReactive<HubAsset[]>(hub.assets)
 const reactiveConstraints = shallowReactive<SemanticValueConstraint[]>(hub.constraints)
+const reactivePartyRoleOptions = shallowReactive<ContractPartyRoleOption[]>(hub.partyRoleOptions)
 
 export const ONTOLOGY_DOMAIN_FIELDS: readonly DomainFieldDefinition[] = reactiveFields
 export const ONTOLOGY_ASSETS: readonly HubAsset[] = reactiveAssets
 export const ONTOLOGY_VALUE_CONSTRAINTS: readonly SemanticValueConstraint[] = reactiveConstraints
+export const CONTRACT_PARTY_ROLE_OPTIONS: readonly ContractPartyRoleOption[] = reactivePartyRoleOptions
 
 let refreshInFlight: Promise<void> | null = null
 
@@ -502,6 +528,7 @@ export function refreshOntologyDomainFields(): Promise<void> {
     reactiveFields.splice(0, reactiveFields.length, ...fresh.fields)
     reactiveAssets.splice(0, reactiveAssets.length, ...fresh.assets)
     reactiveConstraints.splice(0, reactiveConstraints.length, ...fresh.constraints)
+    reactivePartyRoleOptions.splice(0, reactivePartyRoleOptions.length, ...fresh.partyRoleOptions)
   })().finally(() => {
     refreshInFlight = null
   })

@@ -14,6 +14,7 @@ import DataObjectsEditor from '@template-repository/components/data-objects/Data
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { CONTRACT_PARTY_ROLE_OPTIONS } from '@template-repository/utils/ontology-domain-fields'
 import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
@@ -55,6 +56,7 @@ const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const templateLoadState = ref<'loading' | 'loaded' | 'error'>('loading')
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 const detailsValidationAttempted = ref(false)
 const nameError = computed(() =>
@@ -167,6 +169,17 @@ async function verifyContractDetails(): Promise<boolean> {
 }
 
 const createContract = async ({ counterparty, originatorRole, parties }: ParticipantSelection) => {
+  if (
+    templateRoleState.value !== 'ready' ||
+    !originatorRole ||
+    !templatePartyRoles.value.some((role) => role.value === originatorRole)
+  ) {
+    reportActionError(
+      new Error('Select one of the two catalogued roles declared by the loaded template.'),
+      'Create contract',
+    )
+    return
+  }
   isSubmitting.value = true
   try {
     if (selectedTemplate.value) {
@@ -349,12 +362,33 @@ function applyContractDataToDraft(contractData?: unknown) {
   verificationResult.value = null
 }
 
-// The roles the chosen template declares, offered as the originator's own.
-const templatePartyRoles = computed(() => declaredPartyRoles(selectedTemplate.value?.template_data))
+// Only the fully retrieved template in the draft store is authoritative. The
+// list entry selected above may omit template_data or contain a stale summary.
+const loadedTemplatePartyRoles = computed(() =>
+  dcsDraftStore.did === selectedTemplate.value?.did
+    ? declaredPartyRoles({ 'dcs:policies': dcsDraftStore.policies })
+    : [],
+)
+const templatePartyRoles = computed(() => {
+  const roles = loadedTemplatePartyRoles.value
+  if (roles.length !== 2) return []
+  const options = roles.map((role) => CONTRACT_PARTY_ROLE_OPTIONS.find((option) => option.value === role))
+  return options.every((option) => option !== undefined) ? options : []
+})
+const templateRoleState = computed<'loading' | 'ready' | 'empty' | 'error'>(() => {
+  if (templateLoadState.value === 'loading') return 'loading'
+  if (templateLoadState.value === 'error') return 'error'
+  return templatePartyRoles.value.length === 2 ? 'ready' : 'empty'
+})
+
+function onTemplateLoadState(value: { did: string; state: 'loading' | 'loaded' | 'error' }) {
+  if (value.did === selectedTemplate.value?.did) templateLoadState.value = value.state
+}
 
 const scrollStore = useScrollStore()
 
 watch(selectedTemplate, (value) => {
+  templateLoadState.value = 'loading'
   if (!!value?.did) {
     scrollStore.addGutter()
   } else {
@@ -387,7 +421,7 @@ onBeforeRouteLeave(() => {
           </option>
         </select>
       </div>
-      <ViewContractTemplateView v-else :did="selectedTemplate.did" :embedded="true">
+      <ViewContractTemplateView v-else :did="selectedTemplate.did" :embedded="true" @load-state="onTemplateLoadState">
         <template #before-tabs>
           <div class="flex items-end gap-4">
             <div class="flex-1">
@@ -527,6 +561,7 @@ onBeforeRouteLeave(() => {
         <ParticipantSelectionDialog
           v-if="!isEditMode"
           :party-roles="templatePartyRoles"
+          :role-state="templateRoleState"
           :disabled="isSubmitting || !canSubmit"
           class="btn flex-1 btn-primary"
           @submit="createContract"
