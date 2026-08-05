@@ -130,7 +130,7 @@ const handleShowBtn = (negotiation: ContractNegotiation) => {
           <div v-if="negotiation.superseded?.length" class="text-sm">
             <div class="badge badge-sm badge-warning">SUPERSEDED</div>
             <div v-for="discard in negotiation.superseded" :key="discard.superseded_by">
-              Accepted, but the merged contract does not carry its {{ discard.fields.join(', ') }} — a later accepted
+              Accepted, but the merged contract does not carry its {{ discard.fields.join(', ') }}. A later accepted
               change request ({{ discard.superseded_by }}) set the same.
             </div>
           </div>
