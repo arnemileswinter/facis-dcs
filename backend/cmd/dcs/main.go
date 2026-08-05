@@ -433,7 +433,12 @@ func main() {
 	if err := configattest.Attest(ctx, db, did, map[string]string{
 		"did-document":      os.Getenv("DCS_DID"),
 		"oid4vp-trust-data": os.Getenv("OID4VP_TRUST_DATA_PATH"),
-		"x5c-trust-anchors": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PATH"),
+		// One entry per CA trust list (ADR-35). Attesting both under a single
+		// key would hash whichever one happened to be set and leave the other
+		// unpinned — and the PoA list is the file that decides federation
+		// membership outright.
+		"x5c-trust-anchors-poa": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_POA_PATH"),
+		"x5c-trust-anchors-pid":  os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PID_PATH"),
 		// The authorization policy outranks the trust document: a rule granting
 		// everything overrides every entry in it. Attesting the document while
 		// leaving the policy unpinned would put the pinned file under the

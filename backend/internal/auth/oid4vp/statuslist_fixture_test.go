@@ -50,6 +50,9 @@ type ietfStatusList struct {
 	// Roots are the anchors an instance verifying this list must be configured
 	// with; without them the chain in the token verifies against nothing.
 	Roots *x509.CertPool
+	// RootCerts is the same anchors as certificates, which is what a purpose's
+	// anchor set is fed with (ADR-35).
+	RootCerts []*x509.Certificate
 
 	key    *ecdsa.PrivateKey
 	chain  []*x509.Certificate
@@ -99,6 +102,7 @@ func newIETFStatusList(t *testing.T, size int, opts ...func(*ietfStatusList)) *i
 	list.chain = []*x509.Certificate{leaf, list.caCert}
 	list.Roots = x509.NewCertPool()
 	list.Roots.AddCert(list.caCert)
+	list.RootCerts = []*x509.Certificate{list.caCert}
 	list.jwks = statusListJWKS(t, list.key)
 
 	for _, opt := range opts {
@@ -180,7 +184,8 @@ func trustIETFStatusList(t *testing.T, list *ietfStatusList) {
 	cfg := &TrustConfig{}
 	if len(list.chain) > 0 {
 		cfg.Issuers = map[string]TrustedIssuer{list.Issuer: {Mechanism: MechanismX5C}}
-		cfg.SetX5CTrustRoots(list.Roots)
+		cfg.SetX5CTrustRoots(PurposePeer, list.RootCerts)
+		cfg.SetX5CTrustRoots(PurposePID, list.RootCerts)
 	} else {
 		cfg.Issuers = map[string]TrustedIssuer{
 			list.Issuer: {Mechanism: MechanismJWKS, JWKS: list.jwks},
@@ -205,6 +210,9 @@ type xfscStatusList struct {
 	// Roots are the anchors an instance verifying this list must be configured
 	// with; without them the chain in the token verifies against nothing.
 	Roots *x509.CertPool
+	// RootCerts is the same anchors as certificates, which is what a purpose's
+	// anchor set is fed with (ADR-35).
+	RootCerts []*x509.Certificate
 
 	issuer string
 	key    *ecdsa.PrivateKey
@@ -246,6 +254,7 @@ func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
 	list.chain = []*x509.Certificate{leaf, caCert}
 	list.Roots = x509.NewCertPool()
 	list.Roots.AddCert(caCert)
+	list.RootCerts = []*x509.Certificate{caCert}
 
 	return list
 }

@@ -154,7 +154,8 @@ func peerTrust(
 			},
 		},
 	}
-	cfg.SetX5CTrustRoots(statusList.Roots)
+	cfg.SetX5CTrustRoots(PurposePeer, statusList.RootCerts)
+	cfg.SetX5CTrustRoots(PurposePID, statusList.RootCerts)
 
 	require.NoError(t, ConfigureStatusListVerification(cfg))
 	t.Cleanup(func() { _ = ConfigureStatusListVerification(nil) })
@@ -192,7 +193,9 @@ func TestVerifyCounterpartyPoA_UnknownIssuerIsRefused(t *testing.T) {
 		SignatoryDID: poa.SignatoryDID,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not trusted")
+	// An unlisted issuer is refused for a specific reason now: it had no entry,
+	// and it presented no chain that could have stood in for one (ADR-35).
+	assert.Contains(t, err.Error(), "no trust entry")
 }
 
 // An issuer trusted to grant sessions here has not thereby been trusted to

@@ -311,10 +311,37 @@ type stubTrust struct {
 	usesX5C map[string]bool
 	jwks    json.RawMessage
 	roots   *x509.CertPool
+	// unlisted issuers take the anchored path (ADR-35). Absent from this map
+	// means listed, which keeps every pre-existing case reading as before.
+	unlisted map[string]bool
+	// anchoredTrusted is the policy's answer once a chain has been validated.
+	// Nil means "trust whatever anchored", so a test that only cares about the
+	// crypto need not restate the authorization.
+	anchoredTrusted map[string]bool
+	// pinnedLeaf holds, per issuer, the DER SubjectPublicKeyInfo its leaf must
+	// carry — what a login purpose enforces instead of walking to a CA.
+	pinnedLeaf map[string][][]byte
 }
 
 func (s stubTrust) IssuerTrusted(iss string) bool { return s.trusted[iss] }
-func (s stubTrust) VCTAllowed(string) bool        { return true }
+func (s stubTrust) IssuerListed(iss string) bool  { return !s.unlisted[iss] }
+
+func (s stubTrust) IssuerTrustedAnchored(iss string) bool {
+	if s.anchoredTrusted == nil {
+		return true
+	}
+	return s.anchoredTrusted[iss]
+}
+
+// pinnedLeaf, when set for an issuer, makes this view pin the leaf's key the
+// way a login purpose does — no CA is consulted. Unset means the chain is
+// verified to the anchors, which is how peer and pid resolve.
+func (s stubTrust) IssuerPinnedLeafKeys(iss string) ([][]byte, bool, error) {
+	pinned, ok := s.pinnedLeaf[iss]
+	return pinned, ok, nil
+}
+
+func (s stubTrust) VCTAllowed(string) bool { return true }
 
 func (s stubTrust) IssuerJWKS(iss string) (json.RawMessage, error) {
 	if !s.trusted[iss] {
