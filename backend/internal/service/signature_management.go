@@ -612,11 +612,17 @@ func (s *signatureManagementsrvc) Validate(ctx context.Context, req *signaturema
 		HolderDID:   middleware.GetHolderDID(ctx),
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	queryHandler := query.Validator{
 		DB:          s.DB,
 		CRepo:       s.CRepo,
 		PDFCore:     s.PDFCore,
 		Credentials: s.Credentials,
+		Trust:       s.Trust,
+		LocalPeer:   localPeer,
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)
@@ -752,11 +758,17 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	validator := query.Validator{
 		DB:          s.DB,
 		CRepo:       s.CRepo,
 		PDFCore:     s.PDFCore,
 		Credentials: s.Credentials,
+		Trust:       s.Trust,
+		LocalPeer:   localPeer,
 	}
 	validation, err := validator.Handle(ctx, query.ValidateQry{
 		DID:         req.Did,

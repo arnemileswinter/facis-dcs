@@ -66,10 +66,13 @@ const (
 	// same question ("may this holder act as a party on this deployment"), and
 	// both are answered by an issuer this operator named and pinned.
 	PurposeLogin Purpose = "login"
-	// PurposePeer: credentials issued by ANOTHER DCS INSTANCE's issuer, arriving
-	// embedded in a PDF from that instance's operator — the Power of Attorney
-	// behind a signature applied over there, which this instance verifies when
-	// the contract is shipped to it (VerifyCounterpartyPoA).
+	// PurposePeer: credentials issued by ANOTHER DCS INSTANCE's issuer — the
+	// Power of Attorney behind a signature applied over there, embedded into the
+	// contract PDF as an associated file BEFORE that instance's own signature,
+	// so its signature covers its own authorization and the PDF carries
+	// everything the receiver needs (ADR-13: the PDF is the wire format).
+	// Verified here on receipt (VerifyCounterpartyPoA,
+	// dcstodcs.CounterpartyPoAGate).
 	//
 	// It never authorizes anything here. That is what lets it be admitted by a
 	// chain to the PoA CA list rather than by an entry: we cannot enumerate who
@@ -245,11 +248,43 @@ func devKeyMaterial(iss string, entry TrustedIssuer) string {
 	if source := devKeyInJWKS(entry.JWKS); source != "" {
 		return source
 	}
+	if source := devKeyInLeafPins(entry.X5CLeafKeys); source != "" {
+		return source
+	}
 	if strings.HasPrefix(strings.TrimSpace(iss), "did:jwk:") {
 		if key, err := sdjwt.JWKFromDIDJWK(strings.TrimSpace(iss)); err == nil {
 			if source, ok := devIssuerKeyX[canonicalCoordinate(key.X)]; ok {
 				return source
 			}
+		}
+	}
+	return ""
+}
+
+// devKeyInLeafPins names the committed key a login issuer's leaf pin holds.
+//
+// A pin is key material like any other: it says which key this deployment
+// believes its own login issuer by, so pinning one whose private half ships in
+// this repository lets anyone with a clone mint a session here. The guard read
+// only `jwks`, which is exactly the form an x5c issuer does not use — so the
+// one entry shape that carries a key for the purpose with no CA above it was
+// the one shape nothing checked.
+func devKeyInLeafPins(pins []string) string {
+	for _, encoded := range pins {
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			continue
+		}
+		key, err := x509.ParsePKIXPublicKey(der)
+		if err != nil {
+			continue
+		}
+		pub, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if source, ok := devIssuerKeyX[canonicalCoordinateFromInt(pub.X)]; ok {
+			return source
 		}
 	}
 	return ""

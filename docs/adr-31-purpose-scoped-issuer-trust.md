@@ -97,9 +97,10 @@ nothing to check it against — a peer asserting its own authority.
 
 **The credential now travels with the signature.** The ceremony retains the
 Power of Attorney the signatory presented, next to the PID presentation it
-already stored, and the synchronizer ships it with the contract once that
-contract carries signatures (`signatory_poas` on the PDF ship). The receiver
-verifies it before it persists anything of the ship:
+already stored, and it is embedded into the contract PDF beneath the signature
+it authorizes (ADR-35 settles where: inside the PDF, before that party's own
+signature, never as a sibling of it on the wire). The receiver verifies it
+before it persists anything of the ship:
 
 - the issuer is trusted for `peer` and entitled to attest that organization,
 - the credential's `vct`, signature and validity window hold,

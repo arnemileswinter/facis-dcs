@@ -193,9 +193,38 @@ configuration.
   one blocked dynamic trust. They are now separated:
 
   - `peer` means **another DCS instance**. Its issuer's credentials reach us one
-    way: a Power of Attorney embedded in a PDF, behind a signature applied on
-    that instance, verified when the contract is shipped here
+    way: the Power of Attorney behind a signature applied on that instance,
+    embedded **inside the contract PDF** — with the signing summary that attests
+    the signature it stands behind — and verified on receipt
     (`VerifyCounterpartyPoA`). It authorizes nothing locally.
+
+    The PDF is the wire format (ADR-13), so the evidence rides in it and nowhere
+    else. Every signing party embeds its OWN evidence as a PDF/A-3 associated
+    file **before** applying its own signature, so that party's PAdES signature
+    covers its own authorization: one attachment per signing event, carrying
+    `{"summary": <ContractSigningSummaryCredential>, "poa_presentation": <the
+    Power of Attorney as presented at the ceremony>}`. The embed is an
+    append-only incremental update, which is what lets a countersignature add
+    its own to a document the originator already signed without invalidating
+    that signature (DCS-OR-C2PA-002). A countersigned contract therefore carries
+    both parties' evidence, and the receiver verifies everything from the PDF.
+
+    **Every attachment is verified, not the newest one per field.** An embed
+    appends rather than replacing, so a field can legitimately appear more than
+    once; taking only the last would let an appended attachment for an
+    already-verified field ride along unexamined while the contract still
+    carries it. Each summary is checked against the assertion key of the
+    instance that OWNS the field it names — the shipper's for its own fields,
+    ours for ours, and the resolved `did:web` document for anyone else — which
+    is what stops a peer from embedding evidence for a party it has nothing to
+    do with. Evidence for a field this instance owns is authenticated the same
+    way but its Power of Attorney is not re-judged as peer evidence: that
+    ceremony ran here, where the credential is a `login` question.
+
+    Worth stating because the two are easy to conflate: the **contract lifecycle
+    credential** is embedded in every PDF this deployment generates, and it is
+    embedded once by the renderer. The Power of Attorney and the signing summary
+    are embedded per signature, by the party making it.
   - This instance's own signing ceremony verifies the signatory's PoA as
     **`login`** — the wallet is here, and the credential came from this
     deployment's own issuer, which is enumerated and leaf-pinned.

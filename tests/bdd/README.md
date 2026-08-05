@@ -30,14 +30,19 @@ infrastructure. The suite does not care which, as long as both are reachable.
 
 ## 1. Configure trust
 
-The harness authenticates by minting its own Power-of-Attorney credential with
-the issuer key committed at `testWallet/keys/issuer-dev.jwk`, and presenting it
-over OpenID4VP. Your deployment must be configured to trust that issuer, or
-every scenario fails at its first authenticated request with:
+The harness authenticates by minting its own Power-of-Attorney credential AS
+the ORCE credential issuer `ISSUER_BASE_URL` names — signed with the committed
+issuer key that release is handed
+(`deployment/helm/charts/orce/pki-dev/issuer.key`), carrying the certificate
+chain in the credential header — and presenting it over OpenID4VP. The issuer
+is that one because a status list is believed only from the issuer that
+publishes it, and every credential here points at that issuer's list. Your
+deployment must be configured to trust it, or every scenario fails at its first
+authenticated request with:
 
 ```
 401 vp verification failed: credential jwt: token is unverifiable:
-    issuer "did:web:dev.example:issuer:poa" is not trusted
+    issuer "http://localhost:18080/issuer" is not trusted
 ```
 
 Trust is purpose-scoped and bound to an organization (ADR-31). The suite's

@@ -438,7 +438,7 @@ func main() {
 		// unpinned — and the PoA list is the file that decides federation
 		// membership outright.
 		"x5c-trust-anchors-poa": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_POA_PATH"),
-		"x5c-trust-anchors-pid":  os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PID_PATH"),
+		"x5c-trust-anchors-pid": os.Getenv("OID4VP_X5C_TRUST_ANCHORS_PID_PATH"),
 		// The authorization policy outranks the trust document: a rule granting
 		// everything overrides every entry in it. Attesting the document while
 		// leaving the policy unpinned would put the pinned file under the
@@ -478,10 +478,9 @@ func main() {
 	// local policy endpoint, consulted on both the outbound (shipContractPDF,
 	// here) and inbound (PostPdf, service.NewDcsToDcs below) paths.
 	trustGate := dcstodcs2.TrustGate{PDPURL: os.Getenv("DCS_TRUST_PDP_URL")}
-	// Mutual Power-of-Attorney binding (ADR-31): the synchronizer ships the
-	// credential behind each signature this instance applied, and the gate
-	// verifies the credential a counterparty ships back.
-	ceremonyPoAs := &dcstodcs2.CeremonyPoAs{DB: db, CeremonyRepo: &smrepo.PostgresCeremonyRepo{}}
+	// Mutual Power-of-Attorney binding (ADR-31, ADR-35): each party embeds the
+	// credential behind its own signature into the PDF before signing, and this
+	// gate verifies every attachment a counterparty's shipped PDF carries.
 	counterpartyPoAGate := dcstodcs2.CounterpartyPoAGate{Trust: authCfg.Trust}
 	dcsToDcsSynchronizer := dcstodcs2.DCSToDCSSynchronizer{
 		DB:               db,
@@ -490,7 +489,6 @@ func main() {
 		Artifacts:        artifactStore,
 		DIDDocument:      *didDocument,
 		TrustGate:        trustGate,
-		PoAs:             ceremonyPoAs,
 		SettlementSender: dcstodcs2.HTTPSettlementSender{},
 	}
 	dcsToDcsSynchronizer.StartSynchronizerJob(ctx, cepSubClient)

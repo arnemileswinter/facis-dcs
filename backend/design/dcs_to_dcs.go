@@ -26,16 +26,6 @@ var DCSToDCSWrappedCEK = Type("DCSToDCSWrappedCEK", func() {
 	Required("alg", "kid", "epk", "wrapped")
 })
 
-var DCSToDCSSignatoryPoA = Type("DCSToDCSSignatoryPoA", func() {
-	Description("The Power of Attorney a signatory presented at the ceremony on the shipping instance, carried so the receiver can verify a counterparty's authority to sign instead of taking the contract's dcs:hasPowerOfAttorney claim on trust (ADR-31, UC-14). The receiver re-derives the party and its signatory from the shipped contract itself, so these fields are checked against it rather than believed.")
-
-	Attribute("party", String, "The party (organization) the credential authorizes, matching a dcs:parties node of the shipped contract")
-	Attribute("presentation", String, "The dc+sd-jwt Power of Attorney exactly as the signatory's wallet delivered it at the ceremony")
-	Attribute("summary", String, "The ContractSigningSummaryCredential the shipping instance issued for that signature (DCS-FR-SM-08), so the receiver can verify which party signed and by whom without taking the shipper's word for it. Carried here rather than read from the PDF: only the first signer's evidence survives embedding, and adding a second attachment would mutate an already-signed document")
-
-	Required("party", "presentation")
-})
-
 var DCSToDCSPinnedShapes = Type("DCSToDCSPinnedShapes", func() {
 	Description("One Semantic Hub SHACL shape LIBRARY the shipped contract pins in dcs:effectiveShapes, carried at exactly the version the pin names. The receiver installs what it does not already hold into its peer-shapes namespace under this version, so the contract is evaluated against the libraries it was authored under while nothing a peer ships can reach, shadow or activate the receiver's own vocabulary. The DCS envelope graphs (facis-dcs, clause-catalog) never travel: every deployment seeds and enforces its own.")
 
@@ -74,7 +64,6 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Attribute("jades_signature", String, "The sender's JAdES over the contract, present only when this ship is a signature (acceptance); empty for a proposal")
 	Attribute("contract_state", String, "The sender's contract state at ship time. Informational, except REVOKED: a revocation ship from the authenticated counterparty — the party revoking its own signature — is adopted by the receiver (DCS-NFR-BR-06)")
 	Attribute("wrapped_cek", DCSToDCSWrappedCEK, "The contract's CEK wrapped to the receiver's keyAgreement key (DCS-NFR-SEC-14). Sent with every ship; the receiver adopts it only when it holds no live CEK for the contract yet, so repeats are idempotent")
-	Attribute("signatory_poas", ArrayOf(DCSToDCSSignatoryPoA), "The Power of Attorney behind each signature the shipping instance applied, sent once the contract carries signatures. Present-but-unverifiable evidence is refused (ADR-31); absent evidence is accepted and left to the compliance viewer, so a peer that retains none can still federate")
 	Attribute("pinned_shapes", ArrayOf(DCSToDCSPinnedShapes), "The SHACL shape libraries the shipped contract pins in dcs:effectiveShapes (ADR-8). Sent with every ship so the receiver can judge the contract against the libraries it was authored under; a pin the receiver can neither resolve locally nor find here refuses the ship rather than falling back to the receiver's own shapes", func() {
 		MaxLength(32)
 	})

@@ -141,6 +141,10 @@ auditExecutor:
   url: ""
   path: "/audit/run"
   timeout: "10s"
+  # DCS-side evidence collection and the ingress request deadline are separate
+  # from the executor HTTP timeout above.
+  evidenceTimeout: "2m"
+  requestTimeout: "3m"
 
 # Consequential contract transitions use this distinct, snapshot-pinned
 # executor contract. Missing/invalid configuration is a backend boot failure.
