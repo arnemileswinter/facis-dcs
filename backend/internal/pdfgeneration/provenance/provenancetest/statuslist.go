@@ -61,7 +61,10 @@ func (s *SignedStatusList) Credential(index uint32) []byte {
 	vc, _ := json.Marshal(map[string]any{
 		"@context": []any{"https://www.w3.org/ns/credentials/v2"},
 		"type":     []any{"VerifiableCredential", "ContractLifecycleCredential"},
-		"issuer":   "did:web:example.org",
+		// The issuer that issued this credential is the one serving the list it
+		// names — which is what makes that list its revocation statement rather
+		// than some other trusted issuer's (ADR-34).
+		"issuer": s.IssuerURL,
 		"credentialStatus": map[string]any{
 			"id":                   fmt.Sprintf("%s#%d", s.ListURI, index),
 			"type":                 "TokenStatusList",

@@ -222,7 +222,7 @@ type xfscStatusList struct {
 	bits []byte
 }
 
-func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
+func newXFSCStatusList(t *testing.T, size int, issuedBy ...string) *xfscStatusList {
 	t.Helper()
 
 	list := &xfscStatusList{key: newECKey(t), bits: make([]byte, size)}
@@ -241,8 +241,14 @@ func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
 		w.Header().Set("Content-Type", "application/statuslist+jwt")
 		_, _ = w.Write([]byte(token))
 	}))
+	list.URL = "http://" + srv.Listener.Addr().String() + "/status-list/1"
+	// A status list is the statement of the issuer that issued the credential it
+	// governs, so a fixture pairing the two must let them agree — a list served
+	// by anyone else is refused, which is the whole point of the binding.
 	list.issuer = "http://" + srv.Listener.Addr().String()
-	list.URL = list.issuer + "/status-list/1"
+	if len(issuedBy) > 0 && issuedBy[0] != "" {
+		list.issuer = issuedBy[0]
+	}
 	srv.Start()
 	t.Cleanup(srv.Close)
 

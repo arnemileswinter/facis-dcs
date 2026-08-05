@@ -807,13 +807,12 @@ func (c *TrustConfig) SetX5CTrustRoots(p Purpose, anchors []*x509.Certificate) {
 //
 // The status-list verifier is one object for the process and is reached without
 // a purpose in hand (checkStatusList), so it cannot be given a scoped set. The
-// union is sound for it for a narrow reason: a status list is signed by the same
-// issuer as the credential it governs (ADR-34), that credential has ALREADY been
-// admitted under its own purpose's anchors, and the leaf must name the issuer
-// the list's `iss` names either way. What the union does not do is bind the list
-// to the credential — no handler does, which ADR-34 records as an outstanding
-// defect of this project's verification logic, not something this scoping
-// introduced.
+// union is sound because the handlers now bind the list to the credential it
+// governs (status.RequireCredentialIssuer): the list must be issued by the same
+// issuer as that credential, and that credential was already admitted under its
+// own purpose's anchors. So a list anchored for one purpose cannot speak for a
+// credential admitted under another, which is the only thing a scoped set would
+// have bought here.
 func (c *TrustConfig) unionX5CRoots() *x509.CertPool {
 	if c == nil {
 		return nil

@@ -156,15 +156,31 @@ configuration.
   meaningful. Putting a public web PKI root in it would make every domain holder
   a federation member.
 
-- **For the demo, the anchor set is still assembled from the members.**
+- **For the demo, the PoA list is still assembled from the members.**
   `build-x5c-anchors.py` collects each issuer's runtime-minted root by
-  fingerprint, and the peer's root is already among them. So the demo does not
-  yet demonstrate the property this ADR is about: membership is still an edit,
-  just at the CA level rather than the issuer level. A real deployment replaces
-  the per-issuer self-minted roots with one CA that issues to members, and only
-  then does the enumeration actually go away. This is a limitation of the
-  stand-in issuers (ADR-34's scope note), not of the verification path, which is
-  the real one.
+  fingerprint, so membership remains an edit — moved from the issuer level to
+  the CA level, not removed. The demo therefore exercises the verification path
+  this ADR is about without yet demonstrating the property.
+
+  What closes it is one CA that issues to members instead of each issuer minting
+  its own root: the mechanism already exists (`orce.pkiRootCA.devFixture` hands
+  an issuer a root rather than letting it generate one), so it is a matter of
+  provisioning one federation root and handing it to each member's issuer, after
+  which the PoA list holds a single anchor and onboarding touches nobody else's
+  configuration. Until then this is a limitation of the stand-in issuers
+  (ADR-34's scope note), not of the verification path.
+
+- **A status list is now bound to the credential it governs.** ADR-34 recorded
+  as an outstanding defect that no handler did this: a signature said only that
+  SOME trusted issuer published the list, so any of them could publish one at
+  another issuer's URI and un-revoke credentials they had no authority over. All
+  three handlers now require the list's issuer to be the credential's issuer.
+
+  That is also what lets the status-list verifier hold the union of both CA
+  lists. It is one object for the process, reached without a purpose in hand, so
+  it cannot be given a scoped set — and with the binding in place it does not
+  need one: a list anchored for one purpose cannot speak for a credential
+  admitted under another.
 
 - **The trust decision is no longer a pure function of configuration.** For an
   unlisted peer it depends on the credential in hand, so the same issuer is
