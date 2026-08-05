@@ -61,11 +61,20 @@ type TrustConfig struct {
 type Purpose string
 
 const (
-	// PurposeLogin: credentials from this issuer may grant a session here.
+	// PurposeLogin: credentials from this issuer may act HERE — grant a session,
+	// and authorize a signature at this instance's own ceremony. Both are the
+	// same question ("may this holder act as a party on this deployment"), and
+	// both are answered by an issuer this operator named and pinned.
 	PurposeLogin Purpose = "login"
-	// PurposePeer: credentials from this issuer are verified when they arrive
-	// from a counterparty, and when this instance presents its own side of a
-	// mutual Power-of-Attorney binding.
+	// PurposePeer: credentials issued by ANOTHER DCS INSTANCE's issuer, arriving
+	// embedded in a PDF from that instance's operator — the Power of Attorney
+	// behind a signature applied over there, which this instance verifies when
+	// the contract is shipped to it (VerifyCounterpartyPoA).
+	//
+	// It never authorizes anything here. That is what lets it be admitted by a
+	// chain to the PoA CA list rather than by an entry: we cannot enumerate who
+	// a counterparty's issuer is, and we do not have to, because believing their
+	// attestation is not the same as letting it act.
 	PurposePeer Purpose = "peer"
 	// PurposePID: credentials from this issuer attest the identity of a natural
 	// person. A PID is a third party's attestation — an instance that issued it

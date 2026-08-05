@@ -172,12 +172,23 @@ configuration.
   the two happened, or an operator cannot tell a missing anchor from a missing
   entry.
 
-- **`peer` remains overloaded.** This ADR does not split it. An unlisted,
-  anchored issuer can therefore still satisfy a signing ceremony on this
-  instance, which is the hazard ADR-31 named — now reachable by default rather
-  than behind a flag that shipped off. What changed is the standard: the issuer
-  must hold a certificate under a CA this deployment anchors, instead of merely
-  publishing a DID document about itself. The split is still owed.
+- **`peer` is no longer overloaded, and that is what makes anchoring it safe.**
+  ADR-31 recorded that `peer` gated two different questions and that the second
+  one blocked dynamic trust. They are now separated:
+
+  - `peer` means **another DCS instance**. Its issuer's credentials reach us one
+    way: a Power of Attorney embedded in a PDF, behind a signature applied on
+    that instance, verified when the contract is shipped here
+    (`VerifyCounterpartyPoA`). It authorizes nothing locally.
+  - This instance's own signing ceremony verifies the signatory's PoA as
+    **`login`** — the wallet is here, and the credential came from this
+    deployment's own issuer, which is enumerated and leaf-pinned.
+
+  The ceremony previously ran under `peer`, which is what made the purpose
+  ambiguous. Under this ADR that would have been a real widening: a chain to the
+  PoA CA list would authorize a signature on this instance. It does not, because
+  authority to act HERE is the enumerated, pinned question and nothing anchored
+  reaches it.
 
 - **Every trust file must be migrated.** A flat `x5c` anchor path is no longer
   read, and a login issuer that resolves by certificate chain must now pin its
