@@ -387,11 +387,26 @@ def step_when_deploy_contract(context, name):
     # Given; `@step` registers this text under given/when/then alike, and
     # the step is also genuinely used as a real When.
     _ensure_target_designated(context, name)
-    did, updated_at = ContractService._contract_data(context, name)
+    did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    context.requests_response = post_json(
-        context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
-    )
+    # Signing already starts an automatic deployment (deployevent's auto-deploy
+    # subscriber reacts to the signature event), so this explicit deploy can
+    # arrive while that one still holds the contract's workflow-gate run and be
+    # refused with 409 DISPATCHING. That refusal is correct — a gate admits one
+    # claim per snapshot — and it clears within seconds, so wait for the run to
+    # settle instead of failing the scenario on a race it is not testing.
+    deadline = time.monotonic() + 60
+    while True:
+        ContractService._refresh_contract(context, name)
+        _, updated_at = ContractService._contract_data(context, name)
+        context.requests_response = post_json(
+            context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
+        )
+        if context.requests_response.status_code != 409 or time.monotonic() >= deadline:
+            break
+        if "DISPATCHING" not in context.requests_response.text:
+            break
+        time.sleep(1)
     if context.requests_response.status_code == 200:
         body = context.requests_response.json()
         context.deployment_correlation_id = body.get("correlation_id")

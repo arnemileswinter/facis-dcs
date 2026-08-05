@@ -856,10 +856,15 @@ def step_then_contract_offered_on_b(context, expected):
             if actual_state == expected:
                 return
         time.sleep(1)
+    # `if last_resp` is False for every non-2xx response (requests.Response is
+    # truthy only when .ok), so the status that says whether the ship never
+    # arrived (404) or arrived invisible to this reader (403) was reported as
+    # "n/a" — the one thing needed to tell those apart.
     assert actual_state == expected, (
         "Expected the contract offered on instance A to appear on its counterparty B as "
         f"{expected} within a few seconds; last observed state: '{actual_state}' (last response: "
-        f"{last_resp.status_code if last_resp else 'n/a'} {last_resp.text if last_resp else ''})"
+        f"{last_resp.status_code if last_resp is not None else 'no request made'} "
+        f"{last_resp.text if last_resp is not None else ''})"
     )
 
 
@@ -1382,7 +1387,8 @@ def step_then_state_replicated_both(context, state):
         assert actual_state == expected, (
             f"Expected contract state {expected} to be replicated on instance {label}, last "
             f"observed state: '{actual_state}' (last response: "
-            f"{last_resp.status_code if last_resp else 'n/a'} {last_resp.text if last_resp else ''})"
+            f"{last_resp.status_code if last_resp is not None else 'no request made'} "
+            f"{last_resp.text if last_resp is not None else ''})"
         )
 
 
@@ -1788,7 +1794,7 @@ def step_then_provenance_on_b(context):
         time.sleep(1)
     assert resp is not None and resp.status_code == 200, (
         f"Expected instance B to store sync provenance for {c_did}, got "
-        f"{resp.status_code if resp else 'n/a'}: {resp.text if resp else ''}"
+        f"{resp.status_code if resp is not None else 'no request made'}: {resp.text if resp is not None else ''}"
     )
     body = resp.json()
     assert body.get("did") == c_did
@@ -2114,5 +2120,5 @@ def step_then_cross_instance_deploy_accepted(context, label):
         time.sleep(3)
     raise AssertionError(
         f"Expected instance {label} to deploy the countersigned contract, got "
-        f"{resp.status_code if resp else 'n/a'}: {resp.text if resp else ''}"
+        f"{resp.status_code if resp is not None else 'no request made'}: {resp.text if resp is not None else ''}"
     )
