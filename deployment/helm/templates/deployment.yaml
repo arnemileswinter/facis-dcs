@@ -345,6 +345,8 @@ spec:
               value: {{ $auditExecutorURL | quote }}
             - name: PAC_AUDIT_EXECUTOR_TIMEOUT
               value: {{ .Values.auditExecutor.timeout | quote }}
+            - name: PAC_AUDIT_EVIDENCE_TIMEOUT
+              value: {{ .Values.auditExecutor.evidenceTimeout | quote }}
             {{- if or .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken }}
             - name: PAC_AUDIT_EXECUTOR_BEARER_TOKEN
               {{- if .Values.global.auditExecutorTokenSecretRef.name }}
