@@ -37,10 +37,21 @@ def _observed_audit_entries(context, evidence_scope: str) -> list[dict]:
 
 @when('the Auditor triggers a process audit with scope "{scope}"')
 def step_when_auditor_triggers_audit(context, scope):
+    import requests as _requests  # noqa: PLC0415
+
     headers = AuthService.get_headers_for_roles(["Auditor"])
     OrceAuditControlService.reset(context, "audit")
     OrceAuditControlService.set_mode(context, "audit", "success")
-    context.requests_response = post_json(context, pac_audit_url(context), {"scope": scope, "justification": "BDD process audit"}, headers=headers)
+    # A process audit sweeps every contract the run has accumulated, so late in
+    # the suite it legitimately outlives the per-request timeout the other
+    # steps use. The scope of this step is the sweep completing, not completing
+    # fast, so it gets a deadline sized to the whole run's state.
+    context.requests_response = _requests.post(
+        pac_audit_url(context),
+        json={"scope": scope, "justification": "BDD process audit"},
+        headers=headers,
+        timeout=max(context.http_timeout_seconds * 4, 240),
+    )
 
 
 @when('I attempt to trigger a process audit with scope "{scope}"')
