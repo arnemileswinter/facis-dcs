@@ -73,6 +73,44 @@ const expandedStatus = computed(() =>
   expandedErasureDid.value ? (erasureStatuses.value[expandedErasureDid.value] ?? null) : null,
 )
 
+const annotating = ref(false)
+
+// DCS-FR-CSA-11: summary and tags are the only mutable part of an archive
+// entry. The dialog takes the summary; tags are entered on the same line,
+// comma-separated, because the shared modal offers a single text field.
+async function annotateEntry(entry: ArchivedContract) {
+  const dialog = confirmationModal.value
+  if (!dialog) return
+  const { isCanceled, data: summary } = await dialog.reveal({
+    message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to have one generated from the contract metadata.`,
+    editor: { placeholder: 'Summary' },
+  })
+  if (isCanceled) return
+  const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
+    message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
+    editor: { placeholder: 'e.g. supply, 2026, renewed' },
+  })
+  if (tagsCanceled) return
+  const tagList = (tags ?? '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
+  annotating.value = true
+  try {
+    const trimmedSummary = summary?.trim()
+    await archiveService.annotate(
+      entry.did,
+      trimmedSummary === '' ? undefined : trimmedSummary,
+      tagList.length > 0 ? tagList : undefined,
+    )
+    await loadEntries()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    annotating.value = false
+  }
+}
+
 async function deleteEntry(entry: ArchivedContract) {
   const dialog = confirmationModal.value
   if (!dialog) return
@@ -170,6 +208,7 @@ function shortDid(did: string): string {
                 <th>Contract</th>
                 <th>Version</th>
                 <th>State</th>
+                <th>Annotation</th>
                 <th>Encryption</th>
                 <th></th>
               </tr>
@@ -189,6 +228,17 @@ function shortDid(did: string): string {
                   <td>{{ entry.contract_version }}</td>
                   <td>
                     <span class="badge badge-ghost badge-sm">{{ entry.state }}</span>
+                  </td>
+                  <td :data-testid="`archive-annotation-${entry.did}`">
+                    <div v-if="entry.archive_summary" class="max-w-xs truncate text-sm">
+                      {{ entry.archive_summary }}
+                    </div>
+                    <div v-else class="text-sm opacity-50">Not annotated</div>
+                    <div v-if="entry.archive_tags?.length" class="mt-1 flex flex-wrap gap-1">
+                      <span v-for="tag in entry.archive_tags" :key="tag" class="badge badge-ghost badge-xs">
+                        {{ tag }}
+                      </span>
+                    </div>
                   </td>
                   <td>
                     <button
@@ -212,6 +262,14 @@ function shortDid(did: string): string {
                   </td>
                   <td class="text-right">
                     <button
+                      class="btn btn-ghost btn-xs"
+                      :disabled="annotating"
+                      :data-testid="`archive-annotate-${entry.did}`"
+                      @click="annotateEntry(entry)"
+                    >
+                      Annotate
+                    </button>
+                    <button
                       class="btn text-error btn-ghost btn-xs"
                       :disabled="deleting"
                       :data-testid="`archive-delete-${entry.did}`"
@@ -222,7 +280,7 @@ function shortDid(did: string): string {
                   </td>
                 </tr>
                 <tr v-if="expandedErasureDid === entry.did && expandedStatus">
-                  <td colspan="5">
+                  <td colspan="6">
                     <div class="space-y-2 p-2 text-sm" :data-testid="`erasure-details-${entry.did}`">
                       <template v-if="expandedStatus.local_status === 'shredded'">
                         <div>

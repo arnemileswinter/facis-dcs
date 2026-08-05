@@ -6,6 +6,7 @@ import { type ArchiveErasureStatus, archiveService } from '@/services/archive-se
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
+import { claimReportedHttpError } from '@/utils/report-action-error'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
@@ -211,6 +212,9 @@ const executeAudit = async () => {
     selectedFindingId.value = null
   } catch (err) {
     console.error('Audit Error:', err)
+    // The failure is rendered in place, per scope, so the interceptor's toast
+    // for it is dropped rather than announced a second time.
+    claimReportedHttpError(err)
     auditErrorsByScope.value = {
       ...auditErrorsByScope.value,
       [scope]: err instanceof Error ? err.message : 'Audit could not be executed.',
@@ -235,6 +239,7 @@ const generateReport = async (format: AuditReportFormat) => {
     downloadBlob(artifact.bytes, artifact.contentType, artifact.filename)
   } catch (err) {
     console.error('Audit Report Error:', err)
+    claimReportedHttpError(err)
     auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: 'Audit report could not be generated.' }
   } finally {
     reportLoadingScope.value = null

@@ -181,6 +181,40 @@ type Input struct {
 	Continuation      map[string]any
 }
 
+// LocalEvaluationBlockedError is the cause a gate run carries when the
+// DCS-local evaluation itself refused the transition. It names the findings
+// that did it: a gate that blocks without saying which rule blocked leaves
+// the caller — and the run record — with nothing to act on.
+type LocalEvaluationBlockedError struct {
+	Findings []validation.PolicyFinding
+}
+
+func (e *LocalEvaluationBlockedError) Error() string {
+	reasons := e.Reasons()
+	if len(reasons) == 0 {
+		return "local Semantic Hub evaluation blocked the transition"
+	}
+	return "local Semantic Hub evaluation blocked the transition: " + strings.Join(reasons, "; ")
+}
+
+// Reasons renders one line per blocking finding, "<rule>: <message>".
+func (e *LocalEvaluationBlockedError) Reasons() []string {
+	reasons := make([]string, 0, len(e.Findings))
+	for _, finding := range e.Findings {
+		rule := strings.TrimSpace(finding.RuleID)
+		message := strings.TrimSpace(finding.Message)
+		switch {
+		case rule != "" && message != "":
+			reasons = append(reasons, rule+": "+message)
+		case message != "":
+			reasons = append(reasons, message)
+		case rule != "":
+			reasons = append(reasons, rule)
+		}
+	}
+	return reasons
+}
+
 type BlockedError struct {
 	RunID  string
 	Status string
@@ -256,11 +290,12 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 	}
 	local := LocalEvaluation{Result: resultFromLocal(localFindings), Findings: localFindings}
 	if local.Result == "BLOCKED" {
-		runID, persistErr := c.persistClosedRun(ctx, input, snapshot, snapshotID, "BLOCKED", local, errors.New("local Semantic Hub evaluation failed"))
+		cause := &LocalEvaluationBlockedError{Findings: blockingFindings(localFindings)}
+		runID, persistErr := c.persistClosedRun(ctx, input, snapshot, snapshotID, "BLOCKED", local, cause)
 		if persistErr != nil {
 			return "", false, snapshot.UpdatedAt, persistErr
 		}
-		return runID, false, snapshot.UpdatedAt, &BlockedError{RunID: runID, Status: "BLOCKED", Cause: errors.New("local Semantic Hub evaluation failed")}
+		return runID, false, snapshot.UpdatedAt, &BlockedError{RunID: runID, Status: "BLOCKED", Cause: cause}
 	}
 
 	request := Request{ContractVersion: ContractVersion, CorrelationID: uuid.NewString(), SnapshotID: snapshotID, Gate: input.Gate, Snapshot: snapshot, LocalEvaluation: local}
@@ -308,10 +343,16 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 // contract, and demanding review would refuse every contract carrying a context
 // operand or a duty. It does, however, stop the run reading as PASSED: what the
 // DCS checked is not all there was to check.
+//
+// The findings the gate is NOT the enforcement point for are summarised too but
+// do not decide the result — see gateEnforces.
 func resultFromLocal(findings []validation.PolicyFinding) string {
 	result := "PASSED"
 	for _, finding := range findings {
-		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		if !gateEnforces(finding) {
+			continue
+		}
+		switch severityOf(finding) {
 		case validation.SeverityError, "critical", "blocking", "violation":
 			return "BLOCKED"
 		case validation.SeverityWarning, "warn", "review":
@@ -323,6 +364,37 @@ func resultFromLocal(findings []validation.PolicyFinding) string {
 		}
 	}
 	return result
+}
+
+// gateEnforces answers whether a local finding is the workflow gate's to act
+// on. The gate enforces the Semantic Hub bundle the contract is pinned to and
+// the deployment's own contract-content policy set, which govern every
+// transition. The boundaries a contract carries in its own dcs:policies are
+// enforced by ValidateContractPolicySatisfaction at approve.go and
+// signingmanagement apply.go instead; before those, values are proposals a
+// negotiation is free to move.
+func gateEnforces(finding validation.PolicyFinding) bool {
+	return finding.Source != validation.SourceContractODRL
+}
+
+// blockingFindings selects the findings that made resultFromLocal return
+// BLOCKED, so the refusal can name them.
+func blockingFindings(findings []validation.PolicyFinding) []validation.PolicyFinding {
+	blocking := make([]validation.PolicyFinding, 0, 1)
+	for _, finding := range findings {
+		if !gateEnforces(finding) {
+			continue
+		}
+		switch severityOf(finding) {
+		case validation.SeverityError, "critical", "blocking", "violation":
+			blocking = append(blocking, finding)
+		}
+	}
+	return blocking
+}
+
+func severityOf(finding validation.PolicyFinding) string {
+	return strings.ToLower(strings.TrimSpace(finding.Severity))
 }
 
 // resultStatus combines the local summary with the executor's. NOT_EVALUATED is

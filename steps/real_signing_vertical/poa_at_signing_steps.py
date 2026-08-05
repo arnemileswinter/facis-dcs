@@ -144,20 +144,17 @@ def _poa_presentation_from_untrusted_issuer(organization: str) -> str:
     whose issuer was never granted the `peer` purpose here."""
     AuthService._ensure_dcs_wallet_importable()
     from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
-    from dcs_wallet.status_list import BDD_CREDENTIAL_TENANT, DEFAULT_SERVICE_BASE  # noqa: PLC0415
-
-    import os  # noqa: PLC0415
+    from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
 
     keys = AuthService.load_wallet_keys()
-    status_base = os.getenv("STATUSLIST_SERVICE_URL", DEFAULT_SERVICE_BASE).strip() or DEFAULT_SERVICE_BASE
+    roles = ["Contract Signer"]
     return issue_access_credential(
         organization=organization,
-        roles=["Contract Signer"],
+        roles=roles,
         issuer_private=keys.issuer_private,
         wallet_private=keys.wallet_private,
+        status_index=role_credential_index(organization=organization, roles=roles),
         issuer_did="did:web:untrusted-poa-issuer.example:issuer:poa",
-        statuslist_service_base=status_base,
-        statuslist_tenant=BDD_CREDENTIAL_TENANT,
         aud="https://the-counterparty.example",
         nonce="a-nonce-this-instance-never-issued",
     )

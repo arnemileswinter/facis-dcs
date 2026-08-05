@@ -30,8 +30,10 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/semantichub"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
@@ -52,6 +54,9 @@ type DCSToDCSSynchronizer struct {
 	// applied, shipped so the counterparty can verify the authority to sign
 	// rather than read an unbacked claim off the contract (ADR-31).
 	PoAs SignatoryPoAs
+	// SettlementSender delivers this instance's settlement artifact — the
+	// evidence the counterparty needs before it may sign.
+	SettlementSender SettlementSender
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
@@ -81,6 +86,39 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		// signed PDF directly). shipContractPDF gates on the shippable state.
 		switch source {
 		case componenttype.ContractWorkflowEngine:
+			// The two edges that take an agreement back — a reviewer sending the
+			// submission back (SUBMIT_CONTRACT) and an approver rejecting
+			// (REJECT_CONTRACT) — queue a withdrawal toward every peer that was
+			// told this instance settled. Delivering it here rather than only at
+			// the next scheduler tick closes the window in which the peer's
+			// signing gate still reads the withdrawn agreement as evidence.
+			if evt.Type() == eventtype.Submit.String() || evt.Type() == eventtype.Reject.String() {
+				if withdrawnDID, err := didFromEvent(evt); err == nil {
+					s.shipSettlementWithdrawals(ctx, withdrawnDID)
+				} else {
+					log.Errorf(ctx, err, "could not read did from event %s", evt.Data())
+				}
+			}
+			// Settlement (NEGOTIATION -> SUBMITTED) is a statement about BOTH
+			// parties — this instance agreed the document — so the counterparty
+			// must hold verified evidence of it before it may sign. No PDF and no
+			// state cross the boundary here (ADR-13): the artifact binds the
+			// document by digest. SUBMITTED is also reached from REVIEWED (an
+			// approver sending it back for more review), which settles nothing,
+			// so the previous state is what distinguishes the two.
+			if evt.Type() == eventtype.Submit.String() {
+				settledDID, settled, err := settlementFromEvent(evt)
+				if err != nil {
+					log.Errorf(ctx, err, "could not read submit event %s", evt.Data())
+					return
+				}
+				if settled {
+					if err := s.shipSettlement(ctx, settledDID); err != nil {
+						log.Errorf(ctx, err, "failed to ship contract settlement, %s", evt.Data())
+					}
+				}
+				return
+			}
 			// Ship when the regenerator produced a fresh PDF (a content or C2PA
 			// state change) OR when the contract entered the shippable OFFERED
 			// state. An offer is a pure state transition that changes neither the
@@ -124,6 +162,22 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 	go s.startSyncFailScheduler(ctx, conf.SyncFailCronJobTimeOut())
 }
 
+// settlementFromEvent reports which contract a SUBMIT_CONTRACT event settled.
+// Only NEGOTIATION -> SUBMITTED is a settlement: it is the transition that
+// says every negotiator accepted the document as it stands.
+func settlementFromEvent(evt cloudevent.Event) (string, bool, error) {
+	var submitted contractevents.SubmitEvent
+	if err := json.Unmarshal(evt.Data(), &submitted); err != nil {
+		return "", false, fmt.Errorf("unmarshal submit event: %w", err)
+	}
+	if submitted.DID == "" {
+		return "", false, errors.New("submit event carries no did")
+	}
+	settled := submitted.PreviousState == contractstate.Negotiation.String() &&
+		submitted.NewState == contractstate.Submitted.String()
+	return submitted.DID, settled, nil
+}
+
 func didFromEvent(evt cloudevent.Event) (string, error) {
 	var data map[string]interface{}
 	if err := json.Unmarshal(evt.Data(), &data); err != nil {
@@ -164,13 +218,17 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		syncFails, err := readSyncFails()
 		if err != nil {
 			log.Printf(ctx, "could not read sync fails: %v", err)
-			continue
 		}
 		for _, syncFail := range syncFails {
 			if err := s.shipContractPDF(ctx, syncFail.DID); err != nil {
 				log.Printf(ctx, "contract PDF ship retry was not successful: %v", err)
 			}
 		}
+		// Settlements and their withdrawals have their own queues: sync_fails is
+		// keyed by contract and its retry re-ships the PDF, which would never
+		// deliver either.
+		s.retryUndeliveredSettlements(ctx)
+		s.retryUndeliveredSettlementWithdrawals(ctx)
 	}
 }
 
@@ -243,7 +301,18 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return err
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, recipients)
+	pinnedShapes, err := s.pinnedShapesForContract(ctx, contractData)
+	if err != nil {
+		// Unlike the reads above, this fails for stable data-dependent reasons —
+		// a pin naming a graph neither namespace resolves — so the event that
+		// triggered this ship is the only attempt unless the failure is
+		// recorded. Route it through the retry queue like the two deferrals
+		// above: a dropped ship with no record and no retry is a correctness
+		// bug, not merely a timing race.
+		return s.recordShipOutcome(ctx, did, err, nil)
+	}
+
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, pinnedShapes, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -356,7 +425,24 @@ func (s *DCSToDCSSynchronizer) poaEvidenceForSignedContract(ctx context.Context,
 	return evidence, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, recipients []string) error {
+// pinnedShapesForContract reads the shape libraries the contract pins in
+// dcs:effectiveShapes (ADR-8). They ship with every PDF: the pin is what the
+// receiver's workflow gate resolves, and a library published on this instance
+// alone exists nowhere else, so without them the receiver holds a copy no
+// transition can evaluate.
+func (s *DCSToDCSSynchronizer) pinnedShapesForContract(ctx context.Context, contractData *db.Contract) ([]semantichub.Schema, error) {
+	document := []byte(`{}`)
+	if contractData.ContractData != nil && contractData.ContractData.IsNotNullValue() {
+		document = []byte(*contractData.ContractData)
+	}
+	entries, err := PinnedShapesForDocument(ctx, semantichub.DBPinnedShapes{DB: s.DB}, document)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the pinned shapes of %s: %w", contractData.DID, err)
+	}
+	return entries, nil
+}
+
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, pinnedShapes []semantichub.Schema, recipients []string) error {
 	for _, peer := range recipients {
 		if peer == localPeer {
 			continue
@@ -415,6 +501,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			ContractState:  &state,
 			WrappedCek:     WireWrappedCEK(wrappedCEK),
 			SignatoryPoas:  WireSignatoryPoAs(signatoryPoAs),
+			PinnedShapes:   WirePinnedShapes(pinnedShapes),
 		}); err != nil {
 			return err
 		}

@@ -166,6 +166,10 @@ var devIssuerKeySources = map[string]string{
 	"sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss": "testWallet/keys/issuer-dev.jwk",
 	"rnizNORb2RpCt7obNCoi9-6IE6dM6cj2TLue-zwvTZc": "testWallet/keys/issuer-dev-x5c.jwk, which is also the CA key in backend/config/oid4vp/x5c-trust-anchors.dev.pem",
 	"TPg_7qbilFLESVua3__W5v-5PiqqmJWvb5l4jrrXvS4": "testWallet/keys/wallet.jwk",
+	// The root the dev/BDD ORCE credential issuer is handed instead of
+	// generating one, so its status lists and credentials chain to an anchor
+	// that exists before the issuer has ever booted (scripts/orce-dev-root-ca.py).
+	"oZV6WnfYJyAtBAvwpIywxo_KTCHOOhRcHb7lC9fvEDU": "deployment/helm/charts/orce/pki-dev/root-ca.key, the CA the dev/BDD ORCE issuer signs under",
 }
 
 // devIssuerKeyX is devIssuerKeySources keyed by the canonical form of each
@@ -606,13 +610,15 @@ func (c *TrustConfig) SetX5CTrustRoots(pool *x509.CertPool) {
 // certificates (ConfigMap mount) that x5c-bearing credential chains must
 // verify against.
 //
-// An anchor whose key is committed to this repository is refused for the same
-// reason a bundled JWKS key is, and it is the same key: the shipped
-// backend/config/oid4vp/x5c-trust-anchors.dev.pem is self-signed with
-// testWallet/keys/issuer-dev-x5c.jwk, so anyone with a clone can issue a
-// certificate under that anchor and be believed as a PID issuer. Certificates
-// are therefore parsed one by one rather than handed to AppendCertsFromPEM,
-// which reveals nothing about what it added.
+// A bundle holds one root per issuer whose chains a deployment verifies — the
+// PID issuer's, and the login issuer's, whose root is what a signed status list
+// chains to. Every private key behind the shipped
+// backend/config/oid4vp/x5c-trust-anchors.dev.pem is committed here, so anyone
+// with a clone can issue under those anchors and be believed. Such an anchor is
+// refused for the same reason a bundled JWKS key is, and certificates are
+// therefore parsed one by one rather than handed to AppendCertsFromPEM, which
+// reveals nothing about what it added — including a recognisable anchor sitting
+// behind an unrecognised one.
 func LoadX5CTrustAnchors(path string) (*x509.CertPool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

@@ -91,9 +91,11 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
-    # An x5c-bearing PID (signing_acceptance_hardening.feature's "trusted dev
-    # issuer" scenarios) verifies against this baked-in dev cert.
+    # Baked-in bundle of the roots this stack verifies chains to: the dev PID
+    # issuer's own certificate (signing_acceptance_hardening.feature's "trusted
+    # dev issuer" scenarios) and the root the dev ORCE credential issuer is
+    # handed rather than generating one, which is what the signed status list a
+    # login credential names chains to.
     x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 postgresql:
@@ -283,7 +285,7 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: required (fatal on startup if STATUSLIST_SERVICE_URL unreachable).
+# XFSC Status List Service: deployed, with nothing consuming it (ADR-34).
 statuslistService:
   enabled: true
   tenantID: c2pa
@@ -309,7 +311,6 @@ statuslistService:
   bddListInit:
     enabled: true
     tenantIDs:
-      - credential
       - c2pa
       # Instance B shares this service but not this instance's database, and a
       # revocation entry is allocated out of that database (migration 20260734).
@@ -321,9 +322,11 @@ statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # The backend immediately dereferences this exact seeded credential list;
-  # Pod readiness therefore requires the full proxy→Ingress→list route.
-  readinessPath: "/statuslist/v1/tenants/credential/status/1"
+  # A list this service actually serves, so Pod readiness requires the full
+  # proxy→Ingress→list route. Login credentials no longer live here — they name
+  # the ORCE issuer's own signed list — so the "credential" tenant is gone and
+  # the C2PA one this instance allocates from takes its place.
+  readinessPath: "/statuslist/v1/tenants/c2pa/status/1"
 
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:
@@ -447,8 +450,14 @@ orce:
     hosts:
       - host: "localhost"
         path: /contract-target
-      - host: "localhost"
-        path: /orce
+      # No /orce rule here. The DCS mounts its webhook platform at /orce/ on
+      # the service root (backend/cmd/dcs/http.go, DCS-FR-TR-22) and claims the
+      # prefix on this same host, so a second rule for it is a coin toss that
+      # the webhook platform loses. The audit-executor control and run seams
+      # are reached over the ORCE port-forward instead
+      # (BDD_ORCE_AUDIT_CONTROL_URL / BDD_ORCE_AUDIT_EXECUTOR_URL in
+      # tests/bdd/scripts/run_bdd_helm.sh), which is why this rule was only
+      # ever an unused fallback.
 
 auditExecutor:
   url: "http://dcs-orce:1880/customer-audit/run"
@@ -528,4 +537,3 @@ contractTargets:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
-systemToken: "dcs-local-dev-system-token"

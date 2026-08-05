@@ -84,7 +84,6 @@ oid4vp:
   trust:
     enabled: true
     dataPath: /app/config/oid4vp/trust.dev.json
-    xfscAllowUnsignedFallback: true
     x5cAnchorsPath: /app/config/oid4vp/x5c-trust-anchors.dev.pem
 
 # Own PostgreSQL: this instance's own DCS database plus its own Hydra's
@@ -356,4 +355,3 @@ contractTargets:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
-systemToken: "dcs-local-dev-system-token"

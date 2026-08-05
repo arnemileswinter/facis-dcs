@@ -101,7 +101,10 @@ func (s *signatureManagementsrvc) PublishSignatureRequest(ctx context.Context, r
 	// Prepare seals the agreement, embeds the signing-summary evidence, and
 	// places the AcroForm field, yielding the to-be-signed PDF (it holds no
 	// signing key). This is the exact same preparation /signature/prepare runs.
-	applier := s.newApplier()
+	applier, err := s.newApplier()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	document, err := applier.Prepare(ctx, command.ApplyCmd{
 		DID:            ceremony.ContractDID,
 		SignerDID:      *ceremony.SignerDID,
@@ -409,7 +412,10 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	// NOT established by the signing certificate: AssertValidAES checks that the
 	// signature is a valid AES and nothing more — no PID-to-certificate identifier
 	// binding is standardised (see apply.go's SubmitSignature).
-	applier := s.newApplier()
+	applier, err := s.newApplier()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	if err := applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{
 			DID:            ceremony.ContractDID,

@@ -14,6 +14,7 @@ from steps.support.api_client import (
     contract_retrieve_by_id_url,
     get_with_headers,
     hub_shapes_anchors,
+    pac_audit_timeline,
     post_json,
     template_create_url,
 )
@@ -420,14 +421,14 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
-    body = context.requests_response.json()
-    resource = next((r for r in body if r.get("did") == did), None)
-    assert resource is not None, (
+    timeline = pac_audit_timeline(context.requests_response)
+    entries = [entry for entry in timeline if entry.get("did") == did]
+    assert entries, (
         f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {[r.get('did') for r in body]}"
+        f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
     )
     severities = []
-    for entry in resource.get("audit_trail") or []:
+    for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
             continue
         event_data = entry.get("event_data")

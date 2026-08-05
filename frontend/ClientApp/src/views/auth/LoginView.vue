@@ -348,6 +348,9 @@ async function copyPresentationUrl() {
           Keep this tab open — the QR / link refreshes automatically before it expires (about every 5 minutes). You will
           be redirected after the wallet presents credentials.
         </p>
+        <RouterLink :to="{ name: ROUTES.AUTH.PID_VERIFY }" class="link text-xs opacity-70">
+          Check your PID credential without signing in
+        </RouterLink>
       </div>
     </div>
     <div v-else class="flex flex-col items-center gap-3">

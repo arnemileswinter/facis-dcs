@@ -253,6 +253,72 @@ func TestLocalResultSeparatesDeferredFromPassed(t *testing.T) {
 	require.Equal(t, "SUCCESS", resultStatus("NOT_EVALUATED", Response{Result: "PASSED", Findings: []Finding{}}))
 }
 
+// The contract's own dcs:policies are enforced where the contract is
+// committed to — ValidateContractPolicySatisfaction at approve.go and
+// signingmanagement apply.go — not at every transition. A gate that blocked on
+// them refused submission, offer and negotiation-settle, which the SLA
+// federation vertical performs deliberately with an out-of-boundary
+// counter-offer, and replaced the rule-naming refusal with a generic one.
+func TestLocalResultLeavesContractODRLToItsOwnEnforcementPoint(t *testing.T) {
+	contractODRL := validation.PolicyFinding{
+		RuleID: "FACIS-CONTRACT-ODRL-POLICY", Severity: validation.SeverityError,
+		Source: validation.SourceContractODRL,
+	}
+	hubShapes := validation.PolicyFinding{
+		RuleID: "title-InConstraintComponent", Severity: validation.SeverityError,
+		Source: validation.SourceHubShapes,
+	}
+	policySet := validation.PolicyFinding{
+		RuleID: "FACIS-BLACKLIST-COUNTRY", Severity: validation.SeverityError,
+		Source: validation.SourcePolicySetODRL,
+	}
+
+	require.Equal(t, "PASSED", resultFromLocal([]validation.PolicyFinding{contractODRL}))
+	require.Empty(t, blockingFindings([]validation.PolicyFinding{contractODRL}))
+
+	// Everything the gate IS the enforcement point for still blocks, including
+	// an untagged finding from a caller that predates the source tagging.
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{contractODRL, hubShapes}))
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{policySet}))
+	require.Equal(t, "BLOCKED", resultFromLocal([]validation.PolicyFinding{
+		{RuleID: "FACIS-UNTAGGED", Severity: validation.SeverityError},
+	}))
+
+	// A warning on the contract's own policies does not hold the transition
+	// for human review either.
+	contractODRL.Severity = validation.SeverityWarning
+	require.Equal(t, "PASSED", resultFromLocal([]validation.PolicyFinding{contractODRL}))
+}
+
+func TestBlockedGateNamesTheFindingThatBlockedIt(t *testing.T) {
+	blocked := &LocalEvaluationBlockedError{Findings: blockingFindings([]validation.PolicyFinding{
+		{RuleID: "FACIS-SATISFIED", Severity: validation.SeveritySatisfied, Message: "holds"},
+		{
+			RuleID: "title-InConstraintComponent", Severity: validation.SeverityError,
+			Message: "value is not in the allowed list", Source: validation.SourceHubShapes,
+		},
+		{
+			RuleID: "FACIS-CONTRACT-ODRL-POLICY", Severity: validation.SeverityError,
+			Message: "not the gate's call", Source: validation.SourceContractODRL,
+		},
+	})}
+
+	require.Equal(t, []string{"title-InConstraintComponent: value is not in the allowed list"}, blocked.Reasons())
+	require.Equal(t,
+		"workflow gate blocked: local Semantic Hub evaluation blocked the transition: "+
+			"title-InConstraintComponent: value is not in the allowed list",
+		(&BlockedError{Status: "BLOCKED", Cause: blocked}).Error())
+
+	var unwrapped *LocalEvaluationBlockedError
+	require.True(t, errors.As(error(&BlockedError{Status: "BLOCKED", Cause: blocked}), &unwrapped))
+	require.Len(t, unwrapped.Findings, 1)
+
+	// A blocked run with no nameable finding must still not claim a failure
+	// that did not happen: the evaluation succeeded and found something.
+	require.Equal(t, "local Semantic Hub evaluation blocked the transition",
+		(&LocalEvaluationBlockedError{}).Error())
+}
+
 func TestResultPrecedence(t *testing.T) {
 	require.Equal(t, "SUCCESS", resultStatus("PASSED", Response{Result: "PASSED", Findings: []Finding{}}))
 	require.Equal(t, "REVIEW", resultStatus("REVIEW", Response{Result: "PASSED", Findings: []Finding{}}))
@@ -603,6 +669,7 @@ func TestClientReplacedDocumentKeepsTheSnapshotBuildable(t *testing.T) {
 			"https://dcs-osc.test/api/semantic/shapes/facis-dcs?version=1",
 			"https://dcs-osc.test/api/semantic/shapes/clause-catalog?version=1",
 		},
+		nil,
 		"https://dcs-osc.test/api/semantic/profile/facis.sla.basic?version=1")
 	require.NoError(t, err)
 	require.NoError(t, requireConsistentShapesBundle(decodeContent(t, created)))

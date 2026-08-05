@@ -18,6 +18,10 @@ const SIGNING_ERROR_MESSAGES: Record<string, string> = {
   jades_invalid: 'The machine-readable signature (JAdES) accompanying the signed document is invalid or malformed.',
   signature_invalid: 'The submitted signature is not cryptographically valid.',
   ceremony_required: 'A completed identity verification ceremony is required before this contract can be signed.',
+  // Not a refusal of this signer: the contract is waiting for the other party,
+  // and the wait ends without anyone here doing anything.
+  counterparty_not_settled:
+    'Waiting for the counterparty to settle this version — they have not yet confirmed they agree to the document about to be signed. Signing opens as soon as their settlement arrives; if the version was renegotiated, they have to settle it again.',
 }
 
 // Maps a signing-endpoint error to a human-readable message via the typed
