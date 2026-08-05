@@ -450,7 +450,7 @@ async function validate() {
               <p class="text-xs text-base-content/70">
                 Present your PID in the wallet ceremony. The DCS then builds the to-be-signed PDF (with your Power of
                 Attorney and the signing summary embedded, targeting {{ CREDENTIAL_TARGET }}) and downloads it to your
-                device. The DCS holds no signing key — you sign the document yourself.
+                device. The DCS holds no signing key. You sign the document yourself.
               </p>
               <div v-if="!isSigner" class="text-xs text-warning">
                 Your role can review and validate this contract, but signing requires the Signer role.

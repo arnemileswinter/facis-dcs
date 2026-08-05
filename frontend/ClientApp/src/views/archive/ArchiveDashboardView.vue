@@ -124,7 +124,7 @@ async function deleteEntry(entry: ArchivedContract) {
   deleting.value = true
   try {
     await archiveService.delete(entry.did, justification)
-    errorStore.add('Archive entry deleted — encryption keys destroyed', 'info')
+    errorStore.add('Archive entry deleted. Encryption keys destroyed.', 'info')
     statistics.value = await archiveStatisticsService.statistics()
     await loadEntries()
   } catch {
@@ -286,11 +286,11 @@ function shortDid(did: string): string {
                         <div>
                           <span class="font-medium">Keys destroyed</span>
                           {{ formatTimestamp(expandedStatus.shredded_at ?? '') }}
-                          by {{ expandedStatus.shredded_by }} —
+                          by {{ expandedStatus.shredded_by }}:
                           {{ expandedStatus.shred_reason }}
                         </div>
                       </template>
-                      <div v-else>Encryption keys are live — the archived content is decryptable.</div>
+                      <div v-else>Encryption keys are live. The archived content is decryptable.</div>
                       <table v-if="expandedStatus.peers.length > 0" class="table table-xs">
                         <thead>
                           <tr>

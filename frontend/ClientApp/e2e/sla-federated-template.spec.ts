@@ -317,7 +317,7 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
 
     const ruleSelect = (name: string) =>
       editor.locator('label.form-control').filter({ hasText: name }).locator('select')
-    await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+    await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
     await ruleSelect('Action').selectOption({ label: 'use' })
     // The permission targets the declared service object, not the contract —
     // an ODRL rule is about a thing (ADR-23).
