@@ -149,18 +149,39 @@ def _poa_presentation_from_untrusted_issuer(organization: str) -> str:
     verify" case, and the one an operator most plausibly meets: a counterparty
     whose issuer was never granted the `peer` purpose here."""
     AuthService._ensure_dcs_wallet_importable()
-    from dcs_wallet.issuer import issue_access_credential  # noqa: PLC0415
-    from dcs_wallet.status_list import role_credential_index  # noqa: PLC0415
+    from dcs_wallet.issuer import (  # noqa: PLC0415
+        POA_VCT,
+        attach_key_binding,
+        sign_credential_sd_jwt,
+    )
+    from dcs_wallet.keys import cnf_jwk, did_jwk_from_public_jwk, public_jwk  # noqa: PLC0415
+    from dcs_wallet.status_list import build_credential_status, role_credential_index  # noqa: PLC0415
 
+    # Built here rather than through dcs_wallet's issuance entry points, which
+    # issue as the stack's own credential issuer: the point of this credential
+    # is an issuer nobody configured, so it can be resolved by no mechanism the
+    # trust document declares.
     keys = AuthService.load_wallet_keys()
     roles = ["Contract Signer"]
-    return issue_access_credential(
-        organization=organization,
-        roles=roles,
+    holder_public = public_jwk(keys.wallet_private)
+    issued = sign_credential_sd_jwt(
+        visible_claims={
+            "iss": "did:web:untrusted-poa-issuer.example:issuer:poa",
+            "sub": did_jwk_from_public_jwk(holder_public),
+            "vct": POA_VCT,
+            "iat": 1719129600,
+            "exp": 2145916800,
+            "cnf": {"jwk": cnf_jwk(holder_public)},
+            "status": build_credential_status(
+                index=role_credential_index(organization=organization, roles=roles),
+            ),
+        },
+        selective_claims={"organization": organization, "roles": roles},
         issuer_private=keys.issuer_private,
+    )
+    return attach_key_binding(
+        issued_sd_jwt=issued,
         wallet_private=keys.wallet_private,
-        status_index=role_credential_index(organization=organization, roles=roles),
-        issuer_did="did:web:untrusted-poa-issuer.example:issuer:poa",
         aud="https://the-counterparty.example",
         nonce="a-nonce-this-instance-never-issued",
     )

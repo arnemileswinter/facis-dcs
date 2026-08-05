@@ -178,29 +178,29 @@ class AuthService:
         wallet_keys = keys or AuthService.load_wallet_keys()
         AuthService._ensure_dcs_wallet_importable()
         from dcs_wallet.issuer import (
-            DEFAULT_ISSUER_DID,
             attach_key_binding,
             issue_stored_credential,
         )
         from dcs_wallet.status_list import ISSUER_BASE_ENV, role_credential_index
 
-        issuer_did = os.getenv("BDD_ISSUER_DID", DEFAULT_ISSUER_DID)
+        # The issuer base is the credential's ISSUER, not only the host of the
+        # list it names: a status list is believed only from the issuer that
+        # publishes it (backend/internal/auth/oid4vp/status/credentialbinding.go),
+        # so the two cannot be set independently.
         issuer_base = os.getenv(ISSUER_BASE_ENV, "").strip()
         if not issuer_base:
             raise RuntimeError(
                 f"{ISSUER_BASE_ENV} is required for BDD OID4VP credentials — it names the "
-                "ORCE issuer serving the status list the credential points at (set by "
-                "run_bdd_helm.sh)"
+                "ORCE issuer these credentials are issued as, serving the status list they "
+                "point at (set by run_bdd_helm.sh)"
             )
         stored_sd_jwt = issue_stored_credential(
             organization=credentials.organization,
             roles=credentials.roles,
-            issuer_private=wallet_keys.issuer_private,
             wallet_private=wallet_keys.wallet_private,
             status_index=role_credential_index(
                 organization=credentials.organization, roles=credentials.roles
             ),
-            issuer_did=issuer_did,
             issuer_base=issuer_base,
         )
         return attach_key_binding(

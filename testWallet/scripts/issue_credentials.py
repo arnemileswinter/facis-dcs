@@ -21,7 +21,6 @@ sys.path.insert(0, str(WALLET_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from dcs_wallet.issuer import (
-    DEFAULT_ISSUER_DID,
     CREDENTIAL_EXT,
     issue_credential_file,
     issue_stored_credential,
@@ -31,14 +30,19 @@ from dcs_wallet.status_list import fixture_index
 from issue_pid_credentials import issue_pid_credentials
 
 
-def _load_private_keys(keys_dir: Path) -> tuple[dict, dict]:
-    issuer_path = keys_dir / "issuer-dev.jwk"
+def _load_wallet_key(keys_dir: Path) -> dict:
+    """The holder key these credentials are bound to.
+
+    No issuer key is read here: a credential is issued as the stack's ORCE
+    issuer, whose signing key and certificate chain are the committed fixture
+    that issuer itself is handed (dcs_wallet.issuer_pki).
+    """
     wallet_path = keys_dir / "wallet.jwk"
-    if not issuer_path.is_file() or not wallet_path.is_file():
+    if not wallet_path.is_file():
         raise FileNotFoundError(
-            f"missing issuer-dev.jwk or wallet.jwk — run: python3 testWallet/scripts/generate_keys.py --yes"
+            f"missing wallet.jwk — run: python3 testWallet/scripts/generate_keys.py --yes"
         )
-    return private_key_material(load_json(issuer_path)), private_key_material(load_json(wallet_path))
+    return private_key_material(load_json(wallet_path))
 
 
 def _parse_roles(raw: str) -> list[str]:
@@ -54,7 +58,6 @@ def _is_role_template(path: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Issue testWallet SD-JWT credentials (issuer JWT + disclosures only)")
-    parser.add_argument("--issuer-did", default=DEFAULT_ISSUER_DID)
     parser.add_argument("--keys-dir", type=Path, default=WALLET_ROOT / "keys")
     parser.add_argument("--credentials-dir", type=Path, default=WALLET_ROOT / "credentials")
 
@@ -71,7 +74,7 @@ def main() -> int:
     parser.add_argument("--roles", help="comma-separated roles for an on-the-fly credential")
     args = parser.parse_args()
 
-    issuer_private, wallet_private = _load_private_keys(args.keys_dir)
+    wallet_private = _load_wallet_key(args.keys_dir)
 
     if args.organization or args.roles:
         if not args.organization or not args.roles:
@@ -80,10 +83,8 @@ def main() -> int:
         token = issue_stored_credential(
             organization=args.organization,
             roles=_parse_roles(args.roles),
-            issuer_private=issuer_private,
             wallet_private=wallet_private,
             status_index=fixture_index(stem),
-            issuer_did=args.issuer_did,
             issuer_base=args.issuer_base,
         )
         output_path = args.credentials_dir / f"{stem}{CREDENTIAL_EXT}"
@@ -96,9 +97,7 @@ def main() -> int:
             issue_credential_file(
                 credentials_dir=args.credentials_dir,
                 credential_name=name,
-                issuer_private=issuer_private,
                 wallet_private=wallet_private,
-                issuer_did=args.issuer_did,
                 issuer_base=args.issuer_base,
             )
             for name in args.credential
@@ -113,9 +112,7 @@ def main() -> int:
                 issue_credential_file(
                     credentials_dir=args.credentials_dir,
                     credential_name=stem,
-                    issuer_private=issuer_private,
                     wallet_private=wallet_private,
-                    issuer_did=args.issuer_did,
                     issuer_base=args.issuer_base,
                 )
             )
@@ -130,8 +127,6 @@ def main() -> int:
         credentials_dir=args.credentials_dir,
         wallet_private_jwk=wallet_private,
         credential_names=pid_names,
-        issuer_private_jwk=issuer_private,
-        issuer_did=args.issuer_did,
         issuer_base=args.issuer_base,
     ):
         print(f"issued: {path}")

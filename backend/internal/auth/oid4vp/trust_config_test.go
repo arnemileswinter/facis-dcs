@@ -654,6 +654,20 @@ func TestDevKeyGuardSeesDIDJWKAndCertificateForms(t *testing.T) {
 		}
 	})
 
+	// A login issuer's leaf pin is the one key with no CA above it — it IS the
+	// trust decision (ADR-35) — and it is the form an x5c issuer writes its key
+	// in, which is exactly the form a guard reading only `jwks` never saw.
+	t.Run("x5c leaf pin", func(t *testing.T) {
+		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
+          "purposes":["login"],"organizations":["*"],"mechanism":"x5c",
+          "x5c_leaf_keys":[%q]}}}`, devIssuerLeafKeyPinB64(t))
+		if _, err := LoadTrustConfig(writeTrust(t, body)); err == nil {
+			t.Fatal("pinning a leaf key committed to this repository lets anyone with a clone mint a session here, and must be refused")
+		} else if !strings.Contains(err.Error(), "committed in this repository") {
+			t.Errorf("the refusal must say why: %v", err)
+		}
+	})
+
 	t.Run("x5c member", func(t *testing.T) {
 		body := fmt.Sprintf(`{"vcts":["urn:dcs:poa:v1"],"issuers":{"https://a.example/issuer":{
           "purposes":["pid"],"mechanism":"jwks",
@@ -718,6 +732,34 @@ func TestEveryDevX5CAnchorIsRecognisedAsCommittedMaterial(t *testing.T) {
 	if anchors < 2 {
 		t.Fatalf("expected the dev bundle to hold the PID issuer anchor and the ORCE issuer root, got %d", anchors)
 	}
+}
+
+// devIssuerLeafKeyPinB64 is the leaf key the shipped dev document pins: the
+// public half of deployment/helm/charts/orce/pki-dev/issuer.key, which the dev
+// and BDD ORCE issuer is handed instead of generating its own. Read from the
+// file rather than restated here, so the guard is exercised against the very
+// material a deployment could copy out of this repository.
+func devIssuerLeafKeyPinB64(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(devTrustConfigPath)
+	if err != nil {
+		t.Fatalf("read dev trust config: %v", err)
+	}
+	var doc struct {
+		Issuers map[string]struct {
+			X5CLeafKeys []string `json:"x5c_leaf_keys"`
+		} `json:"issuers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse dev trust config: %v", err)
+	}
+	for _, entry := range doc.Issuers {
+		if len(entry.X5CLeafKeys) > 0 {
+			return entry.X5CLeafKeys[0]
+		}
+	}
+	t.Fatal("the dev trust config pins no leaf key, so this guard has nothing to check")
+	return ""
 }
 
 func devAnchorCertificateB64(t *testing.T) string {

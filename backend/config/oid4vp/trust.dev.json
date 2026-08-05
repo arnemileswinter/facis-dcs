@@ -4,58 +4,11 @@
     "urn:dcs:pid:demo:v1"
   ],
   "issuers": {
-    "did:web:dev.example:issuer:poa": {
-      "purposes": [
-        "login",
-        "peer",
-        "pid"
-      ],
-      "organizations": [
-        "*"
-      ],
-      "mechanism": "jwks",
-      "jwks": {
-        "keys": [
-          {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss",
-            "y": "0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"
-          }
-        ]
-      }
-    },
-    "did:web:dev2.example:issuer:poa": {
-      "purposes": [
-        "login",
-        "peer",
-        "pid"
-      ],
-      "organizations": [
-        "*"
-      ],
-      "mechanism": "jwks",
-      "jwks": {
-        "keys": [
-          {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": "sAYnZiIkBGJWkgViAZy4Jsdsp3DXnL1mV7hYQKJYKss",
-            "y": "0e6ZLeEnI57444v4hIXDEvZQVgnxjFtv8-4oLqls3_o"
-          }
-        ]
-      }
-    },
-    "did:web:dev.example:issuer:pid-x5c": {
-      "purposes": [
-        "pid"
-      ],
-      "mechanism": "x5c"
-    },
     "http://localhost:30181": {
       "purposes": [
         "login",
-        "peer"
+        "peer",
+        "pid"
       ],
       "organizations": [
         "*"
@@ -68,7 +21,8 @@
     "http://localhost:18080/issuer": {
       "purposes": [
         "login",
-        "peer"
+        "peer",
+        "pid"
       ],
       "organizations": [
         "*"

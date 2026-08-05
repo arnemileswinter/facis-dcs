@@ -9,6 +9,7 @@ from jwt.algorithms import ECAlgorithm
 
 from dcs_wallet.credential import decode_jwt_payload, load_credential_sd_jwt
 from dcs_wallet.issuer import issue_access_credential
+from dcs_wallet.issuer_pki import dev_issuer, leaf_public_jwk
 from dcs_wallet.presentation import build_vp_token, load_jwk
 from dcs_wallet.status_list import FIXTURE_INDEX, RESERVED_INDEX, role_credential_index
 from dcs_wallet.sdjwt import KB_JWT_TYP, decode_disclosure, sd_hash, split_sd_jwt
@@ -23,7 +24,6 @@ class PresentationTest(unittest.TestCase):
         return issue_access_credential(
             organization=organization,
             roles=roles,
-            issuer_private=load_jwk("issuer-dev.jwk"),
             wallet_private=load_jwk("wallet.jwk"),
             status_index=role_credential_index(organization=organization, roles=roles),
             nonce=nonce,
@@ -73,19 +73,31 @@ class PresentationTest(unittest.TestCase):
             self.assertEqual(claim["idx"], FIXTURE_INDEX[key])
             self.assertTrue(claim["uri"].endswith("/status-list/1"), claim["uri"])
 
-    def test_generated_credential_contains_issuer_header_jwk_and_holder_cnf(self) -> None:
+    def test_generated_credential_carries_its_issuers_chain_and_holder_cnf(self) -> None:
         issuer_jwt, _, _ = split_sd_jwt(load_credential_sd_jwt("johndoe"))
         header = jwt.get_unverified_header(issuer_jwt)
         self.assertEqual(header["typ"], "dc+sd-jwt")
-        self.assertIn("jwk", header)
+        # The issuer publishes its key through a certificate chain, so a bare
+        # header jwk would be a key from somewhere its trust entry never named
+        # (backend/internal/auth/oid4vp/sdjwt/keys.go).
+        self.assertIn("x5c", header)
+        self.assertNotIn("jwk", header)
         self.assertNotIn("kid", header)
-        self.assertEqual(set(header["jwk"].keys()), {"kty", "crv", "x", "y"})
-
-        issuer_private = load_jwk("issuer-dev.jwk")
-        expected_issuer_public = {k: issuer_private[k] for k in ("kty", "crv", "x", "y")}
-        self.assertEqual(header["jwk"], expected_issuer_public)
 
         payload = decode_jwt_payload(issuer_jwt)
+        # The leaf carries the key of the issuer this credential names —
+        # resolved from the credential rather than from the environment, so the
+        # assertion reads the same whether or not ISSUER_BASE_URL is exported.
+        # The certificate's own bytes are not compared: a leaf is re-minted
+        # whenever one is needed and an ECDSA signature is randomized, so two
+        # certificates for the same issuer differ while stating the same thing.
+        issuer = dev_issuer(payload["iss"])
+        self.assertEqual(len(header["x5c"]), 2, "leaf and the root it chains to")
+        self.assertEqual(
+            leaf_public_jwk(header["x5c"][0]),
+            {k: issuer.private_jwk[k] for k in ("kty", "crv", "x", "y")},
+        )
+
         self.assertIn("cnf", payload)
         self.assertIn("jwk", payload["cnf"])
         cnf_jwk = payload["cnf"]["jwk"]
@@ -109,7 +121,7 @@ class PresentationTest(unittest.TestCase):
         issuer_header = jwt.get_unverified_header(issuer_jwt)
         issuer_payload = jwt.decode(
             issuer_jwt,
-            ECAlgorithm.from_jwk(json.dumps(issuer_header["jwk"])),
+            ECAlgorithm.from_jwk(json.dumps(leaf_public_jwk(issuer_header["x5c"][0]))),
             algorithms=["ES256"],
             options={"verify_exp": False, "verify_iat": False},
         )

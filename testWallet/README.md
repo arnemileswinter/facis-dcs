@@ -26,12 +26,14 @@ DCS. PID credentials for dev/test are **self-issued locally**:
 - `scripts/issue_pid_credentials.py` self-signs a PID SD-JWT VC per
   `credentials/*.pid.template.json` (one `given_name`/`family_name`/... claim
   set each), using the SAME local signing primitives
-  (`dcs_wallet.issuer.sign_credential_sd_jwt`) already used for the Power of
-  Attorney credential — no remote call. It signs under
-  `did:web:dev.example:issuer:poa` (`keys/issuer-dev.jwk`), the SAME dev
-  issuer key/DID `backend/config/oid4vp/trust.dev.json` already trusts for
-  PoA — reused, not a new identity, to keep dev key management to one
-  keypair.
+  (`dcs_wallet.issuer.sign_credential_sd_jwt_x5c`) already used for the Power
+  of Attorney credential — no remote call. It signs as the stack's ORCE
+  credential issuer (`dcs_wallet.issuer_pki`): `iss` is that issuer's base URL
+  and the header carries the certificate chain it signs with, minted here from
+  the PKI fixture that issuer itself is handed
+  (`deployment/helm/charts/orce/pki-dev`). That identity, not a wallet-local
+  DID, because a status list is believed only from the issuer that publishes
+  it — and the ORCE issuer is the only thing in a dev stack that publishes one.
 - **This is a dev-only substitution and must never be pointed at from a
   production trust store.** A production deployment configures
   `OID4VP_TRUST_DATA_PATH` at a real PID issuer registry's public keys

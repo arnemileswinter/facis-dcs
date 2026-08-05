@@ -248,11 +248,43 @@ func devKeyMaterial(iss string, entry TrustedIssuer) string {
 	if source := devKeyInJWKS(entry.JWKS); source != "" {
 		return source
 	}
+	if source := devKeyInLeafPins(entry.X5CLeafKeys); source != "" {
+		return source
+	}
 	if strings.HasPrefix(strings.TrimSpace(iss), "did:jwk:") {
 		if key, err := sdjwt.JWKFromDIDJWK(strings.TrimSpace(iss)); err == nil {
 			if source, ok := devIssuerKeyX[canonicalCoordinate(key.X)]; ok {
 				return source
 			}
+		}
+	}
+	return ""
+}
+
+// devKeyInLeafPins names the committed key a login issuer's leaf pin holds.
+//
+// A pin is key material like any other: it says which key this deployment
+// believes its own login issuer by, so pinning one whose private half ships in
+// this repository lets anyone with a clone mint a session here. The guard read
+// only `jwks`, which is exactly the form an x5c issuer does not use — so the
+// one entry shape that carries a key for the purpose with no CA above it was
+// the one shape nothing checked.
+func devKeyInLeafPins(pins []string) string {
+	for _, encoded := range pins {
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			continue
+		}
+		key, err := x509.ParsePKIXPublicKey(der)
+		if err != nil {
+			continue
+		}
+		pub, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if source, ok := devIssuerKeyX[canonicalCoordinateFromInt(pub.X)]; ok {
+			return source
 		}
 	}
 	return ""

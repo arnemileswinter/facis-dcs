@@ -587,11 +587,14 @@ Two trust configurations follow from that:
 - **PID issuer trust anchors** (`OID4VP_TRUST_DATA_PATH`, a JSON file shaped
   like `backend/config/oid4vp/trust.dev.json`): the DID/URL-keyed issuer
   public keys the backend accepts a PID (and Power of Attorney) credential
-  from. **Dev/CI only** ships a self-issuance dev issuer key
-  (`did:web:dev.example:issuer:poa`, matching the key `testWallet/scripts/
-  issue_pid_credentials.py` self-signs with) — self-issued PIDs are a
-  dev-edge substitution for the broken remote EUDIPLO PID service and must
-  **never** appear in a production trust store. A production deployment
+  from. **Dev/CI only** lists that stack's own ORCE credential issuer
+  (`http://localhost:18080/issuer` for CI, `http://localhost:30181` for dev),
+  pinned to the leaf key it is handed as a fixture and granted `pid` as well —
+  which is what `testWallet/scripts/issue_pid_credentials.py` self-signs as,
+  because a status list is believed only from the issuer that publishes it.
+  Self-issued PIDs are a dev-edge substitution for the broken remote EUDIPLO
+  PID service and must **never** appear in a production trust store, nor may a
+  production deployment grant `pid` to an issuer it runs itself. A production deployment
   points this file at the real PID issuer registry's public keys instead —
   swapping the file is the entire change; the verification code
   (`oid4vp.Verifier.VerifyPID`) is identical either way.
