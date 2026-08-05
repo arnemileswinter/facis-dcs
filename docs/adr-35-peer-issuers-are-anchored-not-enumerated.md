@@ -193,9 +193,15 @@ configuration.
   one blocked dynamic trust. They are now separated:
 
   - `peer` means **another DCS instance**. Its issuer's credentials reach us one
-    way: a Power of Attorney embedded in a PDF, behind a signature applied on
-    that instance, verified when the contract is shipped here
-    (`VerifyCounterpartyPoA`). It authorizes nothing locally.
+    way: the Power of Attorney behind a signature applied on that instance,
+    retained on its signing ceremony and shipped **beside** the contract as
+    `signatory_poas` — a sibling of the PDF in the ship payload, not something
+    embedded in it — and verified on receipt (`VerifyCounterpartyPoA`). It
+    authorizes nothing locally.
+
+    Worth stating because the two are easy to conflate: the **contract lifecycle
+    credential** IS embedded in every PDF this deployment generates. The Power of
+    Attorney and the signing summary travel next to the contract instead.
   - This instance's own signing ceremony verifies the signatory's PoA as
     **`login`** — the wallet is here, and the credential came from this
     deployment's own issuer, which is enumerated and leaf-pinned.
