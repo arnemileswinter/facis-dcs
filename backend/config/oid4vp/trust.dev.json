@@ -3,7 +3,6 @@
     "urn:dcs:poa:v1",
     "urn:dcs:pid:demo:v1"
   ],
-  "peer_dynamic": false,
   "issuers": {
     "did:web:dev.example:issuer:poa": {
       "purposes": [
@@ -53,7 +52,7 @@
       ],
       "mechanism": "x5c"
     },
-    "did:web:localhost%3A30181": {
+    "http://localhost:30181": {
       "purposes": [
         "login",
         "peer"
@@ -61,9 +60,12 @@
       "organizations": [
         "*"
       ],
-      "mechanism": "x5c"
+      "mechanism": "x5c",
+      "x5c_leaf_keys": [
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfOZixFX/H2zxj4vP0MFU1yRBJO9YQ2XV3sbokuw/rZwmNkgpU/OimNMMHy9ORLyfyTJuFLMthsWNKLKVnTppHA=="
+      ]
     },
-    "did:web:localhost%3A18080:issuer": {
+    "http://localhost:18080/issuer": {
       "purposes": [
         "login",
         "peer"
@@ -71,7 +73,10 @@
       "organizations": [
         "*"
       ],
-      "mechanism": "x5c"
+      "mechanism": "x5c",
+      "x5c_leaf_keys": [
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfOZixFX/H2zxj4vP0MFU1yRBJO9YQ2XV3sbokuw/rZwmNkgpU/OimNMMHy9ORLyfyTJuFLMthsWNKLKVnTppHA=="
+      ]
     }
   }
 }

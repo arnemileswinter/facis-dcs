@@ -239,9 +239,13 @@ spec:
             {{- if .Values.oid4vp.trust.enabled }}
             - name: OID4VP_TRUST_DATA_PATH
               value: {{ include "digital-contracting-service.oid4vpTrustDataPath" . | quote }}
-            {{- if .Values.oid4vp.trust.x5cAnchorsPath }}
-            - name: OID4VP_X5C_TRUST_ANCHORS_PATH
-              value: {{ .Values.oid4vp.trust.x5cAnchorsPath | quote }}
+            {{- if .Values.oid4vp.trust.x5cAnchors.poa }}
+            - name: OID4VP_X5C_TRUST_ANCHORS_POA_PATH
+              value: {{ .Values.oid4vp.trust.x5cAnchors.poa | quote }}
+            {{- end }}
+            {{- if .Values.oid4vp.trust.x5cAnchors.pid }}
+            - name: OID4VP_X5C_TRUST_ANCHORS_PID_PATH
+              value: {{ .Values.oid4vp.trust.x5cAnchors.pid | quote }}
             {{- end }}
             {{- end }}
             # ---- PKCS#11 signing token (DCS-IR-HI-01) ------------------------------

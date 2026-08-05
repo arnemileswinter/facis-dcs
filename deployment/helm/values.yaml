@@ -95,11 +95,24 @@ oid4vp:
     existingConfigMapKey: trust.json
     # Where the ConfigMap is mounted. The file lands at <mountPath>/<key>.
     existingConfigMapMountPath: /etc/dcs/oid4vp
-    # Optional: trust anchors an x5c-bearing credential's certificate chain
-    # (e.g. a real EUDI wallet's issued PID) must verify against. Empty means
-    # unset — an x5c-bearing credential is then refused outright, never
+    # Trust anchors an x5c-bearing credential's certificate chain must verify
+    # against, ONE SET PER PURPOSE (ADR-35). A purpose left empty has no anchors
+    # and every x5c credential presented for it is refused outright, never
     # trusted off its own embedded certificate (sdjwt.verificationKeyFromX5C).
-    x5cAnchorsPath: ""
+    #
+    # There are two, and they never fall back to one another. `poa` covers
+    # parties — a counterparty's Power of Attorney, admitted by its chain alone,
+    # and our own login issuers, which are the same certificates seen from this
+    # side (the PoA obtained at login here travels in the signed PDF for the
+    # counterparty to verify). `pid` anchors a third party's attestation of a
+    # person, and a certificate under one must not be able to speak for the
+    # other.
+    #
+    # Login is NOT a third list. What separates a login issuer from a peer is
+    # that it must be named in the trust document above; the anchor is shared.
+    x5cAnchors:
+      poa: ""
+      pid: ""
 
 customCA:
   enabled: false

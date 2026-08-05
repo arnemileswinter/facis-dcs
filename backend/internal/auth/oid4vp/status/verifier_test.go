@@ -178,6 +178,9 @@ func statusListCredential(index uint64) status.VerifiedCredential {
 	return status.VerifiedCredential{
 		Format: "sd-jwt",
 		Claims: map[string]any{
+			// A status list is the statement of the issuer that issued this
+			// credential, so the two agree here as they must in production.
+			"iss": statusListIssuer,
 			"status": map[string]any{
 				"status_list": map[string]any{
 					"uri": statusListURI,

@@ -42,7 +42,7 @@ func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 		// carries. Without the anchors here that chain verifies against
 		// nothing and the status list is refused, which is every status list
 		// an x5c issuer signs.
-		cfg.X5CRoots = trustCfg.X5CTrustRoots()
+		cfg.X5CRoots = trustCfg.unionX5CRoots()
 		// Neither a bundled key nor an anchor means every status list this
 		// deployment ever fetches resolves to no key and is refused. That is a
 		// misconfiguration to report at startup, not one to discover at the

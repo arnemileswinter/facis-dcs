@@ -130,9 +130,12 @@ def build_trust_json(
     produces a document the backend refuses outright.
 
     The dev fixture wildcards organizations because its issuers stand in for
-    every party the BDD suite invents; a real deployment names them. peer_dynamic
-    is off: `peer` is checked when a signing ceremony verifies a Power of
-    Attorney, so trusting an unlisted issuer there is self-attestation.
+    every party the BDD suite invents; a real deployment names them.
+
+    These issuers resolve by `jwks`, so they are not the case ADR-35 changed: a
+    login issuer that resolves by CERTIFICATE CHAIN must pin the key its leaf
+    carries, because a chain to a CA would let that CA introduce another login
+    issuer. An issuer whose key is bundled here is already named exactly.
     """
     issuer_key = public_key_material(issuer_public)
     issuers: dict[str, Any] = {}
@@ -151,7 +154,6 @@ def build_trust_json(
         issuers[did] = {"purposes": ["pid"], "mechanism": "x5c"}
     return {
         "vcts": list(dict.fromkeys(vcts)),
-        "peer_dynamic": False,
         "issuers": issuers,
     }
 

@@ -69,7 +69,7 @@ func TestCheckStatusList_IETFStatusList_Active(t *testing.T) {
 	require.NotEmpty(t, list.chain, "the default fixture must sign by chain, not by bundled key")
 	trustIETFStatusList(t, list)
 
-	claims, err := json.Marshal(map[string]any{"status": list.Entry(index)})
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 	require.NoError(t, checkStatusList(claims))
 }
@@ -80,7 +80,7 @@ func TestCheckStatusList_IETFStatusList_Revoked(t *testing.T) {
 	list := newIETFStatusList(t, 16)
 	trustIETFStatusList(t, list)
 
-	claims, err := json.Marshal(map[string]any{"status": list.Entry(index)})
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 
 	// The same credential against the same list is accepted before the
@@ -107,7 +107,7 @@ func TestCheckStatusList_IETFStatusList_RefusesALeafThatNamesNoIssuer(t *testing
 	list := newIETFStatusList(t, 16, leafNamingNoIssuer(t))
 	trustIETFStatusList(t, list)
 
-	claims, err := json.Marshal(map[string]any{"status": list.Entry(index)})
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 
 	err = checkStatusList(claims)
@@ -126,7 +126,7 @@ func TestCheckStatusList_IETFStatusList_BundledKeyIssuer(t *testing.T) {
 	require.Empty(t, list.chain)
 	trustIETFStatusList(t, list)
 
-	claims, err := json.Marshal(map[string]any{"status": list.Entry(index)})
+	claims, err := json.Marshal(map[string]any{"iss": list.Issuer, "status": list.Entry(index)})
 	require.NoError(t, err)
 	require.NoError(t, checkStatusList(claims))
 

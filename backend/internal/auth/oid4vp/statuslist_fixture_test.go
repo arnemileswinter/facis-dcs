@@ -50,6 +50,9 @@ type ietfStatusList struct {
 	// Roots are the anchors an instance verifying this list must be configured
 	// with; without them the chain in the token verifies against nothing.
 	Roots *x509.CertPool
+	// RootCerts is the same anchors as certificates, which is what a purpose's
+	// anchor set is fed with (ADR-35).
+	RootCerts []*x509.Certificate
 
 	key    *ecdsa.PrivateKey
 	chain  []*x509.Certificate
@@ -99,6 +102,7 @@ func newIETFStatusList(t *testing.T, size int, opts ...func(*ietfStatusList)) *i
 	list.chain = []*x509.Certificate{leaf, list.caCert}
 	list.Roots = x509.NewCertPool()
 	list.Roots.AddCert(list.caCert)
+	list.RootCerts = []*x509.Certificate{list.caCert}
 	list.jwks = statusListJWKS(t, list.key)
 
 	for _, opt := range opts {
@@ -180,7 +184,8 @@ func trustIETFStatusList(t *testing.T, list *ietfStatusList) {
 	cfg := &TrustConfig{}
 	if len(list.chain) > 0 {
 		cfg.Issuers = map[string]TrustedIssuer{list.Issuer: {Mechanism: MechanismX5C}}
-		cfg.SetX5CTrustRoots(list.Roots)
+		cfg.SetX5CTrustRoots(PurposePeer, list.RootCerts)
+		cfg.SetX5CTrustRoots(PurposePID, list.RootCerts)
 	} else {
 		cfg.Issuers = map[string]TrustedIssuer{
 			list.Issuer: {Mechanism: MechanismJWKS, JWKS: list.jwks},
@@ -205,6 +210,9 @@ type xfscStatusList struct {
 	// Roots are the anchors an instance verifying this list must be configured
 	// with; without them the chain in the token verifies against nothing.
 	Roots *x509.CertPool
+	// RootCerts is the same anchors as certificates, which is what a purpose's
+	// anchor set is fed with (ADR-35).
+	RootCerts []*x509.Certificate
 
 	issuer string
 	key    *ecdsa.PrivateKey
@@ -214,7 +222,7 @@ type xfscStatusList struct {
 	bits []byte
 }
 
-func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
+func newXFSCStatusList(t *testing.T, size int, issuedBy ...string) *xfscStatusList {
 	t.Helper()
 
 	list := &xfscStatusList{key: newECKey(t), bits: make([]byte, size)}
@@ -233,8 +241,14 @@ func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
 		w.Header().Set("Content-Type", "application/statuslist+jwt")
 		_, _ = w.Write([]byte(token))
 	}))
+	list.URL = "http://" + srv.Listener.Addr().String() + "/status-list/1"
+	// A status list is the statement of the issuer that issued the credential it
+	// governs, so a fixture pairing the two must let them agree — a list served
+	// by anyone else is refused, which is the whole point of the binding.
 	list.issuer = "http://" + srv.Listener.Addr().String()
-	list.URL = list.issuer + "/status-list/1"
+	if len(issuedBy) > 0 && issuedBy[0] != "" {
+		list.issuer = issuedBy[0]
+	}
 	srv.Start()
 	t.Cleanup(srv.Close)
 
@@ -246,6 +260,7 @@ func newXFSCStatusList(t *testing.T, size int) *xfscStatusList {
 	list.chain = []*x509.Certificate{leaf, caCert}
 	list.Roots = x509.NewCertPool()
 	list.Roots.AddCert(caCert)
+	list.RootCerts = []*x509.Certificate{caCert}
 
 	return list
 }
