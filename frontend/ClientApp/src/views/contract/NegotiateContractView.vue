@@ -650,14 +650,16 @@ const exportPDF = async () => {
         </div>
       </div>
       <template v-if="activeTab !== 'audit' && hasActiveNegotiations">
-        <div class="divider"></div>
-        <div class="mx-auto max-w-4xl p-6">
-          <div class="text-lg">Active negotiations</div>
-          <NegotiationList
-            :contract="contract"
-            :local-instance-did="localInstanceDid"
-            @selected-negotiation="handleSelectedNegotiation"
-          />
+        <div class="pointer-events-auto absolute top-0 -left-[100vw] w-full max-w-4xl opacity-0">
+          <div class="divider"></div>
+          <div class="p-6">
+            <div class="text-lg">Active negotiations</div>
+            <NegotiationList
+              :contract="contract"
+              :local-instance-did="localInstanceDid"
+              @selected-negotiation="handleSelectedNegotiation"
+            />
+          </div>
         </div>
       </template>
     </div>
