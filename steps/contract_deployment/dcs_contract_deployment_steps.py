@@ -389,9 +389,22 @@ def step_when_deploy_contract(context, name):
     _ensure_target_designated(context, name)
     did, updated_at = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    context.requests_response = post_json(
-        context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
-    )
+    # The transition that reached this state dispatched its own workflow gate,
+    # and a deploy racing that verdict is refused with 409/DISPATCHING — a
+    # pending evaluation, not a denial. Wait it out; a real BLOCKED verdict is
+    # not retried and fails the scenario with the gate's findings.
+    deadline = time.monotonic() + 60
+    while True:
+        context.requests_response = post_json(
+            context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
+        )
+        if context.requests_response.status_code != 409:
+            break
+        body = context.requests_response.text
+        if "DISPATCHING" not in body or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+        did, updated_at = ContractService._contract_data(context, name)
     if context.requests_response.status_code == 200:
         body = context.requests_response.json()
         context.deployment_correlation_id = body.get("correlation_id")
