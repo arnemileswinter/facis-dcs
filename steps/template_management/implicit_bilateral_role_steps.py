@@ -144,6 +144,6 @@ def step_then_unknown_originator_role_rejected(context):
     response = context.requests_response
     assert response.status_code == 400, f"expected HTTP 400 for unknown originator_role, got {response.status_code}: {response.text}"
     body = response.text.casefold()
-    assert "originator_role" in body and ("template" in body or "declared" in body), (
+    assert ("originator_role" in body or "originator role" in body) and ("template" in body or "declared" in body), (
         f"rejection does not identify the undeclared originator_role: {response.text}"
     )

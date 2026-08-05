@@ -679,6 +679,18 @@
     "dcs:templateType": "dcs:ContractTemplate",
     "dcs:title": "Managed Kubernetes Hosting SLA"
   },
+  "dcs:parties": [
+    {
+      "@id": "did:web:example:template:sla-hosting#party-provider",
+      "@type": "dcs:CompanyParty",
+      "dcs:role": "https://w3id.org/facis/dcs/taxonomy/v1#role-provider"
+    },
+    {
+      "@id": "did:web:example:template:sla-hosting#party-customer",
+      "@type": "dcs:CompanyParty",
+      "dcs:role": "https://w3id.org/facis/dcs/taxonomy/v1#role-customer"
+    }
+  ],
   "dcs:policies": {
     "@id": "did:web:example:template:sla-hosting#policy-set",
     "@type": "odrl:Offer",
