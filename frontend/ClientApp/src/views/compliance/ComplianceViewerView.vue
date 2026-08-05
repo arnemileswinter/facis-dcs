@@ -354,7 +354,7 @@ function exportPdf() {
     </body></html>`
   const win = window.open('', '_blank')
   if (!win) {
-    error.value = 'Could not open the print window — allow pop-ups to export the PDF report.'
+    error.value = 'Could not open the print window. Allow pop-ups to export the PDF report.'
     return
   }
   win.document.write(html)

@@ -211,6 +211,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractHierarchyInvalid) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
+		errors.Is(err, command.ErrInvalidOriginatorRole) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||
@@ -289,7 +290,7 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 	}
 	err = createHandler.Handle(ctx, cmd)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, mapContractCommandError(err)
 	}
 
 	return &contractworkflowengine.ContractCreateResponse{

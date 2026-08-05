@@ -94,7 +94,7 @@ export function compactXsdDatatype(iri: string): XsdDatatype | undefined {
   if (!compact) {
     throw new Error(
       `<${iri}> is an XSD datatype DCS cannot order. Reading it as a string would let a policy boundary over ` +
-        'this field compare lexically and answer wrong — declare a supported datatype, or add this one to ' +
+        'this field compare lexically and answer wrong. Declare a supported datatype, or add this one to ' +
         'XSD_TO_COMPACT and to compareXsdValues in xsd-order.ts.',
     )
   }

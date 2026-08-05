@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,6 +35,8 @@ import (
 // default: a freshly created or renewed contract is at version 1, which is the
 // negotiation round its first tasks belong to.
 const initialContractVersion = 1
+
+var ErrInvalidOriginatorRole = errors.New("originator role must be one of exactly two template roles")
 
 type CreateCmd struct {
 	DID         string `json:"did"`
@@ -224,6 +227,11 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	)
 	if err != nil {
 		return fmt.Errorf("could not pin effective Semantic Hub bundle: %w", err)
+	}
+	if cmd.OriginatorRole != "" {
+		if err := validateOriginatorRole(normalizedContractData, cmd.OriginatorRole); err != nil {
+			return err
+		}
 	}
 	// Parties are attached after normalization for the same reason renewal's
 	// dcs:renewsContract is (see attachRenewsContractReference): the rebase
@@ -460,6 +468,49 @@ func bindOriginatorParty(raw *datatype.JSON, originDID, role, legalName string) 
 	return &encoded, nil
 }
 
+func validateOriginatorRole(raw *datatype.JSON, originatorRole string) error {
+	if !isAbsoluteRoleURI(originatorRole) {
+		return fmt.Errorf("%w: requested role %q is not an absolute URI", ErrInvalidOriginatorRole, originatorRole)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return fmt.Errorf("%w: could not decode contract data: %v", ErrInvalidOriginatorRole, err)
+	}
+	roles := make(map[string]struct{})
+	nodes, _ := doc["dcs:parties"].([]any)
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := node["dcs:role"].(string)
+		if role != "" {
+			if !isAbsoluteRoleURI(role) {
+				return fmt.Errorf("%w: template role %q is not an absolute URI", ErrInvalidOriginatorRole, role)
+			}
+			roles[role] = struct{}{}
+		}
+	}
+	_, member := roles[originatorRole]
+	if len(roles) != 2 || !member {
+		return fmt.Errorf("%w: template roles=%v, requested=%q", ErrInvalidOriginatorRole, mapsKeys(roles), originatorRole)
+	}
+	return nil
+}
+
+func isAbsoluteRoleURI(role string) bool {
+	parsed, err := url.Parse(role)
+	return err == nil && parsed.IsAbs() && !strings.ContainsAny(role, " \t\r\n")
+}
+
+func mapsKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // setPartyLegalName records the organization on the party node named by iri,
 // without overwriting a name the document already carries for it.
 func setPartyLegalName(doc map[string]any, iri, legalName string) {
@@ -590,8 +641,9 @@ func SeedContractParties(raw datatype.JSON, partyDIDs []string) (datatype.JSON, 
 	return encoded, true, nil
 }
 
-// partyPlaceholderIRI finds the dcs:parties node whose IRI carries the
-// #party-<role> fragment and returns its IRI ("" when absent).
+// partyPlaceholderIRI finds the materialized party node carrying role and
+// returns its IRI. URI roles are percent-encoded in the fragment, so dcs:role
+// is the authoritative comparison key.
 func partyPlaceholderIRI(doc map[string]any, role string) string {
 	nodes, _ := doc["dcs:parties"].([]any)
 	for _, rawNode := range nodes {
@@ -599,7 +651,8 @@ func partyPlaceholderIRI(doc map[string]any, role string) string {
 		if !ok {
 			continue
 		}
-		if iri, _ := node["@id"].(string); strings.HasSuffix(iri, "#party-"+role) {
+		if nodeRole, _ := node["dcs:role"].(string); nodeRole == role {
+			iri, _ := node["@id"].(string)
 			return iri
 		}
 	}

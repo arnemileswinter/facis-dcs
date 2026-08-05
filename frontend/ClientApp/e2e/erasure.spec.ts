@@ -99,7 +99,7 @@ async function expectErasedExportMessage(inst: Instance, contractDid: string, co
   })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   await exportAnswered
-  await expect(inst.page.getByText('Content erased — encryption keys destroyed')).toBeVisible({ timeout: 30_000 })
+  await expect(inst.page.getByText('Content erased. Encryption keys destroyed.')).toBeVisible({ timeout: 30_000 })
   // The view survives the refusal: the contract's metadata keeps rendering.
   // It identifies the contract by name — the only DID on this view is the
   // template's — so the name is what proves the Postgres-side record survived
@@ -196,7 +196,7 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     )
     await a.page.getByTestId('confirmation-confirm').click()
     await deleted
-    await expect(a.page.getByText('Archive entry deleted — encryption keys destroyed')).toBeVisible()
+    await expect(a.page.getByText('Archive entry deleted. Encryption keys destroyed.')).toBeVisible()
 
     // The soft-deleted entry leaves the dashboard list; the authoritative
     // status surface from here on is the AuditView erasure panel.

@@ -622,10 +622,10 @@ function formatDateTime(value?: string): string {
         <summary class="collapse-title text-sm font-medium">Erasure details</summary>
         <div class="collapse-content space-y-3 text-sm" data-testid="erasure-status-details">
           <div v-if="erasureStatus.local_status === 'shredded'">
-            Destroyed {{ formatDateTime(erasureStatus.shredded_at) }} by {{ erasureStatus.shredded_by }} —
+            Destroyed {{ formatDateTime(erasureStatus.shredded_at) }} by {{ erasureStatus.shredded_by }}:
             {{ erasureStatus.shred_reason }}
           </div>
-          <div v-else>The local encryption keys are live — the archived content is decryptable.</div>
+          <div v-else>The local encryption keys are live. The archived content is decryptable.</div>
           <p v-if="erasureStatus.peers.length === 0" class="opacity-70">No counterparty instance holds keys.</p>
           <table v-else class="table table-xs">
             <thead>

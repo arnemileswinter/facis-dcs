@@ -93,7 +93,7 @@ const eventType = useContractEventType()
               v-for="discard in audit.event_data.superseded"
               :key="`${discard.negotiation_id}-${discard.superseded_by}`"
             >
-              {{ discard.negotiation_id }} — {{ discard.fields.join(', ') }} superseded by {{ discard.superseded_by }}
+              {{ discard.negotiation_id }}: {{ discard.fields.join(', ') }} superseded by {{ discard.superseded_by }}
             </li>
           </ul>
         </div>
