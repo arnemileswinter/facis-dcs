@@ -98,7 +98,7 @@ const designate = async () => {
         :aria-labelledby="selectedLabelId"
         class="select-bordered select select-sm"
       >
-        <option value="">— none —</option>
+        <option value="">None</option>
         <option v-for="target in targets" :key="target.id" :value="target.id">{{ target.name }}</option>
       </select>
       <button

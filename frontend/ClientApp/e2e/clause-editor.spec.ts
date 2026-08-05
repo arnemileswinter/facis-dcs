@@ -79,7 +79,7 @@ test('an exhaustive access-grant template lets the Appendix C policy be negotiat
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
   // Party roles are supplied by the Semantic Hub catalog. Pick two distinct
   // enabled catalog entries without coupling this test to a particular role
@@ -171,7 +171,7 @@ test('the builder emits a logical (or) constraint when constraints are combined 
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
   await selectBilateralRoles(editor)
 
@@ -217,7 +217,7 @@ test('a Permission can carry a nested duty the assignee must fulfil', async ({ p
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
   await selectBilateralRoles(editor)
 
@@ -289,7 +289,7 @@ test('the builder authors a nested constraint tree (and over an or-group)', asyn
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
   await selectBilateralRoles(editor)
 
@@ -354,7 +354,7 @@ test('a duty can carry a consequence duty', async ({ page, loginAs }) => {
 
   const ruleSelect = (label: string) =>
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
-  await ruleSelect('Rule').selectOption({ label: 'Permission — the assignee MAY' })
+  await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
   await selectBilateralRoles(editor)
 

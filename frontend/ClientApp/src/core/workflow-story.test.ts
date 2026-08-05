@@ -15,7 +15,7 @@ describe('template workflow story', () => {
     const story = templateStory('APPROVED', { templateType: 'CONTRACT_TEMPLATE' })
 
     expect(story.narrative).toBe(
-      'Approved — one step left: a Template Manager registers it in the Template Catalogue; only registered templates can be used to create contracts.',
+      'Approved. A Template Manager can now register it in the Template Catalogue so Contract Creators can use it to create contracts.',
     )
     expect(story.actionHints).toEqual([{ label: 'Open Template Catalogue', routeName: 'template.catalogues.list' }])
   })

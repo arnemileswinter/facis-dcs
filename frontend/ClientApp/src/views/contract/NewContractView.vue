@@ -446,7 +446,7 @@ onBeforeRouteLeave(() => {
                 :aria-labelledby="parentContractPickerLabelId"
                 class="select w-full select-sm"
               >
-                <option :value="null">— none —</option>
+                <option :value="null">None</option>
                 <option v-for="c in draftContracts" :key="c.did" :value="c.did">
                   {{ c.name ?? c.did }}
                 </option>

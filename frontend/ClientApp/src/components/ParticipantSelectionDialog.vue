@@ -76,7 +76,7 @@ function onModalClose() {
         <h3 id="participant-dialog-title" class="text-lg font-bold">Contract Counterparty</h3>
         <p class="mt-2 mb-4 text-sm text-base-content/70">
           The other DCS this contract is offered to and negotiated with. Review, approval and negotiation are handled by
-          your own instance's roles — leave empty for a purely local contract.
+          your own instance's roles. Leave this empty for a purely local contract.
         </p>
 
         <label class="flex flex-col gap-2">
