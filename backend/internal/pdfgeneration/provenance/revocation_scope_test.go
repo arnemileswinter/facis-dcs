@@ -86,7 +86,7 @@ func TestDistinctContractsGetDistinctRevocationEntries(t *testing.T) {
 }
 
 // TestTheSigningSummaryNamesTheContractsEntryToo closes the other half of the
-// scope. The signing summary travels beside the contract to the counterparty and
+// scope. The signing summary travels inside the contract PDF to the counterparty and
 // outlives the ceremony that produced it, so it has to be revocable — and by the
 // one thing that ever revokes here, the contract falling out of force. Issued
 // without a credentialStatus, as it was, it stayed valid forever while the

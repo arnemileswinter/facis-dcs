@@ -497,9 +497,9 @@ func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Con
 	// `login`, not `peer`. This is THIS instance's ceremony: the signatory is at
 	// their wallet here, and the Power of Attorney they present was issued by
 	// this deployment's own issuer. `peer` means another DCS instance — a PoA
-	// retained on THAT instance's ceremony and shipped beside the contract as
-	// `signatory_poas` (VerifyCounterpartyPoA), verified against the PoA CA list
-	// because we cannot enumerate who a counterparty's issuer is.
+	// presented at THAT instance's ceremony and embedded in the contract PDF
+	// beneath its own signature (VerifyCounterpartyPoA), verified against the
+	// PoA CA list because we cannot enumerate who a counterparty's issuer is.
 	//
 	// Verifying a local ceremony as `peer` would authorize a signature here on
 	// the strength of a chain to that CA list, letting a counterparty's operator

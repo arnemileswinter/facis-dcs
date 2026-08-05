@@ -67,11 +67,12 @@ const (
 	// both are answered by an issuer this operator named and pinned.
 	PurposeLogin Purpose = "login"
 	// PurposePeer: credentials issued by ANOTHER DCS INSTANCE's issuer — the
-	// Power of Attorney behind a signature applied over there, retained on that
-	// instance's signing ceremony and shipped BESIDE the contract as
-	// `signatory_poas`, a sibling of the PDF in the ship payload rather than
-	// something embedded in it. Verified here on receipt
-	// (VerifyCounterpartyPoA, dcstodcs.CeremonyPoAs).
+	// Power of Attorney behind a signature applied over there, embedded into the
+	// contract PDF as an associated file BEFORE that instance's own signature,
+	// so its signature covers its own authorization and the PDF carries
+	// everything the receiver needs (ADR-13: the PDF is the wire format).
+	// Verified here on receipt (VerifyCounterpartyPoA,
+	// dcstodcs.CounterpartyPoAGate).
 	//
 	// It never authorizes anything here. That is what lets it be admitted by a
 	// chain to the PoA CA list rather than by an entry: we cannot enumerate who

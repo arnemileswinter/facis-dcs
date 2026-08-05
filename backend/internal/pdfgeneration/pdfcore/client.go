@@ -302,6 +302,10 @@ func (c *Client) Reanchor(ctx context.Context, pdf []byte, manifestURL string) (
 // an external PAdES signer (wallet/QTSP/DSS) produces the signature, so the
 // signature's /ByteRange covers the evidence (embed-first-sign-second,
 // DCS-FR-SM-08). pdf-core holds no key and never signs.
+//
+// Every call appends one more attachment under its own filename, including on a
+// PDF that already carries a signature: the append is an incremental update, so
+// the signatures already there stay valid (DCS-OR-C2PA-002).
 func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embedded []byte, err error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -336,33 +340,38 @@ func (c *Client) EmbedEvidence(ctx context.Context, pdf, evidence []byte) (embed
 	return embedded, nil
 }
 
-// ExtractEvidence posts pdf to POST /evidence/extract and returns the raw
-// signing-evidence attachment bytes embedded by Sign, plus whether it was
-// present.
-func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]byte, bool, error) {
+// ExtractEvidence posts pdf to POST /evidence/extract and returns EVERY signing
+// evidence attachment the PDF carries, oldest first — one per signing event, so
+// a countersigned contract yields both parties' evidence. A PDF carrying none
+// yields an empty slice.
+func (c *Client) ExtractEvidence(ctx context.Context, pdf []byte) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/evidence/extract", bytes.NewReader(pdf))
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence request: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/pdf")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, false, nil
+		return nil, nil
 	}
 	if err := checkStatus(resp); err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	evidence, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, fmt.Errorf("pdf-core extract-evidence read: %w", err)
+		return nil, fmt.Errorf("pdf-core extract-evidence read: %w", err)
 	}
-	return evidence, true, nil
+	var attachments []json.RawMessage
+	if err := json.Unmarshal(body, &attachments); err != nil {
+		return nil, fmt.Errorf("pdf-core extract-evidence decode: %w", err)
+	}
+	return attachments, nil
 }
 
 // VerifyResult is the structured response from pdf-core POST /verify.

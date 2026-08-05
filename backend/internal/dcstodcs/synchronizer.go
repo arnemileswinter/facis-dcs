@@ -50,10 +50,6 @@ type DCSToDCSSynchronizer struct {
 	Artifacts   *artifactstore.Store
 	DIDDocument identity.DIDDocument
 	TrustGate   TrustGate
-	// PoAs supplies the Power of Attorney behind each signature this instance
-	// applied, shipped so the counterparty can verify the authority to sign
-	// rather than read an unbacked claim off the contract (ADR-31).
-	PoAs SignatoryPoAs
 	// SettlementSender delivers this instance's settlement artifact — the
 	// evidence the counterparty needs before it may sign.
 	SettlementSender SettlementSender
@@ -296,11 +292,6 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return err
 	}
 
-	signatoryPoAs, err := s.poaEvidenceForSignedContract(ctx, state, did)
-	if err != nil {
-		return err
-	}
-
 	pinnedShapes, err := s.pinnedShapesForContract(ctx, contractData)
 	if err != nil {
 		// Unlike the reads above, this fails for stable data-dependent reasons —
@@ -312,7 +303,7 @@ func (s *DCSToDCSSynchronizer) shipContractPDF(ctx context.Context, did string) 
 		return s.recordShipOutcome(ctx, did, err, nil)
 	}
 
-	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, signatoryPoAs, pinnedShapes, recipients)
+	shipError := s.shipToPeers(ctx, localPeer, did, state, pdfBytes, jadesSignature, pinnedShapes, recipients)
 
 	var gateErr *GateError
 	if errors.As(shipError, &gateErr) && gateErr.Kind == PolicyFailure {
@@ -408,23 +399,6 @@ func (s *DCSToDCSSynchronizer) jadesForSignedContract(state string, contractData
 	return signature, nil
 }
 
-// poaEvidenceForSignedContract returns the Power of Attorney behind every
-// signature this instance applied, for the ships where a signature exists at
-// all (ADR-31). A proposal carries none because nothing has been signed yet.
-func (s *DCSToDCSSynchronizer) poaEvidenceForSignedContract(ctx context.Context, state, did string) ([]SignatoryPoA, error) {
-	if s.PoAs == nil {
-		return nil, nil
-	}
-	if state != contractstate.Signed.String() && state != contractstate.Revoked.String() {
-		return nil, nil
-	}
-	evidence, err := s.PoAs.ForContract(ctx, did)
-	if err != nil {
-		return nil, fmt.Errorf("read power-of-attorney evidence for %s: %w", did, err)
-	}
-	return evidence, nil
-}
-
 // pinnedShapesForContract reads the shape libraries the contract pins in
 // dcs:effectiveShapes (ADR-8). They ship with every PDF: the pin is what the
 // receiver's workflow gate resolves, and a library published on this instance
@@ -442,7 +416,7 @@ func (s *DCSToDCSSynchronizer) pinnedShapesForContract(ctx context.Context, cont
 	return entries, nil
 }
 
-func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, signatoryPoAs []SignatoryPoA, pinnedShapes []semantichub.Schema, recipients []string) error {
+func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, state string, pdfBytes []byte, jadesSignature string, pinnedShapes []semantichub.Schema, recipients []string) error {
 	for _, peer := range recipients {
 		if peer == localPeer {
 			continue
@@ -500,7 +474,6 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			JadesSignature: &jadesSignature,
 			ContractState:  &state,
 			WrappedCek:     WireWrappedCEK(wrappedCEK),
-			SignatoryPoas:  WireSignatoryPoAs(signatoryPoAs),
 			PinnedShapes:   WirePinnedShapes(pinnedShapes),
 		}); err != nil {
 			return err

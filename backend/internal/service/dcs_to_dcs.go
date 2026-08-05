@@ -89,6 +89,27 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 // injectable for tests.
 var fetchPeerDIDDocument = identity.FetchDIDDocument
 
+// assertionKeyOf resolves the assertion key of the instance that OWNS a signed
+// field, so its embedded signing summary is checked against ITS key rather than
+// the shipper's. A shipped PDF carries one attachment per signing event and a
+// countersigned one therefore carries evidence issued by more than one instance.
+//
+// The two documents already in hand answer for themselves; a field naming a
+// third did:web is resolved the same way the shipping peer's was.
+func (s *dcsToDcssrvc) assertionKeyOf(ownerDID, localPeer, peerDID string, peerDocument *identity.DIDDocument, methodID string) (*ecdsa.PublicKey, error) {
+	switch {
+	case identity.SameDIDWeb(ownerDID, localPeer):
+		return s.DIDDocument.AssertionKey(methodID)
+	case identity.SameDIDWeb(ownerDID, peerDID):
+		return peerDocument.AssertionKey(methodID)
+	}
+	document, err := fetchPeerDIDDocument(ownerDID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve the did document of %s, which the embedded signing evidence names as the signing instance: %w", ownerDID, err)
+	}
+	return document.AssertionKey(methodID)
+}
+
 // PostPdf receives a contract PDF a counterparty shipped (ADR-13). It
 // authenticates the peer (the same layers post_sync applied), asks pdf-core to
 // extract the embedded JSON-LD, and upserts this instance's own local copy of
@@ -171,21 +192,28 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		syncSignature = verified
 	}
 
-	// Counterparty Power of Attorney (ADR-31, UC-14): the peer ships the
-	// credential behind each signature it applied, and this instance verifies it
-	// against the contract the same ship carried — issuer trusted for `peer` and
-	// entitled to the organization, not revoked, held by the signatory recorded
-	// for that party. Present-but-unverifiable evidence refuses the exchange like
-	// any other trust-gate denial; absent evidence does not, so a peer that
-	// retains none still federates and the compliance viewer keeps reporting a
-	// party that signed without one.
+	// Counterparty Power of Attorney (ADR-31, ADR-35, UC-14): every signing party
+	// embeds its own summary credential and Power of Attorney into the PDF before
+	// applying its signature, so the shipped artifact carries the authorization
+	// behind each signature it holds — including this instance's own once the
+	// contract has been countersigned and shipped back. Each is verified here:
+	// issuer trusted for `peer` and entitled to the organization, not revoked,
+	// held by the signatory the summary attests. Present-but-unverifiable
+	// evidence refuses the exchange like any other trust-gate denial; absent
+	// evidence does not, so a peer whose PDF carries none still federates and the
+	// compliance viewer keeps reporting a party that signed without one.
+	embeddedEvidence, err := s.PDFCore.ExtractEvidence(ctx, req.Pdf)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: could not extract the signing evidence embedded in the received PDF: %w", err))
+	}
 	shipped := trustgate.ShippedSignatures{
-		ResolveKey: func(methodID string) (*ecdsa.PublicKey, error) {
-			return remoteDIDDocument.AssertionKey(methodID)
+		ResolveKey: func(ownerDID, methodID string) (*ecdsa.PublicKey, error) {
+			return s.assertionKeyOf(ownerDID, localPeer, req.FromPeerDid, remoteDIDDocument, methodID)
 		},
 		VerifyVC: provenance.VerifyDataIntegrityProof,
 	}
-	if err := s.PoAGate.Check(req.FromPeerDid, req.ContractIri, shipped, trustgate.ReceivedSignatoryPoAs(req.SignatoryPoas)); err != nil {
+	if err := s.PoAGate.Check(req.FromPeerDid, localPeer, req.ContractIri, shipped, embeddedEvidence); err != nil {
 		var gateErr *trustgate.GateError
 		if errors.As(err, &gateErr) {
 			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {

@@ -47,7 +47,7 @@ type SigningSummary struct {
 //
 // status is the CONTRACT's entry in the status list this deployment serves — the
 // same entry its lifecycle credentials name (ADR-34). This credential travels
-// beside the contract to the counterparty and outlives the ceremony that
+// inside the contract PDF to the counterparty and outlives the ceremony that
 // produced it, so it has to be revocable, and revocable by the one thing that
 // ever revokes here: the contract falling out of force.
 func IssueSigningSummaryVC(ctx context.Context, signer VCSigner, issuerDID string, status CredentialStatusRef, s SigningSummary) (json.RawMessage, string, error) {

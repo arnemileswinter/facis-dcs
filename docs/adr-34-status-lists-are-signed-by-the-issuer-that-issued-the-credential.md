@@ -182,7 +182,7 @@ the DCS hosts a status list of its own.
 
 The ORCE issuer issues PID and PoA credentials, so it serves their status list.
 The DCS issues the contract lifecycle credential embedded in every generated PDF
-and the signature evidence / signing summary VC that travels beside a contract —
+and the signature evidence / signing summary VC embedded in a contract's PDF —
 it mints them, embeds them, and asserts them. By the same rule, the DCS serves
 their status list, signed with its own HSM key and carrying its own certificate
 chain (the hsm-provision job already produces c2pa-x5chain.pem beside the signing
