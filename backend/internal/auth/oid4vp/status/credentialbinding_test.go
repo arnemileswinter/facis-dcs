@@ -63,3 +63,50 @@ func TestListWithoutAnIssuerIsLeftToItsOwnBinding(t *testing.T) {
 		t.Fatalf("a list declaring no issuer must be left to its URI-scoped key binding: %v", err)
 	}
 }
+
+// The credential this deployment issues about its own contracts names its
+// issuer as the instance did:web, while the status list that instance serves
+// names its `iss` as the HTTPS origin that DID resolves from. did:web method
+// §3 makes those one authority — the DID document and the list are served by
+// the same origin — so the binding must recognise the two spellings, or every
+// lifecycle credential this deployment issues is refused against its own list.
+func TestDidWebIssuerMatchesItsOwnOrigin(t *testing.T) {
+	for name, pair := range map[string]struct {
+		credentialIssuer string
+		listIssuer       string
+	}{
+		"host with port":     {"did:web:dcs-a.localhost%3A18080", "http://dcs-a.localhost:18080"},
+		"https host":         {"did:web:mine.example", "https://mine.example"},
+		"path segments":      {"did:web:mine.example:issuer", "https://mine.example/issuer"},
+		"case-folded host":   {"did:web:Mine.Example", "https://mine.example"},
+		"url names the list": {"https://mine.example/issuer", "https://mine.example/issuer"},
+	} {
+		credential := credentialFrom(map[string]any{"issuer": pair.credentialIssuer})
+		if err := status.RequireCredentialIssuer(credential, pair.listIssuer); err != nil {
+			t.Errorf("%s: %q refused against its own origin %q: %v", name, pair.credentialIssuer, pair.listIssuer, err)
+		}
+	}
+}
+
+// The equivalence is identity, not leniency: a did:web on one host never
+// matches a list served from another, a path difference is a different issuer,
+// and a scheme that is not a web origin matches nothing.
+func TestDidWebIssuerRefusesForeignOrigins(t *testing.T) {
+	for name, pair := range map[string]struct {
+		credentialIssuer string
+		listIssuer       string
+	}{
+		"different host":    {"did:web:mine.example", "https://someone-else.example"},
+		"different port":    {"did:web:mine.example%3A8443", "https://mine.example:8080"},
+		"different path":    {"did:web:mine.example:issuer", "https://mine.example/other"},
+		"missing path":      {"did:web:mine.example:issuer", "https://mine.example"},
+		"extra path":        {"did:web:mine.example", "https://mine.example/issuer"},
+		"not a web origin":  {"did:web:mine.example", "ftp://mine.example"},
+		"not a did":         {"did:key:z6Mk", "https://mine.example"},
+	} {
+		credential := credentialFrom(map[string]any{"issuer": pair.credentialIssuer})
+		if err := status.RequireCredentialIssuer(credential, pair.listIssuer); err == nil {
+			t.Errorf("%s: %q accepted a list issued at %q", name, pair.credentialIssuer, pair.listIssuer)
+		}
+	}
+}

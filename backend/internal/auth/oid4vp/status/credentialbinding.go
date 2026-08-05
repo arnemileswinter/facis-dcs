@@ -1,6 +1,11 @@
 package status
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+
+	"digital-contracting-service/internal/base/identity"
+)
 
 // RequireCredentialIssuer binds a status list to the credential whose status it
 // carries: the list must be issued by the same issuer as that credential.
@@ -36,10 +41,55 @@ func RequireCredentialIssuer(credential VerifiedCredential, listIssuer string) e
 
 	credentialIssuer := strings.TrimSpace(CredentialIssuer(credential))
 
-	if credentialIssuer == "" || credentialIssuer != listIssuer {
+	if credentialIssuer == "" || !sameIssuerIdentity(credentialIssuer, listIssuer) {
 		return ErrStatusListIssuerMismatch
 	}
 	return nil
+}
+
+// sameIssuerIdentity reports whether two issuer identifiers name the same
+// authority in the two spellings this project carries: the exact same string,
+// or a did:web identifier against the web origin it resolves from.
+//
+// The second form exists because this deployment names itself did:web in the
+// credentials it issues while the status list it serves names its `iss` as the
+// public origin — and did:web method §3 makes those one authority: the DID
+// document and the list are both served by exactly that origin. The mapping is
+// identity, not leniency — host (case-folded, port included) and every path
+// segment must match, so a list on another host, port, or path stays another
+// issuer's list.
+func sameIssuerIdentity(a, b string) bool {
+	if a == b {
+		return true
+	}
+	return didWebNamesOrigin(a, b) || didWebNamesOrigin(b, a)
+}
+
+func didWebNamesOrigin(did, origin string) bool {
+	host, segments, err := identity.DIDWebPath(did)
+	if err != nil {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return false
+	}
+	if !strings.EqualFold(parsed.Host, host) {
+		return false
+	}
+	var originSegments []string
+	if trimmed := strings.Trim(parsed.Path, "/"); trimmed != "" {
+		originSegments = strings.Split(trimmed, "/")
+	}
+	if len(originSegments) != len(segments) {
+		return false
+	}
+	for i := range segments {
+		if originSegments[i] != segments[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // CredentialIssuer is the issuer a verified credential names, in either spelling
