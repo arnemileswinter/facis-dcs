@@ -849,17 +849,30 @@ func (s *service) extractEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	evidence, found, err := compiler.ExtractSigningEvidence(raw)
+	attachments, err := compiler.ExtractSigningEvidence(raw)
 	if err != nil {
 		writeError(w, errBadRequest(err))
 		return
 	}
-	if !found {
+	if len(attachments) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// One attachment per signing party, oldest first, spliced in VERBATIM: each
+	// element is the JSON document the backend embedded, and re-encoding it
+	// would change bytes that credential signatures cover.
+	var body bytes.Buffer
+	body.WriteByte('[')
+	for i, attachment := range attachments {
+		if i > 0 {
+			body.WriteByte(',')
+		}
+		body.Write(attachment)
+	}
+	body.WriteByte(']')
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(evidence)
+	_, _ = w.Write(body.Bytes())
 }
 
 func (s *service) claim(w http.ResponseWriter, r *http.Request) {
