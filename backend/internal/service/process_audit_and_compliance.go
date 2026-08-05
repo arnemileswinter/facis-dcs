@@ -158,7 +158,7 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 
 func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context, req *processauditandcompliance.PACAuditRequest, scopeConfig auditScopeConfig) (res []*auditEvidenceResource, err error) {
 
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	ctx, cancel := context.WithTimeout(ctx, conf.PACAuditEvidenceTimeout())
 	defer cancel()
 
 	if err := s.validateAuditScopeDependencies(scopeConfig); err != nil {
