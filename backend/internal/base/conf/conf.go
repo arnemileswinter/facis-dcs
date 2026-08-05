@@ -19,6 +19,18 @@ func HTTPClientTimeout() time.Duration {
 	return 1 * time.Minute
 }
 
+// PACAuditEvidenceTimeout bounds only the DCS-side evidence collection for a
+// PAC audit. PAC_AUDIT_EVIDENCE_TIMEOUT accepts a positive Go duration; empty,
+// invalid and non-positive values retain the default.
+func PACAuditEvidenceTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("PAC_AUDIT_EVIDENCE_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 2 * time.Minute
+}
+
 func OutboxProcessorTimeOut() time.Duration {
 	return 1 * time.Second
 }
