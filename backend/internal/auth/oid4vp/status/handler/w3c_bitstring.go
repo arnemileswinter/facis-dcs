@@ -99,7 +99,7 @@ func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI st
 	case contentType == "application/vc+jwt" || status.IsLikelyJWT(body):
 		claims, signedBy, err := h.verifyJWT(body)
 		if err != nil {
-				return "", "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if err := bindToStatusList(claims, signedBy, listURI); err != nil {
 			return "", "", "", err
@@ -109,7 +109,7 @@ func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI st
 	case contentType == "application/vc+cose":
 		claims, signedBy, err := h.verifyCOSE(body)
 		if err != nil {
-				return "", "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if normalized, ok := status.NormalizeAnyMap(claims); ok {
 			claims = normalized
@@ -125,7 +125,7 @@ func (h *W3CBitstring) extractW3CEncodedList(response fetch.Response, listURI st
 		}
 		claims, signedBy, err := h.verifySecuredW3CDocument(body)
 		if err != nil {
-				return "", "", "", mapStatusVerifyError(err)
+			return "", "", "", mapStatusVerifyError(err)
 		}
 		if err := bindToStatusList(claims, signedBy, listURI); err != nil {
 			return "", "", "", err
