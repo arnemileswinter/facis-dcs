@@ -197,25 +197,17 @@ def _self_peer_action_credentials(context):
 
 
 def _offer_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    headers = _seed_headers(context, name)
-    resp = post_json(context, contract_offer_url(context), {"did": did, "updated_at": updated_at}, headers=headers)
-    assert resp.status_code == 200, (
-        f"Offer failed while preparing OFFERED state for '{name}': {resp.status_code} {resp.text}"
+    return _post_reissuing_on_conflict(
+        context, contract_offer_url(context), {}, _seed_headers(context, name), name,
+        "Offer while preparing OFFERED state",
     )
-    ContractService._refresh_contract(context, name)
-    return resp
 
 
 def _withdraw_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    headers = _seed_headers(context, name)
-    resp = post_json(context, contract_withdraw_url(context), {"did": did, "updated_at": updated_at}, headers=headers)
-    assert resp.status_code == 200, (
-        f"Withdraw failed while preparing WITHDRAWN state for '{name}': {resp.status_code} {resp.text}"
+    return _post_reissuing_on_conflict(
+        context, contract_withdraw_url(context), {}, _seed_headers(context, name), name,
+        "Withdraw while preparing WITHDRAWN state",
     )
-    ContractService._refresh_contract(context, name)
-    return resp
 
 
 def _advance_to_submitted(context, name):
@@ -255,13 +247,10 @@ def _advance_to_approved(context, name):
     retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=approver_h)
     assert retrieve.status_code == 200, retrieve.text
     updated_at = retrieve.json().get("updated_at")
-    approve = post_json(
-        context, contract_approve_url(context), {"did": did, "updated_at": updated_at}, headers=approver_h
+    _post_reissuing_on_conflict(
+        context, contract_approve_url(context), {}, approver_h, name,
+        "Approve while preparing APPROVED state",
     )
-    assert approve.status_code == 200, (
-        f"Approve failed while preparing APPROVED state for '{name}': {approve.status_code} {approve.text}"
-    )
-    ContractService._refresh_contract(context, name)
 
 
 def _apply_signature(context, name):
@@ -332,19 +321,43 @@ def _revoke_signature(context, name):
     ContractService._refresh_contract(context, name)
 
 
-def _terminate_contract(context, name):
-    did, updated_at = ContractService._contract_data(context, name)
-    manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    resp = post_json(
-        context,
-        contract_terminate_url(context),
-        {"did": did, "reason": "BDD setup", "updated_at": updated_at},
-        headers=manager_h,
-    )
-    assert resp.status_code == 200, (
-        f"Terminate failed while preparing TERMINATED state for '{name}': {resp.status_code} {resp.text}"
+def _post_reissuing_on_conflict(context, url, payload, headers, name, what):
+    """POST a lifecycle setup command, re-reading updated_at immediately before
+    each attempt.
+
+    These helpers only exist to put a contract into a given state; the token
+    they hold was read a step or more earlier, and a background writer (the PDF
+    regenerator, an arriving peer ship) can advance updated_at in between. The
+    backend answers that with a retryable conflict, so re-read and reissue
+    rather than fail a scenario on a race it is not testing. Steps that
+    deliberately present a stale token to prove the guard bites do NOT use this.
+    """
+    did, _ = ContractService._contract_data(context, name)
+    resp = None
+    for _ in range(4):
+        ContractService._refresh_contract(context, name)
+        _, updated_at = ContractService._contract_data(context, name)
+        resp = post_json(context, url, dict(payload, did=did, updated_at=updated_at), headers=headers)
+        if resp.status_code != 409:
+            break
+        time.sleep(1)
+    assert resp is not None and resp.status_code == 200, (
+        f"{what} failed for '{name}': {resp.status_code if resp is not None else 'no request made'} "
+        f"{resp.text if resp is not None else ''}"
     )
     ContractService._refresh_contract(context, name)
+    return resp
+
+
+def _terminate_contract(context, name):
+    _post_reissuing_on_conflict(
+        context,
+        contract_terminate_url(context),
+        {"reason": "BDD setup"},
+        AuthService.get_headers_for_roles(["Contract Manager"]),
+        name,
+        "Terminate while preparing TERMINATED state",
+    )
 
 
 def _reach_state(context, name, state):

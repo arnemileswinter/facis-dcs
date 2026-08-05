@@ -34,6 +34,12 @@ jobs:
       - name: Check Formatting (Prettier)
         run: npm run format:check
 
+      # The component and store tests. Without this step they run only on a
+      # developer's machine, and a half-updated expectation stays red for days
+      # without anyone noticing.
+      - name: Frontend unit tests (vitest)
+        run: npm test
+
       - name: Write frontend success summary
         if: success()
         run: |

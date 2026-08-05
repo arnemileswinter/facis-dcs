@@ -71,15 +71,42 @@ function openNegotiation() {
   void router.push({ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: props.contract.did } })
 }
 
+// Every field identifier the document still binds — from prose placeholders,
+// ODRL operands, or a data object's leaf. A declaration the document no longer
+// references anywhere is what a deleted clause leaves behind: nothing renders
+// an input for it, so no user can ever fill it.
+function boundFieldIds(document: unknown, declared: Set<string>, found = new Set<string>()): Set<string> {
+  if (Array.isArray(document)) {
+    for (const entry of document) boundFieldIds(entry, declared, found)
+    return found
+  }
+  if (typeof document !== 'object' || document === null) return found
+  for (const [key, value] of Object.entries(document)) {
+    // The declaration list itself states which fields exist, not which are used.
+    if (key === 'dcs:contractFields') continue
+    if (key === '@id' && typeof value === 'string' && declared.has(value)) found.add(value)
+    else boundFieldIds(value, declared, found)
+  }
+  return found
+}
+
 // Required contract fields still missing a filled dcs:value — the completeness
 // the backend's offer gate (command/offer.go validateOfferReady, SRS §1.2
 // definite proposal / §2.2.2 filled-out contract) rejects; checked here too so
 // the action is disabled with a reason instead of failing on click. The
-// backend stays authoritative.
+// backend stays authoritative, so this must never be the stricter of the two:
+// validation.ValidateContractClosed blocks on a field a rule or a prose
+// segment REFERENCES, and an unreferenced declaration passes it. Counting one
+// here disabled the button over a field the offer would have accepted, with a
+// reason naming something the contract no longer shows (a clause deleted in
+// the builder leaves its declarations behind).
 const unfilledRequired = computed<DcsContractField[]>(() => {
   const fields = props.contract.contract_data?.['dcs:contractFields'] ?? []
+  const declared = new Set(fields.map((field) => field['@id']))
+  const bound = boundFieldIds(props.contract.contract_data, declared)
   return fields.filter((field) => {
     if (!field['dcs:required']) return false
+    if (!bound.has(field['@id'])) return false
     const value = fieldFillScalar(field['dcs:value'])
     return value === undefined || value === null || String(value).trim() === ''
   })

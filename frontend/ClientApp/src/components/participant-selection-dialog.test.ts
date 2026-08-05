@@ -75,10 +75,11 @@ describe('contract creation participants', () => {
 
     expect(wrapper.find('select').element.value).toBe('')
     await wrapper.find('input[placeholder="did:web:..."]').setValue('did:web:peer.example')
+    // The option shows the catalogue's own label, verbatim.
     expect(wrapper.findAll('select option').map((option) => option.text())).toEqual([
       'Select your role',
-      'Supplier',
-      'Client',
+      'supplier',
+      'client',
     ])
     await wrapper.find('select').setValue(ROLE_CLIENT)
     await wrapper.find('input[placeholder="Acme GmbH, Beispiel AG"]').setValue('Acme GmbH, Beispiel AG')

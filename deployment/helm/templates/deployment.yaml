@@ -326,6 +326,18 @@ spec:
             {{- if $archiveNotaryBaseURL }}
             {{- $archiveNotaryURL = printf "%s%s" $archiveNotaryBaseURL .Values.archiveNotary.notaryPath }}
             {{- $archiveAuditLogURL = printf "%s%s" $archiveNotaryBaseURL .Values.archiveNotary.auditLogPath }}
+            {{/*
+            The URL above is derived automatically as soon as the bundled ORCE
+            is enabled, while the token below defaults to empty — so a release
+            that configures neither addresses a notary it cannot authenticate
+            against. Refused here, at render time, because the runtime symptom
+            appears at the end of the contract lifecycle: the signed document is
+            rejected while its archive entry is notarized. One value authorizes
+            both sides (charts/orce reads the same global).
+            */}}
+            {{- if not (or .Values.global.archiveAuditToken .Values.global.archiveAuditTokenSecretRef.name) }}
+            {{- fail "archiveNotary is addressed (orce.enabled or archiveNotary.baseURL) but no bearer token is configured: set global.archiveAuditToken or global.archiveAuditTokenSecretRef.name — it authorizes the DCS against the ORCE archive flow, and without it every signature is refused when its archive entry is notarized" }}
+            {{- end }}
             {{- end }}
             - name: ORCE_ARCHIVE_NOTARY_URL
               value: {{ $archiveNotaryURL | quote }}

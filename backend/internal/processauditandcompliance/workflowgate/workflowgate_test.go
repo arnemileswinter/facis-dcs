@@ -488,6 +488,60 @@ func TestConcurrentClaimDispatchesExactlyOnceAndReusesSameRun(t *testing.T) {
 	require.Equal(t, got[0].runID, got[1].runID)
 }
 
+// closeoutDriver honours the context the way a real database driver does, and
+// records the statements that actually reached it.
+type closeoutDriver struct{ state *closeoutState }
+type closeoutState struct {
+	mu       sync.Mutex
+	executed []string
+}
+type closeoutConn struct{ state *closeoutState }
+
+func (d closeoutDriver) Open(string) (driver.Conn, error) { return &closeoutConn{state: d.state}, nil }
+func (c *closeoutConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is unsupported")
+}
+func (c *closeoutConn) Close() error { return nil }
+func (c *closeoutConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are unsupported")
+}
+func (c *closeoutConn) ExecContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	c.state.executed = append(c.state.executed, query)
+	return driver.RowsAffected(1), nil
+}
+
+// A gate dispatch usually fails because the caller went away — an HTTP client
+// timeout, a cancelled request. Closing the run out on that same dead context
+// wrote nothing, so the row stayed DISPATCHING; since (snapshot_id,gate) is
+// unique, every later transition of that contract then read the abandoned run
+// and was refused with 409 "does not permit transition", permanently.
+func TestRunIsClosedOutEvenWhenTheCallerIsGone(t *testing.T) {
+	state := &closeoutState{}
+	driverName := "workflow-gate-closeout-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	sql.Register(driverName, closeoutDriver{state: state})
+	rawDB, err := sql.Open(driverName, "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rawDB.Close() })
+	coordinator := &Coordinator{DB: sqlx.NewDb(rawDB, driverName)}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, coordinator.finish(cancelled, uuid.NewString(), "BLOCKED", validGateRequest(), nil,
+		errors.New("executor dispatch failed: context canceled")))
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	require.Len(t, state.executed, 1)
+	require.Contains(t, state.executed[0], "UPDATE pac_workflow_gate_runs")
+	require.Contains(t, state.executed[0], "status='DISPATCHING'")
+}
+
 func TestReviewedContinuationRefreshesTimestampForUnchangedSnapshot(t *testing.T) {
 	content := map[string]any{
 		"@id":                  "did:web:example.test:contract",

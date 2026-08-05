@@ -519,9 +519,15 @@ func main() {
 	}
 
 	archiveNotaryURL := strings.TrimSpace(os.Getenv("ORCE_ARCHIVE_NOTARY_URL"))
+	archiveNotaryToken := os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN")
+	// Reported here rather than at the first signature: see
+	// cwecommand.ValidateArchiveNotaryConfig.
+	if err := cwecommand.ValidateArchiveNotaryConfig(archiveNotaryURL, archiveNotaryToken); err != nil {
+		log.Fatalf(ctx, err, "archive notary configuration error")
+	}
 	var archiveNotaryClient cwecommand.ArchiveNotary
 	if archiveNotaryURL != "" {
-		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, os.Getenv("ORCE_ARCHIVE_AUDIT_LOG_BEARER_TOKEN"))
+		archiveNotaryClient = cwecommand.NewHTTPArchiveNotaryClient(archiveNotaryURL, archiveNotaryToken)
 	}
 
 	// Contract deployment (UC-05-01): a contract designates a registered target
@@ -632,7 +638,17 @@ func main() {
 
 	// Sign contract-lifecycle VCs (DCS-OR-C2PA-004) with the HSM VC key,
 	// producing an ecdsa-rdfc-2019 Data Integrity proof.
-	issuerDID := os.Getenv("ISSUER_DID")
+	//
+	// This identity is stamped into every credential this deployment issues AND
+	// named as the `iss` of the status list that governs them — a verifier binds
+	// the two by comparing them, so they are one value on purpose. Empty, the
+	// deployment would issue credentials no one can attribute and serve a list
+	// that identifies nobody, which surfaces as an unreadable revocation state
+	// on every verification rather than as the missing setting it is.
+	issuerDID := strings.TrimSpace(os.Getenv("ISSUER_DID"))
+	if issuerDID == "" {
+		log.Fatalf(ctx, nil, "ISSUER_DID is required: it is the issuer of this deployment's credentials and of the status list serving them (chart value signing.issuerDID)")
+	}
 	vcKeyLabel := hsm.KeyLabelVC()
 	vcHSMSigner, err := hsmClient.Signer(vcKeyLabel)
 	if err != nil {
@@ -696,7 +712,12 @@ func main() {
 		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
 	}
 	statusListSigner := &provenance.StatusListSigner{
-		Issuer:      statusListIssuerURL,
+		// The identity that ISSUED the credentials this list governs, which is
+		// the one NewLocalVCIssuer stamps into them (see StatusListSigner.Issuer):
+		// a verifier binds list to credential by comparing the two.
+		// statusListIssuerURL stays what it is for — building the list's public
+		// URI, the `sub` and the credentialStatus a credential points at.
+		Issuer:      issuerDID,
 		ListURI:     statusListURI,
 		ListID:      statusListID,
 		Chain:       issuerX5Chain,
