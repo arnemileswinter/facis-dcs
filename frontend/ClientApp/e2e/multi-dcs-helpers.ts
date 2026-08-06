@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
+import { selectOriginatorRole } from './lifecycle-helpers'
 import {
   E2E_API_BASE,
   E2E_API_BASE_B,
@@ -11,7 +12,6 @@ import {
   E2E_FRONTEND_B_ORIGIN,
   E2E_ISSUER_BASE_URL,
 } from '../playwright.config'
-import { selectOriginatorRole } from './lifecycle-helpers'
 import { formatNumberInput } from '../src/modules/template-repository/utils/number-format'
 import type { Browser, BrowserContext, Page, Response } from '@playwright/test'
 
@@ -1016,7 +1016,7 @@ async function contractRecordOn(inst: Instance, contractDid: string): Promise<Co
 
 interface ContractRecord {
   contract_data?: Record<string, unknown>
-  negotiations?: Array<{ created_by?: string }>
+  negotiations?: { created_by?: string }[]
 }
 
 /** The contract document as this instance holds it. */
@@ -1314,7 +1314,7 @@ export async function awaitPeerRedlineOn(
   let held = ''
   for (let attempt = 0; attempt < 12; attempt++) {
     record = await contractRecordOn(inst, contractDid)
-    const fields = (record.contract_data?.['dcs:contractFields'] ?? []) as Array<Record<string, unknown>>
+    const fields = (record.contract_data?.['dcs:contractFields'] ?? []) as Record<string, unknown>[]
     held = JSON.stringify(fields.find((field) => field['dcs:label'] === opts.label)?.['dcs:value'] ?? null)
     if (held.includes(opts.value)) break
     await inst.page.waitForTimeout(5_000)

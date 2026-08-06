@@ -56,7 +56,7 @@ export async function selectOriginatorRole(dialog: Locator): Promise<void> {
   const roleSelect = dialog.getByLabel(/Your role in this contract/)
   await expect(roleSelect).toBeEnabled()
   const value = await roleSelect.locator('option:not([disabled])').first().getAttribute('value')
-  await roleSelect.selectOption(value!)
+  await roleSelect.selectOption(value)
 }
 
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {
