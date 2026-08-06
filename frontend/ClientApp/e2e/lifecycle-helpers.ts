@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession, test } from './dcs-test'
 import { E2E_API_BASE, E2E_DSS_URL, E2E_FRONTEND_ORIGIN, E2E_ISSUER_BASE_URL } from '../playwright.config'
-import type { Browser, Page } from '@playwright/test'
+import type { Browser, Locator, Page } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../../..')
@@ -44,7 +44,19 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
+  await selectOriginatorRole(dialog)
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
+}
+
+/** Picks the first of the template's two catalogued roles as the originator's
+ *  own. The dialog refuses Apply without one: the role binds the creating
+ *  organization to a party in the machine-readable rules, and the select stays
+ *  disabled until the loaded template declares exactly two catalogued roles. */
+export async function selectOriginatorRole(dialog: Locator): Promise<void> {
+  const roleSelect = dialog.getByLabel(/Your role in this contract/)
+  await expect(roleSelect).toBeEnabled()
+  const value = await roleSelect.locator('option:not([disabled])').first().getAttribute('value')
+  await roleSelect.selectOption(value!)
 }
 
 async function waitForTemplateLoaded(page: Page, name: string): Promise<void> {

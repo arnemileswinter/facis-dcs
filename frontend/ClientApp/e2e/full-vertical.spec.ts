@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { type DcsRole, expect, test } from './dcs-test'
-import { signApprovedContractViaViewer } from './lifecycle-helpers'
+import { selectOriginatorRole, signApprovedContractViaViewer } from './lifecycle-helpers'
 import type { Page } from '@playwright/test'
 
 /**
@@ -63,6 +63,7 @@ async function confirmModal(page: Page, buttonName: 'Submit' | 'Confirm'): Promi
 async function completeParticipantDialog(page: Page): Promise<void> {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
+  await selectOriginatorRole(dialog)
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 

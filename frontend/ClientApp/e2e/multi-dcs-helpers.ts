@@ -11,6 +11,7 @@ import {
   E2E_FRONTEND_B_ORIGIN,
   E2E_ISSUER_BASE_URL,
 } from '../playwright.config'
+import { selectOriginatorRole } from './lifecycle-helpers'
 import { formatNumberInput } from '../src/modules/template-repository/utils/number-format'
 import type { Browser, BrowserContext, Page, Response } from '@playwright/test'
 
@@ -1053,6 +1054,7 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
   const dialog = inst.page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
   await dialog.getByPlaceholder('did:web:...').fill(counterparty)
+  await selectOriginatorRole(dialog)
   const created = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/create') && r.request().method() === 'POST',
   )
