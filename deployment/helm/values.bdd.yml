@@ -339,6 +339,13 @@ statusListLocalhostProxy:
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:
   enabled: true
+  # kubo pinned for the disposable stack: `latest` moved to 0.43.0 mid-week and
+  # pin/add started outliving the document-manager's 5s client timeout once the
+  # suite's pinset grew — the same node on 0.35 carried the full run. The
+  # rollback trap the chart warns about (an older kubo refusing a newer repo)
+  # cannot bite here: every run initialises a fresh volume.
+  image:
+    tag: "v0.35.0"
   # Disposable-stack node tuning (charts/ipfs/values.yaml): no DHT to provide
   # to, and no per-block fsync — the fsync is what pushed pin/add past the
   # document-manager's 5s timeout late in the suite, after which every store

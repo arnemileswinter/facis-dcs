@@ -222,20 +222,30 @@ def _advance_to_reviewed(context, name):
     _advance_to_submitted(context, name)
     did, _ = ContractService._contract_data(context, name)
     reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
-    retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
-    assert retrieve.status_code == 200, retrieve.text
-    retrieved = retrieve.json()
-    updated_at = retrieved.get("updated_at")
-    review_submit = post_json(
-        context,
-        contract_submit_url(context),
-        ContractService._contract_reviewer_submit_payload(context, did, updated_at),
-        headers=reviewer_h,
-    )
-    assert review_submit.status_code == 200, (
+    # Same treatment as _post_reissuing_on_conflict, inlined because the
+    # reviewer payload is rebuilt around the fresh token rather than merely
+    # carrying it: a background writer advancing updated_at between the read
+    # and this submit is a retryable conflict, not the thing under test.
+    review_submit = None
+    retrieved = {}
+    for _ in range(4):
+        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
+        assert retrieve.status_code == 200, retrieve.text
+        retrieved = retrieve.json()
+        updated_at = retrieved.get("updated_at")
+        review_submit = post_json(
+            context,
+            contract_submit_url(context),
+            ContractService._contract_reviewer_submit_payload(context, did, updated_at),
+            headers=reviewer_h,
+        )
+        if review_submit.status_code != 409:
+            break
+        time.sleep(1)
+    assert review_submit is not None and review_submit.status_code == 200, (
         f"Reviewer submit (forward_to=approval) failed while preparing REVIEWED state for "
-        f"'{name}' from retrieved state {retrieved.get('state')!r} with "
-        f"updated_at token {updated_at!r}: {review_submit.status_code} {review_submit.text}"
+        f"'{name}' from retrieved state {retrieved.get('state')!r}: "
+        f"{review_submit.status_code} {review_submit.text}"
     )
     ContractService._refresh_contract(context, name)
 
@@ -271,9 +281,19 @@ def _apply_signature(context, name):
     ceremony_id, _presentation, subject_did = _run_full_ceremony(
         context, name, party_did, "BDD Counterparty Signer"
     )
-    resp = wallet_sign(
-        context, did, signer_did=subject_did, signatory="BDD Counterparty Signer", ceremony_id=ceremony_id
-    )
+    # The refusal is explicit about being temporary — the async regenerator is
+    # still writing the PDF this signature must cover — so it is waited out
+    # rather than failing a scenario on the pipeline's own pacing.
+    deadline = time.monotonic() + 120
+    while True:
+        resp = wallet_sign(
+            context, did, signer_did=subject_did, signatory="BDD Counterparty Signer", ceremony_id=ceremony_id
+        )
+        if resp.status_code == 200:
+            break
+        if "still being regenerated" not in resp.text or time.monotonic() >= deadline:
+            break
+        time.sleep(5)
     assert resp.status_code == 200, (
         f"Wallet signing failed while preparing SIGNED state for '{name}': {resp.status_code} {resp.text}"
     )
