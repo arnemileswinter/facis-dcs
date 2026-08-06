@@ -237,3 +237,29 @@ func TestCreateFileStoresRawBytesVerbatim(t *testing.T) {
 		t.Fatalf("raw bytes must reach Kubo unwrapped, got %q", uploaded)
 	}
 }
+
+// TestFetchKuboFileAsksOffline guards against a dangling CID costing a whole
+// request budget. Kubo answers a cat for a block it does not hold by going to
+// the network, and this node is configured with no routing and no peers, so it
+// waits instead of answering. Measured on a live node: a missing block hung
+// past 12s plain and failed in 0s with offline=true.
+func TestFetchKuboFileAsksOffline(t *testing.T) {
+	var gotOffline string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v0/cat" {
+			http.NotFound(w, r)
+			return
+		}
+		gotOffline = r.URL.Query().Get("offline")
+		_, _ = w.Write([]byte(`{"event":"stored"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.FetchFile("some-cid"); err != nil {
+		t.Fatalf("FetchFile returned error: %v", err)
+	}
+	if gotOffline != "true" {
+		t.Fatalf("cat must be requested with offline=true, got %q", gotOffline)
+	}
+}

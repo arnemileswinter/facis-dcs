@@ -140,7 +140,14 @@ func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
-	url := fmt.Sprintf("%s/api/v0/cat?arg=%s", c.mfsBaseURL, cid)
+	// offline=true because every CID this service reads is one it stored
+	// itself. Without it a block the node does not hold sends kubo to the
+	// network to look for it, and a node configured with no routing and no
+	// peers has nowhere to look — so instead of answering "missing" it waits
+	// until the caller's own timeout expires. An audit chain walk that meets
+	// one dangling CID then spends the whole request budget on it. Offline,
+	// a present block reads exactly as before and a missing one fails at once.
+	url := fmt.Sprintf("%s/api/v0/cat?arg=%s&offline=true", c.mfsBaseURL, cid)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubo cat request: %w", err)
