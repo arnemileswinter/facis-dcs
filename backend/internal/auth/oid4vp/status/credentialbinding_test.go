@@ -96,13 +96,13 @@ func TestDidWebIssuerRefusesForeignOrigins(t *testing.T) {
 		credentialIssuer string
 		listIssuer       string
 	}{
-		"different host":    {"did:web:mine.example", "https://someone-else.example"},
-		"different port":    {"did:web:mine.example%3A8443", "https://mine.example:8080"},
-		"different path":    {"did:web:mine.example:issuer", "https://mine.example/other"},
-		"missing path":      {"did:web:mine.example:issuer", "https://mine.example"},
-		"extra path":        {"did:web:mine.example", "https://mine.example/issuer"},
-		"not a web origin":  {"did:web:mine.example", "ftp://mine.example"},
-		"not a did":         {"did:key:z6Mk", "https://mine.example"},
+		"different host":   {"did:web:mine.example", "https://someone-else.example"},
+		"different port":   {"did:web:mine.example%3A8443", "https://mine.example:8080"},
+		"different path":   {"did:web:mine.example:issuer", "https://mine.example/other"},
+		"missing path":     {"did:web:mine.example:issuer", "https://mine.example"},
+		"extra path":       {"did:web:mine.example", "https://mine.example/issuer"},
+		"not a web origin": {"did:web:mine.example", "ftp://mine.example"},
+		"not a did":        {"did:key:z6Mk", "https://mine.example"},
 	} {
 		credential := credentialFrom(map[string]any{"issuer": pair.credentialIssuer})
 		if err := status.RequireCredentialIssuer(credential, pair.listIssuer); err == nil {
