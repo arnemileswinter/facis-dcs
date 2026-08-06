@@ -436,3 +436,37 @@ func TestCreateRetryBackoffGrows(t *testing.T) {
 		t.Fatalf("backoff did not grow: first gap %v, last gap %v", firstGap, lastGap)
 	}
 }
+
+// A retry cadence that outgrows the caller's budget spends it waiting instead
+// of trying: the store then fails with attempts left unused, which turns a
+// slow node into a failed one.
+func TestCreateRetriesStayInsideTheCallersDeadline(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		time.Sleep(40 * time.Millisecond)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	client.fetchAttempts = 8
+	client.fetchBackoff = 30 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := client.CreateFile(ctx, map[string]string{"k": "v"})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("a server answering only 500 must fail the write")
+	}
+	if elapsed > 600*time.Millisecond {
+		t.Fatalf("the retry loop ran %v past a 400ms budget", elapsed)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("the budget was spent without retrying: %d attempts", calls.Load())
+	}
+}

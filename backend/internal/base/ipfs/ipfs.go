@@ -158,14 +158,26 @@ func (c *APIClient) createTenantFileWithRetry(ctx context.Context, body []byte) 
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 && c.fetchBackoff > 0 {
-			// Exponential, capped: a flat cadence keeps a struggling node at
-			// constant pressure, and a stampede of callers retrying in lockstep
-			// is what turned one slow pin into a stall nothing recovered from.
+			// Exponential but tightly capped, and never past the caller's own
+			// deadline: a flat cadence keeps a struggling node at constant
+			// pressure, while a cadence that outgrows the budget spends it
+			// waiting instead of trying — the store then fails with attempts
+			// left unused, which is how a slow node became a failed one.
 			delay := c.fetchBackoff << (attempt - 1)
-			if max := 8 * time.Second; delay > max {
+			if max := 2 * time.Second; delay > max {
 				delay = max
 			}
-			time.Sleep(delay)
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+				break
+			}
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				if lastErr == nil {
+					lastErr = ctx.Err()
+				}
+				return nil, lastErr
+			}
 		}
 
 		result, status, err := c.createTenantOnce(ctx, url, body)
