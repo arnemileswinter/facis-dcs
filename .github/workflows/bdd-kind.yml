@@ -175,11 +175,26 @@ jobs:
               ipfs repo stat || true
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
               ipfs swarm peers 2>/dev/null | wc -l || true
-            # Every stored object is also copied to the MFS root as a flat
-            # /<cid> entry (ipfs.go copyToMFS), so this counts the directory
-            # node that each subsequent files/cp has to rewrite.
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
               sh -c 'ipfs files ls / 2>/dev/null | wc -l' || true
+            # The manager's latencies are bimodal -- everything under 100ms or
+            # cut off at its flat 5s timeout, nothing in between -- and by the
+            # end of a run every create fails while kubo logs nothing at all.
+            # That is something wedged holding a lock, not a node running slow,
+            # so these ask kubo to do the same work itself. An add and a pin
+            # that return instantly here while the manager's creates all time
+            # out puts the fault in the manager, not the node; both hanging
+            # puts it in the node, and the goroutine dump then names whatever
+            # is holding the lock.
+            echo "--- ${release}-ipfs direct add/pin (5s budget each) ---"
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'date -u +%T; echo probe-$(date +%s) | timeout 5 ipfs add -q; date -u +%T' || true
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'timeout 5 ipfs pin add $(echo probe-pin-$(date +%s) | ipfs add -q) ; date -u +%T' || true
+            echo "--- ${release}-ipfs goroutine dump ---"
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'timeout 10 wget -qO- "http://127.0.0.1:5001/debug/pprof/goroutine?debug=2"' \
+              2>/dev/null | grep -A12 -E "^goroutine .*(semacquire|IO wait|sync\.|chan receive)" | head -120 || true
           done
 
       - name: Generate coverage XML and summary
