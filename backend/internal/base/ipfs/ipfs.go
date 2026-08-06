@@ -29,8 +29,10 @@ type APIClient struct {
 	baseURL    string
 	mfsBaseURL string
 	client     *http.Client
-	// writeSlots implements the maxConcurrentWrites bound.
+	// writeSlots implements the maxConcurrentWrites bound; bulkSlots the
+	// tighter maxConcurrentBulkWrites share of it.
 	writeSlots chan struct{}
+	bulkSlots  chan struct{}
 	// fetchAttempts and fetchBackoff bound the read-after-write retry against
 	// the tenant store, which is eventually consistent: a CID returned by
 	// CreateFile is not always immediately resolvable through the tenant
@@ -50,6 +52,7 @@ func NewClient(baseURL string, mfsBaseURL string) *APIClient {
 		fetchAttempts: 8,
 		fetchBackoff:  500 * time.Millisecond,
 		writeSlots:    make(chan struct{}, maxConcurrentWrites),
+		bulkSlots:     make(chan struct{}, maxConcurrentBulkWrites),
 	}
 }
 
@@ -65,6 +68,26 @@ func (c *APIClient) acquireWriteSlot(ctx context.Context) error {
 
 func (c *APIClient) releaseWriteSlot() {
 	<-c.writeSlots
+}
+
+// maxConcurrentBulkWrites is the share of the write pool a background batch may
+// hold. Anchoring drains hundreds of queued events concurrently, and with the
+// whole pool in its hands the store a signing ceremony is waiting on queues
+// behind bulk work nobody is watching — the smaller bound keeps slots free for
+// the callers with a user on the other end.
+const maxConcurrentBulkWrites = 2
+
+// CreateFileBulk is CreateFile for background batch work: it takes a bulk slot
+// before competing for the shared pool, so at most maxConcurrentBulkWrites of
+// the batch are ever in flight and interactive writes always find room.
+func (c *APIClient) CreateFileBulk(ctx context.Context, data any) (*IPFSResult, error) {
+	select {
+	case c.bulkSlots <- struct{}{}:
+		defer func() { <-c.bulkSlots }()
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for a bulk ipfs write slot: %w", ctx.Err())
+	}
+	return c.CreateFile(ctx, data)
 }
 
 type IPFSResult struct {
