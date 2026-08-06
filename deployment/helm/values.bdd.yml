@@ -346,6 +346,17 @@ ipfs:
   # cannot bite here: every run initialises a fresh volume.
   image:
     tag: "v0.35.0"
+  # The node competes with twenty-odd pods for the runner's four cores and
+  # pinning is CPU-bound hashing: under late-suite contention the fair CFS
+  # share is what stretches a pin past the document-manager's 5s budget. The
+  # request raises kubo's scheduling weight; the limit keeps it honest.
+  resources:
+    requests:
+      cpu: "1"
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
   # Disposable-stack node tuning (charts/ipfs/values.yaml): no DHT to provide
   # to, and no per-block fsync — the fsync is what pushed pin/add past the
   # document-manager's 5s timeout late in the suite, after which every store
