@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
-import { selectOriginatorRole } from './lifecycle-helpers'
+import { selectBilateralClauseRoles, selectOriginatorRole } from './lifecycle-helpers'
 import {
   E2E_API_BASE,
   E2E_API_BASE_B,
@@ -733,6 +733,7 @@ export async function authorSemanticComponent(inst: Instance, name: string): Pro
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
   await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
@@ -1041,9 +1042,11 @@ export async function resolveDidWeb(inst: Instance): Promise<string> {
  */
 export async function createContractViaUi(inst: Instance, templateName: string, counterparty: string): Promise<string> {
   // Entered from the Contracts list through its own New Contract action, so the
-  // creator's route in is exercised rather than assumed.
+  // creator's route in is exercised rather than assumed. The list renders the
+  // action twice — the page header and the empty-state hint both link to it —
+  // and either one is the creator's route in.
   await inst.gotoAs('Contract Creator', '/ui/contracts')
-  await inst.page.getByRole('link', { name: 'New Contract', exact: true }).click()
+  await inst.page.getByRole('link', { name: 'New Contract', exact: true }).first().click()
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/new$/)
   const picker = inst.page.locator('select').first()
   const option = picker.locator('option', { hasText: templateName })

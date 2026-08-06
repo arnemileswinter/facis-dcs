@@ -202,6 +202,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     // provided" and block create.
     await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
     await ruleSelect('Action').selectOption({ label: 'use' })
+    await selectBilateralClauseRoles(editor)
     await editor.getByRole('button', { name: '+ constraint' }).click()
     const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
     await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })

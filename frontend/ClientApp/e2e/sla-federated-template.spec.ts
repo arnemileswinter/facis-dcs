@@ -1,4 +1,5 @@
 import { expect, test } from './dcs-test'
+import { selectBilateralClauseRoles } from './lifecycle-helpers'
 import {
   acceptOfferOn,
   assertReceivedInState,
@@ -319,6 +320,7 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
       editor.locator('label.form-control').filter({ hasText: name }).locator('select')
     await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
     await ruleSelect('Action').selectOption({ label: 'use' })
+    await selectBilateralClauseRoles(editor)
     // The permission targets the declared service object, not the contract —
     // an ODRL rule is about a thing (ADR-23).
     await ruleSelect('Toward').selectOption({ label: 'Managed Service' })

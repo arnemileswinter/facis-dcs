@@ -48,6 +48,24 @@ async function completeParticipantDialog(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click()
 }
 
+/** Binds the clause rule to the two catalogued roles — Granted by (assigner)
+ *  and Applies to (assignee). The builder emits no rule while either is unset,
+ *  and a template whose rules name no role parties declares no roles for a
+ *  contract to bind its originator to. */
+export async function selectBilateralClauseRoles(editor: Locator): Promise<void> {
+  const roleSelect = (label: string) =>
+    editor.locator('label.form-control').filter({ hasText: label }).locator('select')
+  const assigner = roleSelect('Granted by')
+  const assignee = roleSelect('Applies to')
+  const values = await assigner
+    .locator('option:not([disabled])')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter(Boolean))
+  const [assignerRole, assigneeRole] = values
+  if (!assignerRole || !assigneeRole) throw new Error('the role catalog does not expose two roles')
+  await assigner.selectOption(assignerRole)
+  await assignee.selectOption(assigneeRole)
+}
+
 /** Picks the first of the template's two catalogued roles as the originator's
  *  own. The dialog refuses Apply without one: the role binds the creating
  *  organization to a party in the machine-readable rules, and the select stays
@@ -156,6 +174,7 @@ async function authorPaymentComponent(
     editor.locator('label.form-control').filter({ hasText: label }).locator('select')
   await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
   await ruleSelect('Action').selectOption({ label: 'use' })
+  await selectBilateralClauseRoles(editor)
   await editor.getByRole('button', { name: '+ constraint' }).click()
   const constraint = editor.locator('.flex.flex-wrap.items-center.gap-1').last()
   await constraint.locator('select').nth(0).selectOption({ label: 'Payment Amount' })
