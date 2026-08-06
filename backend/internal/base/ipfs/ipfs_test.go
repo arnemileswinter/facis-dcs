@@ -470,3 +470,75 @@ func TestCreateRetriesStayInsideTheCallersDeadline(t *testing.T) {
 		t.Fatalf("the budget was spent without retrying: %d attempts", calls.Load())
 	}
 }
+
+// TestFetchFilePrefersKuboAndLeavesTheTenantAlone pins the read ordering that
+// keeps stores alive. The tenant manager answers every GET by listing the whole
+// pinset and scanning it (ssi-vdr-ipfs Get -> Pin().Ls), holding the pinner read
+// lock a concurrent store needs to pin; a read served from Kubo by content
+// address touches none of that. A resolvable CID must therefore never reach the
+// tenant at all.
+func TestFetchFilePrefersKuboAndLeavesTheTenantAlone(t *testing.T) {
+	payload := []byte("%PDF-1.7\nserved by kubo")
+	var tenantCalls, kuboCalls int32
+
+	tenant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tenantCalls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"cid"},"data":%q}`,
+			base64.StdEncoding.EncodeToString([]byte("tenant copy")))
+	}))
+	defer tenant.Close()
+
+	kubo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v0/cat" {
+			http.NotFound(w, r)
+			return
+		}
+		atomic.AddInt32(&kuboCalls, 1)
+		_, _ = w.Write(payload)
+	}))
+	defer kubo.Close()
+
+	client := NewClient(tenant.URL, kubo.URL)
+	result, err := client.FetchFile("cid")
+	if err != nil {
+		t.Fatalf("FetchFile returned error: %v", err)
+	}
+	if string(result.Data) != string(payload) {
+		t.Fatalf("expected the Kubo copy, got %q", result.Data)
+	}
+	if got := atomic.LoadInt32(&kuboCalls); got != 1 {
+		t.Fatalf("expected exactly one Kubo cat, got %d", got)
+	}
+	if got := atomic.LoadInt32(&tenantCalls); got != 0 {
+		t.Fatalf("a Kubo-resolvable CID must not reach the tenant manager, got %d calls", got)
+	}
+}
+
+// TestFetchFileFallsBackToTenantWhenKuboLacksTheBlock is the other half: the
+// Kubo copy is written synchronously, but a peer-shipped object can be read
+// before its copy lands, and the tenant index is the authority for those.
+func TestFetchFileFallsBackToTenantWhenKuboLacksTheBlock(t *testing.T) {
+	payload := []byte("%PDF-1.7\nonly the tenant has this")
+
+	tenant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"cid"},"data":%q}`,
+			base64.StdEncoding.EncodeToString(payload))
+	}))
+	defer tenant.Close()
+
+	kubo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no such block", http.StatusInternalServerError)
+	}))
+	defer kubo.Close()
+
+	client := NewClient(tenant.URL, kubo.URL)
+	result, err := client.FetchFile("cid")
+	if err != nil {
+		t.Fatalf("FetchFile must fall back to the tenant, got error: %v", err)
+	}
+	if string(result.Data) != string(payload) {
+		t.Fatalf("expected the tenant copy, got %q", result.Data)
+	}
+}

@@ -234,32 +234,29 @@ func (c *APIClient) FetchFile(cid string) (*IPFSResult, error) {
 		return c.fetchKuboFile(cid)
 	}
 
-	// Fast path: one tenant attempt, then the durable pinned Kubo copy. Both are
-	// written synchronously by CreateFile (copyToMFS), so the common case — the
-	// tenant document-manager dropped its DataIdentifier mapping under load —
-	// resolves in two quick calls. Doing the multi-second tenant retry first
-	// would compound over a long audit-chain walk into a request-deadline
-	// timeout (DCS-FR-CSA: the tamper-proof trail read must not 404 or hang on a
-	// link the tenant index transiently forgot; the Kubo copy is identical and
-	// the hash chain still verifies).
-	if body, status, err := c.getOnce(fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)); err == nil && status == http.StatusOK {
-		return decodeTenantBody(body)
-	}
+	// Kubo first, tenant only as the fallback. Both hold the same bytes —
+	// CreateFile writes the Kubo copy synchronously (copyToMFS) — but they do
+	// not cost the same to read. The tenant manager answers a GET by listing
+	// the node's ENTIRE pinset and scanning it for the CID before it fetches
+	// anything (ssi-vdr-ipfs main.go Get -> Pin().Ls), so a read costs O(pins)
+	// and does it holding Kubo's pinner read lock, which is the same lock a
+	// concurrent store needs to pin. Over a long audit-chain walk against a
+	// repo that has grown all run, that is what starves the stores: reads and
+	// writes queue on each other until both exceed the manager's fixed 5s and
+	// every store fails at once. cat?arg=<cid> resolves the same bytes by
+	// content address, touching no pin state at all.
 	if c.mfsBaseURL != "" {
 		if kubo, kerr := c.fetchKuboFile(cid); kerr == nil {
 			return kubo, nil
 		}
 	}
 
-	// Neither resolved on the first try — treat as genuine read-after-write lag
-	// and retry the tenant path with backoff, falling back to Kubo once more.
+	// The Kubo copy is missing — read-after-write lag against a peer-shipped
+	// object, or an artifact written before its MFS copy landed. The tenant
+	// index is the authority for those (DCS-FR-CSA: the tamper-proof trail read
+	// must not 404 on a link one store transiently forgot).
 	body, err := c.fetchTenantFileWithRetry(cid)
 	if err != nil {
-		if c.mfsBaseURL != "" {
-			if kubo, kerr := c.fetchKuboFile(cid); kerr == nil {
-				return kubo, nil
-			}
-		}
 		return nil, err
 	}
 	return decodeTenantBody(body)
