@@ -23,7 +23,13 @@ import (
 // pin outlives the manager's own client timeout, every further caller that
 // piles on keeps the node saturated and the failure feeds itself — the cap
 // turns that stampede into a queue the node can drain.
-const maxConcurrentWrites = 4
+//
+// The bound is this tight because the manager gives each request a fixed 5s
+// and the node works through pins close to serially once the repo has grown:
+// at seconds per pin, the wait in a deeper queue alone exceeds the budget, so
+// the last caller in line fails on queueing rather than on work. Two in
+// flight keeps the worst wait one service-time deep.
+const maxConcurrentWrites = 2
 
 type APIClient struct {
 	baseURL    string
@@ -75,7 +81,7 @@ func (c *APIClient) releaseWriteSlot() {
 // whole pool in its hands the store a signing ceremony is waiting on queues
 // behind bulk work nobody is watching — the smaller bound keeps slots free for
 // the callers with a user on the other end.
-const maxConcurrentBulkWrites = 2
+const maxConcurrentBulkWrites = 1
 
 // CreateFileBulk is CreateFile for background batch work: it takes a bulk slot
 // before competing for the shared pool, so at most maxConcurrentBulkWrites of
