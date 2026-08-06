@@ -6,6 +6,7 @@ ontology-prefix enforcement at template creation."""
 
 import json
 import re
+import time
 
 import requests as _requests
 from behave import given, then, when
@@ -15,6 +16,7 @@ from steps.support.api_client import (
     get_with_headers,
     hub_shapes_anchors,
     pac_audit_timeline,
+    pac_audit_url,
     post_json,
     template_create_url,
 )
@@ -423,6 +425,26 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
     did, _ = ContractService._contract_data(context, name)
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
+    # The trail an audit reads is the ANCHORED one: an event reaches it when
+    # the outbox worker has stored it to IPFS, and late in a run that queue is
+    # minutes deep. A snapshot taken before this contract's events anchored is
+    # the queue's depth, not a missing entry — re-run the audit until the entry
+    # lands or the deadline says it genuinely never did.
+    deadline = time.monotonic() + 240
+    while not entries and time.monotonic() < deadline:
+        time.sleep(10)
+        headers = AuthService.get_headers_for_roles(["Auditor"])
+        response = _requests.post(
+            pac_audit_url(context),
+            json={"scope": "contracts", "justification": "BDD process audit (anchor catch-up)"},
+            headers=headers,
+            timeout=max(context.http_timeout_seconds * 4, 240),
+        )
+        if response.status_code != 200:
+            continue
+        context.requests_response = response
+        timeline = pac_audit_timeline(context.requests_response)
+        entries = [entry for entry in timeline if entry.get("did") == did]
     assert entries, (
         f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
         f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
