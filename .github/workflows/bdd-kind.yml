@@ -149,7 +149,38 @@ jobs:
           # the disk-pressure half outright.
           kubectl logs -n dcs-bdd deployment/dcs-ipfs --tail=400 --prefix || true
           kubectl logs -n dcs-bdd deployment/dcs-ipfs-document-manager --tail=400 --prefix || true
+          # Grepped from the whole log, not tailed: a --tail=N window only ever
+          # showed failures already in progress, which cannot distinguish a node
+          # that degrades as the run grows from one that was slow from the first
+          # store. The first failing timestamp is the answer, and it is off the
+          # end of any tail.
+          echo "--- document-manager 5xx over the whole run ---"
+          kubectl logs -n dcs-bdd deployment/dcs-ipfs-document-manager --tail=-1 \
+            | grep -E '\| 5[0-9][0-9] \|' | head -5 || true
+          kubectl logs -n dcs-bdd deployment/dcs-ipfs-document-manager --tail=-1 \
+            | grep -cE '\| 5[0-9][0-9] \|' || true
           docker exec dcs-bdd-control-plane df -h / /var || true
+          # The manager reports "failed to pin" at a flat 5.00s -- its own client
+          # timeout -- which says only that kubo did not answer, never why. These
+          # ask the node itself, and the pin count is the one number that decides
+          # between "the pinset grew until pin/add is O(n)" and "the node is
+          # starved": a slow node with a small pinset is a CPU problem, a slow
+          # node with thousands of pins is a volume problem, and the two have
+          # opposite fixes.
+          for release in dcs dcs2; do
+            echo "--- ${release}-ipfs node state ---"
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'ipfs pin ls --type=recursive 2>/dev/null | wc -l' || true
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              ipfs repo stat || true
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              ipfs swarm peers 2>/dev/null | wc -l || true
+            # Every stored object is also copied to the MFS root as a flat
+            # /<cid> entry (ipfs.go copyToMFS), so this counts the directory
+            # node that each subsequent files/cp has to rewrite.
+            kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
+              sh -c 'ipfs files ls / 2>/dev/null | wc -l' || true
+          done
 
       - name: Generate coverage XML and summary
         if: always()
