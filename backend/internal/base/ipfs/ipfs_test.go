@@ -2,7 +2,6 @@ package ipfs
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -108,38 +107,6 @@ func TestFetchFileReadsFromKuboByCID(t *testing.T) {
 	}
 }
 
-func TestFetchKuboFile_DecodesBase64WrapPayload(t *testing.T) {
-	payload := []byte("%PDF-1.3\nhello pdf content")
-	encoded := base64.StdEncoding.EncodeToString(payload)
-	stored := fmt.Sprintf("%q", encoded) // produces "JVBERi0x..."
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v0/cat" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(stored))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL)
-	result, err := client.FetchFile("bafy-binary-cid")
-	if err != nil {
-		t.Fatalf("FetchFile returned error: %v", err)
-	}
-	if string(result.Data) != string(payload) {
-		t.Fatalf("expected decoded binary payload, got %q", result.Data[:min(20, len(result.Data))])
-	}
-}
-
-// TestCreateFile_CopyToMFSIsIdempotentWhenEntryExists reproduces the shared-IPFS
-// federation collision: instance A already copied a PDF's CID into MFS, then
-// instance B ships the identical bytes and stores them. The store is
-// content-addressed, so B computes the same CID and its files/cp onto the
-// existing /<cid> path fails ("already has entry by that name"). CreateFile must
-// treat that as success — the byte-identical entry already satisfies the
-// postcondition — rather than surfacing an error that would roll back B's
-// contract receive.
 func TestCreateFile_CopyToMFSIsIdempotentWhenEntryExists(t *testing.T) {
 	const cid = "shared-cid"
 	var statCalled bool

@@ -7,7 +7,6 @@ package ipfs
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -174,20 +173,14 @@ func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 		return nil, fmt.Errorf("read Kubo cat response: %w", err)
 	}
 
-	var dataStr string
-	var resultData []byte
-	if json.Unmarshal(body, &dataStr) == nil {
-		decoded, err := base64.StdEncoding.DecodeString(dataStr)
-		if err != nil {
-			return nil, fmt.Errorf("base64 decode Kubo file data: %w", err)
-		}
-		resultData = decoded
-	} else {
-		resultData = body
-	}
-
+	// The block is returned as stored. Nothing unwraps it: CreateFile writes a
+	// []byte artifact verbatim and everything else as the JSON it marshals to,
+	// so there is no envelope here to strip. The base64 decode that used to sit
+	// in this spot belonged to the tenant manager's response format, and once
+	// that reader was gone it could only misfire -- a payload that happened to
+	// marshal to a JSON string would have been base64-decoded into garbage.
 	result := &IPFSResult{
-		Data: resultData,
+		Data: body,
 	}
 	result.Identifier.Format = "CID"
 	result.Identifier.Value = cid
