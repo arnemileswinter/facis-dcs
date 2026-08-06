@@ -29,9 +29,6 @@ dependencies:
 - name: ipfs
   repository: file://charts/ipfs
   version: 0.1.0
-- name: ipfs-document-manager
-  repository: file://charts/ipfs-document-manager
-  version: 0.1.0
 - name: statuslist-service
   repository: file://charts/statuslist-service
   version: 0.1.0

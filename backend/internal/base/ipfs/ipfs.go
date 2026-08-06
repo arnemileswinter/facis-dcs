@@ -18,82 +18,22 @@ import (
 	"time"
 )
 
-// maxConcurrentWrites bounds how many stores may be in flight at once. The
-// node behind the document manager degrades under concurrent pinning: once one
-// pin outlives the manager's own client timeout, every further caller that
-// piles on keeps the node saturated and the failure feeds itself — the cap
-// turns that stampede into a queue the node can drain.
-//
-// The bound is this tight because the manager gives each request a fixed 5s
-// and the node works through pins close to serially once the repo has grown:
-// at seconds per pin, the wait in a deeper queue alone exceeds the budget, so
-// the last caller in line fails on queueing rather than on work. Two in
-// flight keeps the worst wait one service-time deep.
-const maxConcurrentWrites = 2
-
 type APIClient struct {
-	baseURL    string
+	// mfsBaseURL is the Kubo RPC API. Artifacts are stored and read through it
+	// directly: the XFSC ipfs-document-manager that used to sit in front of it
+	// answered every read by listing the whole pinset under Kubo's pinner lock,
+	// and gave an add and its pin one shared 5s deadline (ADR-36).
 	mfsBaseURL string
 	client     *http.Client
-	// writeSlots implements the maxConcurrentWrites bound; bulkSlots the
-	// tighter maxConcurrentBulkWrites share of it.
-	writeSlots chan struct{}
-	bulkSlots  chan struct{}
-	// fetchAttempts and fetchBackoff bound the read-after-write retry against
-	// the tenant store, which is eventually consistent: a CID returned by
-	// CreateFile is not always immediately resolvable through the tenant
-	// gateway (a subsequent GET can transiently return 404/5xx until the
-	// DataIdentifier record and its blocks propagate).
-	fetchAttempts int
-	fetchBackoff  time.Duration
 }
 
-func NewClient(baseURL string, mfsBaseURL string) *APIClient {
+func NewClient(mfsBaseURL string) *APIClient {
 	return &APIClient{
-		baseURL:    baseURL,
 		mfsBaseURL: mfsBaseURL,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		fetchAttempts: 8,
-		fetchBackoff:  500 * time.Millisecond,
-		writeSlots:    make(chan struct{}, maxConcurrentWrites),
-		bulkSlots:     make(chan struct{}, maxConcurrentBulkWrites),
 	}
-}
-
-// acquireWriteSlot blocks until a write slot frees or the context ends.
-func (c *APIClient) acquireWriteSlot(ctx context.Context) error {
-	select {
-	case c.writeSlots <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("waiting for an ipfs write slot: %w", ctx.Err())
-	}
-}
-
-func (c *APIClient) releaseWriteSlot() {
-	<-c.writeSlots
-}
-
-// maxConcurrentBulkWrites is the share of the write pool a background batch may
-// hold. Anchoring drains hundreds of queued events concurrently, and with the
-// whole pool in its hands the store a signing ceremony is waiting on queues
-// behind bulk work nobody is watching — the smaller bound keeps slots free for
-// the callers with a user on the other end.
-const maxConcurrentBulkWrites = 1
-
-// CreateFileBulk is CreateFile for background batch work: it takes a bulk slot
-// before competing for the shared pool, so at most maxConcurrentBulkWrites of
-// the batch are ever in flight and interactive writes always find room.
-func (c *APIClient) CreateFileBulk(ctx context.Context, data any) (*IPFSResult, error) {
-	select {
-	case c.bulkSlots <- struct{}{}:
-		defer func() { <-c.bulkSlots }()
-	case <-ctx.Done():
-		return nil, fmt.Errorf("waiting for a bulk ipfs write slot: %w", ctx.Err())
-	}
-	return c.CreateFile(ctx, data)
 }
 
 type IPFSResult struct {
@@ -109,264 +49,20 @@ func (c *APIClient) CreateFile(ctx context.Context, data any) (*IPFSResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("marshal data: %w", err)
 	}
-
-	if err := c.acquireWriteSlot(ctx); err != nil {
-		return nil, err
-	}
-	defer c.releaseWriteSlot()
-
-	if c.baseURL == "" {
-		return c.createKuboFile(ctx, jsonData)
-	}
-
-	body := jsonData
-	if raw, ok := data.([]byte); ok {
-		body = raw
-	}
-
-	result, err := c.createTenantFileWithRetry(ctx, body)
-	if err != nil {
-		return nil, err
-	}
-
-	if c.mfsBaseURL != "" {
-		err := c.copyToMFS(ctx, c.mfsBaseURL, result.Identifier.Value, result.Identifier.Value)
-		if err != nil {
-			return result, err
-		}
-	}
-
-	return result, nil
-}
-
-// createTenantFileWithRetry stores bytes through the tenant document manager,
-// retrying transport failures and 5xx the same way reads already retry.
-//
-// The document manager pins to its IPFS node as part of the call, and a pin is
-// a network hop that can fail transiently under load — a single blip otherwise
-// fails the whole signing. Retrying is safe because the store is content
-// addressed: the same bytes always yield the same CID, so a retried write
-// converges on the object the first attempt was creating.
-func (c *APIClient) createTenantFileWithRetry(ctx context.Context, body []byte) (*IPFSResult, error) {
-	url := c.baseURL + "/api/ipfs/create"
-
-	attempts := c.fetchAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < attempts; attempt++ {
-		if attempt > 0 && c.fetchBackoff > 0 {
-			// Exponential but tightly capped, and never past the caller's own
-			// deadline: a flat cadence keeps a struggling node at constant
-			// pressure, while a cadence that outgrows the budget spends it
-			// waiting instead of trying — the store then fails with attempts
-			// left unused, which is how a slow node became a failed one.
-			delay := c.fetchBackoff << (attempt - 1)
-			if max := 2 * time.Second; delay > max {
-				delay = max
-			}
-			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
-				break
-			}
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				if lastErr == nil {
-					lastErr = ctx.Err()
-				}
-				return nil, lastErr
-			}
-		}
-
-		result, status, err := c.createTenantOnce(ctx, url, body)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if status == http.StatusOK {
-			return result, nil
-		}
-		lastErr = fmt.Errorf("unexpected status %d", status)
-		// A 4xx is a definitive answer about these bytes; only the server-side
-		// transients are worth another attempt.
-		if status < 500 {
-			return nil, lastErr
-		}
-	}
-	return nil, lastErr
-}
-
-func (c *APIClient) createTenantOnce(ctx context.Context, url string, body []byte) (*IPFSResult, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, 0, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("do request: %w", err)
-	}
-	defer func(Body io.ReadCloser) {
-		if err := Body.Close(); err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, bodyBytes)
-	}
-
-	var result IPFSResult
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("decode response: %w", err)
-	}
-	return &result, resp.StatusCode, nil
+	return c.createKuboFile(ctx, jsonData)
 }
 
 func (c *APIClient) FetchFile(cid string) (*IPFSResult, error) {
-	if c.baseURL == "" {
-		return c.fetchKuboFile(cid)
-	}
-
-	// Kubo first, tenant only as the fallback. Both hold the same bytes —
-	// CreateFile writes the Kubo copy synchronously (copyToMFS) — but they do
-	// not cost the same to read. The tenant manager answers a GET by listing
-	// the node's ENTIRE pinset and scanning it for the CID before it fetches
-	// anything (ssi-vdr-ipfs main.go Get -> Pin().Ls), so a read costs O(pins)
-	// and does it holding Kubo's pinner read lock, which is the same lock a
-	// concurrent store needs to pin. Over a long audit-chain walk against a
-	// repo that has grown all run, that is what starves the stores: reads and
-	// writes queue on each other until both exceed the manager's fixed 5s and
-	// every store fails at once. cat?arg=<cid> resolves the same bytes by
-	// content address, touching no pin state at all.
-	if c.mfsBaseURL != "" {
-		if kubo, kerr := c.fetchKuboFile(cid); kerr == nil {
-			return kubo, nil
-		}
-	}
-
-	// The Kubo copy is missing — read-after-write lag against a peer-shipped
-	// object, or an artifact written before its MFS copy landed. The tenant
-	// index is the authority for those (DCS-FR-CSA: the tamper-proof trail read
-	// must not 404 on a link one store transiently forgot).
-	body, err := c.fetchTenantFileWithRetry(cid)
-	if err != nil {
-		return nil, err
-	}
-	return decodeTenantBody(body)
-}
-
-// decodeTenantBody unwraps a tenant-gateway response into an IPFSResult,
-// decoding the base64-in-JSON-string data payload the tenant store wraps.
-func decodeTenantBody(body []byte) (*IPFSResult, error) {
-	var result IPFSResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(result.Data) > 0 {
-		var dataStr string
-		if err := json.Unmarshal(result.Data, &dataStr); err != nil {
-			return nil, fmt.Errorf("decode ipfs data json string: %w", err)
-		}
-		if dataStr == "" {
-			return nil, fmt.Errorf("decode ipfs data: empty payload")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(dataStr)
-		if err != nil {
-			return nil, fmt.Errorf("decode ipfs data base64: %w", err)
-		}
-		result.Data = json.RawMessage(decoded)
-	}
-
-	return &result, nil
-}
-
-// fetchTenantFileWithRetry GETs a CID from the tenant gateway, retrying on
-// transient not-yet-resolvable responses (404/5xx) with a bounded backoff.
-// This absorbs the tenant store's read-after-write lag so a CID that CreateFile
-// has just returned is reliably retrievable by a subsequent request.
-func (c *APIClient) fetchTenantFileWithRetry(cid string) ([]byte, error) {
-	url := fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)
-
-	attempts := c.fetchAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < attempts; attempt++ {
-		if attempt > 0 && c.fetchBackoff > 0 {
-			time.Sleep(c.fetchBackoff)
-		}
-
-		body, status, err := c.getOnce(url)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if status == http.StatusOK {
-			return body, nil
-		}
-		lastErr = fmt.Errorf("unexpected status %d: %s", status, body)
-		// Only the transient not-yet-resolvable statuses are worth retrying;
-		// any other 4xx is a definitive answer.
-		if status != http.StatusNotFound && status < 500 {
-			return nil, lastErr
-		}
-	}
-	return nil, lastErr
-}
-
-func (c *APIClient) getOnce(url string) ([]byte, int, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func(Body io.ReadCloser) {
-		if err := Body.Close(); err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	return body, resp.StatusCode, nil
+	return c.fetchKuboFile(cid)
 }
 
 func (c *APIClient) DeleteFile(cid string) error {
-	if c.baseURL == "" {
-		return c.deleteKuboFile(cid)
-	}
-
-	url := fmt.Sprintf("%s/api/ipfs/%s", c.baseURL, cid)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, url, nil)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	return nil
-
+	return c.deleteKuboFile(cid)
 }
 
 func (c *APIClient) createKuboFile(ctx context.Context, data []byte) (*IPFSResult, error) {
 	if c.mfsBaseURL == "" {
-		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
 	var body bytes.Buffer
@@ -434,7 +130,7 @@ func (c *APIClient) createKuboFile(ctx context.Context, data []byte) (*IPFSResul
 
 func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 	if c.mfsBaseURL == "" {
-		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return nil, fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
 	url := fmt.Sprintf("%s/api/v0/cat?arg=%s", c.mfsBaseURL, cid)
@@ -487,7 +183,7 @@ func (c *APIClient) fetchKuboFile(cid string) (*IPFSResult, error) {
 
 func (c *APIClient) deleteKuboFile(cid string) error {
 	if c.mfsBaseURL == "" {
-		return fmt.Errorf("IPFS_MFS_BASE_URL is required when IPFS_TENANT_BASE_URL is not configured")
+		return fmt.Errorf("IPFS_MFS_BASE_URL is required")
 	}
 
 	url := fmt.Sprintf("%s/api/v0/pin/rm?arg=%s", c.mfsBaseURL, cid)

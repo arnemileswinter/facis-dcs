@@ -5,16 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
-func TestCreateFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
+func TestCreateFileAddsToKuboAndCopiesToMFS(t *testing.T) {
 	var addCalled bool
 	var mfsCopyCalled bool
 
@@ -50,7 +46,7 @@ func TestCreateFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("", server.URL)
+	client := NewClient(server.URL)
 	result, err := client.CreateFile(context.Background(), map[string]string{"event": "created"})
 	if err != nil {
 		t.Fatalf("CreateFile returned error: %v", err)
@@ -78,7 +74,7 @@ func TestCreateFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
 	}
 }
 
-func TestFetchFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
+func TestFetchFileReadsFromKuboByCID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v0/cat" {
 			http.NotFound(w, r)
@@ -94,7 +90,7 @@ func TestFetchFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("", server.URL)
+	client := NewClient(server.URL)
 	result, err := client.FetchFile("bafy-test-cid")
 	if err != nil {
 		t.Fatalf("FetchFile returned error: %v", err)
@@ -125,97 +121,13 @@ func TestFetchKuboFile_DecodesBase64WrapPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("", server.URL)
+	client := NewClient(server.URL)
 	result, err := client.FetchFile("bafy-binary-cid")
 	if err != nil {
 		t.Fatalf("FetchFile returned error: %v", err)
 	}
 	if string(result.Data) != string(payload) {
 		t.Fatalf("expected decoded binary payload, got %q", result.Data[:min(20, len(result.Data))])
-	}
-}
-
-func TestCreateFetchFileTenantAPI_BinaryRoundTrip(t *testing.T) {
-	payload := []byte("%PDF-1.3\nbinary pdf content here")
-
-	var storedBytes []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/ipfs/create":
-			body, _ := io.ReadAll(r.Body)
-			storedBytes = body
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"tenant-cid"},"data":null}`)
-		case "/api/ipfs/tenant-cid":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"tenant-cid"},"data":%q}`,
-				base64.StdEncoding.EncodeToString(storedBytes))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	if _, err := client.CreateFile(context.Background(), payload); err != nil {
-		t.Fatalf("CreateFile returned error: %v", err)
-	}
-
-	result, err := client.FetchFile("tenant-cid")
-	if err != nil {
-		t.Fatalf("FetchFile returned error: %v", err)
-	}
-
-	if string(result.Data) != string(payload) {
-		t.Fatalf("expected decoded binary payload %q, got %q",
-			payload[:min(20, len(payload))],
-			result.Data[:min(20, len(result.Data))],
-		)
-	}
-}
-
-// TestCreateFileWithPreEncodedStringDoesNotRoundTrip documents why callers
-// must pass raw []byte to CreateFile rather than a pre-base64-encoded string
-// (the bug that made pdfgeneration/event/subscriber.go's C2PA-update writes
-// unreadable by a later plain FetchFile): a string argument is JSON-marshalled
-// into a quoted literal instead of used as the raw upload body, so what comes
-// back out of FetchFile is not the original bytes.
-func TestCreateFileWithPreEncodedStringDoesNotRoundTrip(t *testing.T) {
-	payload := []byte("%PDF-1.3\nbinary pdf content here")
-	preEncoded := base64.StdEncoding.EncodeToString(payload)
-
-	var storedBytes []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/ipfs/create":
-			body, _ := io.ReadAll(r.Body)
-			storedBytes = body
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"tenant-cid"},"data":null}`)
-		case "/api/ipfs/tenant-cid":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"tenant-cid"},"data":%q}`,
-				base64.StdEncoding.EncodeToString(storedBytes))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	// The buggy call pattern: passing an already-base64-encoded string.
-	if _, err := client.CreateFile(context.Background(), preEncoded); err != nil {
-		t.Fatalf("CreateFile returned error: %v", err)
-	}
-
-	result, err := client.FetchFile("tenant-cid")
-	if err != nil {
-		t.Fatalf("FetchFile returned error: %v", err)
-	}
-
-	if string(result.Data) == string(payload) {
-		t.Fatal("expected the pre-encoded-string call pattern to NOT reproduce the original PDF bytes " +
-			"(if this starts passing, CreateFile's string handling changed and subscriber.go's raw-bytes fix may be revertable)")
 	}
 }
 
@@ -232,9 +144,8 @@ func TestCreateFile_CopyToMFSIsIdempotentWhenEntryExists(t *testing.T) {
 	var statCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/ipfs/create":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":%q},"data":null}`, cid)
+		case "/api/v0/add":
+			_, _ = fmt.Fprintf(w, `{"Hash":%q}`, cid)
 		case "/api/v0/files/cp":
 			// The peer already copied this CID: Kubo rejects the duplicate path.
 			w.WriteHeader(http.StatusInternalServerError)
@@ -249,7 +160,7 @@ func TestCreateFile_CopyToMFSIsIdempotentWhenEntryExists(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, server.URL)
+	client := NewClient(server.URL)
 	result, err := client.CreateFile(context.Background(), []byte("%PDF-1.7\npeer shipped bytes"))
 	if err != nil {
 		t.Fatalf("CreateFile must tolerate an already-present shared-MFS CID, got error: %v", err)
@@ -269,9 +180,8 @@ func TestCreateFile_CopyToMFSFailsWhenEntryDiffers(t *testing.T) {
 	const cid = "wanted-cid"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/ipfs/create":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":%q},"data":null}`, cid)
+		case "/api/v0/add":
+			_, _ = fmt.Fprintf(w, `{"Hash":%q}`, cid)
 		case "/api/v0/files/cp":
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = fmt.Fprint(w, `{"Message":"cp: some other failure"}`)
@@ -284,261 +194,8 @@ func TestCreateFile_CopyToMFSFailsWhenEntryDiffers(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, server.URL)
+	client := NewClient(server.URL)
 	if _, err := client.CreateFile(context.Background(), []byte("payload")); err == nil {
 		t.Fatal("expected CreateFile to surface a files/cp failure when MFS does not hold the expected CID")
-	}
-}
-
-func TestFetchFileTenantAPI_RetriesUntilResolvable(t *testing.T) {
-	payload := []byte("%PDF-1.7\nresolvable after propagation")
-	var calls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/ipfs/tenant-cid" {
-			http.NotFound(w, r)
-			return
-		}
-		calls++
-		// The tenant store reports the CID unresolvable for the first two GETs
-		// (the observed read-after-write race) before it propagates.
-		if calls == 1 {
-			http.Error(w, `{"error":"DataIdentifier not found"}`, http.StatusNotFound)
-			return
-		}
-		if calls == 2 {
-			http.Error(w, `{"error":"api call failed"}`, http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"tenant-cid"},"data":%q}`,
-			base64.StdEncoding.EncodeToString(payload))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	client.fetchBackoff = time.Millisecond
-
-	result, err := client.FetchFile("tenant-cid")
-	if err != nil {
-		t.Fatalf("FetchFile should retry past the transient race, got: %v", err)
-	}
-	if string(result.Data) != string(payload) {
-		t.Fatalf("unexpected payload %q", result.Data)
-	}
-	if calls < 3 {
-		t.Fatalf("expected retries until resolvable, server saw %d calls", calls)
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// TestFetchFileFallsBackToPinnedKuboOnTenantMiss proves a lost tenant
-// DataIdentifier mapping does not fail a read: the tenant path 404s
-// ("DataIdentifier not found"), and FetchFile transparently retrieves the
-// durable pinned copy from Kubo (the copy CreateFile made via copyToMFS).
-func TestFetchFileFallsBackToPinnedKuboOnTenantMiss(t *testing.T) {
-	const cid = "bafy-audit-cid"
-	tenantServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v0/cat" {
-			if got := r.URL.Query().Get("arg"); got != cid {
-				t.Fatalf("unexpected cat arg %q", got)
-			}
-			_, _ = w.Write([]byte(`{"audit":"entry"}`))
-			return
-		}
-		// Tenant path: the document-manager no longer has the mapping.
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"DataIdentifier not found"}`))
-	}))
-	defer tenantServer.Close()
-
-	// baseURL (tenant) and mfsBaseURL (Kubo) served by the same test server.
-	client := NewClient(tenantServer.URL, tenantServer.URL)
-	result, err := client.FetchFile(cid)
-	if err != nil {
-		t.Fatalf("FetchFile should fall back to the pinned Kubo copy, got error: %v", err)
-	}
-	if string(result.Data) != `{"audit":"entry"}` {
-		t.Fatalf("unexpected fallback data %s", result.Data)
-	}
-}
-
-// Bounded write concurrency is what keeps a slow node recoverable: once one
-// pin outlives the document manager's own client timeout, every unshed caller
-// that piles on keeps the node saturated and the failure feeds itself. The cap
-// turns that stampede into a queue.
-func TestCreateFileBoundsConcurrentWrites(t *testing.T) {
-	var inFlight, peak atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		now := inFlight.Add(1)
-		for {
-			p := peak.Load()
-			if now <= p || peak.CompareAndSwap(p, now) {
-				break
-			}
-		}
-		time.Sleep(30 * time.Millisecond)
-		inFlight.Add(-1)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"identifier": map[string]string{"Format": "cid", "Value": "QmTest"},
-		})
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _ = client.CreateFile(context.Background(), map[string]string{"k": "v"})
-		}()
-	}
-	wg.Wait()
-
-	if got := peak.Load(); got > maxConcurrentWrites {
-		t.Fatalf("observed %d concurrent writes, the cap is %d", got, maxConcurrentWrites)
-	}
-}
-
-// A flat retry cadence keeps a struggling node at constant pressure; the delay
-// has to grow so a stampede spreads out instead of arriving in lockstep.
-func TestCreateRetryBackoffGrows(t *testing.T) {
-	var stamps []time.Time
-	var mu sync.Mutex
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		stamps = append(stamps, time.Now())
-		mu.Unlock()
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	client.fetchAttempts = 4
-	client.fetchBackoff = 20 * time.Millisecond
-
-	_, err := client.CreateFile(context.Background(), map[string]string{"k": "v"})
-	if err == nil {
-		t.Fatal("a server answering only 500 must fail the write")
-	}
-	if len(stamps) != 4 {
-		t.Fatalf("expected 4 attempts, got %d", len(stamps))
-	}
-	firstGap := stamps[1].Sub(stamps[0])
-	lastGap := stamps[3].Sub(stamps[2])
-	if lastGap < firstGap*2 {
-		t.Fatalf("backoff did not grow: first gap %v, last gap %v", firstGap, lastGap)
-	}
-}
-
-// A retry cadence that outgrows the caller's budget spends it waiting instead
-// of trying: the store then fails with attempts left unused, which turns a
-// slow node into a failed one.
-func TestCreateRetriesStayInsideTheCallersDeadline(t *testing.T) {
-	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		time.Sleep(40 * time.Millisecond)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "")
-	client.fetchAttempts = 8
-	client.fetchBackoff = 30 * time.Millisecond
-
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	_, err := client.CreateFile(ctx, map[string]string{"k": "v"})
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Fatal("a server answering only 500 must fail the write")
-	}
-	if elapsed > 600*time.Millisecond {
-		t.Fatalf("the retry loop ran %v past a 400ms budget", elapsed)
-	}
-	if calls.Load() < 2 {
-		t.Fatalf("the budget was spent without retrying: %d attempts", calls.Load())
-	}
-}
-
-// TestFetchFilePrefersKuboAndLeavesTheTenantAlone pins the read ordering that
-// keeps stores alive. The tenant manager answers every GET by listing the whole
-// pinset and scanning it (ssi-vdr-ipfs Get -> Pin().Ls), holding the pinner read
-// lock a concurrent store needs to pin; a read served from Kubo by content
-// address touches none of that. A resolvable CID must therefore never reach the
-// tenant at all.
-func TestFetchFilePrefersKuboAndLeavesTheTenantAlone(t *testing.T) {
-	payload := []byte("%PDF-1.7\nserved by kubo")
-	var tenantCalls, kuboCalls int32
-
-	tenant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&tenantCalls, 1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"cid"},"data":%q}`,
-			base64.StdEncoding.EncodeToString([]byte("tenant copy")))
-	}))
-	defer tenant.Close()
-
-	kubo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v0/cat" {
-			http.NotFound(w, r)
-			return
-		}
-		atomic.AddInt32(&kuboCalls, 1)
-		_, _ = w.Write(payload)
-	}))
-	defer kubo.Close()
-
-	client := NewClient(tenant.URL, kubo.URL)
-	result, err := client.FetchFile("cid")
-	if err != nil {
-		t.Fatalf("FetchFile returned error: %v", err)
-	}
-	if string(result.Data) != string(payload) {
-		t.Fatalf("expected the Kubo copy, got %q", result.Data)
-	}
-	if got := atomic.LoadInt32(&kuboCalls); got != 1 {
-		t.Fatalf("expected exactly one Kubo cat, got %d", got)
-	}
-	if got := atomic.LoadInt32(&tenantCalls); got != 0 {
-		t.Fatalf("a Kubo-resolvable CID must not reach the tenant manager, got %d calls", got)
-	}
-}
-
-// TestFetchFileFallsBackToTenantWhenKuboLacksTheBlock is the other half: the
-// Kubo copy is written synchronously, but a peer-shipped object can be read
-// before its copy lands, and the tenant index is the authority for those.
-func TestFetchFileFallsBackToTenantWhenKuboLacksTheBlock(t *testing.T) {
-	payload := []byte("%PDF-1.7\nonly the tenant has this")
-
-	tenant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":"cid"},"data":%q}`,
-			base64.StdEncoding.EncodeToString(payload))
-	}))
-	defer tenant.Close()
-
-	kubo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "no such block", http.StatusInternalServerError)
-	}))
-	defer kubo.Close()
-
-	client := NewClient(tenant.URL, kubo.URL)
-	result, err := client.FetchFile("cid")
-	if err != nil {
-		t.Fatalf("FetchFile must fall back to the tenant, got error: %v", err)
-	}
-	if string(result.Data) != string(payload) {
-		t.Fatalf("expected the tenant copy, got %q", result.Data)
 	}
 }
