@@ -35,6 +35,21 @@ func TestCounterpartyNotSettledIsItsOwnAPICode(t *testing.T) {
 	require.NotEqual(t, settlementErr.Name, transitionErr.Name)
 }
 
+// The regenerator holding the contract is a wait, not a refusal: the same
+// request succeeds moments later. Reported as internal_error it claimed the
+// opposite — temporary:false tells a client the request will never succeed,
+// and every caller that could simply have retried gave up instead.
+func TestRegenerationInFlightIsReportedAsTemporary(t *testing.T) {
+	err := mapSignatureCommandError(
+		fmt.Errorf("%w: did:web:dcs.localhost:contract-1", command.ErrRegenerationInFlight))
+
+	var serviceErr *goa.ServiceError
+	require.ErrorAs(t, err, &serviceErr)
+	require.Equal(t, "service_unavailable", serviceErr.Name)
+	require.True(t, serviceErr.Temporary)
+	require.False(t, serviceErr.Fault)
+}
+
 // The settlement gate hard-fails when its store is missing rather than waving
 // the signature through; that is an operator fault, not something a signer can
 // resolve by waiting, so it must not borrow the waiting-for-the-counterparty

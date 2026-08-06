@@ -9,7 +9,11 @@ from jwt.algorithms import ECAlgorithm
 
 from dcs_wallet.credential import decode_jwt_payload, load_credential_sd_jwt
 from dcs_wallet.issuer import issue_access_credential
+<<<<<<< HEAD
+from dcs_wallet.keys import did_jwk_from_public_jwk
+=======
 from dcs_wallet.issuer_pki import dev_issuer, leaf_public_jwk
+>>>>>>> feat/adr-35-anchored-peer-trust
 from dcs_wallet.presentation import build_vp_token, load_jwk
 from dcs_wallet.status_list import FIXTURE_INDEX, RESERVED_INDEX, role_credential_index
 from dcs_wallet.sdjwt import KB_JWT_TYP, decode_disclosure, sd_hash, split_sd_jwt
@@ -77,12 +81,26 @@ class PresentationTest(unittest.TestCase):
         issuer_jwt, _, _ = split_sd_jwt(load_credential_sd_jwt("johndoe"))
         header = jwt.get_unverified_header(issuer_jwt)
         self.assertEqual(header["typ"], "dc+sd-jwt")
+<<<<<<< HEAD
+        self.assertIn("jwk", header)
+        self.assertEqual(set(header["jwk"].keys()), {"kty", "crv", "x", "y"})
+        # Der Header trägt beides: den Schlüssel selbst, gegen den ein Verifier
+        # die Signatur direkt prüfen kann, und den kid als did:jwk desselben
+        # Schlüssels. Beide müssen auf dieselbe Identität zeigen, sonst kann ein
+        # Verifier je nach gewähltem Pfad zu unterschiedlichen Ergebnissen kommen.
+        self.assertEqual(header["kid"], did_jwk_from_public_jwk(header["jwk"]))
+
+        issuer_private = load_jwk("issuer-dev.jwk")
+        expected_issuer_public = {k: issuer_private[k] for k in ("kty", "crv", "x", "y")}
+        self.assertEqual(header["jwk"], expected_issuer_public)
+=======
         # The issuer publishes its key through a certificate chain, so a bare
         # header jwk would be a key from somewhere its trust entry never named
         # (backend/internal/auth/oid4vp/sdjwt/keys.go).
         self.assertIn("x5c", header)
         self.assertNotIn("jwk", header)
         self.assertNotIn("kid", header)
+>>>>>>> feat/adr-35-anchored-peer-trust
 
         payload = decode_jwt_payload(issuer_jwt)
         # The leaf carries the key of the issuer this credential names —

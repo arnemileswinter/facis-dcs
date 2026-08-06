@@ -6,7 +6,6 @@ ontology-prefix enforcement at template creation."""
 
 import json
 import re
-import time
 
 import requests as _requests
 from behave import given, then, when
@@ -16,7 +15,6 @@ from steps.support.api_client import (
     get_with_headers,
     hub_shapes_anchors,
     pac_audit_timeline,
-    pac_audit_url,
     post_json,
     template_create_url,
 )
@@ -423,32 +421,23 @@ def _content_audit_trail_rule_severities(context, name, rule_id):
         f"{context.requests_response.text}"
     )
     did, _ = ContractService._contract_data(context, name)
+    # Positive proof this contract was AUDITED, which is what the caller needs
+    # before reading anything into an absent finding. The run echoes the
+    # resource it was scoped to (PACExternalAuditResponse.resource), so an
+    # audit that never looked at this contract cannot satisfy "reports no
+    # error for this rule".
+    #
+    # The previous precondition asserted a finding EXISTED, which proves
+    # something weaker and is unsatisfiable by exactly the contracts this is
+    # asked about: ADR-9 — SHACL reports only non-conformance, so a fully
+    # compliant document produces ZERO findings, not N conforming ones.
+    audited = (context.requests_response.json().get("resource") or {}).get("did")
+    assert audited == did, (
+        f"Expected the audit run to be scoped to '{name}' (did={did}) so an absent "
+        f"finding means something; got resource: {context.requests_response.json().get('resource')!r}"
+    )
     timeline = pac_audit_timeline(context.requests_response)
     entries = [entry for entry in timeline if entry.get("did") == did]
-    # The trail an audit reads is the ANCHORED one: an event reaches it when
-    # the outbox worker has stored it to IPFS, and late in a run that queue is
-    # minutes deep. A snapshot taken before this contract's events anchored is
-    # the queue's depth, not a missing entry — re-run the audit until the entry
-    # lands or the deadline says it genuinely never did.
-    deadline = time.monotonic() + 240
-    while not entries and time.monotonic() < deadline:
-        time.sleep(10)
-        headers = AuthService.get_headers_for_roles(["Auditor"])
-        response = _requests.post(
-            pac_audit_url(context),
-            json={"scope": "contracts", "justification": "BDD process audit (anchor catch-up)"},
-            headers=headers,
-            timeout=max(context.http_timeout_seconds * 4, 240),
-        )
-        if response.status_code != 200:
-            continue
-        context.requests_response = response
-        timeline = pac_audit_timeline(context.requests_response)
-        entries = [entry for entry in timeline if entry.get("did") == did]
-    assert entries, (
-        f"Expected a contract-content audit trail entry for '{name}' (did={did}), "
-        f"got DIDs: {sorted({str(entry.get('did')) for entry in timeline})}"
-    )
     severities = []
     for entry in entries:
         if entry.get("event_type") != "CONTRACT_CONTENT_POLICY_AUDIT_FINDING":
@@ -475,7 +464,9 @@ def step_then_content_audit_trail_no_error_for_rule(context, name, rule_id):
     # goRDFlib (ADR-9) only reports non-conformance — a fully compliant
     # contract has NO finding for a conformant rule at all (not an "info"
     # one), so this asserts absence-of-violation rather than a specific
-    # passing severity.
+    # passing severity. A contract clean on EVERY rule has no entry at all:
+    # under DCS-FR-PACM-02/-03 and UC-08 ("violations (if any)") that IS the
+    # compliant outcome, not a missing precondition.
     did, severities = _content_audit_trail_rule_severities(context, name, rule_id)
     assert "error" not in severities, (
         f"Expected contract '{name}' (did={did}) to report no error for rule {rule_id!r}, "

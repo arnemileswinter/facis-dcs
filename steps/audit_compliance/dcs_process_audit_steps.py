@@ -54,6 +54,29 @@ def step_when_auditor_triggers_audit(context, scope):
     )
 
 
+@when('the Auditor triggers a process audit for contract "{name}"')
+def step_when_auditor_audits_one_contract(context, name):
+    """Audit one named contract, via the endpoint's own `did` filter.
+
+    A scope-wide audit gathers every contract the instance holds, so a scenario
+    asserting on its own contract silently depended on how many others every
+    preceding feature had created: with 62 contracts the target was already
+    missing from the returned set, and in a full CI run the call ran past the
+    60s client timeout. The filter narrows the query itself, not just the
+    response, so the assertion stays about this contract at any suite size.
+    """
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Auditor"])
+    OrceAuditControlService.reset(context, "audit")
+    OrceAuditControlService.set_mode(context, "audit", "success")
+    context.requests_response = post_json(
+        context,
+        pac_audit_url(context),
+        {"scope": "contracts", "did": did, "justification": "BDD process audit"},
+        headers=headers,
+    )
+
+
 @when('I attempt to trigger a process audit with scope "{scope}"')
 def step_when_attempt_trigger_audit(context, scope):
     headers = getattr(context, "headers", {})

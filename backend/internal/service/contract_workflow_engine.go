@@ -43,6 +43,7 @@ import (
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 
 	"github.com/jmoiron/sqlx"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type contractWorkflowEnginesrvc struct {
@@ -198,6 +199,13 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Cont
 func mapContractCommandError(err error) error {
 	if err == nil {
 		return nil
+	}
+	// A background writer — the PDF regenerator, an arriving peer ship —
+	// advanced updated_at between the caller's read and its command. Re-reading
+	// and reissuing succeeds, so this answers 409 with temporary set, where
+	// internal_error told the caller its request would never succeed.
+	if errors.Is(err, base.ErrUpdatedElsewhere) {
+		return goa.NewServiceError(err, "conflict", false, true, false)
 	}
 	if errors.Is(err, contractstate.ErrInvalidTransition) ||
 		errors.Is(err, validation.ErrContractHierarchyInvalid) ||

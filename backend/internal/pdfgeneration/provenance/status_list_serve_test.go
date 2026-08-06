@@ -42,7 +42,7 @@ func TestTheServedTokenHasTheShapeAVerifierRoutesOn(t *testing.T) {
 	assert.Len(t, header["x5c"], 2)
 
 	claims := decodeSegment(t, parts[1])
-	assert.Equal(t, list.IssuerURL, claims["iss"])
+	assert.Equal(t, list.CredentialIssuer, claims["iss"])
 	// `sub` must be the URI credentials name; the verifier refuses any difference.
 	assert.Equal(t, list.ListURI, claims["sub"])
 	assert.NotNil(t, claims["iat"])
@@ -71,6 +71,30 @@ func TestAClearEntryReadsActiveThroughTheOrdinaryVerifier(t *testing.T) {
 	state, err := list.Verifier.State(context.Background(), list.Credential(13))
 	require.NoError(t, err)
 	assert.Equal(t, provenance.StatusActive, state)
+}
+
+// A deployment issues its credentials under its did:web identity and serves
+// their status list at its https origin. The list is bound to the credential by
+// comparing the two identifiers as strings (ADR-34/-35), so the token has to
+// name the identity that ISSUED them, not the origin it is served from —
+// otherwise one deployment describes itself two ways and every revocation check
+// of its own credentials reports "signed by an issuer other than the one it
+// names", which a caller shows as an unknown state rather than as the
+// misconfiguration it is.
+func TestAListNamesTheIdentityThatIssuedTheCredentialsNotTheOriginItIsServedFrom(t *testing.T) {
+	const issuerDID = "did:web:dcs.example.org"
+	list := provenancetest.NewSignedStatusListIssuedBy(t, issuerDID, 12)
+
+	require.NotEqual(t, list.IssuerURL, list.CredentialIssuer,
+		"the point of this test is that the two identifiers differ, as they do in a deployment")
+
+	revoked, err := list.Verifier.State(context.Background(), list.Credential(12))
+	require.NoError(t, err)
+	assert.Equal(t, provenance.StatusRevoked, revoked)
+
+	active, err := list.Verifier.State(context.Background(), list.Credential(13))
+	require.NoError(t, err)
+	assert.Equal(t, provenance.StatusActive, active)
 }
 
 // TestAListSignedUnderAnUntrustedRootIsNotAReading is what replacing the

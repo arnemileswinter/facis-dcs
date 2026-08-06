@@ -99,7 +99,7 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	}
 
 	if cmd.UpdatedAt.Unix() < original.UpdatedAt.Unix() {
-		return nil, errors.New("contract was updated elsewhere, please reload")
+		return nil, fmt.Errorf("contract %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
 	originalState, err := contractstate.NewContractState(original.State)

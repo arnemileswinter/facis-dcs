@@ -199,6 +199,12 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	// did.json is served at the origin root (did:web well-known path), outside
 	// the API prefix.
 	didsvr.Mount(mux, didServer)
+	// The C2PA manifest store is the public sibling of did.json (ADR-4,
+	// DCS-OR-C2PA-008): an external verifier resolves a contract's provenance
+	// from the manifest URL alone, so the route has to answer at the origin
+	// root, not only under the API prefix. Root-mounted like the DID service;
+	// the prefixed mount below stays for API clients.
+	c2pasvr.Mount(mux, c2paServer)
 	c2pasvr.Mount(apiMux, c2paServer)
 	authsvr.Mount(apiMux, authServer)
 	contractstoragearchivesvr.Mount(apiMux, contractStorageArchiveServer)
@@ -421,6 +427,8 @@ func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusNotFound}
 		case "service_unavailable":
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusServiceUnavailable}
+		case "conflict":
+			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusConflict}
 		}
 	}
 

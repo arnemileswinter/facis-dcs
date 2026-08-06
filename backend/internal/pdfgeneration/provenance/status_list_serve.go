@@ -41,9 +41,22 @@ const StatusListPath = "/status-list/"
 // certificate for the second assertion would add a key ceremony without adding
 // a distinction — and a verifier that trusts one already trusts the other.
 type StatusListSigner struct {
-	// Issuer is this deployment's public origin — the `iss` the token names and
-	// the identity the chain's leaf must carry, or a verifier refuses the list
-	// (sdjwt.VerificationKeyFromX5C).
+	// Issuer is the `iss` the token names, and it must be the identity that
+	// issued the credentials this list governs — the deployment's ISSUER_DID,
+	// the same value NewLocalVCIssuer writes into every credential's `issuer`.
+	//
+	// Not the public origin, though the leaf carries that too: a verifier binds
+	// a list to the credential by comparing the two identifiers as strings
+	// (status.RequireCredentialIssuer, ADR-34/-35). Naming the origin here while
+	// the credentials name the DID describes one deployment two ways, and every
+	// revocation check of our own credentials then reports "signed by an issuer
+	// other than the one it names" — which a caller reads as an unknown, not as
+	// a configuration error.
+	//
+	// The chain's leaf must carry whichever identity this names, or the list is
+	// refused as coming from an unidentified issuer
+	// (sdjwt.VerificationKeyFromX5C); c2pa-cert-provision.sh puts the DID, the
+	// issuer URL and the hostname on it, and leafIdentifiesIssuer accepts any.
 	Issuer string
 
 	// ListURI resolves a list id to the absolute URI a credential names. It is

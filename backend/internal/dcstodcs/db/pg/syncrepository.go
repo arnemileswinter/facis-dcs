@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"digital-contracting-service/internal/dcstodcs/db"
 
@@ -53,13 +54,28 @@ func (r PostgresSyncRepository) DeleteSyncFailEntry(ctx context.Context, tx *sql
 	return err
 }
 
-func (r PostgresSyncRepository) GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx) ([]db.SyncFail, error) {
+// GetPendingSyncFails returns the ships due for another attempt, oldest attempt
+// first and at most limit of them.
+//
+// An entry backs off exponentially from backoffBase, capped at maxBackoff, so a
+// contract that can never ship (a peer that refuses it, a PDF whose key was
+// shredded) stops consuming a slot on every tick. Unbounded, this query
+// returned every row and the scheduler walked all of them serially, each with
+// its own did:web resolution, trust-gate call and peer POST — so a handful of
+// hopeless entries made one pass longer than the interval between passes, and a
+// contract offered right now waited behind all of them.
+func (r PostgresSyncRepository) GetPendingSyncFails(ctx context.Context, tx *sqlx.Tx, backoffBase, maxBackoff time.Duration, limit int) ([]db.SyncFail, error) {
 	query := `
         SELECT *
         FROM sync_fails
+        WHERE last_tried_at IS NULL
+           OR last_tried_at <= CURRENT_TIMESTAMP - make_interval(secs =>
+                LEAST($1::float8 * POWER(2, LEAST(retry_count, 6)), $2::float8))
+        ORDER BY last_tried_at ASC NULLS FIRST
+        LIMIT $3
     `
 	var syncFails []db.SyncFail
-	err := tx.SelectContext(ctx, &syncFails, query)
+	err := tx.SelectContext(ctx, &syncFails, query, backoffBase.Seconds(), maxBackoff.Seconds(), limit)
 	if err != nil {
 		return nil, err
 	}

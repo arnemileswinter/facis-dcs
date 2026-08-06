@@ -397,26 +397,28 @@ def step_when_deploy_contract(context, name):
     # Given; `@step` registers this text under given/when/then alike, and
     # the step is also genuinely used as a real When.
     _ensure_target_designated(context, name)
-    did, updated_at = ContractService._contract_data(context, name)
+    did, _ = ContractService._contract_data(context, name)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    # The transition that reached this state dispatched its own workflow gate,
-    # and a deploy racing that verdict is refused with 409/DISPATCHING — a
-    # pending evaluation, not a denial. Wait it out; a real BLOCKED verdict is
-    # not retried and fails the scenario with the gate's findings. Sized for a
-    # loaded ORCE late in the suite: at 60s a still-evaluating gate leaked its
-    # 409 into a scenario that was owed the deploy endpoint's own answer.
+# Signing already starts an automatic deployment (deployevent's auto-deploy
+    # subscriber reacts to the signature event), so this explicit deploy can
+    # arrive while that one still holds the contract's workflow-gate run and be
+    # refused with 409 DISPATCHING. That refusal is correct — a gate admits one
+    # claim per snapshot — and it settles, so wait for the run instead of
+    # failing the scenario on a race it is not testing. Sized for a loaded ORCE
+    # late in the suite: at 60s a still-evaluating gate leaked its 409 into a
+    # scenario that was owed the deploy endpoint's own answer.
     deadline = time.monotonic() + 180
     while True:
+        ContractService._refresh_contract(context, name)
+        _, updated_at = ContractService._contract_data(context, name)
         context.requests_response = post_json(
             context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h
         )
-        if context.requests_response.status_code != 409:
+        if context.requests_response.status_code != 409 or time.monotonic() >= deadline:
             break
-        body = context.requests_response.text
-        if "DISPATCHING" not in body or time.monotonic() >= deadline:
+        if "DISPATCHING" not in context.requests_response.text:
             break
         time.sleep(2)
-        did, updated_at = ContractService._contract_data(context, name)
     if context.requests_response.status_code == 200:
         body = context.requests_response.json()
         context.deployment_correlation_id = body.get("correlation_id")

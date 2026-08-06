@@ -35,9 +35,12 @@ import (
 // SignedStatusList is a running status-list endpoint plus the verifier that
 // trusts it.
 type SignedStatusList struct {
-	// IssuerURL is the origin the list is served under and the `iss` its token
-	// names — the identity the chain's leaf carries as a SAN URI.
+	// IssuerURL is the origin the list is served under — the base of ListURI.
 	IssuerURL string
+	// CredentialIssuer is the identity that issued the credentials this list
+	// governs, and therefore the `iss` its token names. In a deployment that is
+	// the did:web ISSUER_DID rather than the origin above; the leaf carries both.
+	CredentialIssuer string
 	// ListURI is what a credential names, what a verifier fetches, and the
 	// token's own `sub`. All three are this string; a verifier refuses the list
 	// on any difference.
@@ -64,7 +67,7 @@ func (s *SignedStatusList) Credential(index uint32) []byte {
 		// The issuer that issued this credential is the one serving the list it
 		// names — which is what makes that list its revocation statement rather
 		// than some other trusted issuer's (ADR-34).
-		"issuer": s.IssuerURL,
+		"issuer": s.CredentialIssuer,
 		"credentialStatus": map[string]any{
 			"id":                   fmt.Sprintf("%s#%d", s.ListURI, index),
 			"type":                 "TokenStatusList",
@@ -81,9 +84,32 @@ func (s *SignedStatusList) Credential(index uint32) []byte {
 // only it — anchors.
 func NewSignedStatusList(t *testing.T, revoked ...uint32) *SignedStatusList {
 	t.Helper()
+	return newSignedStatusList(t, "", revoked)
+}
+
+// NewSignedStatusListIssuedBy is the shape a deployment actually has: it issues
+// its credentials under its did:web identity (ISSUER_DID) while serving the list
+// at its https origin, so the token's `iss` and the list's URI are DIFFERENT
+// identifiers, and the leaf carries both — which is what
+// c2pa-cert-provision.sh puts on it.
+//
+// The distinction matters because the binding compares identifiers as strings:
+// a list naming the origin while its credentials name the DID describes one
+// deployment two ways, and every revocation check then reads UNKNOWN.
+func NewSignedStatusListIssuedBy(t *testing.T, credentialIssuer string, revoked ...uint32) *SignedStatusList {
+	t.Helper()
+	return newSignedStatusList(t, credentialIssuer, revoked)
+}
+
+func newSignedStatusList(t *testing.T, credentialIssuer string, revoked []uint32) *SignedStatusList {
+	t.Helper()
 
 	srv := httptest.NewUnstartedServer(nil)
 	issuerURL := "http://" + srv.Listener.Addr().String()
+	identity := credentialIssuer
+	if identity == "" {
+		identity = issuerURL
+	}
 
 	caKey, ca := mintRoot(t)
 
@@ -94,11 +120,19 @@ func NewSignedStatusList(t *testing.T, revoked ...uint32) *SignedStatusList {
 	if err != nil {
 		t.Fatalf("parse issuer url: %v", err)
 	}
-	leafKey, leafDER := mintLeaf(t, ca, caKey, issuerURI)
+	sans := []*url.URL{issuerURI}
+	if credentialIssuer != "" {
+		credentialURI, err := url.Parse(credentialIssuer)
+		if err != nil {
+			t.Fatalf("parse credential issuer %q: %v", credentialIssuer, err)
+		}
+		sans = append(sans, credentialURI)
+	}
+	leafKey, leafDER := mintLeaf(t, ca, caKey, sans...)
 
 	fetched := false
 	signer := &provenance.StatusListSigner{
-		Issuer:      issuerURL,
+		Issuer:      identity,
 		ListURI:     func(listID int) string { return provenance.StatusListURI(issuerURL, listID) },
 		ListID:      provenance.DefaultListID,
 		Chain:       []string{base64.StdEncoding.EncodeToString(leafDER), base64.StdEncoding.EncodeToString(ca.Raw)},
@@ -124,11 +158,12 @@ func NewSignedStatusList(t *testing.T, revoked ...uint32) *SignedStatusList {
 	roots.AddCert(ca)
 
 	return &SignedStatusList{
-		IssuerURL: issuerURL,
-		ListURI:   provenance.StatusListURI(issuerURL, provenance.DefaultListID),
-		Root:      ca,
-		Verifier:  provenance.NewCredentialStatusVerifier(VerifierAnchoring(roots)),
-		fetched:   &fetched,
+		IssuerURL:        issuerURL,
+		CredentialIssuer: identity,
+		ListURI:          provenance.StatusListURI(issuerURL, provenance.DefaultListID),
+		Root:             ca,
+		Verifier:         provenance.NewCredentialStatusVerifier(VerifierAnchoring(roots)),
+		fetched:          &fetched,
 	}
 }
 
@@ -166,7 +201,7 @@ func mintRoot(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate) {
 	return key, cert
 }
 
-func mintLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, issuer *url.URL) (*ecdsa.PrivateKey, []byte) {
+func mintLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, issuers ...*url.URL) (*ecdsa.PrivateKey, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -179,7 +214,10 @@ func mintLeaf(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, issue
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
-		URIs:                  []*url.URL{issuer},
+		// Every identity the deployment answers to, the way
+		// c2pa-cert-provision.sh writes them: the issuer URL, the hostname and
+		// the DID. leafIdentifiesIssuer accepts whichever one the token names.
+		URIs: issuers,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca, &key.PublicKey, caKey)
 	if err != nil {

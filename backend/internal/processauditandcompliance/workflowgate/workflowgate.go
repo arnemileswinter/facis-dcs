@@ -595,7 +595,27 @@ func (c *Coordinator) persistClosedRun(ctx context.Context, input Input, snapsho
 	return runID, c.finish(ctx, runID, status, request, nil, cause)
 }
 
+// closeoutTimeout bounds the detached write that closes a run out. It only ever
+// runs one UPDATE.
+const closeoutTimeout = 5 * time.Second
+
+// closeoutContext detaches a run's close-out from the request that triggered it.
+// A dispatch that fails BECAUSE the caller's context ended would otherwise
+// leave the row DISPATCHING: the closing UPDATE would run on that same dead
+// context and affect nothing. (snapshot_id,gate) is unique, so the abandoned
+// run is what every later transition of that contract reads, and each one is
+// refused with "existing workflow gate run does not permit transition" — the
+// contract stays wedged until someone edits the database. Every close-out
+// derives its context here rather than at the call site, so no caller can
+// reintroduce the dependency.
+func closeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), closeoutTimeout)
+}
+
 func (c *Coordinator) finish(ctx context.Context, runID, status string, request Request, response []byte, cause error) error {
+	ctx, cancel := closeoutContext(ctx)
+	defer cancel()
+
 	var reason any
 	if cause != nil {
 		reason = cause.Error()
@@ -726,7 +746,9 @@ func (c *Coordinator) DecideReview(ctx context.Context, runID, decision, justifi
 			if cause != nil {
 				reason = cause.Error()
 			}
-			_, updateErr := c.DB.ExecContext(ctx, `
+			closeCtx, cancel := closeoutContext(ctx)
+			defer cancel()
+			_, updateErr := c.DB.ExecContext(closeCtx, `
                 UPDATE pac_workflow_gate_continuation_attempts
                 SET status=$2,failure_reason=$3,completed_at=CURRENT_TIMESTAMP
                 WHERE attempt_id=$1 AND status='DISPATCHING'`,
