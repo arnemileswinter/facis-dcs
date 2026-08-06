@@ -45,11 +45,18 @@ type IPFSResult struct {
 }
 
 func (c *APIClient) CreateFile(ctx context.Context, data any) (*IPFSResult, error) {
-	jsonData, err := json.Marshal(data)
+	body, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("marshal data: %w", err)
 	}
-	return c.createKuboFile(ctx, jsonData)
+	// Raw bytes are stored verbatim: an artifact handed over as []byte is
+	// already its final on-disk form (a PDF, a ciphertext blob), and marshalling
+	// it would store a base64 JSON string a third larger than the bytes it
+	// wraps. Everything else is a value that has no form until it is encoded.
+	if raw, ok := data.([]byte); ok {
+		body = raw
+	}
+	return c.createKuboFile(ctx, body)
 }
 
 func (c *APIClient) FetchFile(cid string) (*IPFSResult, error) {

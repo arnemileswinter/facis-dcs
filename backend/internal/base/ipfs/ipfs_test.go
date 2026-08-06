@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -197,5 +198,42 @@ func TestCreateFile_CopyToMFSFailsWhenEntryDiffers(t *testing.T) {
 	client := NewClient(server.URL)
 	if _, err := client.CreateFile(context.Background(), []byte("payload")); err == nil {
 		t.Fatal("expected CreateFile to surface a files/cp failure when MFS does not hold the expected CID")
+	}
+}
+
+// TestCreateFileStoresRawBytesVerbatim guards the storage form of artifacts.
+// A []byte payload is already final on disk — a PDF, a ciphertext blob — and
+// must reach Kubo unwrapped. Marshalling it would store a base64 JSON string a
+// third larger than the bytes it wraps, and would change the CID of every
+// artifact this service has ever stored.
+func TestCreateFileStoresRawBytesVerbatim(t *testing.T) {
+	payload := []byte("%PDF-1.7\nverbatim bytes")
+	var uploaded []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v0/add":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse multipart form: %v", err)
+			}
+			file, _, err := r.FormFile("file")
+			if err != nil {
+				t.Fatalf("read multipart file: %v", err)
+			}
+			uploaded, _ = io.ReadAll(file)
+			_, _ = w.Write([]byte(`{"Hash":"raw-cid"}`))
+		case "/api/v0/files/cp":
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.CreateFile(context.Background(), payload); err != nil {
+		t.Fatalf("CreateFile returned error: %v", err)
+	}
+	if string(uploaded) != string(payload) {
+		t.Fatalf("raw bytes must reach Kubo unwrapped, got %q", uploaded)
 	}
 }
