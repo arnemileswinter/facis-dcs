@@ -15,8 +15,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"strings"
-	"sync"
 	"time"
 )
 
@@ -48,40 +46,6 @@ type APIClient struct {
 	// DataIdentifier record and its blocks propagate).
 	fetchAttempts int
 	fetchBackoff  time.Duration
-	// mfsBuckets remembers which shard directories this process has already
-	// created, so the common store costs one files/cp instead of a mkdir it
-	// does not need. Bounded by mfsBucketCount.
-	mfsBuckets   map[string]struct{}
-	mfsBucketsMu sync.Mutex
-}
-
-// mfsBucketCount shards the MFS tree that CreateFile roots every stored object
-// in. Entries used to land flat in the MFS root, and a full BDD run left 6892
-// of them there: a directory node that every subsequent files/cp has to read,
-// extend and write back, on the same node whose pin latency the document
-// manager gives 5s. Two hex characters of the CID spread the same objects over
-// 256 directories, which keeps the rewritten node small no matter how long the
-// run goes on.
-//
-// The layout is free to change because nothing reads it: FetchFile resolves
-// content with cat?arg=<cid> and deleteKuboFile unpins with pin/rm?arg=<cid>,
-// both by CID. The MFS entry exists only to root the block against GC.
-const mfsBucketCount = 256
-
-// mfsPath places a CID under its shard. The last two characters are used
-// rather than the first: every CIDv0 begins "Qm", so a prefix would put every
-// object in the same handful of buckets and rebuild the flat directory one
-// level down.
-func mfsPath(cid string) string {
-	bucket := cid
-	if len(cid) > 2 {
-		bucket = cid[len(cid)-2:]
-	}
-	return fmt.Sprintf("/dcs/%s/%s", bucket, cid)
-}
-
-func mfsBucketDir(path string) string {
-	return path[:strings.LastIndex(path, "/")]
 }
 
 func NewClient(baseURL string, mfsBaseURL string) *APIClient {
@@ -95,7 +59,6 @@ func NewClient(baseURL string, mfsBaseURL string) *APIClient {
 		fetchBackoff:  500 * time.Millisecond,
 		writeSlots:    make(chan struct{}, maxConcurrentWrites),
 		bulkSlots:     make(chan struct{}, maxConcurrentBulkWrites),
-		mfsBuckets:    make(map[string]struct{}, mfsBucketCount),
 	}
 }
 
@@ -556,12 +519,8 @@ func (c *APIClient) deleteKuboFile(cid string) error {
 }
 
 func (c *APIClient) copyToMFS(ctx context.Context, baseURL string, cid string, filename string) error {
-	path := mfsPath(filename)
-	if err := c.ensureMFSBucket(ctx, baseURL, mfsBucketDir(path)); err != nil {
-		return err
-	}
 
-	url := fmt.Sprintf("%s/api/v0/files/cp?arg=/ipfs/%s&arg=%s", baseURL, cid, path)
+	url := fmt.Sprintf("%s/api/v0/files/cp?arg=/ipfs/%s&arg=/%s", baseURL, cid, filename)
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	resp, err := c.client.Do(req)
@@ -592,45 +551,11 @@ func (c *APIClient) copyToMFS(ctx context.Context, baseURL string, cid string, f
 	return fmt.Errorf("unexpected Kubo files/cp status %d: %s", resp.StatusCode, body)
 }
 
-// ensureMFSBucket creates a shard directory once per process. files/mkdir with
-// parents=true is idempotent, so a cold cache after a restart costs one extra
-// call per bucket and nothing after that.
-func (c *APIClient) ensureMFSBucket(ctx context.Context, baseURL string, dir string) error {
-	c.mfsBucketsMu.Lock()
-	_, known := c.mfsBuckets[dir]
-	c.mfsBucketsMu.Unlock()
-	if known {
-		return nil
-	}
-
-	url := fmt.Sprintf("%s/api/v0/files/mkdir?arg=%s&parents=true", baseURL, dir)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func(Body io.ReadCloser) {
-		if err := Body.Close(); err != nil {
-			log.Println("could not close response body")
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("unexpected Kubo files/mkdir status %d: %s", resp.StatusCode, body)
-	}
-
-	c.mfsBucketsMu.Lock()
-	c.mfsBuckets[dir] = struct{}{}
-	c.mfsBucketsMu.Unlock()
-	return nil
-}
-
 // mfsEntryHasCID reports whether the MFS path /<filename> already resolves to
 // the given CID (via files/stat). Used to make copyToMFS idempotent: a
 // content-addressed entry that is already present holds the same bytes.
 func (c *APIClient) mfsEntryHasCID(ctx context.Context, baseURL string, filename string, cid string) bool {
-	url := fmt.Sprintf("%s/api/v0/files/stat?arg=%s", baseURL, mfsPath(filename))
+	url := fmt.Sprintf("%s/api/v0/files/stat?arg=/%s", baseURL, filename)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	resp, err := c.client.Do(req)
 	if err != nil {

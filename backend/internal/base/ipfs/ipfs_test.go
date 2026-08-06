@@ -36,19 +36,12 @@ func TestCreateFileUsesKuboWhenTenantBaseURLIsEmpty(t *testing.T) {
 				t.Fatalf("unexpected file name %q", fileHeader.Filename)
 			}
 			_, _ = w.Write([]byte(`{"Hash":"bafy-test-cid"}`))
-		case "/api/v0/files/mkdir":
-			if got := r.URL.Query().Get("arg"); got != "/dcs/id" {
-				t.Fatalf("unexpected files/mkdir arg %q", got)
-			}
-			if r.URL.Query().Get("parents") != "true" {
-				t.Fatalf("files/mkdir must create parents: %v", r.URL.Query())
-			}
 		case "/api/v0/files/cp":
 			mfsCopyCalled = true
 			if r.Method != http.MethodPost {
 				t.Fatalf("expected POST for Kubo files/cp, got %s", r.Method)
 			}
-			if got := r.URL.Query()["arg"]; len(got) != 2 || got[0] != "/ipfs/bafy-test-cid" || got[1] != "/dcs/id/bafy-test-cid" {
+			if got := r.URL.Query()["arg"]; len(got) != 2 || got[0] != "/ipfs/bafy-test-cid" || got[1] != "/bafy-test-cid" {
 				t.Fatalf("unexpected files/cp args: %v", got)
 			}
 		default:
@@ -242,7 +235,6 @@ func TestCreateFile_CopyToMFSIsIdempotentWhenEntryExists(t *testing.T) {
 		case "/api/ipfs/create":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":%q},"data":null}`, cid)
-		case "/api/v0/files/mkdir":
 		case "/api/v0/files/cp":
 			// The peer already copied this CID: Kubo rejects the duplicate path.
 			w.WriteHeader(http.StatusInternalServerError)
@@ -280,7 +272,6 @@ func TestCreateFile_CopyToMFSFailsWhenEntryDiffers(t *testing.T) {
 		case "/api/ipfs/create":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":%q},"data":null}`, cid)
-		case "/api/v0/files/mkdir":
 		case "/api/v0/files/cp":
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = fmt.Fprint(w, `{"Message":"cp: some other failure"}`)
@@ -477,60 +468,5 @@ func TestCreateRetriesStayInsideTheCallersDeadline(t *testing.T) {
 	}
 	if calls.Load() < 2 {
 		t.Fatalf("the budget was spent without retrying: %d attempts", calls.Load())
-	}
-}
-
-// TestCreateFileShardsMFSAndCreatesEachBucketOnce pins the layout that keeps
-// the MFS tree from degrading over a long run: a full BDD suite left 6892
-// entries in the flat MFS root, and every files/cp had to rewrite that
-// directory node. Objects must land under their shard, and the mkdir that
-// creates a shard must not be repeated for every object in it.
-func TestCreateFileShardsMFSAndCreatesEachBucketOnce(t *testing.T) {
-	var mu sync.Mutex
-	mkdirs := map[string]int{}
-	copies := []string{}
-	cid := "cid-aa"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch r.URL.Path {
-		case "/api/ipfs/create":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"identifier":{"Format":"CID","Value":%q},"data":null}`, cid)
-		case "/api/v0/files/mkdir":
-			mkdirs[r.URL.Query().Get("arg")]++
-		case "/api/v0/files/cp":
-			copies = append(copies, r.URL.Query()["arg"][1])
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, server.URL)
-	for _, next := range []string{"cid-aa", "cid-2aa", "cid-bb"} {
-		mu.Lock()
-		cid = next
-		mu.Unlock()
-		if _, err := client.CreateFile(context.Background(), []byte(next)); err != nil {
-			t.Fatalf("CreateFile(%s) returned error: %v", next, err)
-		}
-	}
-
-	wantCopies := []string{"/dcs/aa/cid-aa", "/dcs/aa/cid-2aa", "/dcs/bb/cid-bb"}
-	if len(copies) != len(wantCopies) {
-		t.Fatalf("expected %d files/cp calls, got %v", len(wantCopies), copies)
-	}
-	for i, want := range wantCopies {
-		if copies[i] != want {
-			t.Fatalf("files/cp %d targeted %q, want %q", i, copies[i], want)
-		}
-	}
-	if mkdirs["/dcs/aa"] != 1 {
-		t.Fatalf("the /dcs/aa bucket must be created exactly once, got %d", mkdirs["/dcs/aa"])
-	}
-	if mkdirs["/dcs/bb"] != 1 {
-		t.Fatalf("the /dcs/bb bucket must be created exactly once, got %d", mkdirs["/dcs/bb"])
 	}
 }
