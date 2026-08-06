@@ -18,10 +18,19 @@ import (
 	"time"
 )
 
+// maxConcurrentWrites bounds how many stores may be in flight at once. The
+// node behind the document manager degrades under concurrent pinning: once one
+// pin outlives the manager's own client timeout, every further caller that
+// piles on keeps the node saturated and the failure feeds itself — the cap
+// turns that stampede into a queue the node can drain.
+const maxConcurrentWrites = 4
+
 type APIClient struct {
 	baseURL    string
 	mfsBaseURL string
 	client     *http.Client
+	// writeSlots implements the maxConcurrentWrites bound.
+	writeSlots chan struct{}
 	// fetchAttempts and fetchBackoff bound the read-after-write retry against
 	// the tenant store, which is eventually consistent: a CID returned by
 	// CreateFile is not always immediately resolvable through the tenant
@@ -40,7 +49,22 @@ func NewClient(baseURL string, mfsBaseURL string) *APIClient {
 		},
 		fetchAttempts: 8,
 		fetchBackoff:  500 * time.Millisecond,
+		writeSlots:    make(chan struct{}, maxConcurrentWrites),
 	}
+}
+
+// acquireWriteSlot blocks until a write slot frees or the context ends.
+func (c *APIClient) acquireWriteSlot(ctx context.Context) error {
+	select {
+	case c.writeSlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for an ipfs write slot: %w", ctx.Err())
+	}
+}
+
+func (c *APIClient) releaseWriteSlot() {
+	<-c.writeSlots
 }
 
 type IPFSResult struct {
@@ -56,6 +80,11 @@ func (c *APIClient) CreateFile(ctx context.Context, data any) (*IPFSResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("marshal data: %w", err)
 	}
+
+	if err := c.acquireWriteSlot(ctx); err != nil {
+		return nil, err
+	}
+	defer c.releaseWriteSlot()
 
 	if c.baseURL == "" {
 		return c.createKuboFile(ctx, jsonData)
@@ -100,7 +129,14 @@ func (c *APIClient) createTenantFileWithRetry(ctx context.Context, body []byte) 
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 && c.fetchBackoff > 0 {
-			time.Sleep(c.fetchBackoff)
+			// Exponential, capped: a flat cadence keeps a struggling node at
+			// constant pressure, and a stampede of callers retrying in lockstep
+			// is what turned one slow pin into a stall nothing recovered from.
+			delay := c.fetchBackoff << (attempt - 1)
+			if max := 8 * time.Second; delay > max {
+				delay = max
+			}
+			time.Sleep(delay)
 		}
 
 		result, status, err := c.createTenantOnce(ctx, url, body)
