@@ -389,7 +389,9 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     // Submit), then reload so that state clears before submitting.
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      await showBtn.click()
+      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
+      // a coordinate click cannot land, so the event is dispatched directly.
+      await showBtn.dispatchEvent('click')
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
@@ -491,7 +493,9 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      await showBtn.click()
+      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
+      // a coordinate click cannot land, so the event is dispatched directly.
+      await showBtn.dispatchEvent('click')
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )

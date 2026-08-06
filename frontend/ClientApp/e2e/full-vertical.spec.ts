@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { type DcsRole, expect, test } from './dcs-test'
-import { selectOriginatorRole, signApprovedContractViaViewer } from './lifecycle-helpers'
+import { selectBilateralClauseRoles, selectOriginatorRole, signApprovedContractViaViewer } from './lifecycle-helpers'
 import type { Page } from '@playwright/test'
 
 /**

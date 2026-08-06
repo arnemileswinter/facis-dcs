@@ -1,5 +1,11 @@
 import { expect, test } from './dcs-test'
-import { deriveLocalContract, gotoAs, registerContractTemplate, submitReviewApproveTemplate } from './lifecycle-helpers'
+import {
+  deriveLocalContract,
+  gotoAs,
+  registerContractTemplate,
+  selectBilateralClauseRoles,
+  submitReviewApproveTemplate,
+} from './lifecycle-helpers'
 
 /**
  * Semantic data objects, clicked into existence (ADR-23 / DCS-FR-TR-25):
@@ -102,6 +108,21 @@ test('a LegalPerson data object is clicked into a template and filled in the con
     await expect(address).toBeVisible()
     await address.getByTestId('toggle-negotiable-countryName').check()
     await expect(address.getByTestId('negotiable-countryName')).toBeVisible()
+
+    // A contract binds its originator to one of the two catalogued roles its
+    // template's rules declare, so a data-only template is not instantiable —
+    // author the minimal role-bearing clause beside the data object.
+    await page.getByRole('tab', { name: /Clauses/ }).click()
+    const clauseEditor = page.getByTestId('split-clause-editor')
+    await clauseEditor.getByPlaceholder('Clause title').fill('Bilateral roles')
+    await clauseEditor.locator('.clause-editor').first().click()
+    await page.keyboard.type('The parties act in their catalogued roles.')
+    const ruleSelect = (label: string) =>
+      clauseEditor.locator('label.form-control').filter({ hasText: label }).locator('select')
+    await ruleSelect('Rule').selectOption({ label: 'Permission: the assignee MAY' })
+    await ruleSelect('Action').selectOption({ label: 'use' })
+    await selectBilateralClauseRoles(clauseEditor)
+    await clauseEditor.getByRole('button', { name: 'Add clause', exact: true }).click()
 
     const created = page.waitForRequest((r) => r.url().includes('/template/create') && r.method() === 'POST')
     const response = page.waitForResponse(

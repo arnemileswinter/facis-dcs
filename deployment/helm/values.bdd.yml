@@ -339,6 +339,13 @@ statusListLocalhostProxy:
 # IPFS: required — IPFS_TENANT_BASE_URL and IPFS_MFS_BASE_URL are fatal on startup.
 ipfs:
   enabled: true
+  # Disposable-stack node tuning (charts/ipfs/values.yaml): no DHT to provide
+  # to, and no per-block fsync — the fsync is what pushed pin/add past the
+  # document-manager's 5s timeout late in the suite, after which every store
+  # failed and the retries snowballed the node.
+  config:
+    routingType: none
+    noSync: true
   # The audit/evidence chains store content-addressed blobs whose CIDs live
   # in the (persistent) database — the two stores must share a lifetime, or
   # every IPFS pod restart dangles the recorded evidence.

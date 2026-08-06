@@ -1390,7 +1390,9 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       await openNegotiateView(inst, contractDid)
       const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
       if (!(await showBtn.isVisible().catch(() => false))) continue
-      await showBtn.click()
+      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
+      // a coordinate click cannot land, so the event is dispatched directly.
+      await showBtn.dispatchEvent('click')
       const responded = inst.page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
         { timeout: 30_000 },
