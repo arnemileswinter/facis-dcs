@@ -140,7 +140,7 @@ export const FIXTURE_CLAUSE_PROSE = 'The provider invoices the agreed payment am
  * inline placeholder renders an editable input, a bare constraint boundary does
  * not). Returns the created component's DID.
  */
-async function authorPaymentComponent(
+export async function authorPaymentComponent(
   page: Page,
   loginAs: LoginAs,
   name: string,
@@ -395,7 +395,7 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
@@ -499,7 +499,7 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)

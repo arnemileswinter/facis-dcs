@@ -348,19 +348,29 @@ def _ensure_target_designated(context, name, target_id=None):
     A contract designates its own destination (ADR-25) because the automatic
     trigger on signing completion has no human present to choose one.
     """
-    ContractService._refresh_contract(context, name)
-    did, updated_at = ContractService._contract_data(context, name)
     resolved = target_id if target_id is not None else _registered_target_id(context)
     manager_h = AuthService.get_headers_for_roles(["Contract Manager"])
-    resp = post_json(
-        context,
-        contract_target_designate_url(context),
-        {"did": did, "updated_at": updated_at, "target_id": resolved},
-        headers=manager_h,
-    )
+    # The updated_at token is optimistic concurrency, and the async pipeline
+    # (regeneration, gate verdicts) legitimately advances the contract between
+    # the read and this write late in a run. The refusal names its own remedy —
+    # reload and try again — so that is what happens, bounded.
+    deadline = time.monotonic() + 60
+    while True:
+        ContractService._refresh_contract(context, name)
+        did, updated_at = ContractService._contract_data(context, name)
+        resp = post_json(
+            context,
+            contract_target_designate_url(context),
+            {"did": did, "updated_at": updated_at, "target_id": resolved},
+            headers=manager_h,
+        )
+        if resp.status_code == 200:
+            break
+        if "changed since it was read" not in resp.text or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
     assert resp.status_code == 200, (
-        f"could not designate a target system for contract '{name}' with "
-        f"updated_at token {updated_at!r}: {resp.status_code} {resp.text}"
+        f"could not designate a target system for contract '{name}': {resp.status_code} {resp.text}"
     )
     ContractService._refresh_contract(context, name)
 
@@ -392,8 +402,10 @@ def step_when_deploy_contract(context, name):
     # The transition that reached this state dispatched its own workflow gate,
     # and a deploy racing that verdict is refused with 409/DISPATCHING — a
     # pending evaluation, not a denial. Wait it out; a real BLOCKED verdict is
-    # not retried and fails the scenario with the gate's findings.
-    deadline = time.monotonic() + 60
+    # not retried and fails the scenario with the gate's findings. Sized for a
+    # loaded ORCE late in the suite: at 60s a still-evaluating gate leaked its
+    # 409 into a scenario that was owed the deploy endpoint's own answer.
+    deadline = time.monotonic() + 180
     while True:
         context.requests_response = post_json(
             context, contract_deploy_url(context), {"did": did, "updated_at": updated_at}, headers=manager_h

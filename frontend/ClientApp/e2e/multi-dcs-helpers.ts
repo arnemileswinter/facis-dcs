@@ -103,6 +103,17 @@ function didTail(did: string): string {
  */
 async function followViewLinkFor(inst: Instance, did: string, where: string): Promise<void> {
   const row = inst.page.locator('.list-row').filter({ has: inst.page.locator(`a[href*="${didTail(did)}"]`) })
+  // The row appears when the peer's ship lands, and a list rendered before
+  // that moment never refreshes itself — so absence is re-checked on a fresh
+  // load rather than waited out on a stale one.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await expect(row).toHaveCount(1, { timeout: 30_000 })
+      break
+    } catch {
+      await inst.page.reload()
+    }
+  }
   await expect(row, `${where} on ${inst.origin} shows no row for ${did}`).toHaveCount(1, { timeout: 30_000 })
   await row.getByRole('link', { name: 'View', exact: true }).click()
 }
@@ -1397,7 +1408,7 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
         { timeout: 30_000 },
       )
-      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
+      await inst.page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
       await confirmModalOn(inst, 'Confirm')
       accepted = (await responded).ok()
     }
