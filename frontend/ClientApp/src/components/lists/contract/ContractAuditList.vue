@@ -1,103 +1,139 @@
 <script setup lang="ts">
+import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/vue/20/solid'
+import { computed, ref, watch } from 'vue'
 import { useContractEventType } from '@/composables/useContractEventType'
-import { contractAuditEventDisplayText } from '@/utils/contract-audit-event-display'
+import {
+  contractAuditEventActor,
+  contractAuditEventDisplayText,
+  contractAuditEventOccurredAt,
+} from '@/utils/contract-audit-event-display'
 import { toProperCase } from '@/utils/string'
-import type { ContractAuditResponse } from '@/models/responses/contract-response'
+import type { ContractAuditResponse, ContractAuditResponseItem } from '@/models/responses/contract-response'
 
-defineProps<{
+const props = defineProps<{
   audits: ContractAuditResponse
 }>()
 
 const eventType = useContractEventType()
+const expandedIds = ref<Set<number>>(new Set())
+
+interface AuditRow {
+  id: number
+  title: string
+  occurredAt: string
+  actor?: string
+  eventType: string
+  component: string
+  transition?: string
+  reason?: string
+  supersededIntro?: string
+  superseded?: { key: string; text: string }[]
+  eventDataJson: string
+}
+
+function formatOccurredAt(audit: ContractAuditResponseItem): string {
+  const raw = contractAuditEventOccurredAt(audit.event_data, audit.created_at)
+  if (!raw) return '—'
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString()
+}
+
+function formatEventDataJson(eventData: unknown): string {
+  try {
+    return JSON.stringify(eventData ?? null, null, 2)
+  } catch {
+    return String(eventData)
+  }
+}
+
+function toRow(audit: ContractAuditResponseItem): AuditRow {
+  const row: AuditRow = {
+    id: audit.id,
+    title: contractAuditEventDisplayText(audit.event_type, audit.event_data),
+    occurredAt: formatOccurredAt(audit),
+    actor: contractAuditEventActor(audit.event_data),
+    eventType: String(audit.event_type),
+    component: String(audit.component),
+    eventDataJson: formatEventDataJson(audit.event_data),
+  }
+
+  if (eventType.isSubmitEvent(audit) && audit.event_data.new_state) {
+    row.transition = `${toProperCase(audit.event_data.previous_state)} → ${toProperCase(audit.event_data.new_state)}`
+  }
+  if (eventType.isRejectEvent(audit) && audit.event_data.reason) {
+    row.reason = audit.event_data.reason
+  }
+  if (eventType.isNegotiationChangeSupersededEvent(audit)) {
+    row.supersededIntro = `Version ${audit.event_data.merged_contract_version} does not carry these accepted change requests:`
+    row.superseded = audit.event_data.superseded.map((discard) => ({
+      key: `${discard.negotiation_id}-${discard.superseded_by}`,
+      text: `${discard.negotiation_id}: ${discard.fields.join(', ')} superseded by ${discard.superseded_by}`,
+    }))
+  }
+
+  return row
+}
+
+const rows = computed(() => props.audits.map(toRow))
+
+watch(
+  () => props.audits,
+  () => {
+    expandedIds.value = new Set()
+  },
+)
+
+function isExpanded(id: number): boolean {
+  return expandedIds.value.has(id)
+}
+
+function toggle(id: number) {
+  const next = new Set(expandedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedIds.value = next
+}
 </script>
 
 <template>
-  <ul class="list">
-    <li v-for="audit in audits" :key="audit.id" class="list-row grid-cols-1">
-      <div class="flex justify-between">
-        <div>{{ new Date(audit.event_data.occurred_at).toLocaleString() }}</div>
-        <div class="badge badge-soft badge-sm badge-secondary">
-          {{ contractAuditEventDisplayText(audit.event_type, audit.event_data) }}
-        </div>
-        <div class="text-xs">{{ toProperCase(audit.component) }}</div>
-      </div>
-      <div class="list-col-wrap">
-        <div v-if="eventType.isCreateEvent(audit)">
-          <div>Created by: {{ audit.event_data.created_by }}</div>
-        </div>
-        <div v-else-if="eventType.isUpdateEvent(audit)">
-          <div>Updated by: {{ audit.event_data.updated_by }}</div>
-        </div>
-        <div v-else-if="eventType.isSubmitEvent(audit)" class="flex justify-between">
-          <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
-          <div v-if="audit.event_data.new_state">
-            Transition:
-            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary" aria-label="From state">
-              {{ toProperCase(audit.event_data.previous_state) }}
-            </span>
-            <span aria-hidden="true">→</span>
-            <span class="relative -top-0.5 badge badge-soft badge-xs badge-secondary" aria-label="To state">
-              {{ toProperCase(audit.event_data.new_state) }}
-            </span>
+  <ul class="divide-y divide-base-300">
+    <li v-for="row in rows" :key="row.id" class="py-3 first:pt-0 last:pb-0">
+      <div class="flex items-start gap-2">
+        <button
+          type="button"
+          class="btn mt-0.5 shrink-0 px-1 btn-ghost btn-xs"
+          :aria-expanded="isExpanded(row.id)"
+          :aria-label="isExpanded(row.id) ? 'Hide activity details' : 'Show activity details'"
+          @click="toggle(row.id)"
+        >
+          <ChevronDownIcon v-if="isExpanded(row.id)" class="size-4" />
+          <ChevronRightIcon v-else class="size-4" />
+        </button>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-base-content">{{ row.title }}</div>
+          <div class="mt-0.5 text-xs text-base-content/70">{{ row.occurredAt }}</div>
+          <div v-if="row.actor" class="mt-1 font-mono text-xs break-all text-base-content/80">By: {{ row.actor }}</div>
+
+          <div
+            v-if="isExpanded(row.id)"
+            class="mt-2 space-y-2 border-l border-base-300 pl-3 text-xs text-base-content/70"
+          >
+            <div>Event: {{ toProperCase(row.eventType) }}</div>
+            <div>Component: {{ toProperCase(row.component) }}</div>
+            <div v-if="row.transition">Transition: {{ row.transition }}</div>
+            <div v-if="row.reason" class="break-words whitespace-pre-wrap">Reason: {{ row.reason }}</div>
+            <div v-if="row.supersededIntro">{{ row.supersededIntro }}</div>
+            <ul v-if="row.superseded?.length" class="list-disc pl-4">
+              <li v-for="item in row.superseded" :key="item.key">{{ item.text }}</li>
+            </ul>
+            <details class="collapse-arrow collapse rounded-box border border-base-content/10">
+              <summary class="collapse-title text-xs font-medium">Event data (JSON)</summary>
+              <div class="collapse-content">
+                <pre class="text-xs wrap-break-word whitespace-pre-wrap">{{ row.eventDataJson }}</pre>
+              </div>
+            </details>
           </div>
         </div>
-        <div v-else-if="eventType.isRetrieveByIDEvent(audit)">
-          <div>Retrieved by: {{ audit.event_data.retrieved_by }}</div>
-        </div>
-        <div v-else-if="eventType.isRetrieveHistoryByDIDEvent(audit)">
-          <div>Retrieved by: {{ audit.event_data.retrieved_by }}</div>
-        </div>
-        <div v-else-if="eventType.isRetrieveAllEvent(audit)">
-          <div>Retrieved by: {{ audit.event_data.retrieved_by }}</div>
-        </div>
-        <div v-else-if="eventType.isVerifyEvent(audit)">
-          <div>Verified by: {{ audit.event_data.verified_by }}</div>
-        </div>
-        <div v-else-if="eventType.isNegotiationEvent(audit)">
-          <div>Negotiated by: {{ audit.event_data.negotiated_by }}</div>
-        </div>
-        <div v-else-if="eventType.isAcceptNegotiationEvent(audit)">
-          <div>Accepted by: {{ audit.event_data.accepted_by }}</div>
-        </div>
-        <div v-else-if="eventType.isRejectNegotiationEvent(audit)">
-          <div>Rejected by: {{ audit.event_data.rejected_by }}</div>
-        </div>
-        <div v-else-if="eventType.isApproveEvent(audit)">
-          <div>Approved by: {{ audit.event_data.approved_by }}</div>
-        </div>
-        <div v-else-if="eventType.isRejectEvent(audit)" class="flex flex-col gap-1">
-          <div class="min-w-0 break-all">Rejected by: {{ audit.event_data.rejected_by }}</div>
-          <div class="min-w-0 break-words whitespace-pre-wrap">Reason: {{ audit.event_data.reason }}</div>
-        </div>
-        <div v-else-if="eventType.isTerminateEvent(audit)">
-          <div>Terminated by: {{ audit.event_data.terminated_by }}</div>
-        </div>
-        <div v-else-if="eventType.isRecordEvidenceEvent(audit)">
-          <div>Recorded by: {{ audit.event_data.recorded_by }}</div>
-        </div>
-        <div v-else-if="eventType.isAuditEvent(audit)">
-          <div>Audited by: {{ audit.event_data.audited_by }}</div>
-        </div>
-        <div v-else-if="eventType.isReviewEvent(audit)">
-          <div>Reviewed by: {{ audit.event_data.reviewed_by }}</div>
-        </div>
-        <div v-else-if="eventType.isIncreaseContractVersionEvent(audit)">
-          <div>Submitted by: {{ audit.event_data.submitted_by }}</div>
-        </div>
-        <div v-else-if="eventType.isNegotiationChangeSupersededEvent(audit)">
-          <div>
-            Version {{ audit.event_data.merged_contract_version }} does not carry these accepted change requests:
-          </div>
-          <ul>
-            <li
-              v-for="discard in audit.event_data.superseded"
-              :key="`${discard.negotiation_id}-${discard.superseded_by}`"
-            >
-              {{ discard.negotiation_id }}: {{ discard.fields.join(', ') }} superseded by {{ discard.superseded_by }}
-            </li>
-          </ul>
-        </div>
-        <div v-else>{{ audit.event_data }}</div>
       </div>
     </li>
   </ul>
