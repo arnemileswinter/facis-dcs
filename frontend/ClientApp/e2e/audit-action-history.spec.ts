@@ -84,7 +84,7 @@ test.describe('Audit Action History', () => {
     await expect(page.getByRole('heading', { name: 'Audit' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Execute Audit' })).toBeVisible()
 
-    await page.getByRole('button', { name: 'Action History', exact: true }).click()
+    await page.getByRole('tab', { name: 'Action History', exact: true }).click()
     await expect(page.getByRole('button', { name: 'View activity history' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Execute Audit' })).toBeHidden()
 
@@ -125,7 +125,7 @@ test.describe('Audit Action History', () => {
     })
 
     await page.goto('/ui/audit')
-    await page.getByRole('button', { name: 'Action History', exact: true }).click()
+    await page.getByRole('tab', { name: 'Action History', exact: true }).click()
     await page.locator('#select-action-history-type').selectOption('template')
     await page.locator('#input-action-history-did').fill(templateDid)
     await page.getByRole('button', { name: 'View activity history' }).click()
@@ -137,7 +137,8 @@ test.describe('Audit Action History', () => {
   test('keeps Compliance Audit available as the default tab', async ({ page }) => {
     await authenticate(page, 'Auditor')
     await page.goto('/ui/audit')
-    await expect(page.getByRole('button', { name: 'Compliance Audit', exact: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Compliance Audit', exact: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Action History', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Execute Audit' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'JSON', exact: true })).toBeVisible()
   })

@@ -526,11 +526,11 @@ function formatDateTime(value?: string): string {
     </div>
   </div>
 
-  <section v-show="activeTab === 'action-history' && canSeeActionHistory" class="space-y-4 px-4 pb-8">
+  <section v-if="activeTab === 'action-history' && canSeeActionHistory" class="space-y-4 px-4 pb-8">
     <ActionHistoryPanel />
   </section>
 
-  <section v-show="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
+  <section v-if="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
     <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
       <div
         v-if="hasExecutedAudit"
