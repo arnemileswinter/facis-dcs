@@ -45,6 +45,18 @@ describe('contract editor tabs', () => {
     ])
   })
 
+  it('offers Diff View for submitted and draft when the view renders it', () => {
+    signIn(['CONTRACT_REVIEWER'])
+
+    expect(tabIds(ContractState.submitted, ['details', 'content', 'diff', 'audit'])).toEqual([
+      'details',
+      'content',
+      'diff',
+    ])
+    expect(tabIds(ContractState.draft, ['details', 'content', 'diff'])).toContain('diff')
+    expect(tabIds(ContractState.submitted, ['details', 'content', 'audit'])).not.toContain('diff')
+  })
+
   it('offers the audit tab to the roles /contract/audit scopes', () => {
     signIn(['CONTRACT_CREATOR', 'AUDITOR'])
 

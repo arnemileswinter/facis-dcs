@@ -9,6 +9,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
@@ -56,7 +57,12 @@ const isAuditingAuthorized = computed(
 )
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content', 'audit']),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'diff',
+    'audit',
+  ]),
 )
 
 const story = computed(() =>
@@ -263,6 +269,24 @@ const exportPDF = async () => {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  v-if="contract"
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                  :current-details="{
+                    name: contract.name,
+                    description: contract.description,
+                    contract_version: contract.contract_version,
+                    start_date: contract.start_date,
+                    exp_date: contract.exp_date,
+                    exp_policy: contract.exp_policy,
+                    exp_notice_period: contract.exp_notice_period,
+                  }"
+                />
               </div>
 
               <template v-if="isAuditingAuthorized">

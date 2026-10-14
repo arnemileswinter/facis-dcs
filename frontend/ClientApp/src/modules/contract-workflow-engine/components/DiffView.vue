@@ -7,21 +7,30 @@ import {
   useContractPlainTextConverter,
 } from '@contract-workflow-engine/composables/useContractPlainTextConverter'
 import type { ContractData } from '@/models/contract/contract-data'
+import type { ContractDetailsSnapshot } from '@contract-workflow-engine/models/contract-details-snapshot'
 
 const props = withDefaults(
   defineProps<{
     leftContractData?: ContractData
     rightContractData?: ContractData
+    leftDetails?: ContractDetailsSnapshot | null
+    rightDetails?: ContractDetailsSnapshot | null
     showLineNumbers?: boolean
     highlightDiff?: boolean
     leftPaneTitle?: string
     rightPaneTitle?: string
+    leftTestId?: string
+    rightTestId?: string
   }>(),
   {
     showLineNumbers: true,
     highlightDiff: true,
     leftPaneTitle: '',
     rightPaneTitle: '',
+    leftDetails: null,
+    rightDetails: null,
+    leftTestId: undefined,
+    rightTestId: undefined,
   },
 )
 
@@ -41,6 +50,21 @@ const rightBlocks = computed<ContractPlainTextBlock[]>(() => {
 })
 
 const contractDiffDocument = computed(() => buildContractBlockDiff(leftBlocks.value, rightBlocks.value))
+
+const detailKeys: (keyof ContractDetailsSnapshot)[] = [
+  'name',
+  'contract_version',
+  'description',
+  'start_date',
+  'exp_date',
+  'exp_notice_period',
+  'exp_policy',
+]
+
+const changedDetailKeys = computed(() => {
+  if (!props.highlightDiff) return [] as (keyof ContractDetailsSnapshot)[]
+  return detailKeys.filter((key) => String(props.leftDetails?.[key] ?? '') !== String(props.rightDetails?.[key] ?? ''))
+})
 </script>
 
 <template>
@@ -50,8 +74,11 @@ const contractDiffDocument = computed(() => buildContractBlockDiff(leftBlocks.va
       :blocks="leftBlocks"
       :diff-rows="contractDiffDocument.leftRows"
       :highlight-diff="highlightDiff"
-      :show-no-prior-version="!hasLeftContractData"
+      :show-no-prior-version="!hasLeftContractData && !leftDetails"
       :show-line-numbers="showLineNumbers"
+      :details="leftDetails"
+      :changed-detail-keys="changedDetailKeys"
+      :test-id="leftTestId"
     />
     <DiffPane
       :title="rightPaneTitle"
@@ -59,6 +86,9 @@ const contractDiffDocument = computed(() => buildContractBlockDiff(leftBlocks.va
       :diff-rows="contractDiffDocument.rightRows"
       :highlight-diff="highlightDiff"
       :show-line-numbers="showLineNumbers"
+      :details="rightDetails"
+      :changed-detail-keys="changedDetailKeys"
+      :test-id="rightTestId"
     />
   </div>
 </template>

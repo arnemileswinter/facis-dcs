@@ -644,6 +644,15 @@ const exportPDF = async () => {
                     :contract-did="contract.did"
                     :contract-state="contract.state"
                     :current-contract-data="currentContractData"
+                    :current-details="{
+                      name: contract.name,
+                      description: contract.description,
+                      contract_version: contract.contract_version,
+                      start_date: contract.start_date,
+                      exp_date: contract.exp_date,
+                      exp_policy: contract.exp_policy,
+                      exp_notice_period: contract.exp_notice_period,
+                    }"
                   />
                 </div>
 

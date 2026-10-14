@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from '@/stores/auth-store'
-import { ContractState } from '@/types/contract-state'
 import type { ContractState as ContractStateType } from '@/types/contract-state'
 import type { UserRole } from '@/types/user-role'
 import type {
@@ -35,10 +34,7 @@ export const useContractEditorUiStore = defineStore(storeId, {
         (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
         false
 
-      const forState: ContractEditorTabId[] =
-        contractState === ContractState.negotiation
-          ? ['details', 'content', 'diff', 'structure']
-          : ['details', 'content', 'structure']
+      const forState: ContractEditorTabId[] = ['details', 'content', 'diff', 'structure']
 
       return this.tabs.filter(
         (tab) =>
