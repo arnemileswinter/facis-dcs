@@ -66,6 +66,7 @@ export interface LoadDocumentMeta {
   templateType?: TemplateTypeValue
   state?: ContractTemplateState | null
   version?: number | null
+  created_at?: string | null
   updated_at?: string | null
   created_by?: string
   responsible?: ContractTemplateResponsible | null
@@ -162,6 +163,7 @@ export const useDcsDraftStore = defineStore(storeId, {
           templateType: templateType !== TemplateType.component ? templateType : derivedTemplateType,
           state: meta.state ?? undefined,
           version: meta.version ?? null,
+          created_at: meta.created_at ?? null,
           updated_at: meta.updated_at ?? null,
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
@@ -185,6 +187,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         templateType,
         state: meta.state ?? undefined,
         version: meta.version ?? null,
+        created_at: meta.created_at ?? null,
         updated_at: meta.updated_at ?? null,
         created_by: meta.created_by ?? '',
         responsible: meta.responsible ?? null,
@@ -1239,6 +1242,7 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   templateType: TemplateType.component,
   state: undefined,
   version: null,
+  created_at: null,
   updated_at: null,
   created_by: '',
   responsible: null,
