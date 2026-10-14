@@ -132,6 +132,9 @@ export interface SignatureViewItem {
   qualified?: boolean
   signer_cert_subject?: string
   signer_cert_serial?: string
+  poa_organization?: string
+  poa_roles?: string[]
+  summary_issuer?: string
 }
 
 export interface SignatureViewResult {

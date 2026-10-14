@@ -319,6 +319,9 @@ var SMSignatureViewItem = Type("SMSignatureViewItem", func() {
 	Attribute("qualified", Boolean, "Whether DSS's qualification determination for this signature was QESIG (qualified certificate + QSCD, ADR-20) — the QES evidence distinct from credential_type alone")
 	Attribute("signer_cert_subject", String, "Subject of the signing certificate that produced this signature (ADR-20 sole-control evidence, DCS-FR-SM-26)")
 	Attribute("signer_cert_serial", String, "Serial number of the signing certificate that produced this signature (DCS-FR-SM-26)")
+	Attribute("poa_organization", String, "Organization the signatory was authorized to act for, from the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
+	Attribute("poa_roles", ArrayOf(String), "Roles asserted by the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
+	Attribute("summary_issuer", String, "Issuer DID of the verified ContractSigningSummaryCredential that binds this signature (DCS-FR-SM-26 credential chain)")
 
 	Required("signer_did", "credential_type", "status", "format")
 })

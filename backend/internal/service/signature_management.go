@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -848,6 +849,8 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 				item.RequiredCredentialType = ceremony.RequiredCredentialType
 				item.SignerCertSubject = ceremony.SignerCertSubject
 				item.SignerCertSerial = ceremony.SignerCertSerial
+				item.PoaOrganization = ceremony.PoAOrganization
+				item.PoaRoles = decodePoARoles(ceremony.PoARoles)
 			}
 		}
 		enrichWithSigningEvidence(item, rec, validation.SigningEvidence)
@@ -886,8 +889,22 @@ func enrichWithSigningEvidence(item *signaturemanagement.SMSignatureViewItem, re
 		item.PdfHash = optString(ev.PDFHash)
 		item.KbSdHash = optString(ev.KBSDHash)
 		item.ValidationReportHash = optString(ev.ValidationReportHash)
+		item.SummaryIssuer = optString(ev.Issuer)
 		return
 	}
+}
+
+// decodePoARoles unmarshals the ceremony's JSON roles array; absent or
+// malformed roles yield nil so the attribute stays unset.
+func decodePoARoles(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var roles []string
+	if err := json.Unmarshal(raw, &roles); err != nil || len(roles) == 0 {
+		return nil
+	}
+	return roles
 }
 
 // optString returns nil for an empty string so optional goa attributes stay

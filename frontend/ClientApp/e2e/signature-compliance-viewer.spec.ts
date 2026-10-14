@@ -60,6 +60,15 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await expect(page.getByText('Signature level:')).toBeVisible()
     await expect(page.getByText('Timestamp:')).toBeVisible()
 
+    const chain = page.getByTestId('credential-chain')
+    await expect(chain.getByRole('heading', { name: 'Signing Credentials & Authorization' })).toBeVisible()
+    await expect(chain.getByText('Signer & Authorization')).toBeVisible()
+    await expect(chain.getByText('Signer', { exact: true })).toBeVisible()
+    await expect(chain.getByText('Organization')).toBeVisible()
+    await expect(chain.getByText('Authorized Roles')).toBeVisible()
+    await expect(chain.getByText('Signing Credential', { exact: true })).toBeVisible()
+    await expect(chain.getByText('Issued by')).toBeVisible()
+
     // The cryptographic-integrity findings section renders with pass/fail rows.
     await expect(page.getByRole('heading', { name: 'Cryptographic Integrity' })).toBeVisible()
     await expect(

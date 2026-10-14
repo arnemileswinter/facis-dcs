@@ -60,6 +60,7 @@ type SigningEvidence struct {
 	CredentialType       string
 	KBSDHash             string
 	ValidationReportHash string
+	Issuer               string
 }
 
 type Validator struct {
@@ -310,6 +311,7 @@ func collectSigningEvidence(documents []json.RawMessage) []SigningEvidence {
 // ok is false for a document that is not a signing-summary VC (no signer id).
 func parseSigningEvidence(evidence []byte) (SigningEvidence, bool) {
 	var vc struct {
+		Issuer            json.RawMessage `json:"issuer"`
 		CredentialSubject struct {
 			ID                   string `json:"id"`
 			CeremonyID           string `json:"ceremony_id"`
@@ -334,7 +336,25 @@ func parseSigningEvidence(evidence []byte) (SigningEvidence, bool) {
 		CredentialType:       cs.CredentialType,
 		KBSDHash:             cs.KBSDHash,
 		ValidationReportHash: cs.ValidationReportHash,
+		Issuer:               issuerDIDFromRaw(vc.Issuer),
 	}, true
+}
+
+func issuerDIDFromRaw(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return strings.TrimSpace(asString)
+	}
+	var asObj struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &asObj); err == nil {
+		return strings.TrimSpace(asObj.ID)
+	}
+	return ""
 }
 
 // crossCheckEmbeddedPID re-verifies the embedded signer binding against the

@@ -11,6 +11,12 @@ import {
   type SignatureViewResult,
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  poaOrganizationDisplay,
+  poaRolesDisplay,
+  signerDisplayName,
+  summaryIssuerDisplay,
+} from '@/utils/credential-chain-evidence'
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import {
@@ -508,6 +514,58 @@ function exportPdf() {
                       <dd class="inline">{{ activeDss.sub_indication ?? '—' }}</dd>
                     </div>
                   </dl>
+                </div>
+              </div>
+
+              <div
+                v-for="(sig, sigIndex) in view.signatures"
+                :key="`credential-chain-${sig.signer_did}-${sig.field_name ?? sigIndex}`"
+                data-testid="credential-chain"
+                class="card border border-base-content/10 bg-base-100"
+              >
+                <div class="card-body gap-4 p-4 text-sm">
+                  <div>
+                    <h3 class="font-semibold">Signing Credentials &amp; Authorization</h3>
+                    <p class="text-base-content/60">Local signer information recorded during signing</p>
+                  </div>
+
+                  <section :aria-labelledby="`credential-chain-signer-${sigIndex}`">
+                    <h4 :id="`credential-chain-signer-${sigIndex}`" class="mb-2 font-medium text-base-content">
+                      Signer &amp; Authorization
+                    </h4>
+                    <dl class="space-y-1">
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signer</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">{{ signerDisplayName(sig) }}</dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Organization</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ poaOrganizationDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Authorized Roles</dt>
+                        <dd class="m-0 min-w-0 break-words text-base-content/80">
+                          {{ poaRolesDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section :aria-labelledby="`credential-chain-summary-${sigIndex}`">
+                    <h4 :id="`credential-chain-summary-${sigIndex}`" class="mb-2 font-medium text-base-content">
+                      Signing Credential
+                    </h4>
+                    <dl class="space-y-1">
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Issued by</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ summaryIssuerDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
                 </div>
               </div>
 
