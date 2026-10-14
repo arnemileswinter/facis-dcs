@@ -115,7 +115,13 @@ onUnmounted(() => stateFilterStore.reset())
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
       <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
-        <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
+        <TaskListSearch
+          class="flex-1"
+          :tasks="tasks"
+          placeholder="Search contracts"
+          :contract-search-defaults="{ state: ContractState.submitted }"
+          @search-result="applySearchResult"
+        />
         <ListStateFilter
           label="Review Task"
           :filters="reviewTaskStates"

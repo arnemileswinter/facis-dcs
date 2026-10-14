@@ -63,6 +63,8 @@ export interface ContractSearchRequest {
   state?: ContractState
   name?: string
   description?: string
+  contract_data?: string
+  parent_did?: string
   filter?: string
 }
 
