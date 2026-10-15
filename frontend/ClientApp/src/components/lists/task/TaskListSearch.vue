@@ -69,19 +69,16 @@ const searchableItems = computed(() => {
 })
 
 function mapContractHits(response: ContractSearchResponse): Searchable[] {
-  return response.map(
-    (item) =>
-      ({
-        did: item.did,
-        name: item.name,
-        description: item.description,
-        contract_version: item.contract_version,
-        state: item.state,
-        updated_at: item.updated_at,
-        created_at: item.created_at,
-        created_by: '',
-      }),
-  )
+  return response.map((item) => ({
+    did: item.did,
+    name: item.name,
+    description: item.description,
+    contract_version: item.contract_version,
+    state: item.state,
+    updated_at: item.updated_at,
+    created_at: item.created_at,
+    created_by: '',
+  }))
 }
 
 function mapTemplateHits(response: ContractTemplateSearchResponse): Searchable[] {

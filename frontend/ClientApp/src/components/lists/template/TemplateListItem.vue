@@ -19,10 +19,7 @@ const canEdit = computed(() => {
   const inValidStateForManager =
     (props.template.state === TemplateState.draft ||
       props.template.state === TemplateState.submitted ||
-      props.template.state === TemplateState.rejected ||
-      props.template.state === TemplateState.reviewed ||
-      props.template.state === TemplateState.approved ||
-      props.template.state === TemplateState.deleted) &&
+      props.template.state === TemplateState.rejected) &&
     isManager.value
   return inDraftOrRejectedState || inSubmittedState || inValidStateForManager
 })

@@ -97,8 +97,10 @@ const isAuditingAuthorized = computed(
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Clauses
               </h2>
-              <ClauseEditor />
-              <div class="divider text-xs text-base-content/70">existing clauses</div>
+              <ClauseEditor v-if="templateEditorUiStore.isTemplateEditable" />
+              <div v-if="templateEditorUiStore.isTemplateEditable" class="divider text-xs text-base-content/70">
+                existing clauses
+              </div>
               <ClausesEditor />
             </div>
           </div>
