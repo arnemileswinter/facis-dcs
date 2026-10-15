@@ -18,17 +18,17 @@ type PostgresAccessAttemptRepo struct {
 func (r *PostgresAccessAttemptRepo) Create(ctx context.Context, tx *sqlx.Tx, data db.AccessAttempt) error {
 	statement := `
         INSERT INTO access_attempts (
-            attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
 	_, err := tx.ExecContext(ctx, statement,
-		data.AttemptBy, data.IPAddress, data.AttemptedAt, data.Success, data.Service, data.Method, data.Roles, data.Scope, data.DID, data.Justification)
+		data.AttemptBy, data.IPAddress, data.AttemptedAt, data.Success, data.Service, data.Method, data.Roles, data.Scope, data.DID, data.Justification, data.Outcome)
 	return err
 }
 
 func (r *PostgresAccessAttemptRepo) ReadByUserID(ctx context.Context, tx *sqlx.Tx, attemptBy string) ([]db.AccessAttempt, error) {
 	query := `
-        SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification
+        SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome
         FROM access_attempts
         WHERE attempt_by = $1
         ORDER BY attempted_at DESC
@@ -46,7 +46,7 @@ func (r *PostgresAccessAttemptRepo) ReadByUserID(ctx context.Context, tx *sqlx.T
 
 func (r *PostgresAccessAttemptRepo) ReadByIP(ctx context.Context, tx *sqlx.Tx, ip string) ([]db.AccessAttempt, error) {
 	query := `
-        SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification
+        SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome
         FROM access_attempts
         WHERE ip_address = $1
         ORDER BY attempted_at DESC
@@ -104,4 +104,18 @@ func (r *PostgresAccessAttemptRepo) DeleteOlderThan(ctx context.Context, tx *sql
 		return fmt.Errorf("failed to delete old login attempts: %w", err)
 	}
 	return nil
+}
+
+func (r *PostgresAccessAttemptRepo) ReadPage(ctx context.Context, tx *sqlx.Tx, before *db.AccessAttemptCursor, limit int) ([]db.AccessAttempt, error) {
+	query := `SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome FROM access_attempts`
+	args := []any{}
+	if before != nil {
+		query += ` WHERE (attempted_at, id) < ($1, $2)`
+		args = append(args, before.AttemptedAt, before.ID)
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(` ORDER BY attempted_at DESC, id DESC LIMIT $%d`, len(args))
+	attempts := []db.AccessAttempt{}
+	err := tx.SelectContext(ctx, &attempts, query, args...)
+	return attempts, err
 }

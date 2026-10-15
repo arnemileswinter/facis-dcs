@@ -9,6 +9,7 @@ import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
+import AccessAttempts from './AccessAttempts.vue'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
@@ -470,6 +471,7 @@ function formatDateTime(value?: string): string {
   </div>
 
   <section class="space-y-4 px-4">
+    <AccessAttempts />
     <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
       <div
         v-if="hasExecutedAudit"
