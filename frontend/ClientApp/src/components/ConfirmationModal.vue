@@ -98,7 +98,7 @@ defineExpose<ModalExpose>({ reveal: reveal })
       aria-modal="true"
       :aria-labelledby="dialogTitleId"
       :aria-describedby="dialogDescriptionId"
-      @close="cancel"
+      @cancel.prevent="cancel"
     >
       <div class="modal-box">
         <h3 :id="dialogTitleId" class="text-lg font-bold">Confirmation</h3>
