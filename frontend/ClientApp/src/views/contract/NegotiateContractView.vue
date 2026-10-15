@@ -661,7 +661,7 @@ const exportPDF = async () => {
                     <div class="card border border-base-300 bg-base-100 shadow-sm">
                       <div class="card-body">
                         <h2 class="card-title text-sm">Audit History</h2>
-                        <AuditView />
+                        <AuditView :blocks="dcsDraftStore.blocks" :layout="dcsDraftStore.layout" />
                       </div>
                     </div>
                   </div>

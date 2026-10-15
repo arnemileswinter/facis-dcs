@@ -30,11 +30,19 @@ export interface ContractUpdateRequest {
   contract_data?: ContractData
 }
 
+/** block-level review annotation */
+export interface ContractBlockAnnotation {
+  block_id: string
+  comment: string
+}
+
 export interface ContractSubmitRequest {
   did: string
   updated_at: string
   forward_to?: ContractActionFlag
   comments?: string[]
+  /** Optional block-level review annotations */
+  annotations?: ContractBlockAnnotation[]
   /** Optional updated contract data to persist atomically before submit validation */
   contract_data?: ContractData
   reviewers?: string[]

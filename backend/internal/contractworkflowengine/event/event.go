@@ -222,6 +222,13 @@ func (e UpdateEvent) GetDID() string {
 	return e.DID
 }
 
+// BlockAnnotation is one review note targeting a layout block @id.
+// Persisted on SubmitEvent → outbox_events.event_data.
+type BlockAnnotation struct {
+	BlockID string `json:"block_id"`
+	Comment string `json:"comment"`
+}
+
 // SubmitEvent is emitted when a contract is submitted
 type SubmitEvent struct {
 	DID             string                 `json:"did"`
@@ -233,6 +240,7 @@ type SubmitEvent struct {
 	ContractVersion int                    `json:"contract_version"`
 	ActionFlag      *actionflag.ActionFlag `json:"action_flag,omitempty"`
 	Comments        []string               `json:"comments"`
+	Annotations     []BlockAnnotation      `json:"annotations,omitempty"`
 	UserRoles       userrole.UserRoles     `json:"user_roles"`
 }
 

@@ -7,15 +7,26 @@ import {
   contractAuditEventDisplayText,
   contractAuditEventOccurredAt,
 } from '@/utils/contract-audit-event-display'
+import { resolveAnnotationContentLabel } from '@/utils/review-block-annotations'
 import { toProperCase } from '@/utils/string'
+import type { DcsBlock, DcsLayoutNode } from '@/models/dcs-jsonld'
 import type { ContractAuditResponse, ContractAuditResponseItem } from '@/models/responses/contract-response'
 
 const props = defineProps<{
   audits: ContractAuditResponse
+  /** Optional: resolve annotation targets to the same labels as Contract Content. */
+  blocks?: DcsBlock[]
+  layout?: DcsLayoutNode[]
 }>()
 
 const eventType = useContractEventType()
 const expandedIds = ref<Set<number>>(new Set())
+
+interface AuditAnnotationRow {
+  blockId: string
+  comment: string
+  label: string
+}
 
 interface AuditRow {
   id: number
@@ -28,6 +39,7 @@ interface AuditRow {
   reason?: string
   comments?: string
   commentsLabel?: string
+  annotations?: AuditAnnotationRow[]
   supersededIntro?: string
   superseded?: { key: string; text: string }[]
   eventDataJson: string
@@ -54,6 +66,31 @@ function joinComments(comments: unknown): string | undefined {
   return parts.length ? parts.join('\n') : undefined
 }
 
+function parseAnnotations(raw: unknown): AuditAnnotationRow[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: AuditAnnotationRow[] = []
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const blockId = typeof row.block_id === 'string' ? row.block_id.trim() : ''
+    const comment = typeof row.comment === 'string' ? row.comment.trim() : ''
+    if (!blockId || !comment) continue
+    out.push({
+      blockId,
+      comment,
+      label: resolveAnnotationContentLabel(blockId, props.blocks ?? [], props.layout),
+    })
+  }
+
+  return out.length ? out : undefined
+}
+
+function eventDataAnnotations(eventData: unknown): unknown {
+  if (!eventData || typeof eventData !== 'object') return undefined
+  return (eventData as Record<string, unknown>).annotations
+}
+
 function toRow(audit: ContractAuditResponseItem): AuditRow {
   const row: AuditRow = {
     id: audit.id,
@@ -77,6 +114,8 @@ function toRow(audit: ContractAuditResponseItem): AuditRow {
       row.commentsLabel = reviewReturn ? 'Findings' : 'Comments'
     }
   }
+  // Annotations live on SubmitEvent event_data; show whenever present (Review + Negotiate Audit History).
+  row.annotations = parseAnnotations(eventDataAnnotations(audit.event_data))
   if (eventType.isRejectEvent(audit) && audit.event_data.reason) {
     row.reason = audit.event_data.reason
   }
@@ -91,7 +130,12 @@ function toRow(audit: ContractAuditResponseItem): AuditRow {
   return row
 }
 
-const rows = computed(() => props.audits.map(toRow))
+const rows = computed(() => {
+  // Re-resolve annotation labels when contract content (blocks/layout) loads.
+  void props.blocks
+  void props.layout
+  return props.audits.map(toRow)
+})
 
 watch(
   () => props.audits,
@@ -143,6 +187,25 @@ function toggle(id: number) {
             data-testid="audit-comments"
           >
             {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}
+          </div>
+          <div v-if="row.annotations?.length" class="mt-2 text-sm text-base-content/90" data-testid="audit-annotations">
+            <div class="font-medium">Annotations</div>
+            <ul class="mt-1.5 list-none space-y-2 p-0">
+              <li
+                v-for="(ann, i) in row.annotations"
+                :key="`${ann.blockId}-${i}`"
+                class="rounded-box border border-base-content/10 bg-base-200/40 px-3 py-2 break-words"
+              >
+                <div class="text-xs text-base-content/70" :title="ann.blockId">
+                  <span class="font-medium text-base-content/50">Content:</span>
+                  {{ ann.label }}
+                </div>
+                <div class="mt-1 text-sm whitespace-pre-wrap text-base-content">
+                  <span class="font-medium text-base-content/50">Annotation:</span>
+                  {{ ann.comment }}
+                </div>
+              </li>
+            </ul>
           </div>
 
           <div

@@ -55,6 +55,13 @@ var ContractUpdateResponse = Type("ContractUpdateResponse", func() {
 	Required("did")
 })
 
+var ContractBlockAnnotation = Type("ContractBlockAnnotation", func() {
+	Description("One block-level review annotation: targets a layout block @id")
+	Attribute("block_id", String, "dcs:documentStructure layout / block @id")
+	Attribute("comment", String, "Reviewer annotation text")
+	Required("block_id", "comment")
+})
+
 var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Description("Contract submit request")
 
@@ -66,6 +73,7 @@ var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 
 	Attribute("forward_to", String, "Action flag: approval | reject")
 	Attribute("comments", ArrayOf(String), "Optional comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Optional block-level review annotations")
 	Attribute("contract_data", Any, "Optional updated contract data to persist atomically before submit validation")
 
 	Required("did", "updated_at")

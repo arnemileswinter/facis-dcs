@@ -36,6 +36,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationactionflag"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
@@ -443,6 +444,18 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		}
 	}
 
+	annotations := make([]contractevents.BlockAnnotation, 0, len(req.Annotations))
+	for _, a := range req.Annotations {
+		if a == nil {
+			continue
+		}
+
+		annotations = append(annotations, contractevents.BlockAnnotation{
+			BlockID: a.BlockID,
+			Comment: a.Comment,
+		})
+	}
+
 	cmd := command.SubmitCmd{
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
@@ -451,6 +464,7 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 		UserRoles:    middleware.GetUserRoles(ctx),
 		ActionFlag:   actionFlag,
 		Comments:     req.Comments,
+		Annotations:  annotations,
 		ContractData: contractData,
 		CauserDID:    localPeer,
 	}
