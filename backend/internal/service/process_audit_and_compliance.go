@@ -16,6 +16,7 @@ import (
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -41,7 +42,7 @@ type processAuditAndCompliancesrvc struct {
 	FRepo                pacdb.RiskFindingRepo
 	AuditExecutor        auditexecutor.Client
 	WorkflowGate         *workflowgate.Coordinator
-	auditRunReader       func(context.Context, string, string) ([]byte, error)
+	auditRunReader       func(context.Context, string, string) (persistedAuditRun, error)
 	reportEventPersister func(context.Context, auditReport, string, string, string, string) error
 	auth.JWTAuthenticator
 }
@@ -151,6 +152,9 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		return nil, processauditandcompliance.MakeExecutorError(err)
 	}
 	if err := s.persistAuditRun(ctx, executorRequest, executorResponse, rawResponse); err != nil {
+		if artifactstore.IsShredded(err) {
+			return nil, processauditandcompliance.MakeNotFound(err)
+		}
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 	return toPACExternalAuditResponse(executorResponse, evidence), nil
@@ -590,7 +594,7 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 		did = strings.TrimSpace(*p.Did)
 	}
 	if format != "json" && format != "csv" && format != "pdf" {
-		return nil, fmt.Errorf("unsupported audit report format %q", format)
+		return nil, processauditandcompliance.MakeBadRequest(fmt.Errorf("unsupported audit report format %q", format))
 	}
 	roles := middleware.GetUserRoles(ctx)
 	if userrole.UserRoles(roles).HasRoles(userrole.ArchiveManager) && !userrole.UserRoles(roles).HasRoles(userrole.Auditor) && strings.ToLower(scope) != "archive" {
@@ -601,7 +605,7 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 		return nil, processauditandcompliance.MakeBadRequest(err)
 	}
 	raw, err := s.readLatestAuditRun(ctx, normalized.scopeName, did)
-	if errors.Is(err, errPACAuditRunNotFound) {
+	if errors.Is(err, errPACAuditRunNotFound) || artifactstore.IsShredded(err) {
 		return nil, processauditandcompliance.MakeNotFound(err)
 	}
 	if err != nil {
@@ -614,7 +618,14 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	contentHash := hashBytes(content)
 	contentCID := ""
 	if s.ATrailReader.Artifacts != nil {
-		stored, err := s.ATrailReader.Artifacts.Put(ctx, s.ATrailReader.Artifacts.InstanceScope(), content)
+		envelope, err := sealPACSnapshot(ctx, s.ATrailReader.Artifacts, report.ReportID, raw.Scopes, content)
+		if artifactstore.IsShredded(err) {
+			return nil, processauditandcompliance.MakeNotFound(err)
+		}
+		if err != nil {
+			return nil, processauditandcompliance.MakeInternalError(err)
+		}
+		stored, err := s.ATrailReader.Artifacts.Put(ctx, s.ATrailReader.Artifacts.InstanceScope(), envelope)
 		if err != nil {
 			return nil, processauditandcompliance.MakeInternalError(fmt.Errorf("archive audit report bytes: %w", err))
 		}
@@ -630,7 +641,7 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	return content, nil
 }
 
-func (s *processAuditAndCompliancesrvc) readLatestAuditRun(ctx context.Context, scope, did string) ([]byte, error) {
+func (s *processAuditAndCompliancesrvc) readLatestAuditRun(ctx context.Context, scope, did string) (persistedAuditRun, error) {
 	if s.auditRunReader != nil {
 		return s.auditRunReader(ctx, scope, did)
 	}

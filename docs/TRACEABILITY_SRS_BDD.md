@@ -214,6 +214,15 @@ not a coverage hole.
 
 ## 3.2.5 Process Audit & Compliance (DCS-FR-PACM-…)
 
+P06 update (2026-10-15): full JSON reports, frozen lifecycle timelines in all
+three formats, HTTP media types, PDF pagination and report erasure have new
+specifications under `@REQ-audit-report-export-AC1` through `AC5` in
+`features/08_audit_compliance/external_pac_audit_executor.feature` and focused
+Go test sources. **These changes have not been executed or independently
+verified, at the user's request.** Existing coverage labels below do not
+constitute acceptance of P06. UI download/error acceptance (AC6) also remains
+pending. Details: [P06 implementation note](qa-p06-audit-report-export.md).
+
 | ID | Requirement | Status | Evidence / disposition |
 |---|---|---|---|
 | DCS-FR-PACM-01 | Tamper-Proof Audit Trail for Contract Lifecycle | ✅ Covered | 08 process audit incl. create event; exportable via /pac/report. Global tamper evidence is now a Merkle checkpoint per anchoring batch, each root chained to its predecessor and timestamped once (ADR-16), replacing the per-event global chain that serialised every event behind one TSA round-trip and stalled the trail when a single event failed; per-resource hash chains are unchanged. Leaves are blinded so a published proof reveals nothing, and 12/system_user_classes asserts a checkpoint head carrying a root and leaking no entry data. An unanchorable event is dead-lettered rather than retried silently, i.e. a gap is visible. NOT yet in force: external anchoring — the ORCE flow polling the head ends at a debug node, so the log is tamper-evident to us but not provable against the operator. |

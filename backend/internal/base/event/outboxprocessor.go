@@ -464,8 +464,13 @@ var erasureRecordEventTypes = map[string]bool{
 // for everything without a resource attribution — plus the erasure records
 // themselves, which must outlive the shredding they document.
 func (j OutboxProcessor) scopeForEvent(event datatype.OutboxEvent) artifactstore.Scope {
+	return ScopeForEvent(event, j.Artifacts.InstanceScope())
+}
+
+// ScopeForEvent shares the audit-body erasure boundary with persisted evidence.
+func ScopeForEvent(event datatype.OutboxEvent, instance artifactstore.Scope) artifactstore.Scope {
 	if !isResourceDID(event.DID) || erasureRecordEventTypes[event.EventType] {
-		return j.Artifacts.InstanceScope()
+		return instance
 	}
 	switch event.Component {
 	case componenttype.ContractWorkflowEngine.String(),
@@ -476,7 +481,7 @@ func (j OutboxProcessor) scopeForEvent(event datatype.OutboxEvent) artifactstore
 		componenttype.TemplateCatalogueIntegration.String():
 		return artifactstore.TemplateScope(*event.DID)
 	default:
-		return j.Artifacts.InstanceScope()
+		return instance
 	}
 }
 

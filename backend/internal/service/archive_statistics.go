@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
@@ -169,5 +170,20 @@ func auditEntryActor(raw json.RawMessage) string {
 			return actor
 		}
 	}
-	return ""
+	// Synthetic evidence may contain several identities; only accept an unambiguous actor.
+	actor := ""
+	for key, value := range data {
+		if !strings.HasSuffix(key, "_by") {
+			continue
+		}
+		identity, ok := value.(string)
+		if !ok || identity == "" {
+			continue
+		}
+		if actor != "" && actor != identity {
+			return ""
+		}
+		actor = identity
+	}
+	return actor
 }

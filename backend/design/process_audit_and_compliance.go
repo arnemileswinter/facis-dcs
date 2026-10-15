@@ -193,6 +193,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		Error("forbidden", ErrorResult, "Forbidden")
 		Error("internal_error", ErrorResult, "Internal server error")
 		Error("executor_error", ErrorResult, "External audit executor infrastructure error")
+		Error("not_found", ErrorResult, "Audit evidence has been cryptographically erased")
 
 		HTTP(func() {
 			POST("/pac/audit")
@@ -201,11 +202,12 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
 			Response("executor_error", StatusBadGateway)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
 	Method("audit_report", func() {
-		Description("generate and retrieve audit reports.")
+		Description("Export the latest persisted audit run, including its frozen lifecycle timeline, as JSON, CSV, or PDF. No checks are executed again. Reports containing erased resource content are unavailable.")
 		Meta("dcs:requirements", "DCS-IR-PACM-02")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -221,7 +223,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 		Error("forbidden", ErrorResult, "Forbidden")
 		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "No matching persisted audit run")
+		Error("not_found", ErrorResult, "No matching persisted audit run or report content erased")
 		Error("internal_error", ErrorResult, "Internal server error")
 		Result(Bytes)
 		HTTP(func() {
@@ -230,11 +232,13 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Param("format")
 			Param("did")
 			Param("justification")
-			Response(StatusOK)
-			Response("forbidden", StatusForbidden)
-			Response("bad_request", StatusBadRequest)
-			Response("not_found", StatusNotFound)
-			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK, func() {
+				Meta("openapi:extension:"+responseContentExtension, `{"application/json":{"type":"object"},"text/csv":{"type":"string","format":"binary"},"application/pdf":{"type":"string","format":"binary"}}`)
+			})
+			Response("forbidden", StatusForbidden, func() { ContentType("application/json") })
+			Response("bad_request", StatusBadRequest, func() { ContentType("application/json") })
+			Response("not_found", StatusNotFound, func() { ContentType("application/json") })
+			Response("internal_error", StatusInternalServerError, func() { ContentType("application/json") })
 		})
 	})
 
