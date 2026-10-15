@@ -24,11 +24,19 @@ interface AuditRow {
   component: string
   transition?: string
   reason?: string
+  comments?: string
+  commentsLabel?: string
   policyMessage?: string
   policyMeta?: string
   severity?: string
   severityClass?: string
   eventDataJson: string
+}
+
+function joinComments(comments: unknown): string | undefined {
+  if (!Array.isArray(comments)) return undefined
+  const parts = comments.map((c) => String(c ?? '').trim()).filter(Boolean)
+  return parts.length ? parts.join('\n') : undefined
 }
 
 function formatEventDataJson(eventData: unknown): string {
@@ -91,6 +99,11 @@ function toRow(audit: TemplateAuditItem): AuditRow {
 
   if (eventType.isSubmitEvent(audit)) {
     row.transition = `${toProperCase(audit.event_data.previous_state)} → ${toProperCase(audit.event_data.new_state)}`
+    const comments = joinComments(audit.event_data.comments)
+    if (comments) {
+      row.comments = comments
+      row.commentsLabel = 'Comments'
+    }
   }
   if (eventType.isRejectEvent(audit) && audit.event_data.reason) {
     row.reason = audit.event_data.reason
@@ -143,6 +156,20 @@ function toggle(id: number) {
           </div>
           <div class="mt-0.5 text-xs text-base-content/70">{{ row.occurredAt }}</div>
           <div v-if="row.actor" class="mt-1 font-mono text-xs break-all text-base-content/80">By: {{ row.actor }}</div>
+          <div
+            v-if="row.reason"
+            class="mt-1 text-sm break-words whitespace-pre-wrap text-base-content/90"
+            data-testid="audit-reason"
+          >
+            Reason: {{ row.reason }}
+          </div>
+          <div
+            v-if="row.comments"
+            class="mt-1 text-sm break-words whitespace-pre-wrap text-base-content/90"
+            data-testid="audit-comments"
+          >
+            {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}
+          </div>
 
           <div
             v-if="isExpanded(row.id)"
@@ -152,6 +179,9 @@ function toggle(id: number) {
             <div>Component: {{ toProperCase(row.component) }}</div>
             <div v-if="row.transition">Transition: {{ row.transition }}</div>
             <div v-if="row.reason" class="break-words whitespace-pre-wrap">Reason: {{ row.reason }}</div>
+            <div v-if="row.comments" class="break-words whitespace-pre-wrap">
+              {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}
+            </div>
             <div v-if="row.policyMessage" class="break-words whitespace-pre-wrap">{{ row.policyMessage }}</div>
             <div v-if="row.policyMeta">{{ row.policyMeta }}</div>
             <details class="collapse-arrow collapse rounded-box border border-base-content/10">

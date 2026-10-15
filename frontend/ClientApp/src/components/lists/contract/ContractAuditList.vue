@@ -26,6 +26,8 @@ interface AuditRow {
   component: string
   transition?: string
   reason?: string
+  comments?: string
+  commentsLabel?: string
   supersededIntro?: string
   superseded?: { key: string; text: string }[]
   eventDataJson: string
@@ -46,6 +48,12 @@ function formatEventDataJson(eventData: unknown): string {
   }
 }
 
+function joinComments(comments: unknown): string | undefined {
+  if (!Array.isArray(comments)) return undefined
+  const parts = comments.map((c) => String(c ?? '').trim()).filter(Boolean)
+  return parts.length ? parts.join('\n') : undefined
+}
+
 function toRow(audit: ContractAuditResponseItem): AuditRow {
   const row: AuditRow = {
     id: audit.id,
@@ -59,6 +67,15 @@ function toRow(audit: ContractAuditResponseItem): AuditRow {
 
   if (eventType.isSubmitEvent(audit) && audit.event_data.new_state) {
     row.transition = `${toProperCase(audit.event_data.previous_state)} → ${toProperCase(audit.event_data.new_state)}`
+    const comments = joinComments(audit.event_data.comments)
+    if (comments) {
+      row.comments = comments
+      // Review Reject uses action_flag REJECT (SUBMITTED → NEGOTIATION).
+      const prev = String(audit.event_data.previous_state ?? '').toUpperCase()
+      const next = String(audit.event_data.new_state ?? '').toUpperCase()
+      const reviewReturn = audit.event_data.action_flag === 'REJECT' || (prev === 'SUBMITTED' && next === 'NEGOTIATION')
+      row.commentsLabel = reviewReturn ? 'Findings' : 'Comments'
+    }
   }
   if (eventType.isRejectEvent(audit) && audit.event_data.reason) {
     row.reason = audit.event_data.reason
@@ -113,6 +130,20 @@ function toggle(id: number) {
           <div class="text-sm font-medium text-base-content">{{ row.title }}</div>
           <div class="mt-0.5 text-xs text-base-content/70">{{ row.occurredAt }}</div>
           <div v-if="row.actor" class="mt-1 font-mono text-xs break-all text-base-content/80">By: {{ row.actor }}</div>
+          <div
+            v-if="row.reason"
+            class="mt-1 text-sm break-words whitespace-pre-wrap text-base-content/90"
+            data-testid="audit-reason"
+          >
+            Reason: {{ row.reason }}
+          </div>
+          <div
+            v-if="row.comments"
+            class="mt-1 text-sm break-words whitespace-pre-wrap text-base-content/90"
+            data-testid="audit-comments"
+          >
+            {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}
+          </div>
 
           <div
             v-if="isExpanded(row.id)"
@@ -122,6 +153,9 @@ function toggle(id: number) {
             <div>Component: {{ toProperCase(row.component) }}</div>
             <div v-if="row.transition">Transition: {{ row.transition }}</div>
             <div v-if="row.reason" class="break-words whitespace-pre-wrap">Reason: {{ row.reason }}</div>
+            <div v-if="row.comments" class="break-words whitespace-pre-wrap">
+              {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}
+            </div>
             <div v-if="row.supersededIntro">{{ row.supersededIntro }}</div>
             <ul v-if="row.superseded?.length" class="list-disc pl-4">
               <li v-for="item in row.superseded" :key="item.key">{{ item.text }}</li>
