@@ -89,6 +89,26 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await page.getByRole('button', { name: 'Run Compliance', exact: true }).click()
     await checked
 
+    // PACM-07 partial: party/clause segmented report panel.
+    const reportPanel = page.getByTestId('compliance-report-panel')
+    await expect(reportPanel.getByRole('heading', { name: 'Compliance Report' })).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-party')).toBeVisible()
+    await expect(reportPanel.getByTestId('report-tab-clauses')).toBeVisible()
+    await expect(reportPanel.getByTestId('party-compliance-section').first()).toBeVisible()
+    await expect(reportPanel.getByText('Signature status')).toBeVisible()
+    await expect(reportPanel.getByText('Signer')).toBeVisible()
+    await expect(reportPanel.getByText('Signing level')).toBeVisible()
+    await expect(reportPanel.getByText('Authorized role')).toBeVisible()
+    await expect(reportPanel.getByText('Signed at')).toBeVisible()
+    await expect(reportPanel.getByText('Non-conformance')).toBeVisible()
+    await reportPanel.getByTestId('report-tab-clauses').click()
+    await expect(reportPanel.getByTestId('clause-compliance-report')).toBeVisible()
+    // Wait for live clause-report projection (PACM-07 coverage-aware statuses).
+    await expect(reportPanel.getByText('Assessment run').first()).toBeVisible({ timeout: 15_000 })
+    await expect(reportPanel.getByText('Applicable checks').first()).toBeVisible()
+    await expect(reportPanel.getByText('Status').first()).toBeVisible()
+    await reportPanel.getByTestId('report-tab-party').click()
+
     // FR-SM-21: signature level (AES) and credential status (ACTIVE) per signature.
     await expect(page.locator('.badge').filter({ hasText: 'AES' }).first()).toBeVisible()
     await expect(page.locator('.badge').filter({ hasText: 'ACTIVE' }).first()).toBeVisible()
@@ -129,9 +149,17 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     const report = JSON.parse(readFileSync(jsonPath, 'utf-8')) as {
       contract_did: string
       signatures: unknown[]
+      parties?: unknown[]
+      report_scope?: string
+      contract_findings?: unknown[]
     }
     expect(report.contract_did).toBe(contractDid)
     expect(report.signatures.length).toBeGreaterThan(0)
+    expect(report.report_scope).toMatch(/current DCS instance/i)
+    expect(Array.isArray(report.parties)).toBe(true)
+    expect(report.parties!.length).toBeGreaterThan(0)
+    expect(Array.isArray(report.contract_findings)).toBe(true)
+    expect(report).toHaveProperty('clauses')
 
     // PDF export opens a print window (dependency-free, browser "Save as PDF").
     const popup = page.waitForEvent('popup')

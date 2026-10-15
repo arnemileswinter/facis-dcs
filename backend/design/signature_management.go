@@ -338,6 +338,49 @@ var SMSignatureViewResponse = Type("SMSignatureViewResponse", func() {
 	Required("did", "contract_state", "signatures", "integrity_findings")
 })
 
+var SMClauseReportRequest = Type("SMClauseReportRequest", func() {
+	Description("Clause-segmented compliance report request (DCS-FR-PACM-07)")
+	Token("token", String, "JWT token")
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Required("did")
+})
+
+var SMClauseReportFinding = Type("SMClauseReportFinding", func() {
+	Description("One content-policy / SHACL finding with optional conservative clause attribution")
+	Attribute("rule_id", String, "Stable rule identifier")
+	Attribute("severity", String, "Finding severity (error/warning/info)")
+	Attribute("message", String, "Human-readable finding message")
+	Attribute("path", String, "SHACL result path local name when present")
+	Attribute("field_iri", String, "Field IRI when present")
+	Attribute("focus_node", String, "Structured SHACL focus node IRI when present")
+	Attribute("source", String, "Audit source tag when present")
+	Attribute("clause_ids", ArrayOf(String), "Attributed clause @ids — empty or exactly one when mapping is reliable")
+	Required("severity", "message")
+})
+
+var SMClauseReportSection = Type("SMClauseReportSection", func() {
+	Description("One dcs:Clause component in the clause compliance report")
+	Attribute("clause_id", String, "dcs:Clause @id")
+	Attribute("title", String, "Clause title when authored")
+	Attribute("status", String, "not_assessed | undetermined | warnings_only | issues_identified | compliant — never compliant solely from empty findings")
+	Attribute("findings", ArrayOf(SMClauseReportFinding), "Non-conformance findings attributed to this clause (excludes satisfied checks)")
+	Attribute("assessment_run", String, "RFC3339 timestamp of this projection run (not proof each clause was individually assessed)")
+	Attribute("applicable_checks", String, "Display label: Not established | None | comma-separated check ids")
+	Attribute("applicable_checks_status", String, "not_established | none | established")
+	Attribute("verdict_note", String, "Short explanation when status is undetermined or not_assessed")
+	Required("clause_id", "status", "findings", "assessment_run", "applicable_checks", "applicable_checks_status")
+})
+
+var SMClauseReportResponse = Type("SMClauseReportResponse", func() {
+	Description("Clause-segmented compliance projection for the Compliance Viewer By Clauses tab (DCS-FR-PACM-07)")
+	Attribute("did", String, "Contract DID")
+	Attribute("assessment_run", String, "RFC3339 timestamp of this projection run")
+	Attribute("scope_note", String, "Human-readable scope / interpretation note")
+	Attribute("clauses", ArrayOf(SMClauseReportSection), "Clause sections from the contract document")
+	Attribute("unassigned_findings", ArrayOf(SMClauseReportFinding), "Findings that could not be attributed to exactly one clause")
+	Required("did", "assessment_run", "clauses", "unassigned_findings")
+})
+
 var SMSignatureRequestStartRequest = Type("SMSignatureRequestStartRequest", func() {
 	Description("Start a signing ceremony: request a PID presentation from the signer's wallet (FR-SM-14, UC-04-02)")
 
@@ -917,6 +960,35 @@ var _ = Service("SignatureManagement", func() {
 
 		HTTP(func() {
 			POST("/signature/compliance")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("clause_report", func() {
+		Description("Compliance report by clauses.")
+		Meta("dcs:requirements", "DCS-FR-PACM-07")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Signer")
+			Scope("Sys. Contract Signer")
+			Scope("Contract Observer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+
+		Payload(SMClauseReportRequest)
+		Result(SMClauseReportResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/signature/clause-report")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

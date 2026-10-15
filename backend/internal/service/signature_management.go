@@ -759,6 +759,81 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 	}, nil
 }
 
+// ClauseReport serves the PACM-07 clause-segmented compliance projection for
+// the Compliance Viewer By Clauses tab: live SHACL/content-policy findings with
+// conservative mapping to dcs:Clause @ids and shape-coverage–aware status.
+// Absence of findings is not treated as compliance success.
+func (s *signatureManagementsrvc) ClauseReport(ctx context.Context, req *signaturemanagement.SMClauseReportRequest) (*signaturemanagement.SMClauseReportResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := query.ClauseReportHandler{DB: s.DB, CRepo: s.CRepo}
+	result, err := handler.Handle(ctx, query.ClauseReportQry{DID: req.Did})
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
+
+	sections := make([]*signaturemanagement.SMClauseReportSection, 0, len(result.Clauses))
+	for _, c := range result.Clauses {
+		title := c.Title
+		section := &signaturemanagement.SMClauseReportSection{
+			ClauseID:               c.ClauseID,
+			Title:                  &title,
+			Status:                 c.Status,
+			Findings:               mapClauseReportFindings(c.Findings),
+			AssessmentRun:          c.AssessmentRun,
+			ApplicableChecks:       c.ApplicableChecks,
+			ApplicableChecksStatus: c.ApplicableChecksStatus,
+		}
+		if c.VerdictNote != "" {
+			note := c.VerdictNote
+			section.VerdictNote = &note
+		}
+		sections = append(sections, section)
+	}
+	scope := result.ScopeNote
+	return &signaturemanagement.SMClauseReportResponse{
+		Did:                result.DID,
+		AssessmentRun:      result.AssessmentRun,
+		ScopeNote:          &scope,
+		Clauses:            sections,
+		UnassignedFindings: mapClauseReportFindings(result.UnassignedFindings),
+	}, nil
+}
+
+func mapClauseReportFindings(in []query.ClauseReportFinding) []*signaturemanagement.SMClauseReportFinding {
+	out := make([]*signaturemanagement.SMClauseReportFinding, 0, len(in))
+	for _, f := range in {
+		item := &signaturemanagement.SMClauseReportFinding{
+			Severity:  f.Severity,
+			Message:   f.Message,
+			ClauseIds: append([]string(nil), f.ClauseIDs...),
+		}
+		if f.RuleID != "" {
+			v := f.RuleID
+			item.RuleID = &v
+		}
+		if f.Path != "" {
+			v := f.Path
+			item.Path = &v
+		}
+		if f.FieldIri != "" {
+			v := f.FieldIri
+			item.FieldIri = &v
+		}
+		if f.FocusNode != "" {
+			v := f.FocusNode
+			item.FocusNode = &v
+		}
+		if f.Source != "" {
+			v := f.Source
+			item.Source = &v
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 // View serves the Signature Compliance Viewer (DCS-FR-SM-26, DCS-IR-SM-05):
 // per-signature signer identity, credential class/signature level, status,
 // and timestamps, plus the contract's cryptographic integrity findings from
