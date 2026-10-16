@@ -11,9 +11,10 @@ import (
 	"net/url"
 	"testing"
 
+	goahttp "goa.design/goa/v3/http"
+
 	processauditandcompliancesvr "digital-contracting-service/gen/http/process_audit_and_compliance/server"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
-	goahttp "goa.design/goa/v3/http"
 )
 
 func TestAuditReportHTTPMediaTypesAndErrors(t *testing.T) {

@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	goa "goa.design/goa/v3/pkg"
+
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
-	goa "goa.design/goa/v3/pkg"
 )
 
 type countingAuditExecutor struct {
