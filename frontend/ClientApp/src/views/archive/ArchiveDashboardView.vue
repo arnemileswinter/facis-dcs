@@ -83,12 +83,12 @@ async function annotateEntry(entry: ArchivedContract) {
   if (!dialog) return
   const { isCanceled, data: summary } = await dialog.reveal({
     message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to have one generated from the contract metadata.`,
-    editor: { placeholder: 'Summary' },
+    editor: { requiredText: false, placeholder: 'Summary' },
   })
   if (isCanceled) return
   const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
     message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
-    editor: { placeholder: 'e.g. supply, 2026, renewed' },
+    editor: { requiredText: false, placeholder: 'e.g. supply, 2026, renewed' },
   })
   if (tagsCanceled) return
   const tagList = (tags ?? '')
