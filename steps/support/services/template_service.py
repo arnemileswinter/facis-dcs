@@ -1,7 +1,5 @@
 import re
 
-from docutils.nodes import description
-from requests import get
 
 from steps.support.api_client import get_with_headers, post_json, template_approve_url, template_create_url, template_retrieve_by_id_url, template_retrieve_url, template_submit_url, template_verify_url
 from steps.support.services.auth_service import AuthService
@@ -67,12 +65,12 @@ class TemplateService:
         }
 
     @staticmethod
-    def create_fresh_template(context, name="Standard Template", description="BDD auto-created template", title="BDD Standard NDA") -> tuple:
+    def create_fresh_template(context, name="Standard Template", description="BDD auto-created template", title="BDD Standard NDA", *, party_type=MULTI_PARTY_TYPE, template_type=CONTRACT_TEMPLATE_TYPE) -> tuple:
         """Create a Draft template as Template Creator; return (did, updated_at)."""
         headers = AuthService.get_headers_for_roles(["Template Creator"])
         payload = {
-            "template_type": TemplateService.template_type_for_category("legal"),
-            "party_type": TemplateService.MULTI_PARTY_TYPE,
+            "template_type": template_type,
+            "party_type": party_type,
             "name": name,
             "description": description,
             "template_data": TemplateService.canonical_document_data(title),
