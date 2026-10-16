@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
@@ -123,10 +124,27 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		return nil, processauditandcompliance.MakeExecutorError(errors.New("audit executor is not configured"))
 	}
 
+	var allowed map[string]bool
+	if scopeConfig.scopeName == "archive" || scopeConfig.scopeName == "contracts" {
+		ctx, err = s.contractAuditContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed, err = readableContractDIDs(ctx, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		if did := auditRequestDID(req); did != "" && allowed != nil && !allowed[did] {
+			return nil, processauditandcompliance.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+	}
+
 	evidence, err := s.gatherAuditEvidence(ctx, req, scopeConfig)
 	if err != nil {
 		return nil, err
 	}
+	evidence = filterContractAuditEvidence(evidence, allowed)
+
 	id := uuid.NewString()
 	roleNames := make([]string, 0, len(roles))
 	for _, role := range roles {
@@ -193,6 +211,14 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 	resLogHistories, err := handler.Handle(ctx, qry)
 	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+
+	if _, scoped := contractreadpolicy.FromContext(ctx); scoped {
+		allowed, err := readableContractDIDs(ctx, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		resLogHistories = filterContractAuditChains(resLogHistories, allowed)
 	}
 
 	contractContentEntriesByDID := make(map[string][]datatype.AuditLogEntry)
@@ -604,6 +630,20 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	if err != nil {
 		return nil, processauditandcompliance.MakeBadRequest(err)
 	}
+	if did != "" && (normalized.scopeName == "archive" || normalized.scopeName == "contracts") {
+		scoped, err := s.contractAuditContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed, err := readableContractDIDs(scoped, s.DB)
+		if err != nil {
+			return nil, err
+		}
+		if allowed != nil && !allowed[did] {
+			return nil, processauditandcompliance.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+	}
+
 	raw, err := s.readLatestAuditRun(ctx, normalized.scopeName, did)
 	if errors.Is(err, errPACAuditRunNotFound) || artifactstore.IsShredded(err) {
 		return nil, processauditandcompliance.MakeNotFound(err)
@@ -611,6 +651,10 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
+	if err := s.authorizeAuditReport(ctx, raw); err != nil {
+		return nil, err
+	}
+
 	content, report, err := renderPersistedExecutorReport(raw, format, middleware.GetParticipantID(ctx), time.Now().UTC())
 	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)

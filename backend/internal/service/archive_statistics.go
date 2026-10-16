@@ -23,6 +23,15 @@ const archiveRecentActionLimit = 10
 // is complete — snapshot, content hash, signature metadata, and TSA receipt
 // (DCS-FR-CSA-19's completeness dimension); everything else is flagged.
 func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
+	ctx, err := contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -92,7 +101,7 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		return res.ExpiringContracts[i].ExpDate < res.ExpiringContracts[j].ExpDate
 	})
 
-	res.RecentActions = recentArchiveActions(auditChains, archiveRecentActionLimit)
+	res.RecentActions = recentArchiveActions(filterContractAuditChains(auditChains, allowed), archiveRecentActionLimit)
 	return res, nil
 }
 

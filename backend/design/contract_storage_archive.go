@@ -253,7 +253,11 @@ var _ = Service("ContractStorageArchive", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/erasure-status")
 			Param("did")
 			Response(StatusOK)
@@ -275,7 +279,11 @@ var _ = Service("ContractStorageArchive", func() {
 
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/statistics")
 			Response(StatusOK)
 			Response("internal_error", StatusInternalServerError)
@@ -300,7 +308,11 @@ var _ = Service("ContractStorageArchive", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/audit")
 			Param("did")
 			Param("justification")

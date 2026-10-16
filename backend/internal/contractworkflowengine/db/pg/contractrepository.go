@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
@@ -187,9 +189,10 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 		) latest ON true
 	`
 	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "cem.did", &params)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		query += fmt.Sprintf(" ORDER BY cem.created_at DESC, cem.did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -212,9 +215,11 @@ func (r *PostgresContractRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *
 	if err != nil {
 		return nil, err
 	}
+	query += " WHERE TRUE"
 	if len(params) > 0 {
-		query += " WHERE " + *conditions
+		query += " AND " + *conditions
 	}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_effective_metadata.did", &params)
 
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
@@ -316,10 +321,12 @@ func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.
                content_hash, snapshot_cid, snapshot_cid_created_at, signature_metadata, credential_hashes, tsa_receipt, evidence, retention_until,
                deleted_at, deleted_by, deletion_reason
         FROM contract_archive_entries
-        ORDER BY stored_at, did, contract_version
+
     `
+	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "contract_archive_entries.did", &params) + " ORDER BY stored_at, did, contract_version"
 	var entries []db.ContractArchiveEntry
-	err := tx.SelectContext(ctx, &entries, query)
+	err := tx.SelectContext(ctx, &entries, query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -385,8 +392,10 @@ func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sq
 	    SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
     FROM contracts_archive_metadata
 	`
+	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 	var cts []db.ContractMetadata
-	err := tx.SelectContext(ctx, &cts, query)
+	err := tx.SelectContext(ctx, &cts, query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +412,11 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	query += " WHERE TRUE"
 	if len(params) > 0 {
-		query += " WHERE " + *conditions
+		query += " AND " + *conditions
 	}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 
 	var cts []db.ContractMetadata
 	err = tx.SelectContext(ctx, &cts, query, params...)

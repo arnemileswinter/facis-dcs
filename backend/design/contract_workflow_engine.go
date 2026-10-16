@@ -1112,7 +1112,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/negotiation_draft/{did}")
 			Param("did")
 			Response(StatusOK)
@@ -1197,7 +1201,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/review")
 			Param("did")
 
@@ -1265,7 +1273,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/kpis/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1368,7 +1380,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/history/{did}")
 			Param("did")
 
@@ -1551,9 +1567,13 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/audit")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})

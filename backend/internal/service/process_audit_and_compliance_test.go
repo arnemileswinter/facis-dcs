@@ -55,7 +55,7 @@ func TestAuditReportUsesPersistedRunWithoutExecutorAndHashesExactBytes(t *testin
 		},
 	}
 	scope, format, did := "contracts", "json", "did:example:contract"
-	content, err := service.AuditReport(context.Background(), &processauditandcompliance.AuditReportPayload{
+	content, err := service.AuditReport(middleware.InjectAuthContext(context.Background(), []string{"Auditor"}, "holder", "auditor"), &processauditandcompliance.AuditReportPayload{
 		Scope: &scope, Format: &format, Did: &did, Justification: "report unit test",
 	})
 	if err != nil {

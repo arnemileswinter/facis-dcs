@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -78,8 +80,11 @@ func (r *PostgresNegotiationTaskRepo) ReadAllByNegotiator(ctx context.Context, t
                created_by, created_at
         FROM contract_negotiation_task WHERE negotiator = $1
     `
+	params := []any{negotiator}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contract_negotiation_task.did", &params)
+
 	var negotiationTasks []db.NegotiationTaskData
-	err := tx.SelectContext(ctx, &negotiationTasks, query, negotiator)
+	err := tx.SelectContext(ctx, &negotiationTasks, query, params...)
 	if err != nil {
 		return nil, err
 	}
