@@ -1,6 +1,7 @@
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type { DcsBlock, DcsContractDataObject, DcsContractField, DcsLayoutNode, OdrlRule } from '@/models/dcs-jsonld'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { MetaData, TemplateTypeValue } from '@template-repository/models/contract-template'
 
 export const TEMPLATE_DATA_VERSIONS = [1] as const
@@ -24,6 +25,7 @@ interface TemplateDraftState {
   /** JSON-LD ODRL policies (operator constraints). */
   policies: OdrlRule[]
   customMetaData: MetaData[]
+  partyType: PartyType | undefined
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
   version: number | null

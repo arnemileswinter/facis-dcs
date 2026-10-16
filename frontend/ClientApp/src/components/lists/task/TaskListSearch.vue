@@ -31,6 +31,7 @@ const emptyTemplate: PartialContractTemplate = {
   updated_at: '',
   name: '',
   template_type: 'CONTRACT_TEMPLATE',
+  party_type: 'SINGLE_PARTY',
   state: 'DRAFT',
   created_by: '',
 }

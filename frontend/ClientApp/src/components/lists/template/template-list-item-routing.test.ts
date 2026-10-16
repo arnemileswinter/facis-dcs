@@ -22,6 +22,7 @@ function viewTarget(roles: UserRole[], state: PartialContractTemplate['state']) 
     name: 'Supply template',
     state,
     template_type: 'CONTRACT_TEMPLATE',
+    party_type: 'SINGLE_PARTY',
     version: 1,
     created_by: 'did:web:example.com:creator',
     created_at: '2026-07-31T00:00:00Z',

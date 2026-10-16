@@ -105,6 +105,7 @@ from steps.support.api_client import (
     template_verify_url,
 )
 from steps.support.services.auth_service import AuthService
+from steps.support.services.template_service import TemplateService
 
 
 @contextmanager
@@ -828,6 +829,7 @@ def step_given_sla_template_registered_on_a(context):
             template_create_url(context),
             {
                 "template_type": "CONTRACT_TEMPLATE",
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": name,
                 "description": description,
                 "template_data": fixture,
@@ -1480,6 +1482,7 @@ def step_given_single_instance_sla_contract(context, name):
         template_create_url(context),
         {
             "template_type": "CONTRACT_TEMPLATE",
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": f"{name} Template {int(time.time())}",
             "description": "Federated SLA demonstrator, single-instance operation",
             "template_data": _fixture(),

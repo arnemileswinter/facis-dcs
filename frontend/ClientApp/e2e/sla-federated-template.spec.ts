@@ -271,6 +271,7 @@ test('an SLA authored from a hub shape crosses the catalogue and enforces on the
   await test.step('Stage 2 [DCS-IR-TR-01, ADR-23, ADR-11]: A authors the SLA clause and its ODRL', async () => {
     await a.gotoAs('Template Creator', '/ui/templates/new')
     await a.page.getByRole('button', { name: /Component/ }).click()
+    await a.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
     await a.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(componentName)
     await a.page
       .getByRole('group')

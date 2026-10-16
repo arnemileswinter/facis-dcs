@@ -1,6 +1,16 @@
 <script setup lang="ts" generic="T extends { did: string }">
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
-import { computed, nextTick, type Ref, ref, type ShallowRef, shallowRef, useTemplateRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  type Ref,
+  ref,
+  type ShallowRef,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
 
 type FilterLabelConfig<T> = Partial<Record<keyof T, string>>
 type SearchFunction<T> = (request: Record<string, unknown>) => Promise<T[]>
@@ -11,6 +21,7 @@ const props = defineProps<{
   searchFn: SearchFunction<T>
   emptyItem: T
   placeholder?: string
+  filters?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +41,23 @@ const filterPopover = useTemplateRef('filter-popover')
 const searchResults: ShallowRef<T[]> = shallowRef([])
 // The search currently in flight, so a caller that has to publish a result can
 // wait for it rather than read searchResults mid-request.
-let pendingSearch: Promise<void> | null = null
+let pendingSearch: Promise<boolean> | null = null
+let requestVersion = 0
+onBeforeUnmount(() => requestVersion++)
+const requestFilters = computed(() => ({
+  ...Object.fromEntries(
+    Object.entries(props.filters ?? {}).filter(([, value]) => value !== undefined && value !== null && value !== ''),
+  ),
+  ...(searchQuery.value.trim() && searchKey.value ? { [searchKey.value]: searchQuery.value } : {}),
+}))
+const hasQuery = computed(() => Object.keys(requestFilters.value).length > 0)
+watch(
+  () => props.filters,
+  () => {
+    void publishSearch(searchRequest())
+  },
+  { deep: true, flush: 'sync' },
+)
 
 const selectedOption: Ref<T | null> = ref(null)
 
@@ -41,7 +68,7 @@ const searchKey = computed(() => {
 })
 
 const searchedItems = computed(() => {
-  if (searchQuery.value.length < 1) return props.items
+  if (!hasQuery.value) return props.items
 
   if (searchResults.value.length === 0) return []
 
@@ -56,52 +83,47 @@ const inputValue: Ref<T> = computed(() => {
 
 const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabels).length === 1)
 
-async function searchRequest() {
-  if (searchQuery.value.length < 1 || !searchKey.value) {
-    searchResults.value = []
-    pendingSearch = null
-    return
-  }
-
-  isSearching.value = true
+function searchRequest(): Promise<boolean> {
+  const version = ++requestVersion
+  searchResults.value = []
   searchError.value = null
+  isSearching.value = false
+  if (!hasQuery.value) {
+    pendingSearch = null
+    return Promise.resolve(true)
+  }
+  isSearching.value = true
+  const request = { ...requestFilters.value }
   const run = (async () => {
     try {
-      await retrieveSearch()
-    } catch (e: unknown) {
-      // A search that could not run has NOT established that nothing matches;
-      // reporting it as an empty result is how a 403 reads as "no results".
-      searchResults.value = []
-      searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
+      const result = await props.searchFn(request)
+      if (version !== requestVersion) return false
+      searchResults.value = result
+      return true
+    } catch (error: unknown) {
+      if (version !== requestVersion) return false
+      searchError.value = error instanceof Error && error.message ? error.message : 'Search failed'
+      return false
     } finally {
-      isSearching.value = false
+      if (version === requestVersion) isSearching.value = false
     }
   })()
   pendingSearch = run
-  await run
+  return run
 }
 
-async function retrieveSearch() {
-  if (!searchKey.value) return
-  const request = { [searchKey.value]: searchQuery.value }
-  searchResults.value = await props.searchFn(request)
+async function publishSearch(run: Promise<boolean>) {
+  const version = requestVersion
+  if ((await run) && version === requestVersion) emit('searchResult', hasQuery.value ? searchResults.value : null)
 }
 
 async function searchList(event?: Event) {
-  if (event && event.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
-    await searchRequest()
-  } else if (searchQuery.value.trim().length > 0) {
-    // Typing already started a search, and clicking Search is not an input
-    // event, so nothing above awaits it. Emitting now publishes the empty
-    // searchResults the arriving response never gets to correct.
-    await (pendingSearch ?? searchRequest())
+  if (event?.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
+    searchQuery.value = event.target.value
+    await publishSearch(searchRequest())
+    return
   }
-  if (searchError.value) return
-  if (searchQuery.value.trim().length > 0) {
-    emit('searchResult', searchedItems.value)
-  } else {
-    emit('searchResult', null)
-  }
+  await publishSearch(searchError.value ? searchRequest() : (pendingSearch ?? searchRequest()))
 }
 
 function getDisplayValue(template: T | null): string {
@@ -122,22 +144,22 @@ async function onComboboxFocus() {
 
 async function onSearchChange(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
-  if (searchQuery.value.trim().length === 0) {
-    emit('searchResult', null)
-  } else {
-    await searchRequest()
-  }
+  const run = searchRequest()
+  if (!searchQuery.value.trim()) await publishSearch(run)
+  else await run
 }
 
 function onComboboxUpdate(item: T) {
   selectedOption.value = item
   if (selectedOption.value) {
     searchQuery.value = searchKey.value ? String(selectedOption.value[searchKey.value]) : ''
+    void searchRequest()
   }
 }
 
 function onFilterSelect(label: FilterLabelValue) {
   selectedFilter.value = label
+  void publishSearch(searchRequest())
   filterPopover.value?.hidePopover()
 }
 
@@ -244,6 +266,7 @@ function handlePopoverToggle(event: ToggleEvent) {
         </ComboboxOptions>
       </Combobox>
     </div>
+    <p v-if="searchError && !searchQuery.trim()" role="alert" class="text-error">{{ searchError }}</p>
     <button
       type="button"
       class="btn join-item ms-0 -mt-px rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"

@@ -50,6 +50,7 @@ async function mockTemplateReview(page: Page): Promise<void> {
       version: 1,
       state: 'SUBMITTED',
       template_type: 'COMPONENT',
+      party_type: 'MULTI_PARTY',
       name: 'Approval verification fixture',
       description: 'A submitted template awaiting review.',
       created_by: 'template-creator',

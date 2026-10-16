@@ -113,6 +113,7 @@ def step_given_reusable_clauses_exist(context, c1, c2, c3):
         template_create_url(context),
         {
             "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": "BDD Reusable Clause Template",
             "description": "BDD template assembled from reusable clauses",
             "template_data": _clause_catalog_document(clause_names),

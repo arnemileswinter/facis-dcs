@@ -60,6 +60,7 @@ watch(
           name: template.name ?? '',
           description: template.description ?? '',
           templateType: template.template_type,
+          partyType: template.party_type,
           state: template.state,
           version: template.version ?? null,
           updated_at: template.updated_at ?? null,

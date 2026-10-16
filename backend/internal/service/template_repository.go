@@ -28,6 +28,7 @@ import (
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	"digital-contracting-service/internal/templaterepository/query/contracttemplate"
 
@@ -90,6 +91,10 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	partyType, err := partytype.New(req.PartyType)
+	if err != nil {
+		return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+	}
 	templateType, err := contracttemplatetype.NewContractTemplateType(req.TemplateType)
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
@@ -110,6 +115,7 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 		CreatedBy:    middleware.GetParticipantID(ctx),
 		HolderDID:    middleware.GetHolderDID(ctx),
 		TemplateType: templateType,
+		PartyType:    partyType.String(),
 		Name:         req.Name,
 		Description:  req.Description,
 		TemplateData: &templateData,
@@ -223,6 +229,14 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
 	var templateType *contracttemplatetype.ContractTemplateType
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
@@ -236,6 +250,7 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
 		TemplateType: templateType,
+		PartyType:    partyType.String(),
 		Name:         req.Name,
 		Description:  req.Description,
 		TemplateData: &metaData,
@@ -275,6 +290,14 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 		return nil, templaterepository.MakeInternalError(err)
 	}
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
 	var templateType *contracttemplatetype.ContractTemplateType
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
@@ -288,6 +311,7 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 		DID:          req.Did,
 		UpdatedAt:    updatedAt,
 		TemplateType: templateType,
+		PartyType:    partyType.String(),
 		Name:         req.Name,
 		Description:  req.Description,
 		TemplateData: &metaData,
@@ -315,6 +339,22 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	var partyType partytype.PartyType
+	if req.PartyType != nil {
+		var err error
+		partyType, err = partytype.New(*req.PartyType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+	}
+	var templateType *contracttemplatetype.ContractTemplateType
+	if req.TemplateType != nil {
+		value, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
+		if err != nil {
+			return nil, goa.NewServiceError(err, "bad_request", false, false, false)
+		}
+		templateType = &value
+	}
 	var state *contracttemplatestate.ContractTemplateState
 	if req.State != nil {
 		tState, err := contracttemplatestate.NewContractTemplateState(*req.State)
@@ -337,6 +377,8 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 		DID:          base.DerefString(req.Did),
 		Version:      base.DerefInt(req.Version),
 		State:        state,
+		TemplateType: templateType,
+		PartyType:    partyType.String(),
 		Name:         base.DerefString(req.Name),
 		Description:  base.DerefString(req.Description),
 		TemplateData: base.DerefString(req.TemplateData),
@@ -358,6 +400,7 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedAt:    item.CreatedAt.Format(time.RFC3339),
@@ -402,6 +445,7 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
 			TemplateData: item.TemplateData,
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 		})
 	}
 
@@ -443,6 +487,7 @@ func (s *templateRepositorysrvc) Retrieve(ctx context.Context, req *templaterepo
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,
@@ -506,6 +551,7 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		Version:      contractTemplate.Version,
 		State:        contractTemplate.State.String(),
 		TemplateType: contractTemplate.TemplateType.String(),
+		PartyType:    contractTemplate.PartyType,
 		Name:         contractTemplate.Name,
 		Description:  contractTemplate.Description,
 		CreatedBy:    contractTemplate.CreatedBy,
@@ -522,6 +568,7 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		Version:      contractTemplate.Version,
 		State:        contractTemplate.State.String(),
 		TemplateType: contractTemplate.TemplateType.String(),
+		PartyType:    contractTemplate.PartyType,
 		Name:         contractTemplate.Name,
 		Description:  contractTemplate.Description,
 		CreatedBy:    contractTemplate.CreatedBy,

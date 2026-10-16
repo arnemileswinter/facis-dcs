@@ -32,6 +32,7 @@ type GetByIDResult struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
 	CreatedBy    string
@@ -95,6 +96,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		Version:      data.Version,
 		State:        state,
 		TemplateType: templateType,
+		PartyType:    data.PartyType,
 		Name:         data.Name,
 		Description:  data.Description,
 		CreatedBy:    data.CreatedBy,

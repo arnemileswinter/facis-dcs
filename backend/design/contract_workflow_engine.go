@@ -2,6 +2,8 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var ContractCreateRequest = Type("ContractCreateRequest", func() {
@@ -620,6 +622,7 @@ var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRet
 	Attribute("version", Int, "Version")
 	Attribute("state", String, "State")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
 	Attribute("created_by", String, "Created by")
@@ -627,7 +630,7 @@ var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRet
 	Attribute("updated_at", String, "Updated at")
 	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version")
+	Required("did", "state", "template_type", "party_type", "created_by", "created_at", "updated_at", "version")
 })
 
 var ContractDeployRequest = Type("ContractDeployRequest", func() {

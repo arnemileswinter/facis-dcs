@@ -33,6 +33,7 @@ type GetHistoryByIDResult struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
 	CreatedBy    string
@@ -106,6 +107,7 @@ func (h *GetHistoryByIDHandler) Handle(ctx context.Context, query GetHistoryByID
 			UpdatedAt:    entry.UpdatedAt,
 			TemplateData: entry.TemplateData,
 			TemplateType: ctType,
+			PartyType:    entry.PartyType,
 		}
 	}
 

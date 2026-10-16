@@ -19,6 +19,7 @@ import type { UserRole } from '@/types/user-role'
 withDefaults(
   defineProps<{
     title: string
+    partyTypeError?: string
     nameError?: string
     descriptionError?: string
   }>(),
@@ -83,7 +84,11 @@ const isAuditingAuthorized = computed(
                 </div>
                 <div v-if="state" class="badge badge-sm badge-secondary">{{ state }}</div>
               </h2>
-              <DetailsEditor :name-error="nameError" :description-error="descriptionError" />
+              <DetailsEditor
+                :party-type-error="partyTypeError"
+                :name-error="nameError"
+                :description-error="descriptionError"
+              />
             </div>
           </div>
         </div>

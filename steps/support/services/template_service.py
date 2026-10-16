@@ -12,6 +12,7 @@ class TemplateService:
 
     CONTRACT_TEMPLATE_TYPE = "CONTRACT_TEMPLATE"
     COMPONENT_TEMPLATE_TYPE = "COMPONENT"
+    MULTI_PARTY_TYPE = "MULTI_PARTY"
 
     @staticmethod
     def template_env_key(name: str) -> str:
@@ -71,6 +72,7 @@ class TemplateService:
         headers = AuthService.get_headers_for_roles(["Template Creator"])
         payload = {
             "template_type": TemplateService.template_type_for_category("legal"),
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": name,
             "description": description,
             "template_data": TemplateService.canonical_document_data(title),

@@ -109,6 +109,7 @@ watch(
         name: data.name ?? '',
         description: data.description ?? '',
         templateType: toTemplateType(data.template_type),
+        partyType: data.party_type,
         state: TemplateState.draft,
         version: data.version ?? null,
         updated_at: data.updated_at ?? null,

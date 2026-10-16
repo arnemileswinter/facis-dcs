@@ -43,6 +43,7 @@ import type {
 } from '@/models/requests/template-request'
 import type { DcsOperator } from '@/models/semantic/facis-dcs-semantic'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type {
   DomainFieldDefinition,
   MetaData,
@@ -64,6 +65,7 @@ export interface LoadDocumentMeta {
   name: string
   description: string
   templateType?: TemplateTypeValue
+  partyType?: PartyType
   state?: ContractTemplateState | null
   version?: number | null
   updated_at?: string | null
@@ -113,10 +115,12 @@ export const useDcsDraftStore = defineStore(storeId, {
       }) as DcsTemplateData
     },
     templateCreateRequestData(): ContractTemplateCreateRequest {
+      if (!this.partyType) throw new Error('Party type is required.')
       return {
         name: this.name,
         description: this.description,
         template_type: this.templateType,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -127,6 +131,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         updated_at: this.updated_at,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -138,6 +143,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         template_type: this.templateType,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -155,6 +161,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         const structure = rawDoc['dcs:documentStructure']
 
         this.reset({
+          partyType: meta.partyType,
           did: meta.did,
           documentIri: rawDoc['@id'] ?? null,
           name: meta.name ? meta.name : (metadata['dcs:title'] ?? ''),
@@ -179,6 +186,7 @@ export const useDcsDraftStore = defineStore(storeId, {
 
       // Unknown / empty format — start fresh
       this.reset({
+        partyType: meta.partyType,
         did: meta.did,
         name: meta.name,
         description: meta.description,
@@ -1236,6 +1244,7 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   contractData: [],
   policies: [],
   customMetaData: [],
+  partyType: undefined,
   templateType: TemplateType.component,
   state: undefined,
   version: null,
