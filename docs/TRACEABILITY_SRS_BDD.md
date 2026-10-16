@@ -186,7 +186,7 @@ not a coverage hole.
 | ID | Requirement | Status | Evidence / disposition |
 |---|---|---|---|
 | DCS-FR-CSA-01 | Tamper-Proof Contract Storage | ✅ Covered | Merkle-checkpointed, TSA-anchored audit trail (ADR-16) + tamper scenarios (03/format_review tampered-PDF) prove tamper-evidence. A submitted PDF may add a signature but never redefine the contract: the submit path compares the embedded JSON-LD against the prepared document, deliberately the opposite of the federation rule where an inbound PDF is authoritative. |
-| DCS-FR-CSA-02 | Role-Based Access Control | 🟡 Partial | Existing archive role-denial and export-audit scenarios remain. F02 adds explicit DENIED outcomes without counting them as credential failures; `08_audit_compliance/denied_access_audit.feature` and the strengthened access/lockout scenarios are not yet executed. See [F02 implementation note](qa-f02-denied-access-audit.md). |
+| DCS-FR-CSA-02 | Role-Based Access Control | 🟡 Partial | Existing archive role-denial and export-audit scenarios remain. F02 adds explicit DENIED outcomes without counting them as credential failures; `08_audit_compliance/denied_access_audit.feature` and the strengthened access/lockout BDD scenarios are not yet executed. Real PostgreSQL/JWT tests passed, including the corrected UTC failure window; see [verification](qa-fixes-verification-2026-10-16.md). See [F02 implementation note](qa-f02-denied-access-audit.md). |
 | DCS-FR-CSA-03 | Proof-of-Existence | ✅ Covered | TSA timestamp + IPFS anchoring per event (05 TSA receipt, 08 audit anchoring). |
 | DCS-FR-CSA-04 | Contract Expiry & Renewal Tracking | 🟡 Partial | Expiry detection + banner proven (19). Configurable-threshold alert notifications not modeled — deviation note. |
 | DCS-FR-CSA-05 | Hierarchical Contract Storage | ✅ Covered | 20 sibling-isolation + party-scoped-bundle scenarios: hierarchy preserved and scoped in archive/bundles. |
@@ -214,21 +214,22 @@ not a coverage hole.
 
 ## 3.2.5 Process Audit & Compliance (DCS-FR-PACM-…)
 
-P06 update (2026-10-15): full JSON reports, frozen lifecycle timelines in all
-three formats, HTTP media types, PDF pagination and report erasure have new
-specifications under `@REQ-audit-report-export-AC1` through `AC5` in
-`features/08_audit_compliance/external_pac_audit_executor.feature` and focused
-Go test sources. **These changes have not been executed or independently
-verified, at the user's request.** Existing coverage labels below do not
-constitute acceptance of P06. UI download/error acceptance (AC6) also remains
-pending. Details: [P06 implementation note](qa-p06-audit-report-export.md).
+P06 update (2026-10-16): focused Go tests and the complete service suite passed
+for full JSON reports, frozen timelines, HTTP media types, PDF pagination and
+report erasure, including a real PostgreSQL/CEK round trip. UI download/error
+checks passed with mocked HTTP responses. BDD specifications
+`@REQ-audit-report-export-AC1` through `AC5` in
+`features/08_audit_compliance/external_pac_audit_executor.feature` remain
+**unexecuted at the user's request**; existing coverage labels are not a new
+BDD acceptance result. See the [verification report](qa-fixes-verification-2026-10-16.md)
+for evidence and live-stack limits.
 
 | ID | Requirement | Status | Evidence / disposition |
 |---|---|---|---|
 | DCS-FR-PACM-01 | Tamper-Proof Audit Trail for Contract Lifecycle | ✅ Covered | 08 process audit incl. create event; exportable via /pac/report. Global tamper evidence is now a Merkle checkpoint per anchoring batch, each root chained to its predecessor and timestamped once (ADR-16), replacing the per-event global chain that serialised every event behind one TSA round-trip and stalled the trail when a single event failed; per-resource hash chains are unchanged. Leaves are blinded so a published proof reveals nothing, and 12/system_user_classes asserts a checkpoint head carrying a root and leaking no entry data. An unanchorable event is dead-lettered rather than retried silently, i.e. a gap is visible. NOT yet in force: external anchoring — the ORCE flow polling the head ends at a debug node, so the log is tamper-evident to us but not provable against the operator. |
 | DCS-FR-PACM-02 | Compliance Monitoring and Risk Detection | ✅ Covered | 08 continuous monitoring; risk-during-approval scenario (03/contract_approval). |
 | DCS-FR-PACM-03 | Automated Regulatory and Policy Compliance Checks | ✅ Covered | 18 ODRL gates on approve+sign; /pac/monitor sweep flags MISSING_APPROVAL risks on approval-pending contracts and anchors each as PAC_COMPLIANCE_RISK per contract (03/contract_approval monitoring scenario, 08). |
-| DCS-FR-PACM-04 | Role-Based Access Control for Audit Logs | 🟡 Partial | F02 implements an Auditor-only access-attempt list with mandatory justification, read logging and cursor pagination; denials include post-JWT scope restrictions. BDD and Vue component test sources exist but execution and UI acceptance are deferred. See [F02 implementation note](qa-f02-denied-access-audit.md). |
+| DCS-FR-PACM-04 | Role-Based Access Control for Audit Logs | 🟡 Partial | F02 implements an Auditor-only access-attempt list with mandatory justification, read logging and cursor pagination; denials include post-JWT scope restrictions. Real PostgreSQL/JWT, Vue component and mocked-HTTP browser checks passed on 2026-10-16; BDD execution remains pending. See [F02 implementation note](qa-f02-denied-access-audit.md). |
 | DCS-FR-PACM-05 | Contract Non-Compliance Investigation and Reporting | ✅ Covered | 08 incident-report scenario; monitor + report link findings. |
 | DCS-FR-PACM-06 | Structural Integrity Validation for Multi-Contract Packages | ✅ Covered | 20 export-refusal structural-integrity scenario (tagged @DCS-FR-PACM-06). |
 | DCS-FR-PACM-07 | Compliance Reporting by Contract Component and Party | 🟡 Partial | Scoped audit/report per component (08 scoped audit/report scenarios). Per-party/per-clause segmentation not modeled — noted. |

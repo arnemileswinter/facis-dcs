@@ -1,6 +1,6 @@
 # P06: complete audit report export
 
-Status: implemented in source, verification deferred by explicit user request.
+Status: verified on 2026-10-16 in the agreed non-BDD scope; live-stack acceptance remains open.
 Decision date: 2026-10-15.
 
 The source is row 7 (C7:D7) of
@@ -61,18 +61,21 @@ Migration `20261015_pac_audit_snapshot.sql` replaces the plaintext response
 and receipt columns with encrypted `snapshot_bytes`. It requires an empty
 `pac_audit_runs` table: old runs lack the original request evidence, and there
 is deliberately no backfill or legacy fallback. This change does not delete
-existing rows or apply the migration to a running database.
+existing rows. The migration was executed only in fresh temporary PostgreSQL 16
+test schemas; no existing deployment was migrated.
 
-## Verification still required
+## Verification
 
-Test sources cover report contents and hashes, timeline ordering, pagination,
-HTTP media types and JSON errors, OpenAPI generation, snapshot protection,
-shredding and repeated exports. The BDD scenario uses a real workflow and
-standard archive deletion. Original deferred-verdict/ODRL summary tests are
-retained.
+Focused Go tests and the complete service suite passed, including the new
+PostgreSQL snapshot/export/shredding round trip. Browser tests passed for
+JSON/CSV/PDF download bytes and filenames and 404/500 error presentation.
+HTTP media types, OpenAPI declarations and report rendering have separate Go
+test coverage. Original deferred-verdict/ODRL summary tests are retained.
 
-No tests, BDD runs, build, lint or pre-commit checks were run for this change.
-Only Go source formatting and the required Goa generation were performed.
-The existing UI download path is unchanged; AC6 browser acceptance remains
-pending. The simple PDF renderer still uses its existing standard Helvetica
-font; full Unicode glyph coverage is outside this change.
+See the [2026-10-16 verification report](qa-fixes-verification-2026-10-16.md)
+for commands, counts and boundaries. Browser responses were mocked; the SQL
+test uses real CEKs/encryption with test key-provider and blob-transport
+fixtures. BDD was explicitly excluded by the user. Neither these results nor
+the local configuration assessment establish the historical QA-500 cause.
+The existing standard Helvetica PDF font does not provide full Unicode glyph
+coverage.

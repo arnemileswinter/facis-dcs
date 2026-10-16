@@ -14,7 +14,10 @@ import type { ContractTemplateReviewTask } from '@/models/contract-template/cont
 
 type ReviewTask = ContractTemplateReviewTask | ContractReviewTask
 
-const templateTask = (did: string, state = ReviewTaskState.open): ContractTemplateReviewTask => ({
+const templateTask = (
+  did: string,
+  state: ContractTemplateReviewTask['state'] = ReviewTaskState.open,
+): ContractTemplateReviewTask => ({
   type: 'template',
   did,
   version: 1,
@@ -23,7 +26,7 @@ const templateTask = (did: string, state = ReviewTaskState.open): ContractTempla
   created_at: '2026-08-03T00:00:00Z',
 })
 
-const contractTask = (did: string, state = ReviewTaskState.open): ContractReviewTask => ({
+const contractTask = (did: string, state: ContractReviewTask['state'] = ReviewTaskState.open): ContractReviewTask => ({
   type: 'contract',
   did,
   contract_version: '1',

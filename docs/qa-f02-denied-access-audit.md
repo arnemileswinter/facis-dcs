@@ -1,6 +1,6 @@
 # F02: denied access attempts
 
-Status: implemented in source; verification deferred by explicit user request.
+Status: verified on 2026-10-16 in the agreed non-BDD scope; BDD acceptance remains open.
 Decision date: 2026-10-15.
 
 Source: `QA_DCS_SRS_Requested_Fixes_06_10_2026.xlsx`, sheet
@@ -45,18 +45,25 @@ failed requests, label each outcome, and support next/previous navigation.
 Migration `20261015_access_attempt_outcome.sql` adds the outcome and pagination
 index. It requires an empty `access_attempts` table: old authorization outcomes
 cannot be reconstructed from credential validity. There is no backfill or
-automatic deletion. No migration or database reset was executed.
+automatic deletion. Migrations were executed only in fresh temporary PostgreSQL 16
+test schemas; no existing deployment was migrated or reset.
 
-## Verification still required
+## Verification
 
-AC1–AC6 have BDD specifications in `08_audit_compliance/denied_access_audit.feature`,
-the existing audit-access scenario and the authentication lockout scenario.
-They cover denial classification, one record per attempt, metadata, unchanged
-credential failure counts, role restrictions, pagination and read justification.
-Unit-test sources cover finalization, metadata extraction, cursor validation
-and response pagination. AC7 has focused Vue component tests; browser layout,
-keyboard behavior and existing audit/export regressions remain to be checked.
+The real PostgreSQL/JWT integration exposed a timezone defect in failure
+counting: local-time boundaries were compared with UTC values in timestamp
+columns. Repository time parameters now use UTC consistently, including
+insertion, failure counting, retention and cursor boundaries. The regression
+compares UTC and explicit UTC+2 failure windows and verifies lockout
+(`backend/internal/auth/db/pq/accessattemptrepository.go:25`,
+`backend/internal/service/qa_access_integration_test.go:171`). Permission
+denials remain separate from invalid credentials.
 
-No tests, builds, lint or pre-commit checks were run. Goa generation, Go
-formatting and formatting of the changed frontend files were performed.
-Independent acceptance and revision remain deferred; no green result is claimed.
+The service suite, focused authentication tests, Vue tests and browser
+regressions passed. Browser checks cover roles, justification, outcomes,
+pagination, errors/retry, keyboard access and narrow/wide layouts. AC1–AC6 BDD
+specifications remain unexecuted at the user's request. Independent review
+reported no findings within this non-BDD scope.
+
+See the [verification report](qa-fixes-verification-2026-10-16.md) for commands,
+counts and limits.
