@@ -1,6 +1,6 @@
 # P06: complete audit report export
 
-Status: verified on 2026-10-16 in the agreed non-BDD scope; live-stack acceptance remains open.
+Status: verified on 2026-10-16, including connected local non-BDD acceptance; external deployment acceptance remains open.
 Decision date: 2026-10-15.
 
 The source is row 7 (C7:D7) of
@@ -21,13 +21,16 @@ that shared dependency change. This is a plausible explanation, not a proven
 cause of the QA observation. No external QA checks were performed after the
 user requested a repository-only assessment.
 
-A separate local chart discrepancy remains: declared `ipfs.mfsBaseURL` and
-`ipfs.mfsBaseURLSecretRef` are not consumed by the endpoint helper in
-`deployment/helm/templates/_helpers.tpl`. It uses `ipfsClient.mfsBaseURL`, or
-the bundled service when `ipfs.enabled` is true. With only an external secret
-reference and the subchart disabled, the current backend has an empty endpoint
-and fails startup; that does not establish the cause of an isolated report
-500. No speculative IPFS or deployment changes are part of this patch.
+The separate local chart discrepancy is now fixed. The canonical `ipfs`
+configuration supplies the endpoint with this priority: named
+`ipfs.mfsBaseURLSecretRef` (its `key` is required), explicit `ipfs.mfsBaseURL`,
+then the enabled subchart's release-derived host and API port; otherwise it
+renders empty (`deployment/helm/templates/deployment.yaml:308`,
+`deployment/helm/templates/_helpers.tpl:248`). The unused `ipfsClient` group
+was removed, without a compatibility alias. The rendering matrix covers both
+subchart settings, precedence, custom ports and a missing secret key
+(`deployment/helm/tests/ipfs_endpoint_test.sh:31`). This startup/configuration
+fix does not establish the historical QA-500 cause.
 
 The current HTTP path had an independently identifiable media-type defect:
 constructing Goa's fallback encoder could modify a preselected CSV/PDF header.
@@ -61,8 +64,9 @@ Migration `20261015_pac_audit_snapshot.sql` replaces the plaintext response
 and receipt columns with encrypted `snapshot_bytes`. It requires an empty
 `pac_audit_runs` table: old runs lack the original request evidence, and there
 is deliberately no backfill or legacy fallback. This change does not delete
-existing rows. The migration was executed only in fresh temporary PostgreSQL 16
-test schemas; no existing deployment was migrated.
+existing rows. The initial SQL tests used fresh temporary PostgreSQL 16 schemas. The later
+connected acceptance also applied all 69 migrations to a fresh local database
+and started the real backend; no existing deployment was migrated.
 
 ## Verification
 
@@ -79,3 +83,9 @@ fixtures. BDD was explicitly excluded by the user. Neither these results nor
 the local configuration assessment establish the historical QA-500 cause.
 The existing standard Helvetica PDF font does not provide full Unicode glyph
 coverage.
+
+The [connected acceptance report](qa-fixes-connected-verification-2026-10-16.md)
+adds real local Kubo/SoftHSM/executor/PDF/signing evidence, JSON/CSV/PDF downloads
+and report unavailability after key shredding. It supersedes the earlier
+live-stack limitation for that local setup, without claiming external QA
+acceptance or identifying the historical 500 cause.

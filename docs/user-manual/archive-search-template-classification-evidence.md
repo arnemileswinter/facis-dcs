@@ -50,3 +50,25 @@ size limits, a changed contract or insufficient access can prevent saving.
 Download failures display an error. Evidence cannot be read after its contract's
 encryption keys have been destroyed. Changing contracts clears the previous
 contract's evidence view and unfinished input.
+
+## Keep an archive summary while changing tags
+
+1. As an Archive Manager, find the archived contract and select **Annotate**.
+2. Enter a **Summary**, confirm, enter tags if needed and confirm again.
+3. Check the saved annotation. To change only tags later, leave the summary
+   empty in the annotation form; the saved manual summary is retained.
+
+A failed save displays an error. Reload the archive to check the saved result
+before retrying.
+
+## Download an audit report
+
+1. As an Auditor, open the audit view, choose the scope and optionally enter
+   the contract DID.
+2. Enter an **Audit justification** and select **Execute Audit**.
+3. After the audit completes, select **JSON**, **CSV** or **PDF** to download
+   the report. Each format uses the saved audit and includes its lifecycle
+   timeline; later contract changes do not update that saved audit.
+
+A failed download displays an error. A report can no longer be downloaded
+after deletion destroys the encryption key of a contract included in it.

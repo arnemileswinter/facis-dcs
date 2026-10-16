@@ -97,3 +97,10 @@ The temporary database and frontend servers were stopped after verification.
 
 No new architecture decision was needed. ADR-21 only received a corrected
 source reference; its decision and implementation status remain unchanged.
+
+## Subsequent connected acceptance
+
+The [connected local acceptance report](qa-fixes-connected-verification-2026-10-16.md)
+records the later real-service checks for all seven QA fixes. The results and
+fixture boundaries above describe the earlier run and remain unchanged. BDD
+was still not executed; external deployment acceptance remains open.
