@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"digital-contracting-service/internal/auth/db"
 	goa "goa.design/goa/v3/pkg"
+
+	"digital-contracting-service/internal/auth/db"
 )
 
 type accessMetadataRequest struct {

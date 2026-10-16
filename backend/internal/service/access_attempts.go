@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	goa "goa.design/goa/v3/pkg"
+
 	pac "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/auth/db"
-	goa "goa.design/goa/v3/pkg"
 )
 
 func (s *processAuditAndCompliancesrvc) AccessAttempts(ctx context.Context, p *pac.AccessAttemptsPayload) (*pac.PACAccessAttempts, error) {

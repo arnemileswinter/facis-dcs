@@ -7,9 +7,9 @@ import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
+import AccessAttempts from './AccessAttempts.vue'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
-import AccessAttempts from './AccessAttempts.vue'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})

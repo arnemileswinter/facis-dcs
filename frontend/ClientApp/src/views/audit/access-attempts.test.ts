@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AccessAttempt, AccessAttemptsResponse } from '@/models/responses/auditing-response'
 import AccessAttempts from './AccessAttempts.vue'
+import type { AccessAttempt, AccessAttemptsResponse } from '@/models/responses/auditing-response'
 
 const mocks = vi.hoisted(() => ({
   auth: { user: { roles: ['AUDITOR'] as string[] } },

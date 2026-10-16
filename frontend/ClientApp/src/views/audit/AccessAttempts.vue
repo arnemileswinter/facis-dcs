@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Pagination from '@/components/Pagination.vue'
-import type { AccessAttempt } from '@/models/responses/auditing-response'
 import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { claimReportedHttpError } from '@/utils/report-action-error'
+import type { AccessAttempt } from '@/models/responses/auditing-response'
 
 const authStore = useAuthStore()
 const allowed = computed(() => authStore.user?.roles.includes('AUDITOR'))
