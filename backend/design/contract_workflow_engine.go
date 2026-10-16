@@ -523,22 +523,32 @@ var ContractRejectResponse = Type("ContractRejectResponse", func() {
 })
 
 var ContractStoreRequest = Type("ContractStoreRequest", func() {
-	Description("Contract store evidence request")
-
 	Token("token", String, "JWT token")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("updated_at", String, "Updated at")
-
-	Required("did", "updated_at")
+	Attribute("did", String)
+	Attribute("updated_at", String)
+	Attribute("content", Bytes)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Required("did", "updated_at", "content", "filename", "description")
 })
-
 var ContractStoreResponse = Type("ContractStoreResponse", func() {
-	Description("Result for store evidence")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-
-	Required("did")
+	Attribute("did", String)
+	Attribute("evidence_id", String)
+	Required("did", "evidence_id")
+})
+var ContractEvidence = Type("ContractEvidence", func() {
+	Attribute("evidence_id", String)
+	Attribute("did", String)
+	Attribute("contract_version", Int)
+	Attribute("recorded_by", String)
+	Attribute("recorded_at", String)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Attribute("sha256", String)
+	Attribute("content", Bytes)
+	Required("evidence_id", "did", "contract_version", "recorded_by", "recorded_at", "filename", "description", "media_type", "sha256")
 })
 
 var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
@@ -1497,12 +1507,64 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
+		Error("conflict", ErrorResult)
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/store")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
+			Response("conflict", StatusConflict)
+		})
+	})
+
+	Method("list_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractEvidence))
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+		})
+	})
+	Method("retrieve_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() {
+			Token("token", String)
+			Attribute("did", String)
+			Attribute("evidence_id", String)
+			Required("did", "evidence_id")
+		})
+		Result(ContractEvidence)
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence/{evidence_id}")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
@@ -1558,6 +1620,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
 			Scope("Compliance Officer")
 		})
 

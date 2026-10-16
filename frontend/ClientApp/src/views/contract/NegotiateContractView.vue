@@ -30,6 +30,7 @@ import { getLocalDIDFile } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import { activeNegotiations } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
@@ -37,7 +38,6 @@ import type { Contract, ContractChangeRequest } from '@/models/contract/contract
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 import type { ContractHistoryItem } from '@/models/responses/contract-response'
-import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -66,8 +66,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const isAuditingAuthorized = computed(
-  () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
+  () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 const tabs = computed(() =>
@@ -173,7 +172,10 @@ const loadContract = async () => {
   try {
     const id = route.params.did
     if (id && !Array.isArray(id)) {
-      contract.value = await contractWorkflowService.retrieveById({ did: id })
+      contract.value = null
+      const loaded = await contractWorkflowService.retrieveById({ did: id })
+      if (route.params.did !== id) return
+      contract.value = loaded
       editedContract.value = !!contract.value ? { ...contract.value } : null
       applyContractDataToDraft(contract.value?.contract_data)
       await loadSupersededVersions(id)
@@ -185,7 +187,7 @@ const loadContract = async () => {
 }
 
 watch(
-  () => !!route.params.did,
+  () => route.params.did,
   async (value) => {
     if (!value) return
     await loadContract()
@@ -525,16 +527,18 @@ const exportPDF = async () => {
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Negotiate Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
-              <a
+              <button
                 v-for="tab in tabs"
                 :key="tab.id"
+                type="button"
                 role="tab"
+                :aria-selected="activeTab === tab.id"
                 class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -652,7 +656,7 @@ const exportPDF = async () => {
                     <div class="card border border-base-300 bg-base-100 shadow-sm">
                       <div class="card-body">
                         <h2 class="card-title text-sm">Audit History</h2>
-                        <AuditView />
+                        <AuditView v-if="contract" :contract="contract" />
                       </div>
                     </div>
                   </div>

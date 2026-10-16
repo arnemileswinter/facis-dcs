@@ -21,10 +21,10 @@ import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
-import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -51,8 +51,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const isAuditingAuthorized = computed(
-  () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
+  () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 const tabs = computed(() =>
@@ -78,13 +77,16 @@ const verificationResult = computed(() => {
 const contract: Ref<Contract | null> = ref(null)
 
 watch(
-  () => !!route.params.did,
+  () => route.params.did,
   async (value) => {
     if (value) {
       try {
         const id = route.params.did
         if (id && !Array.isArray(id)) {
-          contract.value = await contractWorkflowService.retrieveById({ did: id })
+          contract.value = null
+          const loaded = await contractWorkflowService.retrieveById({ did: id })
+          if (route.params.did !== id) return
+          contract.value = loaded
           applyContractDataToDraft(contract.value?.contract_data)
         }
       } catch (err: unknown) {
@@ -220,16 +222,18 @@ const exportPDF = async () => {
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Review Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
-              <a
+              <button
                 v-for="tab in tabs"
                 :key="tab.id"
+                type="button"
                 role="tab"
+                :aria-selected="activeTab === tab.id"
                 class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -270,7 +274,7 @@ const exportPDF = async () => {
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView />
+                      <AuditView v-if="contract" :contract="contract" />
                     </div>
                   </div>
                 </div>

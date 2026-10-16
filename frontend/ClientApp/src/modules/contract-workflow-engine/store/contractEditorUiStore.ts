@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from '@/stores/auth-store'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import type { ContractState as ContractStateType } from '@/types/contract-state'
-import type { UserRole } from '@/types/user-role'
 import type {
   ContractEditorTabId,
   ContractEditorUiState,
@@ -32,8 +32,7 @@ export const useContractEditorUiStore = defineStore(storeId, {
     // a tab outside it would select an empty page body.
     availableTabs(contractState: ContractStateType, rendered: ContractEditorTabId[]) {
       const isAuditingAuthorized =
-        (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
-        false
+        contractAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false
 
       const forState: ContractEditorTabId[] =
         contractState === ContractState.negotiation

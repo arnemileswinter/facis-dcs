@@ -1437,43 +1437,6 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 	}, nil
 }
 
-func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	cmd := command.RecordEvidenceCmd{
-		DID:        req.Did,
-		RecordedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		UpdatedAt:  updatedAt,
-		CauserDID:  localPeer,
-	}
-	handler := command.EvidenceRecorder{
-		DB:    s.DB,
-		CRepo: s.CRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	return &contractworkflowengine.ContractStoreResponse{
-		Did: req.Did,
-	}, nil
-}
-
 func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)

@@ -245,6 +245,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	var handler http.Handler = outerMux
 	handler = middleware.RateLimitAuthenticated(conf.APIRateLimitPerMinute(), handler)
 	handler = reportContentTypeMiddleware(handler)
+	handler = evidenceBodyLimit(handler)
 	handler = service.RequestContextMiddleware(handler)
 	handler = middleware.InjectIP(handler)
 	handler = metricsMiddleware(handler)
