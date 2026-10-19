@@ -6,6 +6,7 @@ import {
   contractAuditEventActor,
   contractAuditEventDisplayText,
   contractAuditEventOccurredAt,
+  contractAuditEventTransition,
 } from '@/utils/contract-audit-event-display'
 import { resolveAnnotationContentLabel } from '@/utils/review-block-annotations'
 import { toProperCase } from '@/utils/string'
@@ -99,11 +100,11 @@ function toRow(audit: ContractAuditResponseItem): AuditRow {
     actor: contractAuditEventActor(audit.event_data),
     eventType: String(audit.event_type),
     component: String(audit.component),
+    transition: contractAuditEventTransition(audit.event_data),
     eventDataJson: formatEventDataJson(audit.event_data),
   }
 
-  if (eventType.isSubmitEvent(audit) && audit.event_data.new_state) {
-    row.transition = `${toProperCase(audit.event_data.previous_state)} → ${toProperCase(audit.event_data.new_state)}`
+  if (eventType.isSubmitEvent(audit)) {
     const comments = joinComments(audit.event_data.comments)
     if (comments) {
       row.comments = comments
@@ -174,6 +175,9 @@ function toggle(id: number) {
           <div class="text-sm font-medium text-base-content">{{ row.title }}</div>
           <div class="mt-0.5 text-xs text-base-content/70">{{ row.occurredAt }}</div>
           <div v-if="row.actor" class="mt-1 font-mono text-xs break-all text-base-content/80">By: {{ row.actor }}</div>
+          <div v-if="row.transition" class="mt-1 text-sm text-base-content/90" data-testid="audit-transition">
+            Transition: {{ row.transition }}
+          </div>
           <div
             v-if="row.reason"
             class="mt-1 text-sm break-words whitespace-pre-wrap text-base-content/90"
@@ -214,7 +218,6 @@ function toggle(id: number) {
           >
             <div>Event: {{ toProperCase(row.eventType) }}</div>
             <div>Component: {{ toProperCase(row.component) }}</div>
-            <div v-if="row.transition">Transition: {{ row.transition }}</div>
             <div v-if="row.reason" class="break-words whitespace-pre-wrap">Reason: {{ row.reason }}</div>
             <div v-if="row.comments" class="break-words whitespace-pre-wrap">
               {{ row.commentsLabel ?? 'Comments' }}: {{ row.comments }}

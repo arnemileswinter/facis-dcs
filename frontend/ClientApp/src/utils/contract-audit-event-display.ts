@@ -61,6 +61,14 @@ export function contractAuditEventOccurredAt(eventData?: unknown, fallback?: str
   return stringField(eventData, 'occurred_at') ?? (fallback?.trim() ? fallback : undefined)
 }
 
+export function contractAuditEventTransition(eventData?: unknown): string | undefined {
+  const previousState = stringField(eventData, 'previous_state') ?? stringField(eventData, 'old_state')
+  const newState = stringField(eventData, 'new_state')
+  if (!previousState || !newState) return undefined
+  if (previousState.toUpperCase() === newState.toUpperCase()) return undefined
+  return `${toProperCase(previousState)} → ${toProperCase(newState)}`
+}
+
 function submitContractDisplayText(eventData: unknown): string {
   const previousState = stringField(eventData, 'previous_state') ?? stringField(eventData, 'old_state')
   const newState = stringField(eventData, 'new_state')
