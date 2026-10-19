@@ -252,6 +252,19 @@ function statusIndicator(status: string) {
   return signatureStatusIndicator(status)
 }
 
+function formatSignedAt(iso: string | undefined): string {
+  if (!iso?.trim()) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const day = d.getUTCDate()
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const mon = months[d.getUTCMonth()]
+  const year = d.getUTCFullYear()
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${day} ${mon} ${year}, ${hh}:${mm} UTC`
+}
+
 function signatureLevel(sig: SignatureViewItem): string {
   return signatureLevelLabel(sig.credential_type)
 }
@@ -498,8 +511,12 @@ function exportPdf() {
           <li v-for="contract in filteredContracts" :key="contract.did" class="max-w-full min-w-0 overflow-hidden">
             <button
               type="button"
-              :class="{ active: selected?.did === contract.did }"
-              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden"
+              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden border-l-4 transition-none"
+              :class="
+                selected?.did === contract.did ? 'border-primary bg-base-100' : 'border-transparent bg-transparent'
+              "
+              :aria-current="selected?.did === contract.did ? 'true' : undefined"
+              data-testid="compliance-contract-row"
               @click="selectContract(contract)"
             >
               <span class="max-w-full truncate font-medium">{{ contract.name ?? contract.did }}</span>
@@ -574,33 +591,59 @@ function exportPdf() {
                 <span v-if="!canManage" class="text-xs text-base-content/50">Requires Contract Manager role.</span>
               </div>
 
-              <div v-if="activeDss" class="card border border-base-content/10 bg-base-100">
-                <div class="card-body p-4">
-                  <div class="flex items-center gap-2">
-                    <h3 class="font-semibold">EU DSS Validation (ETSI EN 319 102-1)</h3>
+              <div v-if="activeDss" class="card border border-base-content/10 bg-base-100" data-testid="dss-validation">
+                <div class="card-body gap-4 p-4 text-sm">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-semibold">EU DSS Validation — PDF Signature</h3>
                     <span class="badge" :class="dssIndicator(activeDss.indication).cls">
                       {{ dssIndicator(activeDss.indication).label }}
                     </span>
                   </div>
-                  <dl class="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt class="inline font-medium">Signer identity:</dt>
-                      <dd class="inline break-all">{{ activeDss.signed_by ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Signature level:</dt>
-                      <dd class="inline">{{ activeDss.signature_format ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Timestamp:</dt>
-                      <dd class="inline">{{ activeDss.signing_time ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Sub-indication:</dt>
-                      <dd class="inline">{{ activeDss.sub_indication ?? '—' }}</dd>
-                    </div>
-                  </dl>
+
+                  <section aria-labelledby="dss-cert-details-heading">
+                    <h4 id="dss-cert-details-heading" class="mb-2 font-medium text-base-content">
+                      Certificate &amp; Signature Details
+                    </h4>
+                    <dl class="space-y-1">
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Sub-indication</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ activeDss.sub_indication ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signer identity</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ activeDss.signed_by ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signature format</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80">
+                          {{ activeDss.signature_format ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signing time</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80">
+                          {{ formatSignedAt(activeDss.signing_time) }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
                 </div>
+              </div>
+              <div
+                v-else
+                class="rounded-box border border-dashed border-base-content/20 bg-base-200/30 p-4 text-sm text-base-content/70"
+                data-testid="dss-validation-unavailable"
+              >
+                EU DSS validation is not available for this contract. Trust-anchor and timestamp validation results
+                appear here when a DSS report is returned by
+                <span class="font-mono text-xs">/signature/view</span>
+                or
+                <span class="font-mono text-xs">/signature/validate</span>
+                .
               </div>
 
               <div
@@ -611,8 +654,11 @@ function exportPdf() {
               >
                 <div class="card-body gap-4 p-4 text-sm">
                   <div>
-                    <h3 class="font-semibold">Signing Credentials &amp; Authorization</h3>
-                    <p class="text-base-content/60">Local signer information recorded during signing</p>
+                    <h3 class="font-semibold">Signing Credentials &amp; Authorization — Local Signature Record</h3>
+                    <p v-if="activeDss" class="text-base-content/60">
+                      DCS local signature record (not the EU DSS PDF validation above)
+                    </p>
+                    <p v-else class="text-base-content/60">Local signer information recorded during signing</p>
                   </div>
 
                   <section :aria-labelledby="`credential-chain-signer-${sigIndex}`">
@@ -621,31 +667,29 @@ function exportPdf() {
                     </h4>
                     <dl class="space-y-1">
                       <div class="flex items-baseline gap-x-3">
-                        <dt class="w-44 shrink-0 text-base-content/60">Signer</dt>
+                        <dt class="w-52 shrink-0 text-base-content/60">Signer</dt>
                         <dd class="m-0 min-w-0 break-all text-base-content/80">{{ signerDisplayName(sig) }}</dd>
                       </div>
                       <div class="flex items-baseline gap-x-3">
-                        <dt class="w-44 shrink-0 text-base-content/60">Organization</dt>
+                        <dt class="w-52 shrink-0 text-base-content/60">Organization</dt>
                         <dd class="m-0 min-w-0 break-all text-base-content/80">
                           {{ poaOrganizationDisplay(sig) ?? 'Unavailable' }}
                         </dd>
                       </div>
                       <div class="flex items-baseline gap-x-3">
-                        <dt class="w-44 shrink-0 text-base-content/60">Authorized Roles</dt>
+                        <dt class="w-52 shrink-0 text-base-content/60">Authorized Roles</dt>
                         <dd class="m-0 min-w-0 break-words text-base-content/80">
                           {{ poaRolesDisplay(sig) ?? 'Unavailable' }}
                         </dd>
                       </div>
-                    </dl>
-                  </section>
-
-                  <section :aria-labelledby="`credential-chain-summary-${sigIndex}`">
-                    <h4 :id="`credential-chain-summary-${sigIndex}`" class="mb-2 font-medium text-base-content">
-                      Signing Credential
-                    </h4>
-                    <dl class="space-y-1">
                       <div class="flex items-baseline gap-x-3">
-                        <dt class="w-44 shrink-0 text-base-content/60">Issued by</dt>
+                        <dt class="w-52 shrink-0 text-base-content/60">Signed at</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80" data-testid="credential-chain-timestamp">
+                          {{ formatSignedAt(sig.signed_at) }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Summary credential issuer</dt>
                         <dd class="m-0 min-w-0 break-all text-base-content/80">
                           {{ summaryIssuerDisplay(sig) ?? 'Unavailable' }}
                         </dd>

@@ -55,19 +55,27 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
 
     // The DSS report (ETSI EN 319 102-1) — signer identity, signature level,
     // timestamp — is exactly the metadata FR-SM-26 requires.
-    await expect(page.getByText('EU DSS Validation (ETSI EN 319 102-1)')).toBeVisible()
-    await expect(page.getByText('Signer identity:')).toBeVisible()
-    await expect(page.getByText('Signature level:')).toBeVisible()
-    await expect(page.getByText('Timestamp:')).toBeVisible()
+    // DSS also surfaces IR-SM-05 trust-anchor / timestamp validation via
+    // indication / signing_time (no separate API booleans).
+    const dss = page.getByTestId('dss-validation')
+    await expect(dss.getByText('EU DSS Validation — PDF Signature')).toBeVisible()
+    await expect(dss.getByRole('heading', { name: 'Certificate & Signature Details' })).toBeVisible()
+    await expect(dss.getByText('Sub-indication')).toBeVisible()
+    await expect(dss.getByText('Signer identity')).toBeVisible()
+    await expect(dss.getByText('Signature format')).toBeVisible()
+    await expect(dss.getByText('Signing time')).toBeVisible()
 
     const chain = page.getByTestId('credential-chain')
-    await expect(chain.getByRole('heading', { name: 'Signing Credentials & Authorization' })).toBeVisible()
+    await expect(
+      chain.getByRole('heading', { name: 'Signing Credentials & Authorization — Local Signature Record' }),
+    ).toBeVisible()
     await expect(chain.getByText('Signer & Authorization')).toBeVisible()
     await expect(chain.getByText('Signer', { exact: true })).toBeVisible()
     await expect(chain.getByText('Organization')).toBeVisible()
     await expect(chain.getByText('Authorized Roles')).toBeVisible()
-    await expect(chain.getByText('Signing Credential', { exact: true })).toBeVisible()
-    await expect(chain.getByText('Issued by')).toBeVisible()
+    await expect(chain.getByText('Signed at', { exact: true })).toBeVisible()
+    await expect(chain.getByTestId('credential-chain-timestamp')).toBeVisible()
+    await expect(chain.getByText('Summary credential issuer')).toBeVisible()
 
     // The cryptographic-integrity findings section renders with pass/fail rows.
     await expect(page.getByRole('heading', { name: 'Cryptographic Integrity' })).toBeVisible()
