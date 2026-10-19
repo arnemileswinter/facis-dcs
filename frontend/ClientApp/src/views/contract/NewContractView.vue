@@ -83,8 +83,15 @@ const canSubmitContract = computed(
     (contract.value.state === ContractState.draft || contract.value.state === ContractState.rejected),
 )
 
+const isContractMutable = computed(
+  () =>
+    !isEditMode.value ||
+    contract.value?.state === ContractState.draft ||
+    contract.value?.state === ContractState.rejected,
+)
+
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
-  if (!isEditMode.value) return null
+  if (!isEditMode.value || !isContractMutable.value) return null
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
 })
@@ -217,6 +224,7 @@ const createContract = async ({ counterparty, originatorRole, parties }: Partici
 }
 
 const updateContract = async () => {
+  if (!isContractMutable.value) return
   if (!(await verifyContractDetails())) return
   isSubmitting.value = true
   try {
@@ -289,9 +297,8 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          const uneditableStates = [ContractState.approved, ContractState.terminated].map((s) => s.toLowerCase())
           templateEditorUiStore.setTemplateEditable(
-            !uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''),
+            contract.value?.state === ContractState.draft || contract.value?.state === ContractState.rejected,
           )
         }
       } catch (err: unknown) {
@@ -496,6 +503,7 @@ onBeforeRouteLeave(() => {
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor
                   :contract="contract"
+                  :disabled="!isContractMutable"
                   :name-error="nameError ?? undefined"
                   :description-error="descriptionError ?? undefined"
                 />
@@ -511,6 +519,7 @@ onBeforeRouteLeave(() => {
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
                         :set-semantic-condition-value="setSemanticConditionValue"
+                        :disabled="!isContractMutable"
                       />
                     </div>
                     <template v-if="dcsDraftStore.contractData.length">
@@ -571,7 +580,7 @@ onBeforeRouteLeave(() => {
           @submit="createContract"
         />
         <button
-          v-if="isEditMode"
+          v-if="isEditMode && isContractMutable"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting || !canSubmit"
           @click="updateContract"
