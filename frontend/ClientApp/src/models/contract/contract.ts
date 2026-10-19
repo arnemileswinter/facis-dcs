@@ -64,7 +64,10 @@ export interface Contract {
   target_name?: string
 }
 
-export type ContractChangeRequest = Pick<Contract, 'name' | 'description' | 'exp_notice_period' | 'exp_policy'> & {
+export type ContractChangeRequest = Pick<
+  Contract,
+  'name' | 'description' | 'start_date' | 'exp_date' | 'exp_notice_period' | 'exp_policy'
+> & {
   /** A content redline is a complete canonical contract document. The backend
    *  validates and replaces contract_data atomically; nested partial patches
    *  are not part of the negotiation contract. */

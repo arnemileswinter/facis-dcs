@@ -1,21 +1,27 @@
 <script setup lang="ts" generic="T extends { did: string }">
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
-import { computed, nextTick, type Ref, ref, type ShallowRef, shallowRef, useTemplateRef } from 'vue'
+import { computed, nextTick, type Ref, ref, type ShallowRef, shallowRef, useSlots, useTemplateRef } from 'vue'
 
 type FilterLabelConfig<T> = Partial<Record<keyof T, string>>
 type SearchFunction<T> = (request: Record<string, unknown>) => Promise<T[]>
 
-const props = defineProps<{
-  items: T[]
-  filterLabels: FilterLabelConfig<T>
-  searchFn: SearchFunction<T>
-  emptyItem: T
-  placeholder?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    items: T[]
+    filterLabels: FilterLabelConfig<T>
+    searchFn: SearchFunction<T>
+    emptyItem: T
+    placeholder?: string
+    extraRequest?: Record<string, unknown>
+  }>(),
+  { extraRequest: () => ({}) },
+)
 
 const emit = defineEmits<{
   searchResult: [value: T[] | null]
 }>()
+
+const slots = useSlots()
 
 const searchQuery = ref('')
 const isSearching = ref(false)
@@ -40,8 +46,20 @@ const searchKey = computed(() => {
   )
 })
 
+const hasTextQuery = computed(() => searchQuery.value.trim().length > 0)
+
+const hasExtraCriteria = computed(() =>
+  Object.values(props.extraRequest ?? {}).some((value) => {
+    if (value == null) return false
+    if (typeof value === 'string') return value.trim() !== ''
+    return true
+  }),
+)
+
+const hasSearchCriteria = computed(() => hasTextQuery.value || hasExtraCriteria.value)
+
 const searchedItems = computed(() => {
-  if (searchQuery.value.length < 1) return props.items
+  if (!hasSearchCriteria.value) return props.items
 
   if (searchResults.value.length === 0) return []
 
@@ -49,15 +67,23 @@ const searchedItems = computed(() => {
 })
 
 const inputValue: Ref<T> = computed(() => {
-  return searchQuery.value.length < 1 || !searchKey.value
+  return !hasTextQuery.value || !searchKey.value
     ? props.emptyItem
     : { ...props.emptyItem, [searchKey.value]: searchQuery.value }
 })
 
 const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabels).length === 1)
 
+function buildRequest(): Record<string, unknown> {
+  const request: Record<string, unknown> = { ...(props.extraRequest ?? {}) }
+  if (searchKey.value && hasTextQuery.value) {
+    request[searchKey.value as string] = searchQuery.value
+  }
+  return request
+}
+
 async function searchRequest() {
-  if (searchQuery.value.length < 1 || !searchKey.value) {
+  if (!hasSearchCriteria.value) {
     searchResults.value = []
     pendingSearch = null
     return
@@ -67,7 +93,7 @@ async function searchRequest() {
   searchError.value = null
   const run = (async () => {
     try {
-      await retrieveSearch()
+      searchResults.value = await props.searchFn(buildRequest())
     } catch (e: unknown) {
       // A search that could not run has NOT established that nothing matches;
       // reporting it as an empty result is how a 403 reads as "no results".
@@ -78,30 +104,28 @@ async function searchRequest() {
     }
   })()
   pendingSearch = run
-  await run
-}
-
-async function retrieveSearch() {
-  if (!searchKey.value) return
-  const request = { [searchKey.value]: searchQuery.value }
-  searchResults.value = await props.searchFn(request)
-}
-
-async function searchList(event?: Event) {
-  if (event && event.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
-    await searchRequest()
-  } else if (searchQuery.value.trim().length > 0) {
-    // Typing already started a search, and clicking Search is not an input
-    // event, so nothing above awaits it. Emitting now publishes the empty
-    // searchResults the arriving response never gets to correct.
-    await (pendingSearch ?? searchRequest())
+  try {
+    await run
+  } finally {
+    // Clear only if this call is still the tracked in-flight search.
+    if (pendingSearch === run) pendingSearch = null
   }
-  if (searchError.value) return
-  if (searchQuery.value.trim().length > 0) {
-    emit('searchResult', searchedItems.value)
-  } else {
+}
+
+async function searchList() {
+  if (!hasSearchCriteria.value) {
+    pendingSearch = null
+    searchResults.value = []
     emit('searchResult', null)
+    return
   }
+
+  // Typing already started a search, and clicking Search is not an input
+  // event, so nothing above awaits it. Emitting now publishes the empty
+  // searchResults the arriving response never gets to correct.
+  await (pendingSearch ?? searchRequest())
+  if (searchError.value) return
+  emit('searchResult', searchResults.value)
 }
 
 function getDisplayValue(template: T | null): string {
@@ -122,9 +146,12 @@ async function onComboboxFocus() {
 
 async function onSearchChange(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
-  if (searchQuery.value.trim().length === 0) {
+  if (!hasSearchCriteria.value) {
     emit('searchResult', null)
-  } else {
+    return
+  }
+  // Text cleared but extra criteria (e.g. deadline) remain: wait for Search.
+  if (hasTextQuery.value) {
     await searchRequest()
   }
 }
@@ -159,98 +186,118 @@ function handlePopoverToggle(event: ToggleEvent) {
 </script>
 
 <template>
-  <div class="join m-2 flex-col sm:flex-row">
-    <div class="join-item">
-      <button
-        id="list-btn-search"
-        type="button"
-        class="select-button btn w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default sm:rounded-l-md sm:rounded-tr-none"
-        popovertarget="list-popover-search"
-        aria-haspopup="listbox"
-        :aria-expanded="filterPopover?.matches(':popover-open')"
-        :class="{ 'btn-disabled': isFilterSelectionDisabled }"
-        :disabled="isFilterSelectionDisabled"
-      >
-        {{ selectedFilter }}
-      </button>
-      <ul
-        id="list-popover-search"
-        ref="filter-popover"
-        class="menu dropdown dropdown-start mt-2 w-52 rounded-box bg-base-300 shadow-sm"
-        popover
-        role="listbox"
-        :aria-label="'Select search filter'"
-        @toggle="handlePopoverToggle"
-      >
-        <li role="option" aria-selected="false" class="menu-title">
-          <span class="menu-disabled pointer-events-none text-base-content/70 select-none">Select search filter</span>
-        </li>
-        <template v-for="([key, label], index) in Object.entries(filterLabels)" :key="key">
-          <li role="option" :aria-selected="label === selectedFilter">
-            <a
-              tabindex="0"
-              :class="{
-                'bg-primary text-primary-content': label === selectedFilter,
-                'menu-focus': index === 0 && showInitialFocus,
-              }"
-              @blur="index === 0 ? (showInitialFocus = false) : null"
-              @click="onFilterSelect(label)"
-              @keydown.enter="onFilterSelect(label)"
-              @keydown.space.prevent="onFilterSelect(label)"
-            >
-              {{ label }}
-            </a>
-          </li>
-        </template>
-      </ul>
-    </div>
-    <div class="relative grow">
-      <Combobox v-model="selectedOption" nullable @update:model-value="onComboboxUpdate">
-        <label class="input join-item ms-0 -mt-px w-full rounded-none input-secondary sm:-ms-px sm:mt-0">
-          <ComboboxInput
-            :display-value="(item) => getDisplayValue(item as T | null)"
-            :placeholder="placeholder || 'Search'"
-            class="w-full bg-transparent"
-            :aria-label="placeholder || 'Search'"
-            @change="onSearchChange"
-            @focus="onComboboxFocus"
-            @keydown.enter="searchList"
-          />
-        </label>
-
-        <ComboboxOptions
-          v-if="searchQuery.length > 0"
-          class="absolute top-full right-0 left-0 z-10 rounded-lg border border-base-300 bg-base-100 shadow-lg"
+  <div class="w-full min-w-0">
+    <div class="join m-2 flex w-full min-w-0 flex-col sm:flex-row">
+      <div class="join-item shrink-0">
+        <button
+          id="list-btn-search"
+          type="button"
+          class="select-button btn w-full cursor-default rounded-t-md rounded-b-none border-secondary btn-outline-default sm:rounded-l-md sm:rounded-tr-none"
+          popovertarget="list-popover-search"
+          aria-haspopup="listbox"
+          :aria-expanded="filterPopover?.matches(':popover-open')"
+          :class="{ 'btn-disabled': isFilterSelectionDisabled }"
+          :disabled="isFilterSelectionDisabled"
         >
-          <ComboboxOption :value="inputValue" class="hidden"></ComboboxOption>
-
-          <div v-if="isSearching" class="px-4 py-2 text-base-content/50">Searching...</div>
-          <div v-else-if="searchError" role="alert" class="px-4 py-2 text-error">{{ searchError }}</div>
-          <template v-else-if="searchedItems.length > 0">
-            <ComboboxOption
-              v-for="item in searchedItems"
-              :key="item.did"
-              v-slot="{ active, selected }"
-              :value="item"
-              as="template"
-            >
-              <li v-if="searchKey" :class="autocompleteOptionClasses(active, selected)">
-                <span class="block truncate">{{ item[searchKey] }}</span>
-              </li>
-            </ComboboxOption>
+          {{ selectedFilter }}
+        </button>
+        <ul
+          id="list-popover-search"
+          ref="filter-popover"
+          class="menu dropdown dropdown-start mt-2 w-52 rounded-box bg-base-300 shadow-sm"
+          popover
+          role="listbox"
+          :aria-label="'Select search filter'"
+          @toggle="handlePopoverToggle"
+        >
+          <li role="option" aria-selected="false" class="menu-title">
+            <span class="menu-disabled pointer-events-none text-base-content/70 select-none">Select search filter</span>
+          </li>
+          <template v-for="([key, label], index) in Object.entries(filterLabels)" :key="key">
+            <li role="option" :aria-selected="label === selectedFilter">
+              <a
+                tabindex="0"
+                :class="{
+                  'bg-primary text-primary-content': label === selectedFilter,
+                  'menu-focus': index === 0 && showInitialFocus,
+                }"
+                @blur="index === 0 ? (showInitialFocus = false) : null"
+                @click="onFilterSelect(label)"
+                @keydown.enter="onFilterSelect(label)"
+                @keydown.space.prevent="onFilterSelect(label)"
+              >
+                {{ label }}
+              </a>
+            </li>
           </template>
+        </ul>
+      </div>
+      <div class="relative min-w-0 grow">
+        <Combobox v-model="selectedOption" nullable @update:model-value="onComboboxUpdate">
+          <label class="input join-item ms-0 -mt-px w-full min-w-0 rounded-none input-secondary sm:-ms-px sm:mt-0">
+            <ComboboxInput
+              :display-value="(item) => getDisplayValue(item as T | null)"
+              :placeholder="placeholder || 'Search'"
+              class="w-full min-w-0 grow bg-transparent"
+              :aria-label="placeholder || 'Search'"
+              @change="onSearchChange"
+              @focus="onComboboxFocus"
+              @keydown.enter="searchList"
+            />
+          </label>
 
-          <div v-else class="px-4 py-2 text-base-content/50">No templates found</div>
-        </ComboboxOptions>
-      </Combobox>
+          <ComboboxOptions
+            v-if="searchQuery.length > 0"
+            class="absolute top-full right-0 left-0 z-10 rounded-lg border border-base-300 bg-base-100 shadow-lg"
+          >
+            <ComboboxOption :value="inputValue" class="hidden"></ComboboxOption>
+
+            <div v-if="isSearching" class="px-4 py-2 text-base-content/50">Searching...</div>
+            <div v-else-if="searchError" role="alert" class="px-4 py-2 text-error">{{ searchError }}</div>
+            <template v-else-if="searchedItems.length > 0">
+              <ComboboxOption
+                v-for="item in searchedItems"
+                :key="item.did"
+                v-slot="{ active, selected }"
+                :value="item"
+                as="template"
+              >
+                <li v-if="searchKey" :class="autocompleteOptionClasses(active, selected)">
+                  <span class="block truncate">{{ item[searchKey] }}</span>
+                </li>
+              </ComboboxOption>
+            </template>
+
+            <div v-else class="px-4 py-2 text-base-content/50">No templates found</div>
+          </ComboboxOptions>
+        </Combobox>
+      </div>
+      <slot name="before-search-button" :submit="searchList" />
+      <button
+        type="button"
+        class="btn join-item ms-0 -mt-px shrink-0 rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
+        :class="{ 'btn-disabled': isSearching }"
+        :disabled="isSearching"
+        @click="searchList"
+      >
+        Search
+      </button>
     </div>
-    <button
-      type="button"
-      class="btn join-item ms-0 -mt-px rounded-t-none rounded-b-md btn-secondary sm:-ms-px sm:mt-0 sm:rounded-r-md sm:rounded-bl-none"
-      @click="searchList"
+    <div
+      v-if="searchError && !hasTextQuery"
+      role="alert"
+      class="px-4 text-sm text-error"
+      data-testid="list-search-error"
     >
-      Search
-    </button>
+      {{ searchError }}
+    </div>
+    <div
+      v-else-if="isSearching && !hasTextQuery && slots['before-search-button']"
+      class="px-4 text-sm text-base-content/50"
+      aria-live="polite"
+    >
+      Searching...
+    </div>
   </div>
 </template>
 

@@ -120,6 +120,8 @@ const hasChangeRequest = computed(() => {
     changedName.value ||
     changedDescription.value ||
     changedContractData.value ||
+    changedStartDate.value ||
+    changedExpDate.value ||
     changeExpNoticePeriod.value ||
     changeExpPolicy.value
   )
@@ -129,6 +131,8 @@ const contractSemanticConditionValueSnapshot: Ref<SemanticConditionValue[]> = re
 
 const changedName = computed(() => editedContract.value?.name !== contract.value?.name)
 const changedDescription = computed(() => editedContract.value?.description !== contract.value?.description)
+const changedStartDate = computed(() => editedContract.value?.start_date !== contract.value?.start_date)
+const changedExpDate = computed(() => editedContract.value?.exp_date !== contract.value?.exp_date)
 const changeExpNoticePeriod = computed(
   () => editedContract.value?.exp_notice_period != contract.value?.exp_notice_period,
 )
@@ -218,6 +222,12 @@ function buildChangeRequest(): ContractChangeRequest {
   }
   if (changedDescription.value) {
     changeRequest.description = editedContract.value.description
+  }
+  if (changedStartDate.value) {
+    changeRequest.start_date = editedContract.value.start_date
+  }
+  if (changedExpDate.value) {
+    changeRequest.exp_date = editedContract.value.exp_date
   }
   if (changeExpNoticePeriod.value) {
     changeRequest.exp_notice_period = editedContract.value.exp_notice_period
@@ -333,6 +343,8 @@ async function restoreNegotiationDraft() {
     draftSaved.value = true
     if (changeRequest.name !== undefined) editedContract.value.name = changeRequest.name
     if (changeRequest.description !== undefined) editedContract.value.description = changeRequest.description
+    if (changeRequest.start_date !== undefined) editedContract.value.start_date = changeRequest.start_date
+    if (changeRequest.exp_date !== undefined) editedContract.value.exp_date = changeRequest.exp_date
     if (changeRequest.exp_notice_period !== undefined)
       editedContract.value.exp_notice_period = changeRequest.exp_notice_period
     if (changeRequest.exp_policy !== undefined) editedContract.value.exp_policy = changeRequest.exp_policy
@@ -464,6 +476,8 @@ const handleSelectedNegotiation = async (negotiation: ContractNegotiation | null
         contract_version: superseded.contract_version,
         name: superseded.name ?? live.name,
         description: superseded.description ?? live.description,
+        start_date: superseded.start_date ?? live.start_date,
+        exp_date: superseded.exp_date ?? live.exp_date,
         exp_notice_period: superseded.exp_notice_period ?? live.exp_notice_period,
         exp_policy: superseded.exp_policy ?? live.exp_policy,
         contract_data: superseded.contract_data ?? live.contract_data,
@@ -479,6 +493,8 @@ const handleSelectedNegotiation = async (negotiation: ContractNegotiation | null
     ...current,
     name: negotiation.change_request.name ?? current.name,
     description: negotiation.change_request.description ?? current.description,
+    start_date: negotiation.change_request.start_date ?? current.start_date,
+    exp_date: negotiation.change_request.exp_date ?? current.exp_date,
     exp_notice_period: negotiation.change_request.exp_notice_period ?? current.exp_notice_period,
     exp_policy: negotiation.change_request.exp_policy ?? current.exp_policy,
     contract_data: proposedContractData,
@@ -572,6 +588,10 @@ const exportPDF = async () => {
                         <dd class="break-words">{{ proposalComparison.current.name || '—' }}</dd>
                         <dt class="font-medium">Description</dt>
                         <dd class="break-words">{{ proposalComparison.current.description || '—' }}</dd>
+                        <dt class="font-medium">Start date</dt>
+                        <dd>{{ proposalComparison.current.start_date || '—' }}</dd>
+                        <dt class="font-medium">Expiration date</dt>
+                        <dd>{{ proposalComparison.current.exp_date || '—' }}</dd>
                         <dt class="font-medium">Notice period</dt>
                         <dd>{{ proposalComparison.current.exp_notice_period ?? '—' }}</dd>
                         <dt class="font-medium">Expiry policy</dt>
@@ -587,6 +607,10 @@ const exportPDF = async () => {
                         <dd class="break-words">{{ proposalComparison.proposed.name || '—' }}</dd>
                         <dt class="font-medium">Description</dt>
                         <dd class="break-words">{{ proposalComparison.proposed.description || '—' }}</dd>
+                        <dt class="font-medium">Start date</dt>
+                        <dd>{{ proposalComparison.proposed.start_date || '—' }}</dd>
+                        <dt class="font-medium">Expiration date</dt>
+                        <dd>{{ proposalComparison.proposed.exp_date || '—' }}</dd>
                         <dt class="font-medium">Notice period</dt>
                         <dd>{{ proposalComparison.proposed.exp_notice_period ?? '—' }}</dd>
                         <dt class="font-medium">Expiry policy</dt>

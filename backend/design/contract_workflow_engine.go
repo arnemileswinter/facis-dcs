@@ -361,6 +361,7 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 	Attribute("contract_data", String, "Search value for full text search in contract data")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -1420,6 +1421,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("description")
 			Param("contract_data")
 			Param("parent_did")
+			Param("valid_until")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

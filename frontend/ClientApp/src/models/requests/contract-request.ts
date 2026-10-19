@@ -73,6 +73,7 @@ export interface ContractSearchRequest {
   description?: string
   contract_data?: string
   parent_did?: string
+  valid_until?: string
   filter?: string
 }
 

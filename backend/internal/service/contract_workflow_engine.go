@@ -1269,6 +1269,11 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		state = &tState
 	}
 
+	validUntil, err := parseSearchTime("valid_until", req.ValidUntil)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+
 	pagination := datatype.Pagination{
 		Offset: base.DerefInt(req.Offset),
 		Limit:  base.DerefInt(req.Limit),
@@ -1285,6 +1290,7 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		Description:     base.DerefString(req.Description),
 		ContractData:    base.DerefString(req.ContractData),
 		ParentDID:       base.DerefString(req.ParentDid),
+		ValidUntil:      validUntil,
 		Pagination:      pagination,
 	}
 	qryHandler := contract.GetAllMetaDataByFilterHandler{
@@ -1298,6 +1304,12 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 
 	var contracts []*contractworkflowengine.ContractSearchResponse
 	for _, item := range result {
+
+		var startDate *string
+		if item.StartDate != nil {
+			s := item.StartDate.Format(time.RFC3339)
+			startDate = &s
+		}
 
 		var expDate *string
 		if item.ExpDate != nil {
@@ -1319,6 +1331,7 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 			Description:     item.Description,
 			CreatedAt:       item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
+			StartDate:       startDate,
 			ExpDate:         expDate,
 			ExpPolicy:       expPolicy,
 			ExpNoticePeriod: item.ExpNoticePeriod,

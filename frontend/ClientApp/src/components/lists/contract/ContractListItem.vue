@@ -147,39 +147,37 @@ function isTemplateVersionErrorVisible(contract: Contract) {
               Counterparty: {{ contract.responsible.counterparty }}
             </div>
             <div>Creation date: {{ new Date(contract.created_at).toLocaleString() }}</div>
+            <div v-if="contract.start_date">Start date: {{ new Date(contract.start_date).toLocaleString() }}</div>
+            <div v-if="contract.exp_date">Expiration date: {{ new Date(contract.exp_date).toLocaleString() }}</div>
           </div>
           <div v-if="contract.description" class="hidden min-w-0 flex-1 truncate px-4 sm:block">
             {{ contract.description }}
           </div>
-          <div class="card-actions shrink-0 justify-end">
-            <RouterLink
-              :to="{ name: resolveViewRouteName, params: { did: contract.did } }"
-              class="btn btn-sm btn-primary"
+          <div class="flex shrink-0 flex-col items-end gap-2">
+            <div
+              v-if="contract.exp_date && timeUntil(contract.exp_date).totalDays > 0"
+              :class="expirationBadgeClass(timeUntil(contract.exp_date), contract.exp_notice_period)"
             >
-              View
-            </RouterLink>
-            <RouterLink
-              v-if="canEdit"
-              :to="{
-                name: ROUTES.CONTRACTS.EDIT,
-                params: { did: contract.did },
-              }"
-              class="btn gap-2 btn-sm btn-primary"
-            >
-              Edit
-            </RouterLink>
-          </div>
-        </div>
-        <div v-if="contract?.start_date" class="flex justify-between">
-          <div>Start date: {{ new Date(contract?.start_date ?? '').toLocaleString() }}</div>
-        </div>
-        <div v-if="contract?.exp_date" class="flex justify-between">
-          <div>Expiration date: {{ new Date(contract?.exp_date ?? '').toLocaleString() }}</div>
-          <div
-            v-if="timeUntil(contract?.exp_date).totalDays > 0"
-            :class="expirationBadgeClass(timeUntil(contract?.exp_date), contract?.exp_notice_period)"
-          >
-            {{ expirationMessage(timeUntil(contract?.exp_date)) }}
+              {{ expirationMessage(timeUntil(contract.exp_date)) }}
+            </div>
+            <div class="card-actions justify-end">
+              <RouterLink
+                :to="{ name: resolveViewRouteName, params: { did: contract.did } }"
+                class="btn btn-sm btn-primary"
+              >
+                View
+              </RouterLink>
+              <RouterLink
+                v-if="canEdit"
+                :to="{
+                  name: ROUTES.CONTRACTS.EDIT,
+                  params: { did: contract.did },
+                }"
+                class="btn gap-2 btn-sm btn-primary"
+              >
+                Edit
+              </RouterLink>
+            </div>
           </div>
         </div>
       </div>
