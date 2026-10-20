@@ -51,6 +51,20 @@ func TestParseShippedSharedDetailsLeavesMissingFieldsNil(t *testing.T) {
 	require.Nil(t, got.ExpNoticePeriod)
 }
 
+func TestStampSharedDetailsIntoContractDataOverwritesEmbeddedTitleFromRow(t *testing.T) {
+	// Policy-fixture updates ship a full document whose dcs:title is a fixture
+	// label ("BDD ODRL Soundness Contract") while contracts.name stays the
+	// template name. Stamping the row name must win so signing's consistency
+	// gate does not refuse.
+	raw := datatype.JSON(`{"@type":"dcs:Contract","dcs:metadata":{"@type":"dcs:ContractMetadata","dcs:title":"BDD ODRL Soundness Contract"}}`)
+	rowName := "BDD Contract Source Template"
+
+	stamped, changed, err := stampSharedDetailsIntoContractData(&raw, sharedContractDetails{Name: &rowName})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, AssertSharedDetailsConsistent(&rowName, nil, nil, nil, stamped))
+}
+
 func TestStampSharedDetailsIntoContractDataWritesMetadata(t *testing.T) {
 	raw := datatype.JSON(`{"@type":"dcs:Contract","dcs:metadata":{"@type":"dcs:ContractMetadata","dcs:title":"Old"}}`)
 	start := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)

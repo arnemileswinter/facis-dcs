@@ -187,18 +187,52 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 
 	// Mirror Shared Contract Details into dcs:metadata so the PDF embed carries
 	// Description / dates / expiration for the peer (initial replication).
+	// A contract_data-only PUT (e.g. ODRL policy fixtures) often omits name and
+	// the other row fields; stamp from the stored row whenever the command
+	// leaves them unset so AssertSharedDetailsConsistent cannot see a title the
+	// client pasted into dcs:metadata diverge from contracts.name.
 	docForStamp := cmd.ContractData
 	if docForStamp == nil {
 		docForStamp = oldData.ContractData
 	}
 
+	stampName := cmd.Name
+	if stampName == nil {
+		stampName = oldData.Name
+	}
+
+	stampDescription := cmd.Description
+	if stampDescription == nil {
+		stampDescription = oldData.Description
+	}
+
+	stampStart := cmd.StartDate
+	if stampStart == nil {
+		stampStart = oldData.StartDate
+	}
+
+	stampExp := cmd.ExpDate
+	if stampExp == nil {
+		stampExp = oldData.ExpDate
+	}
+
+	stampNotice := cmd.ExpNoticePeriod
+	if stampNotice == nil {
+		stampNotice = oldData.ExpNoticePeriod
+	}
+
+	stampPolicy := expPolicy
+	if stampPolicy == nil {
+		stampPolicy = oldData.ExpPolicy
+	}
+
 	stamped, stampedChanged, err := stampSharedDetailsIntoContractData(docForStamp, sharedContractDetails{
-		Name:            cmd.Name,
-		Description:     cmd.Description,
-		StartDate:       cmd.StartDate,
-		ExpDate:         cmd.ExpDate,
-		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: cmd.ExpNoticePeriod,
+		Name:            stampName,
+		Description:     stampDescription,
+		StartDate:       stampStart,
+		ExpDate:         stampExp,
+		ExpPolicy:       stampPolicy,
+		ExpNoticePeriod: stampNotice,
 	})
 
 	if err != nil {
