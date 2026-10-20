@@ -58,15 +58,16 @@ const searchFn = async (request: Record<string, unknown>) => {
 </script>
 
 <template>
-  <div class="flex flex-col sm:flex-row">
-    <div class="m-2 flex flex-col text-sm">
-      <label :for="partyTypeId">Party type</label>
-      <select :id="partyTypeId" v-model="partyType" class="select">
+  <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>.join]:m-0">
+    <div class="shrink-0 text-sm">
+      <label :for="partyTypeId" class="sr-only">Party type</label>
+      <select :id="partyTypeId" v-model="partyType" class="select w-max min-w-44">
         <option value="">All party types</option>
         <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
     </div>
     <ListSearch
+      class="w-full min-w-0 sm:w-auto sm:max-w-full sm:flex-1"
       :items="templates"
       :filter-labels="filterLabels"
       :filters="filters"
