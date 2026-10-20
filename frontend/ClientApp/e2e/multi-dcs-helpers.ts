@@ -1397,9 +1397,30 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       await proposalsTab.click()
     }
 
-    // NegotiationList only badges peer proposals this party can still decide.
+    // Submit is visible before NegotiationList rows finish painting. An immediate
+    // empty "Awaiting your decision" count used to return here and skip Accept,
+    // leaving Submit stuck on "Waiting for every proposal…". Wait until a
+    // proposal card is present (or Submit already unlocked) before treating
+    // "no awaiting badge" as done.
+    const proposalCards = inst.page.locator('li.list-row').filter({ hasText: 'Change proposal by:' })
     const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
-    if ((await awaiting.count()) === 0) return
+    const submit = inst.page.getByTestId('submit-negotiation')
+    await expect
+      .poll(
+        async () => {
+          if ((await awaiting.count()) > 0) return 'awaiting'
+          if ((await proposalCards.count()) > 0) return 'settled'
+          if (await submit.isEnabled().catch(() => false)) return 'settled'
+          return 'loading'
+        },
+        {
+          timeout: 60_000,
+          message: `${inst.origin} proposals list never settled on ${contractDid}`,
+        },
+      )
+      .not.toEqual('loading')
+
+    if ((await awaiting.count()) === 0) break
 
     const card = awaiting.first()
     const showBtn = card.getByRole('button', { name: 'Show', exact: true })
@@ -1454,12 +1475,17 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
 export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
   await acceptOpenDecisionsOn(inst, contractDid)
 
-  // Reload so the compare view that "Show" opened (which disables Submit) and
-  // the now-resolved decision clear, then submit the merged round
-  // (NEGOTIATION -> SUBMITTED) once Submit is enabled.
-  await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+  // Peer Accept of our proposal lands asynchronously; the negotiate view only
+  // polls sync for ~10s, so reload until Submit unlocks rather than waiting on
+  // one stale page load.
   const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
-  await expect(submit).toBeEnabled({ timeout: 30_000 })
+  await expect(async () => {
+    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    await expect(submit).toBeEnabled({ timeout: 10_000 })
+  }).toPass({
+    timeout: 120_000,
+    intervals: [2_000, 5_000, 10_000],
+  })
   const submitted = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
