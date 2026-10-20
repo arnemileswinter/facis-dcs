@@ -184,6 +184,15 @@ func TestFederationAgreementDigestNeutralizesAPIOrigins(t *testing.T) {
 	db, err := federationAgreementDigest(b)
 	require.NoError(t, err)
 	require.Equal(t, da, db)
+
+	bddA := []byte(`{"@id":"http://dcs-a.localhost:18080/digital-contracting-service/api/contract/x","@context":"http://dcs-a.localhost:18080/digital-contracting-service/api/semantic/context/facis-dcs?version=2","dcs:parties":[{"@id":"did:web:dcs-a.localhost%3A18080"}]}`)
+	bddB := []byte(`{"@id":"http://dcs-b.localhost:18080/digital-contracting-service/api/contract/x","@context":"http://dcs-b.localhost:18080/digital-contracting-service/api/semantic/context/facis-dcs?version=2","dcs:parties":[{"@id":"did:web:dcs-a.localhost%3A18080"}]}`)
+	daBDD, err := federationAgreementDigest(bddA)
+	require.NoError(t, err)
+	dbBDD, err := federationAgreementDigest(bddB)
+	require.NoError(t, err)
+	require.Equal(t, daBDD, dbBDD)
+
 	// Party DIDs must remain distinct across parties — rewriting must not
 	// collapse did:web hosts.
 	other := []byte(`{"@id":"http://localhost:8992/api/contract/x","dcs:parties":[{"@id":"did:web:localhost%3A8992"}]}`)

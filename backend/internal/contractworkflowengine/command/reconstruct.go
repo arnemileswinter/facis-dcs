@@ -19,7 +19,7 @@ import (
 // apiOriginPattern matches an instance's public API base inside absolute IRIs
 // (DCS_PUBLIC_URL), e.g. http://localhost:8991/api. Party did:web IRIs are left
 // alone — they are identity, not document location.
-var apiOriginPattern = regexp.MustCompile(`https?://[^/"\s]+/api`)
+var apiOriginPattern = regexp.MustCompile(`https?://[^/"\s?#]+(?:/[^/"\s?#]+)*/api`)
 
 // ErrShippedDisagreesWithLocalRound refuses a peer PDF re-ship whose embedded
 // document is not what this instance rebuilds from its formal base plus the

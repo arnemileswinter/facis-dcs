@@ -1380,15 +1380,14 @@ async function openNegotiateView(inst: Instance, contractDid: string): Promise<v
 }
 
 /**
- * Accepts every outstanding change request on this instance (NegotiationList
- * Show → Accept → /contract/respond) until none remain.
+ * Accepts every peer proposal this instance still owes a decision on
+ * (NegotiationList Show → Accept → /contract/respond) until none remain.
  *
- * hasOpenDecisions counts EVERY undecided decision on the contract, including
- * the counterparty's, and that record replicates to both copies. So after the
- * final counter the offering side cannot submit until the RECEIVING side has
- * decided — settling is a mutual agreement, not a unilateral one. Reload between
- * rounds so the compare view "Show" opens (itself a Submit blocker) clears
- * before the next decision.
+ * Own proposals stay listed with Show/Withdraw and never offer Accept.
+ * Walking Show by index hit the newest (own) row first and waited for an
+ * Accept that is not rendered. Target the "Awaiting your decision" card
+ * instead, expand it, wait until Accept is enabled (sync drain), then
+ * complete respond — do not skip the Accept path.
  */
 export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
@@ -1397,32 +1396,50 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
     if (await proposalsTab.isVisible().catch(() => false)) {
       await proposalsTab.click()
     }
-    const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
-    if (pending === 0) break
 
-    // Walk every pending round rather than only the first: a change request this
-    // instance authored itself stays pending forever (FR-CWE-07 refuses an accept
-    // by its own author), so it must be stepped over to reach the peer's.
-    let accepted = false
-    for (let i = 0; i < pending && !accepted; i++) {
-      await openNegotiateView(inst, contractDid)
-      const roundTab = inst.page.getByRole('tab', { name: /proposals/i })
-      if (await roundTab.isVisible().catch(() => false)) {
-        await roundTab.click()
-      }
-      const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
-      if (!(await showBtn.isVisible().catch(() => false))) continue
+    // NegotiationList only badges peer proposals this party can still decide.
+    const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
+    if ((await awaiting.count()) === 0) return
+
+    const card = awaiting.first()
+    const showBtn = card.getByRole('button', { name: 'Show', exact: true })
+    if (await showBtn.isVisible().catch(() => false)) {
       await showBtn.click()
-      const responded = inst.page.waitForResponse(
-        (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
-        { timeout: 30_000 },
-      )
-      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
-      await confirmModalOn(inst, 'Confirm')
-      accepted = (await responded).ok()
     }
-    if (!accepted) break
+
+    const accept = card.getByTestId('accept-negotiation')
+    await expect(
+      accept,
+      `${inst.origin} opened a peer proposal on ${contractDid} but Accept never appeared`,
+    ).toBeVisible({ timeout: 30_000 })
+    // pending_negotiation_sync disables Accept until outbound ACK lands.
+    await expect(
+      accept,
+      `${inst.origin} Accept stayed disabled on ${contractDid} (negotiation sync still pending)`,
+    ).toBeEnabled({ timeout: 90_000 })
+
+    const responded = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await accept.click()
+    await confirmModalOn(inst, 'Confirm')
+    const response = await responded
+    expect(
+      response.ok(),
+      `${inst.origin} Accept respond failed on ${contractDid}: HTTP ${response.status()} ${await response.text().catch(() => '')}`,
+    ).toBeTruthy()
   }
+
+  await openNegotiateView(inst, contractDid)
+  const proposalsTab = inst.page.getByRole('tab', { name: /proposals/i })
+  if (await proposalsTab.isVisible().catch(() => false)) {
+    await proposalsTab.click()
+  }
+  await expect(
+    inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' }),
+    `${inst.origin} still has undecided peer proposals on ${contractDid} after Accept rounds`,
+  ).toHaveCount(0)
 }
 
 /**
