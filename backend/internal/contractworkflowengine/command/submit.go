@@ -49,6 +49,7 @@ type Submitter struct {
 	ATRepo      db.ApprovalTaskRepo
 	NRepo       db.NegotiationRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 }
@@ -214,6 +215,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 		if hasOpenNegotiations {
 			return errors.New("not all negotiations are processed")
+		}
+
+		// Submit gate: every inter-enterprise Proposal/Decision for
+		// this contract must already have peer ACK before the round closes.
+		err = requireConfirmedNegotiationDelivery(ctx, tx, h.NORepo, localPeer, cmd.DID)
+		if err != nil {
+			return err
 		}
 
 		err = h.NTRepo.UpdateState(ctx, tx, processData.DID, cmd.CauserDID, processData.ContractVersion, negotiationtaskstate.Accepted.String())

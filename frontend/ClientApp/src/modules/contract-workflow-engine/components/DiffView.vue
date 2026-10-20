@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DiffPane from '@contract-workflow-engine/components/diff-view/DiffPane.vue'
-import { useContractBlockDiff } from '@contract-workflow-engine/composables/useContractBlockDiff'
+import {
+  buildWordDiffSegments,
+  type TextDiffSegment,
+  useContractBlockDiff,
+} from '@contract-workflow-engine/composables/useContractBlockDiff'
 import {
   type ContractPlainTextBlock,
   useContractPlainTextConverter,
@@ -61,9 +65,54 @@ const detailKeys: (keyof ContractDetailsSnapshot)[] = [
   'exp_policy',
 ]
 
+function displayDetail(
+  snapshot: ContractDetailsSnapshot | null | undefined,
+  key: keyof ContractDetailsSnapshot,
+): string {
+  const value = snapshot?.[key]
+  if (value == null || value === '') return ''
+  if (key === 'start_date' || key === 'exp_date') {
+    const date = new Date(String(value))
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  }
+  return String(value)
+}
+
 const changedDetailKeys = computed(() => {
   if (!props.highlightDiff) return [] as (keyof ContractDetailsSnapshot)[]
   return detailKeys.filter((key) => String(props.leftDetails?.[key] ?? '') !== String(props.rightDetails?.[key] ?? ''))
+})
+
+const leftDetailSegmentsByKey = computed(() => {
+  const map: Partial<Record<keyof ContractDetailsSnapshot, TextDiffSegment[]>> = {}
+  if (!props.highlightDiff) return map
+  for (const key of changedDetailKeys.value) {
+    const left = displayDetail(props.leftDetails, key)
+    const right = displayDetail(props.rightDetails, key)
+    const wordDiff = buildWordDiffSegments(left || '—', right || '—')
+    map[key] = wordDiff.leftSegments?.length
+      ? wordDiff.leftSegments
+      : left
+        ? [{ type: 'equal', text: left }]
+        : [{ type: 'equal', text: '—' }]
+  }
+  return map
+})
+
+const rightDetailSegmentsByKey = computed(() => {
+  const map: Partial<Record<keyof ContractDetailsSnapshot, TextDiffSegment[]>> = {}
+  if (!props.highlightDiff) return map
+  for (const key of changedDetailKeys.value) {
+    const left = displayDetail(props.leftDetails, key)
+    const right = displayDetail(props.rightDetails, key)
+    const wordDiff = buildWordDiffSegments(left || '—', right || '—')
+    map[key] = wordDiff.rightSegments?.length
+      ? wordDiff.rightSegments
+      : right
+        ? [{ type: 'equal', text: right }]
+        : [{ type: 'equal', text: '—' }]
+  }
+  return map
 })
 </script>
 
@@ -77,7 +126,7 @@ const changedDetailKeys = computed(() => {
       :show-no-prior-version="!hasLeftContractData && !leftDetails"
       :show-line-numbers="showLineNumbers"
       :details="leftDetails"
-      :changed-detail-keys="changedDetailKeys"
+      :detail-segments-by-key="leftDetailSegmentsByKey"
       :test-id="leftTestId"
     />
     <DiffPane
@@ -87,7 +136,7 @@ const changedDetailKeys = computed(() => {
       :highlight-diff="highlightDiff"
       :show-line-numbers="showLineNumbers"
       :details="rightDetails"
-      :changed-detail-keys="changedDetailKeys"
+      :detail-segments-by-key="rightDetailSegmentsByKey"
       :test-id="rightTestId"
     />
   </div>

@@ -50,6 +50,8 @@ export interface Contract {
   responsible?: ContractResponsible
   contract_data?: ContractData
   negotiations?: ContractNegotiation[]
+  /** True when outbound Proposals/Decisions still await peer ACK. */
+  pending_negotiation_sync?: boolean
   outdated?: boolean
   latest_template_did?: string
   template_did?: string
@@ -68,8 +70,9 @@ export type ContractChangeRequest = Pick<
   Contract,
   'name' | 'description' | 'start_date' | 'exp_date' | 'exp_notice_period' | 'exp_policy'
 > & {
-  /** A content redline is a complete canonical contract document. The backend
-   *  validates and replaces contract_data atomically; nested partial patches
-   *  are not part of the negotiation contract. */
+  /** A content redline is a complete canonical contract document. Propose
+   *  validates it and records it on the negotiation row; the formal
+   *  contract_data is replaced only when Submit merges accepted proposals.
+   *  Nested partial patches are not part of the negotiation contract. */
   contract_data?: ContractData
 }

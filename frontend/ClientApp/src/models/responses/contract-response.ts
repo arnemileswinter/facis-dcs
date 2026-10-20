@@ -56,6 +56,8 @@ export interface ContractRetrieveByIdResponse {
   /** The data of that contract */
   contract_data: ContractData
   negotiations: ContractNegotiation[]
+  /** True when outbound Proposals/Decisions still await peer ACK. */
+  pending_negotiation_sync?: boolean
   /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
 }

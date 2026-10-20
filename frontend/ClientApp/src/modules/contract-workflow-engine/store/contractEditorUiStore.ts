@@ -16,6 +16,7 @@ const defaultState: Readonly<ContractEditorUiState> = {
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
     { id: 'diff', label: 'Diff View' },
+    { id: 'proposals', label: 'Proposals' },
     { id: 'audit', label: 'Audit History' },
     { id: 'structure', label: 'Structure' },
   ],
@@ -34,7 +35,7 @@ export const useContractEditorUiStore = defineStore(storeId, {
         (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => useAuthStore().user?.roles?.includes(role)) ??
         false
 
-      const forState: ContractEditorTabId[] = ['details', 'content', 'diff', 'structure']
+      const forState: ContractEditorTabId[] = ['details', 'content', 'diff', 'proposals', 'structure']
 
       return this.tabs.filter(
         (tab) =>

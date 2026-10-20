@@ -4,6 +4,7 @@ import {
   type ContractDiffRow,
   type DiffType,
   type TextDiffSegment,
+  type TextDiffSegmentType,
 } from '@contract-workflow-engine/composables/useContractBlockDiff'
 import {
   type ContractPlainTextBlock,
@@ -22,7 +23,8 @@ const props = withDefaults(
     showNoPriorVersion?: boolean
     showLineNumbers?: boolean
     details?: ContractDetailsSnapshot | null
-    changedDetailKeys?: (keyof ContractDetailsSnapshot)[]
+    /** Per-field word-diff segments. */
+    detailSegmentsByKey?: Partial<Record<keyof ContractDetailsSnapshot, TextDiffSegment[]>>
     testId?: string
   }>(),
   {
@@ -31,7 +33,7 @@ const props = withDefaults(
     showNoPriorVersion: false,
     showLineNumbers: true,
     details: null,
-    changedDetailKeys: () => [],
+    detailSegmentsByKey: () => ({}),
     testId: undefined,
   },
 )
@@ -46,8 +48,6 @@ const detailRows: { key: keyof ContractDetailsSnapshot; label: string }[] = [
   { key: 'exp_policy', label: 'Expiry policy' },
 ]
 
-const changedKeySet = computed(() => new Set(props.changedDetailKeys))
-
 function displayDetail(key: keyof ContractDetailsSnapshot): string {
   const value = props.details?.[key]
   if (value == null || value === '') return ''
@@ -56,6 +56,19 @@ function displayDetail(key: keyof ContractDetailsSnapshot): string {
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
   }
   return String(value)
+}
+
+function detailSegmentClass(type: TextDiffSegmentType): string {
+  if (type === 'added') return 'bg-green-200/80 text-green-900 rounded-sm'
+  if (type === 'removed') return 'bg-red-200/80 text-red-900 rounded-sm'
+  return ''
+}
+
+function segmentsForDetail(key: keyof ContractDetailsSnapshot): TextDiffSegment[] {
+  const prepared = props.detailSegmentsByKey?.[key]
+  if (prepared && prepared.length > 0) return prepared
+  const text = displayDetail(key)
+  return text ? [{ type: 'equal', text }] : [{ type: 'equal', text: '—' }]
 }
 
 const showDetails = computed(() => props.details != null)
@@ -70,12 +83,20 @@ function getDiffTypeByLine(lineNumber: number): DiffType | null {
 }
 
 function getSegmentsByLine(lineNumber: number): TextDiffSegment[] | undefined {
-  return diffRowByLine.value.get(lineNumber)?.segments
+  const row = diffRowByLine.value.get(lineNumber)
+  if (!row) return undefined
+  if (row.segments && row.segments.length > 0) return row.segments
+  // Whole-line add/remove: same green/red text treatment as char segments.
+  if (row.type === 'added' || row.type === 'removed') {
+    return [{ type: row.type, text: row.block.text }]
+  }
+  return undefined
 }
 
 function shouldHighlightSegments(lineNumber: number): boolean {
   if (!props.highlightDiff) return false
-  return getDiffTypeByLine(lineNumber) === 'modified'
+  const diffType = getDiffTypeByLine(lineNumber)
+  return diffType === 'modified' || diffType === 'added' || diffType === 'removed'
 }
 
 function getRowBackgroundClass(lineNumber: number): string {
@@ -100,11 +121,14 @@ function getRowBackgroundClass(lineNumber: number): string {
         >
           <template v-for="row in detailRows" :key="row.key">
             <dt class="text-base-content/70">{{ row.label }}</dt>
-            <dd
-              class="m-0 break-words whitespace-pre-wrap"
-              :class="{ 'bg-amber-100/20 px-1': highlightDiff && changedKeySet.has(row.key) }"
-            >
-              {{ displayDetail(row.key) }}
+            <dd class="m-0 break-words whitespace-pre-wrap">
+              <span
+                v-for="(segment, index) in segmentsForDetail(row.key)"
+                :key="`${row.key}-${index}`"
+                :class="detailSegmentClass(segment.type)"
+              >
+                {{ segment.text }}
+              </span>
             </dd>
           </template>
         </dl>

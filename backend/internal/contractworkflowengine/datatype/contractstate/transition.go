@@ -26,14 +26,15 @@ const (
 	// logic; the transition table only bounds which outcomes are legal.
 	EventSubmit Event = "SUBMIT"
 
-	// EventNegotiate/EventAcceptNegotiation/EventRejectNegotiation: manage
-	// individual negotiation change-request records. None of these change
-	// the contract's own state (they stay within NEGOTIATION), but they are
-	// still validated against the table per the C4 requirement that every
-	// command handler checks against it.
-	EventNegotiate         Event = "NEGOTIATE"
-	EventAcceptNegotiation Event = "ACCEPT_NEGOTIATION"
-	EventRejectNegotiation Event = "REJECT_NEGOTIATION"
+	// EventNegotiate/EventAcceptNegotiation/EventRejectNegotiation/
+	// EventWithdrawNegotiation: manage individual negotiation change-request
+	// records. None of these change the contract's own state (they stay within
+	// NEGOTIATION), but they are still validated against the table per the C4
+	// requirement that every command handler checks against it.
+	EventNegotiate           Event = "NEGOTIATE"
+	EventAcceptNegotiation   Event = "ACCEPT_NEGOTIATION"
+	EventRejectNegotiation   Event = "REJECT_NEGOTIATION"
+	EventWithdrawNegotiation Event = "WITHDRAW_NEGOTIATION"
 
 	// EventApprove/EventReject: the final approval decision.
 	EventApprove Event = "APPROVE"
@@ -110,12 +111,13 @@ var Transitions = map[ContractState]map[Event][]ContractState{
 		// negotiators" and "merged an accepted change request, new round
 		// starts" (submit.go); Negotiation -> Submitted is reached once all
 		// negotiators have accepted and there is nothing left to merge.
-		EventSubmit:            {Negotiation, Submitted},
-		EventWithdraw:          {Withdrawn},
-		EventNegotiate:         {Negotiation},
-		EventAcceptNegotiation: {Negotiation},
-		EventRejectNegotiation: {Negotiation},
-		EventTerminate:         {Terminated},
+		EventSubmit:              {Negotiation, Submitted},
+		EventWithdraw:            {Withdrawn},
+		EventNegotiate:           {Negotiation},
+		EventAcceptNegotiation:   {Negotiation},
+		EventRejectNegotiation:   {Negotiation},
+		EventWithdrawNegotiation: {Negotiation},
+		EventTerminate:           {Terminated},
 	},
 	Submitted: {
 		// Submitted -> Reviewed (all reviewers approved), Submitted ->

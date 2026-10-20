@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, normalizeClass, ref, useAttrs, useTemplateRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { type DcsContractField, fieldFillScalar } from '@/models/dcs-jsonld'
@@ -34,6 +34,7 @@ const props = defineProps<{
 
 const confirmationModal = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-modal')
 
+const route = useRoute()
 const router = useRouter()
 const { isCreator, isManager, isNegotiator } = useContractPermissions()
 
@@ -58,6 +59,8 @@ const canOffer = computed(() => {
 // on a pure responder instance no Creator or Negotiator role is granted, and
 // this button is that instance's only way into a received offer.
 const canNegotiate = computed(() => {
+  // Already on the negotiate page — the button only re-opens this route.
+  if (route.name === ROUTES.CONTRACTS.NEGOTIATE) return false
   const state = props.contract.state
   return (
     (isNegotiator.value || isCreator.value || isManager.value) &&

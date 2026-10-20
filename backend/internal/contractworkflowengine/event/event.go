@@ -607,6 +607,28 @@ func (e RejectNegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// WithdrawNegotiationEvent is emitted when the proposal author retracts their
+// change request before any counterparty has accepted it.
+type WithdrawNegotiationEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	NegotiationID   string             `json:"negotiation_id"`
+	WithdrawnBy     string             `json:"withdrawn_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e WithdrawNegotiationEvent) EventType() string {
+	return eventtype.WithdrawRespond.String()
+}
+
+// GetDID implements the Event interface.
+func (e WithdrawNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
 // NegotiationChangeSupersededEvent records the change requests whose content
 // the fold of a round dropped. Each entry names one accepted request, the
 // later accepted request that overwrote it, and the fields that did not reach

@@ -1390,6 +1390,10 @@ async function openNegotiateView(inst: Instance, contractDid: string): Promise<v
 export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string): Promise<void> {
   for (let round = 0; round < 10; round++) {
     await openNegotiateView(inst, contractDid)
+    const proposalsTab = inst.page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
     const pending = await inst.page.getByRole('button', { name: 'Show' }).count()
     if (pending === 0) break
 
@@ -1399,16 +1403,18 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
     let accepted = false
     for (let i = 0; i < pending && !accepted; i++) {
       await openNegotiateView(inst, contractDid)
+      const roundTab = inst.page.getByRole('tab', { name: /proposals/i })
+      if (await roundTab.isVisible().catch(() => false)) {
+        await roundTab.click()
+      }
       const showBtn = inst.page.getByRole('button', { name: 'Show' }).nth(i)
       if (!(await showBtn.isVisible().catch(() => false))) continue
-      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
-      // a coordinate click cannot land, so the event is dispatched directly.
-      await showBtn.dispatchEvent('click')
+      await showBtn.click()
       const responded = inst.page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST',
         { timeout: 30_000 },
       )
-      await inst.page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
+      await inst.page.getByRole('button', { name: 'Accept', exact: true }).click()
       await confirmModalOn(inst, 'Confirm')
       accepted = (await responded).ok()
     }
