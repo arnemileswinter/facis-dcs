@@ -1397,11 +1397,11 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       await proposalsTab.click()
     }
 
-    // Submit is visible before NegotiationList rows finish painting. An immediate
-    // empty "Awaiting your decision" count used to return here and skip Accept,
-    // leaving Submit stuck on "Waiting for every proposal…". Wait until a
-    // proposal card is present (or Submit already unlocked) before treating
-    // "no awaiting badge" as done.
+    // Submit mounts before NegotiationList paints. Own proposals always render
+    // a card without an "Awaiting your decision" badge — treating "any card" as
+    // done skipped peer Accepts and left Submit blocked. After the two-counter
+    // vertical each side holds ≥2 cards; wait for that (or Submit unlock)
+    // before treating zero awaiting badges as "nothing left to Accept".
     const proposalCards = inst.page.locator('li.list-row').filter({ hasText: 'Change proposal by:' })
     const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
     const submit = inst.page.getByTestId('submit-negotiation')
@@ -1409,12 +1409,12 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       .poll(
         async () => {
           if ((await awaiting.count()) > 0) return 'awaiting'
-          if ((await proposalCards.count()) > 0) return 'settled'
           if (await submit.isEnabled().catch(() => false)) return 'settled'
+          if ((await proposalCards.count()) >= 2) return 'settled'
           return 'loading'
         },
         {
-          timeout: 60_000,
+          timeout: 90_000,
           message: `${inst.origin} proposals list never settled on ${contractDid}`,
         },
       )
