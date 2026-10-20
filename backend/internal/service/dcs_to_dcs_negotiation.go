@@ -89,6 +89,11 @@ func (s *dcsToDcssrvc) PostNegotiation(ctx context.Context, req *dcstodcs.DCSToD
 		if err != nil {
 			return nil, err
 		}
+	case cwedb.NegotiationMessageOfferAccepted:
+		err = persistShippedOfferAccepted(ctx, tx, s.CRepo, req)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_negotiation rejected: unknown kind %q", req.Kind))
@@ -206,6 +211,39 @@ func (s *dcsToDcssrvc) persistShippedProposal(
 			return contractworkflowengine.MakeInternalError(
 				fmt.Errorf("could not move received proposal into negotiation: %w", err))
 		}
+	}
+
+	return nil
+}
+
+// persistShippedOfferAccepted advances the origin's copy OFFERED → NEGOTIATION
+// once the counterparty has accepted the offer. Idempotent when already past
+// OFFERED. Does not mint tasks or proposals — the origin already holds those.
+func persistShippedOfferAccepted(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	cRepo cwedb.ContractRepo,
+	req *dcstodcs.DCSToDCSNegotiationMessageRequest,
+) error {
+	processData, err := cRepo.ReadProcessDataByDID(ctx, tx, req.ContractIri)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+
+	currentState := contractstate.ContractState(processData.State)
+	if currentState != contractstate.Offered {
+		return nil
+	}
+
+	err = contractstate.ValidateOutcome(currentState, contractstate.EventNegotiate, contractstate.Negotiation)
+	if err != nil {
+		return contractworkflowengine.MakeBadRequest(err)
+	}
+
+	err = cRepo.UpdateState(ctx, tx, req.ContractIri, contractstate.Negotiation.String())
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(
+			fmt.Errorf("could not move origin copy into negotiation after offer accepted: %w", err))
 	}
 
 	return nil

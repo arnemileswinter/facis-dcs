@@ -22,21 +22,20 @@ func TestVerifyShippedAllowsIdempotentReshipOfFormalDocument(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestVerifyShippedRefusesUnexplainedDocumentChange(t *testing.T) {
+func TestVerifyShippedAllowsCounterofferWithoutLocalAccepts(t *testing.T) {
 	contracts := &taskContractRepoFake{stored: taskStoredContract()}
 	negotiations := &negotiationRepoFake{}
 	shipped := datatype.JSON(`{
 		"@type":"dcs:Contract",
 		"dcs:documentStructure":{"dcs:blocks":{"@list":[]},"dcs:layout":[]},
-		"dcs:metadata":{"@type":"dcs:ContractMetadata","dcs:title":"Tampered"}
+		"dcs:metadata":{"@type":"dcs:ContractMetadata","dcs:title":"Counteroffer"}
 	}`)
 
 	err := VerifyShippedAgainstLocalRound(
 		context.Background(), nil, contracts, negotiations,
 		taskContractDID, 1, []byte(shipped),
 	)
-	require.ErrorIs(t, err, ErrShippedDisagreesWithLocalRound)
-	require.ErrorContains(t, err, "no accepted decisions")
+	require.NoError(t, err)
 }
 
 func TestVerifyShippedAcceptsReconstructedDescriptionOnlyMerge(t *testing.T) {

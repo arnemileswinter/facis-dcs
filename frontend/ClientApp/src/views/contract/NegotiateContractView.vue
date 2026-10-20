@@ -409,8 +409,16 @@ const canAcceptOffer = computed(() => {
   return !!counterparty && counterparty === localInstanceDid.value
 })
 
-// OFFERED is accept-or-wait only: no redlines until the round is in NEGOTIATION.
-const formEditable = computed(() => contract.value?.state === ContractState.negotiation)
+// Counterparty edits only in NEGOTIATION. The origin may also edit while still
+// OFFERED (after Offer, before/while the peer opens the round) so it is not
+// stuck read-only waiting for the counterparty's first Change Proposal.
+const formEditable = computed(() => {
+  const state = contract.value?.state
+  if (state === ContractState.negotiation) return true
+  if (state !== ContractState.offered || !localInstanceDid.value) return false
+  const originPeer = contract.value?.responsible?.creator ?? contract.value?.created_by
+  return originPeer === localInstanceDid.value
+})
 
 // Own proposals whose counterparty decision is still missing or undecided —
 // inbound Accept/Reject from the peer does not flip pending_negotiation_sync

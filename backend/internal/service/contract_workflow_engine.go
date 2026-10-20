@@ -1083,6 +1083,7 @@ func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contr
 		DB:          s.DB,
 		CRepo:       s.CRepo,
 		NTRepo:      s.NTRepo,
+		NORepo:      s.NORepo,
 		DIDDocument: s.DIDDocument,
 	}
 	err = handler.Handle(ctx, command.AcceptOfferCmd{

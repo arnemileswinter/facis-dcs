@@ -10,19 +10,18 @@ import {
 import type { Contract } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 
-const baseContract = (overrides: Partial<Contract> = {}): Contract =>
-  ({
-    did: 'did:web:example:contract',
-    contract_version: 1,
-    state: 'NEGOTIATION',
-    created_by: 'did:web:example:org',
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    name: 'Formal name',
-    description: 'Formal description',
-    start_date: '2026-01-01T00:00:00Z',
-    ...overrides,
-  })
+const baseContract = (overrides: Partial<Contract> = {}): Contract => ({
+  did: 'did:web:example:contract',
+  contract_version: 1,
+  state: 'NEGOTIATION',
+  created_by: 'did:web:example:org',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  name: 'Formal name',
+  description: 'Formal description',
+  start_date: '2026-01-01T00:00:00Z',
+  ...overrides,
+})
 
 const negotiation = (overrides: Partial<ContractNegotiation>): ContractNegotiation => ({
   id: 'n1',

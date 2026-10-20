@@ -206,6 +206,9 @@ func (s *DCSToDCSSynchronizer) buildNegotiationShipRequest(ctx context.Context, 
 	case cwedb.NegotiationMessageWithdraw:
 		// Domain row is already deleted locally; the outbound row carries the
 		// negotiation_id the peer must drop.
+	case cwedb.NegotiationMessageOfferAccepted:
+		// No domain negotiation row; the receiver only advances OFFERED →
+		// NEGOTIATION on the origin copy.
 	default:
 		return nil, fmt.Errorf("unknown negotiation outbound kind %q", msg.Kind)
 	}
@@ -217,7 +220,8 @@ func isNegotiationDeliveryEvent(eventType string) bool {
 	case cweeventtype.Negotiation.String(),
 		cweeventtype.AcceptRespond.String(),
 		cweeventtype.RejectRespond.String(),
-		cweeventtype.WithdrawRespond.String():
+		cweeventtype.WithdrawRespond.String(),
+		cweeventtype.AcceptOffer.String():
 		return true
 	default:
 		return false

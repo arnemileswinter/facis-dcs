@@ -29,9 +29,14 @@ var ErrShippedDisagreesWithLocalRound = errors.New("shipped contract does not ma
 // VerifyShippedAgainstLocalRound rebuilds the expected post-Submit document from
 // the local formal row and accepted change requests for contractVersion, then
 // compares it to the peer-shipped JSON-LD. An identical re-ship of the current
-// formal document is allowed (idempotent PDF retry). A content change with no
-// accepted decisions to explain it is refused — the peer must hold the Accept
-// rows before adopting the merge PDF.
+// formal document is allowed (idempotent PDF retry).
+//
+// Reconstruct runs only when this instance already holds confirmed Accept rows
+// for the round (post-Submit merge ships). A content change with no local
+// Accepts is a proposal/counteroffer or signed-artifact re-ship (ADR-13 PDF
+// exchange) — those must adopt without reconstruct. Negotiation rows travel on
+// their own outbound channel; they are not a prerequisite for adopting a peer
+// PDF that is not a Submit-merge ship.
 func VerifyShippedAgainstLocalRound(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -70,8 +75,7 @@ func VerifyShippedAgainstLocalRound(
 	}
 
 	if len(accepted) == 0 {
-		return fmt.Errorf("%w: shipped document differs from the formal base and this instance holds no accepted decisions for version %d",
-			ErrShippedDisagreesWithLocalRound, contractVersion)
+		return nil
 	}
 
 	expected, err := reconstructExpectedShippedDocument(ctx, tx, cRepo, nRepo, contract, contractVersion)

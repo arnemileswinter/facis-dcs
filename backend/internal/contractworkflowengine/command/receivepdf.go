@@ -112,10 +112,10 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	}
 
 	if existing != nil {
-		// Before adopting a re-ship, rebuild the expected post-Submit document
-		// from this instance's formal base and confirmed accepted decisions. A
-		// mismatch (omission, conflict, or unapproved delta) refuses the update
-		// rather than blindly trusting the peer PDF.
+		// Before adopting a post-Submit re-ship, rebuild the expected document
+		// from this instance's formal base and confirmed Accepts.
+		// Counteroffer / signed-artifact re-ships with no local Accepts adopt
+		// without reconstruct (ADR-13 PDF exchange).
 		if h.NRepo != nil {
 			if err := VerifyShippedAgainstLocalRound(ctx, tx, h.CRepo, h.NRepo, cmd.ContractIRI, existing.ContractVersion, cmd.Payload); err != nil {
 				return err

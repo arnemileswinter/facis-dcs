@@ -19,9 +19,33 @@ func (r PostgresNegotiationOutboundRepo) Enqueue(ctx context.Context, tx *sqlx.T
 		return r.enqueueWithdraw(ctx, tx, msg)
 	case db.NegotiationMessageAccept, db.NegotiationMessageReject:
 		return r.enqueueDecision(ctx, tx, msg)
+	case db.NegotiationMessageOfferAccepted:
+		return r.enqueueOfferAccepted(ctx, tx, msg)
 	default:
 		return "", fmt.Errorf("unknown negotiation outbound kind %q", msg.Kind)
 	}
+}
+
+func (r PostgresNegotiationOutboundRepo) enqueueOfferAccepted(ctx context.Context, tx *sqlx.Tx, msg db.NegotiationOutboundMessage) (string, error) {
+	negotiationID := msg.NegotiationID
+	if negotiationID == "" {
+		negotiationID = db.OfferAcceptedSentinelNegotiationID
+	}
+	statement := `
+        INSERT INTO contract_negotiation_outbound (
+            did, from_peer_did, to_peer_did, kind, negotiation_id, decision_id, contract_version
+        ) VALUES ($1, $2, $3, 'OFFER_ACCEPTED'::contract_negotiation_message_kind, $4, NULL, $5)
+        ON CONFLICT (did, to_peer_did) WHERE kind = 'OFFER_ACCEPTED'
+        DO UPDATE SET
+            recorded_at = CURRENT_TIMESTAMP,
+            delivered_at = NULL,
+            contract_version = EXCLUDED.contract_version
+        RETURNING id
+    `
+	var id string
+	err := tx.GetContext(ctx, &id, statement,
+		msg.DID, msg.FromPeerDID, msg.ToPeerDID, negotiationID, msg.ContractVersion)
+	return id, err
 }
 
 func (r PostgresNegotiationOutboundRepo) enqueueWithdraw(ctx context.Context, tx *sqlx.Tx, msg db.NegotiationOutboundMessage) (string, error) {

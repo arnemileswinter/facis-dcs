@@ -7,6 +7,7 @@ import {
   assertReceivedInState,
   authorContractTemplate,
   authorSemanticComponent,
+  awaitPeerRedlineOn,
   counterOffer,
   createContractViaUi,
   fillContractAmountOn,
@@ -138,8 +139,8 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     // A full negotiation round, as in full-vertical-2dcs: settling is mutual,
     // so neither side can consolidate straight from OFFERED. Each redline value
     // must differ from the last, or the editor stays undirty and the staged
-    // draft never saves. Each redline also ships a new PDF, so the chain-growth
-    // polls double as the replication barrier between the two sides.
+    // draft never saves. Propose syncs negotiation rows (not PDFs); C2PA grows
+    // when Accept+Submit merges and ships.
     let aChain = await assertManifestChainGrew(a, contractDid, 0)
     let bChain = await assertManifestChainGrew(b, contractDid, 0)
 
@@ -150,21 +151,20 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await acceptOfferOn(b, contractDid)
 
     await stagedCounterOffer(b, contractDid, { value: '10000' })
-    bChain = await assertManifestChainGrew(b, contractDid, bChain)
-    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    await awaitPeerRedlineOn(a, contractDid, { label: 'Payment Amount', value: '10000' })
 
     // A answers with its own redline rather than accepting B's: Submit renders
     // for a party that has acted in the round, not for one that has only
     // received a proposal.
     await counterOffer(a, contractDid, { value: '15000' })
-    await assertManifestChainGrew(a, contractDid, aChain)
-    await assertManifestChainGrew(b, contractDid, bChain)
+    await awaitPeerRedlineOn(b, contractDid, { label: 'Payment Amount', value: '15000' })
 
-    // A moved last, so the outstanding decision is B's to settle (FR-CWE-07
-    // refuses an accept by the record's own author).
+    await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
     await settleToApprovedOn(a, contractDid)
+    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
     await settleToApprovedOn(b, contractDid)
     await signOnInstance(a, contractDid, 'Erasure Signatory')
     await assertReceivedInState(a, contractDid, 'SIGNED')

@@ -15,7 +15,15 @@ const (
 	// NegotiationMessageWithdraw retracts a Proposal the author still owns
 	// before any counterparty has accepted it.
 	NegotiationMessageWithdraw = "WITHDRAW"
+	// NegotiationMessageOfferAccepted tells the origin that the counterparty
+	// opened the round (Accept offer). No contract_negotiations row is created;
+	// outbound rows use OfferAcceptedSentinelNegotiationID.
+	NegotiationMessageOfferAccepted = "OFFER_ACCEPTED"
 )
+
+// OfferAcceptedSentinelNegotiationID fills negotiation_id for OFFER_ACCEPTED
+// rows (column is NOT NULL, but no domain negotiation exists for this kind).
+const OfferAcceptedSentinelNegotiationID = "00000000-0000-0000-0000-000000000000"
 
 // NegotiationOutboundMessage is one negotiation fact queued toward one peer.
 // DeliveredAt stays nil until that peer has acknowledged durable persistence.

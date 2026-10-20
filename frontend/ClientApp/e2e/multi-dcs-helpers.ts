@@ -1028,7 +1028,7 @@ async function contractRecordOn(inst: Instance, contractDid: string): Promise<Co
 
 interface ContractRecord {
   contract_data?: Record<string, unknown>
-  negotiations?: { created_by?: string }[]
+  negotiations?: { created_by?: string; change_request?: unknown }[]
 }
 
 /** The contract document as this instance holds it. */
@@ -1300,24 +1300,13 @@ export async function assertNotYetSignable(inst: Instance, contractDid: string):
 }
 
 /**
- * Waits for a counter-offer the PEER proposed to reach this instance's own copy
- * of the contract, and returns the document it landed as.
+ * Waits for a counter-offer the PEER proposed to land on this instance as a
+ * synced negotiation proposal, and returns that change_request document.
  *
- * A redline crosses as the DOCUMENT, not as a change request: the proposing
- * instance applies it to its own contract_data and ships the re-rendered PDF,
- * and the receiver adopts that document verbatim (ADR-13 §1/§2 — the PDF is the
- * wire format, and "the counterparty receives it as a proposal"). Negotiation
- * rows and their decisions are local to the instance that recorded them and are
- * not replicated — the peer sync that used to carry them was deleted with the
- * single-writer-origin model. So the receiving side has no change request to
- * answer, and no Show/Accept entry in its Active negotiations; under ADR-13 §3
- * agreeing to the terms on the table is SETTLEMENT (a ship of the same version
- * stamped `agreed`), which the two-instance vertical covers.
- *
- * The ship is asynchronous and the views do not poll, so this reads the
- * authenticated retrieve until the redlined value is the one this instance
- * holds. It then asserts this instance lists no round at all, which pins that
- * boundary — so it serves only an instance that has proposed nothing itself.
+ * Propose does not apply the redline to formal contract_data or re-ship a PDF.
+ * The proposal crosses on the negotiation outbound channel; Accept + Submit
+ * later merge it into the formal document and ship the PDF. So this waits on
+ * retrieve.negotiations[].change_request, not on the formal Payment Amount field.
  */
 export async function awaitPeerRedlineOn(
   inst: Instance,
@@ -1326,25 +1315,39 @@ export async function awaitPeerRedlineOn(
 ): Promise<Record<string, unknown>> {
   let record: ContractRecord = {}
   let held = ''
+  let matched: Record<string, unknown> | undefined
   for (let attempt = 0; attempt < 12; attempt++) {
     record = await contractRecordOn(inst, contractDid)
-    const fields = (record.contract_data?.['dcs:contractFields'] ?? []) as Record<string, unknown>[]
-    held = JSON.stringify(fields.find((field) => field['dcs:label'] === opts.label)?.['dcs:value'] ?? null)
-    if (held.includes(opts.value)) break
+    for (const negotiation of record.negotiations ?? []) {
+      const cr = negotiation.change_request
+      if (cr == null || typeof cr !== 'object') continue
+      const blob = JSON.stringify(cr)
+      if (!blob.includes(opts.value)) continue
+      const data = (cr as { contract_data?: Record<string, unknown> }).contract_data
+      if (data) {
+        const fields = (data['dcs:contractFields'] ?? []) as Record<string, unknown>[]
+        held = JSON.stringify(fields.find((field) => field['dcs:label'] === opts.label)?.['dcs:value'] ?? null)
+        if (held.includes(opts.value)) {
+          matched = data
+          break
+        }
+      } else if (blob.includes(opts.label) || blob.includes(opts.value)) {
+        held = blob
+        matched = cr as Record<string, unknown>
+        break
+      }
+    }
+    if (matched) break
     await inst.page.waitForTimeout(5_000)
   }
   expect(held, `the peer's redline of ${opts.label} never reached ${inst.origin} for ${contractDid}`).toContain(
     opts.value,
   )
-  // The boundary the document crossed alone: the receiver records no round of
-  // its own for a counter it did not propose. Asserting it here is what makes a
-  // later change to that rule surface as this stage failing rather than as a
-  // responder view silently offering an Accept nothing ships.
   expect(
     record.negotiations ?? [],
-    `${inst.origin} lists a change request for a counter-offer it did not propose`,
-  ).toHaveLength(0)
-  return record.contract_data!
+    `${inst.origin} never received a synced proposal for the counter-offer`,
+  ).not.toHaveLength(0)
+  return matched!
 }
 
 /**
