@@ -1181,9 +1181,9 @@ export async function counterOffer(inst: Instance, contractDid: string, opts: { 
   // intrinsic state), so the tab lists the contract on the strength of the
   // TASK's state — an entry that a filter keyed on the contract's state would
   // hide, which is how the tab used to look empty here.
+  // Negotiation tasks deep-link straight to /contracts/negotiate (same as
+  // stagedCounterOffer); there is no view → open-negotiation hop anymore.
   await openContractFromTaskTab(inst, 'Contract Creator', 'negotiations', contractDid)
-  await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
-  await inst.page.getByTestId('open-negotiation').click()
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/negotiate\//)
   // The negotiable requirement-field value inputs live under the Contract Content
   // tab (NegotiateContractView renders them via TemplatePreview). Editing the
