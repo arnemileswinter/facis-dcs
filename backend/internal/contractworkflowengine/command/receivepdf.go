@@ -51,6 +51,7 @@ type PeerPdfReceiveCmd struct {
 type PeerPdfReceiver struct {
 	DB        *sqlx.DB
 	CRepo     db.ContractRepo
+	NRepo     db.NegotiationRepo
 	RTRepo    db.ReviewTaskRepo
 	ATRepo    db.ApprovalTaskRepo
 	NTRepo    db.NegotiationTaskRepo
@@ -111,6 +112,15 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	}
 
 	if existing != nil {
+		// Before adopting a re-ship, rebuild the expected post-Submit document
+		// from this instance's formal base and confirmed accepted decisions. A
+		// mismatch (omission, conflict, or unapproved delta) refuses the update
+		// rather than blindly trusting the peer PDF.
+		if h.NRepo != nil {
+			if err := VerifyShippedAgainstLocalRound(ctx, tx, h.CRepo, h.NRepo, cmd.ContractIRI, existing.ContractVersion, cmd.Payload); err != nil {
+				return err
+			}
+		}
 		// A re-ship (a counteroffer or a settled/signed version) refreshes the
 		// content but must not clobber this instance's own local RBAC progress —
 		// its intrinsic state is private and advances through its own workflow.

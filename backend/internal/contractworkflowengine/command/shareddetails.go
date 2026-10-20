@@ -1,12 +1,17 @@
 package command
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
 // Ontology keys on dcs:ContractMetadata (optional except title). These travel
@@ -78,6 +83,113 @@ func parseShippedSharedDetails(payload []byte) sharedContractDetails {
 	}
 
 	return out
+}
+
+// ErrSharedDetailsInconsistent refuses signing when the contracts-row Shared
+// Contract Details disagree with the values embedded in dcs:metadata.
+// Settlement digests bind contract_data; this gate closes the gap for row
+// fields that must match the document both enterprises hold.
+var ErrSharedDetailsInconsistent = errors.New("shared contract details do not match the embedded document metadata")
+
+// AssertSharedDetailsConsistent refuses when name, description, expiration
+// policy, or expiration notice period on the contracts row disagree with
+// dcs:metadata inside contract_data.
+func AssertSharedDetailsConsistent(
+	name, description, expPolicy *string,
+	expNoticePeriod *int,
+	contractData *datatype.JSON,
+) error {
+	if contractData == nil || !contractData.IsNotNullValue() {
+		return nil
+	}
+	embedded := parseShippedSharedDetails([]byte(*contractData))
+	if err := sharedStringField("name", name, embedded.Name); err != nil {
+		return err
+	}
+
+	if err := sharedStringField("description", description, embedded.Description); err != nil {
+		return err
+	}
+
+	if err := sharedStringField("expiration policy", expPolicy, embedded.ExpPolicy); err != nil {
+		return err
+	}
+
+	if err := sharedIntField("expiration notice period", expNoticePeriod, embedded.ExpNoticePeriod); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func sharedStringField(label string, row, embedded *string) error {
+	rowVal := ""
+	if row != nil {
+		rowVal = *row
+	}
+
+	embVal := ""
+	if embedded != nil {
+		embVal = *embedded
+	}
+
+	if rowVal != embVal {
+		return fmt.Errorf("%w: %s: row %q, embedded %q", ErrSharedDetailsInconsistent, label, rowVal, embVal)
+	}
+
+	return nil
+}
+
+func sharedIntField(label string, row, embedded *int) error {
+	if row == nil && embedded == nil {
+		return nil
+	}
+
+	if row == nil || embedded == nil || *row != *embedded {
+		rowVal, embVal := "nil", "nil"
+		if row != nil {
+			rowVal = fmt.Sprintf("%d", *row)
+		}
+		if embedded != nil {
+			embVal = fmt.Sprintf("%d", *embedded)
+		}
+		return fmt.Errorf("%w: %s: row %s, embedded %s", ErrSharedDetailsInconsistent, label, rowVal, embVal)
+	}
+
+	return nil
+}
+
+// stampMergedSharedDetails writes the contracts-row Shared Contract Details
+// into dcs:metadata after a Submit merge so the next PDF ship and settlement
+// digest carry them.
+func stampMergedSharedDetails(ctx context.Context, tx *sqlx.Tx, cRepo db.ContractRepo, did string) error {
+	stored, err := cRepo.ReadDataByDID(ctx, tx, did)
+
+	if err != nil {
+		return fmt.Errorf("could not read contract for shared-details stamp: %w", err)
+	}
+
+	stamped, changed, err := stampSharedDetailsIntoContractData(stored.ContractData, sharedContractDetails{
+		Name:            stored.Name,
+		Description:     stored.Description,
+		StartDate:       stored.StartDate,
+		ExpDate:         stored.ExpDate,
+		ExpPolicy:       stored.ExpPolicy,
+		ExpNoticePeriod: stored.ExpNoticePeriod,
+	})
+	if err != nil {
+		return err
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if err := cRepo.Update(ctx, tx, db.ContractUpdateData{DID: did, ContractData: stamped}); err != nil {
+		return fmt.Errorf("could not persist stamped shared details: %w", err)
+	}
+
+	return nil
 }
 
 // stampSharedDetailsIntoContractData writes Shared Contract Details into

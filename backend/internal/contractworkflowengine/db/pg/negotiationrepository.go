@@ -311,7 +311,7 @@ func (r PostgresNegotiationRepo) ReadAllAcceptedByContractDIDAndVersion(ctx cont
 }
 
 func (r PostgresNegotiationRepo) HasOpenNegotiationDecisions(ctx context.Context, tx *sqlx.Tx, did string, contractVersion int, negotiator string, caller string) (bool, error) {
-	// Submit needs every proposal handled (P03 §3.4). Count unresolved nulls:
+	// Submit needs every proposal handled. Count unresolved nulls:
 	//  - we still owe Accept/Reject on someone else's proposal, or
 	//  - our proposal still waits on a counterparty decision.
 	// Author "Not required" nulls stay out: FR-CWE-07 refuses self-accept, so

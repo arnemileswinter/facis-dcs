@@ -292,6 +292,14 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					}
 				}
 
+				// Shared Contract Details live on the contracts row and must
+				// also sit in dcs:metadata before the post-merge PDF ships, so
+				// the peer's reconstruct-and-verify and the settlement digest
+				// bind the same shared fields both enterprises signed.
+				if err := stampMergedSharedDetails(ctx, tx, h.CRepo, cmd.DID); err != nil {
+					return err
+				}
+
 				// Last-accepted-wins leaves accepted requests whose content the
 				// merged version does not carry. Their decision rows still read
 				// ACCEPTED, so the discard is annotated on the losing request and
