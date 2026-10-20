@@ -1397,20 +1397,22 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       await proposalsTab.click()
     }
 
-    // Submit mounts before NegotiationList paints. Own proposals always render
-    // a card without an "Awaiting your decision" badge — treating "any card" as
-    // done skipped peer Accepts and left Submit blocked. After the two-counter
-    // vertical each side holds ≥2 cards; wait for that (or Submit unlock)
-    // before treating zero awaiting badges as "nothing left to Accept".
+    // Own proposals render "Your proposal" without an Accept path. Peer cards
+    // are every "Change proposal by" row that is not our own. Treating "≥2
+    // cards" as done while a peer card still lacked an Awaiting badge skipped
+    // Accept and left Submit blocked on unresolved proposals.
     const proposalCards = inst.page.locator('li.list-row').filter({ hasText: 'Change proposal by:' })
+    const ownCards = proposalCards.filter({ hasText: 'Your proposal' })
+    const peerCards = proposalCards.filter({ hasNotText: 'Your proposal' })
     const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
     const submit = inst.page.getByTestId('submit-negotiation')
     await expect
       .poll(
         async () => {
           if ((await awaiting.count()) > 0) return 'awaiting'
+          if ((await peerCards.count()) > 0) return 'peer'
           if (await submit.isEnabled().catch(() => false)) return 'settled'
-          if ((await proposalCards.count()) >= 2) return 'settled'
+          if ((await ownCards.count()) > 0 && (await peerCards.count()) === 0) return 'settled'
           return 'loading'
         },
         {
@@ -1420,9 +1422,12 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       )
       .not.toEqual('loading')
 
-    if ((await awaiting.count()) === 0) break
+    let card = awaiting.first()
+    if ((await awaiting.count()) === 0) {
+      if ((await peerCards.count()) === 0) break
+      card = peerCards.first()
+    }
 
-    const card = awaiting.first()
     const showBtn = card.getByRole('button', { name: 'Show', exact: true })
     if (await showBtn.isVisible().catch(() => false)) {
       await showBtn.click()
