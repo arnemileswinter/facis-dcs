@@ -18,6 +18,9 @@ var KnownEvents = []EventInfo{
 	// DCS-FR-CSA-20 / DCS-FR-CWE-10: API-delivered expiry alert; emitted by
 	// the contractworkflowengine expiry cron when it persists EXPIRED.
 	{Name: "contract.expired", Description: "A contract passed its expiration date"},
+	// DCS-FR-CWE-22 / DCS-FR-CSA-20: renewal-deadline alert; emitted by the
+	// expiry cron once per expiry date when the notice period starts.
+	{Name: "contract.renewal_due", Description: "The notice period before a contract's expiration date started"},
 	{Name: "template.created", Description: "A new contract template was created"},
 	{Name: "template.approved", Description: "A contract template was approved"},
 	// DCS-FR-TR-22: Template Users subscribe to these to learn that a
@@ -42,6 +45,7 @@ var DCSEventMap = map[string]string{
 	"NEGOTIATE_CONTRACT":         "contract.negotiated",
 	"TERMINATE_CONTRACT":         "contract.terminated",
 	"CONTRACT_EXPIRED":           "contract.expired",
+	"CONTRACT_RENEWAL_DUE":       "contract.renewal_due",
 	"CREATE_CONTRACT_TEMPLATE":   "template.created",
 	"APPROVE_CONTRACT_TEMPLATE":  "template.approved",
 	"UPDATE_CONTRACT_TEMPLATE":   "template.updated",

@@ -138,7 +138,7 @@ not a coverage hole.
 | DCS-FR-CWE-19 | Contract Signing | ✅ Covered | 22 end-to-end AES signing with ceremony, status tracked (ceremony + e2e scenarios). |
 | DCS-FR-CWE-20 | Store Contract in Archive | ✅ Covered | 05 archive-at-SIGNED scenario (tagged @DCS-FR-CWE-20). |
 | DCS-FR-CWE-21 | Retrieve Contract from Archive | ✅ Covered | 07 archive retrieve/search with RBAC. |
-| DCS-FR-CWE-22 | Contract Renewal Management | ✅ Covered | Renewal workflow endpoint (see CWE-11). |
+| DCS-FR-CWE-22 | Contract Renewal Management | ✅ Covered | Renewal workflow endpoint (see CWE-11). Renewal-deadline notice: the expiry cron emits CONTRACT_RENEWAL_DUE once per expiry date when the notice period starts, delivered as the `contract.renewal_due` webhook. Covered by backend unit tests, not by a BDD scenario (`backend/internal/contractworkflowengine/cronjobs_test.go`, `backend/internal/webhookplatform/store_test.go`). |
 | DCS-FR-CWE-23 | Contract Termination | ✅ Covered | 06 termination via API, removed from active flows (state TERMINATED). |
 | DCS-FR-CWE-24 | Contract Management Dashboard | ✅ Covered | Dashboard UI; backing search/status APIs covered (03 state-filtered search, 07). UI now asserted: e2e/dashboards.spec.ts (contract dashboard lists contracts with lifecycle state). |
 | DCS-FR-CWE-25 | Contract Review and Approval Interface | 🟡 Partial | Approval API surface covered (03/contract_approval); dedicated reviewer UI out of harness scope. |
@@ -204,7 +204,7 @@ not a coverage hole.
 | DCS-FR-CSA-17 | Contract Deletion | ✅ Covered | Archive delete scenarios (07, tagged @DCS-FR-CSA-17) incl. audit logging. |
 | DCS-FR-CSA-18 | Audit Log for Contract Storage and Retrieval | ✅ Covered | 20 export RBAC + audit-entry scenarios (tagged @DCS-FR-CSA-18); archive audit endpoint covered (07). |
 | DCS-FR-CSA-19 | Compliance Verification for Archived Contracts | 🟡 Partial | Audit entries retrievable per component (07/08); automated compliance flagging of archived entries beyond workflow gates not modeled. |
-| DCS-FR-CSA-20 | Automated Contract Monitoring and Alerts | 🟡 Partial | pac/monitor continuous monitoring (08); configurable UI/email alert delivery not modeled — deviation note. |
+| DCS-FR-CSA-20 | Automated Contract Monitoring and Alerts | 🟡 Partial | pac/monitor continuous monitoring (08); API alerts for "expired" (`contract.expired`, 02/template_update_notifications) and "renewal due" (`contract.renewal_due`, backend unit tests only) via the webhook platform; email alert delivery not modeled — deviation note. |
 | DCS-FR-CSA-21 | Contract Archive Dashboard | 📋 Not BDD-verifiable | Dashboard UI; backing stats/search APIs covered (07). |
 | DCS-FR-CSA-22 | Contract Search Interface | 📋 Not BDD-verifiable | Search UI; backing API covered (07 archive search). |
 | DCS-FR-CSA-23 | Contract Expiration and Renewal Management UI | 📋 Not BDD-verifiable | Expiry/renewal UI; backing expiry + renewal APIs covered (19, 06). |

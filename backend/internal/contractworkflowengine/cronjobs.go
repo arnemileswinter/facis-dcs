@@ -1,10 +1,11 @@
 // Package contractworkflowengine implements the core contract lifecycle:
-// creation, negotiation, review, approval, termination, and expiry (this
-// file's CronJob). It follows the repository-wide CQRS layout (command/,
-// query/, db/, datatype/, event/), plus two contract-specific additions:
-// negotiationmerging (folds accepted change requests into a new contract
-// version) and remotesync (the command/RPC side of DCS-to-DCS federation;
-// the peer-transport side lives in the separate dcstodcs package).
+// creation, negotiation, review, approval, termination, expiry and
+// renewal-deadline notices (this file's CronJob). It follows the
+// repository-wide CQRS layout (command/, query/, db/, datatype/, event/),
+// plus two contract-specific additions: negotiationmerging (folds accepted
+// change requests into a new contract version) and remotesync (the
+// command/RPC side of DCS-to-DCS federation; the peer-transport side lives
+// in the separate dcstodcs package).
 //
 // Ownership model: every contract has a single writer, its Origin peer (see
 // command package doc). Expiry is additionally exposed instantly to readers
@@ -43,7 +44,7 @@ func (j CronJob) Start(ctx context.Context, db *sqlx.DB) {
 
 func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.ContractRepo, interval time.Duration) {
 
-	readExpiredContracts := func() ([]database.ContractMetadata, error) {
+	readContracts := func(read func(context.Context, *sqlx.Tx) ([]database.ContractMetadata, error)) ([]database.ContractMetadata, error) {
 		tx, err := db.BeginTxx(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("could not start transaction: %w", err)
@@ -54,9 +55,9 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 			}
 		}(tx)
 
-		expiredContracts, err := repo.ReadExpiredContracts(ctx, tx)
+		contracts, err := read(ctx, tx)
 		if err != nil {
-			return nil, fmt.Errorf("could not read expired contracts: %w", err)
+			return nil, err
 		}
 
 		err = tx.Commit()
@@ -64,7 +65,7 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 			return nil, fmt.Errorf("could not commit transaction: %w", err)
 		}
 
-		return expiredContracts, nil
+		return contracts, nil
 	}
 
 	callExpirationLogic := func(expiredContract database.ContractMetadata) error {
@@ -127,10 +128,40 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 		return tx.Commit()
 	}
 
+	// The ledger claim and the event share one transaction: a failed event
+	// write releases the claim, so the next tick retries the notice.
+	callRenewalDueLogic := func(c database.ContractMetadata) error {
+		tx, err := db.BeginTxx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("could not start transaction: %w", err)
+		}
+		defer func(tx *sqlx.Tx) {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				log.Printf("could not rollback transaction: %v", err)
+			}
+		}(tx)
+
+		evt, err := newRenewalDueEvent(c, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		claimed, err := repo.ClaimRenewalNotice(ctx, tx, evt.DID, evt.ExpDate)
+		if err != nil {
+			return fmt.Errorf("could not record renewal notice for contract with DID %s: %w", c.DID, err)
+		}
+		if !claimed {
+			return nil
+		}
+		if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
+			return fmt.Errorf("could not create event: %w", err)
+		}
+		return tx.Commit()
+	}
+
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
 
-		expiredContracts, err := readExpiredContracts()
+		expiredContracts, err := readContracts(repo.ReadExpiredContracts)
 		if err != nil {
 			log.Printf("could not read expired contracts: %v", err)
 			continue
@@ -146,5 +177,44 @@ func startExpiryScheduler(ctx context.Context, db *sqlx.DB, repo database.Contra
 				log.Printf("could not call expiration logic for expired contract: %v", err)
 			}
 		}
+
+		renewalDue, err := readContracts(repo.ReadRenewalDueContracts)
+		if err != nil {
+			log.Printf("could not read renewal-due contracts: %v", err)
+			continue
+		}
+		for _, c := range renewalDue {
+			if err := callRenewalDueLogic(c); err != nil {
+				log.Printf("could not notify renewal due: %v", err)
+			}
+		}
 	}
+}
+
+func newRenewalDueEvent(c database.ContractMetadata, now time.Time) (contractevents.ContractRenewalDue, error) {
+	if c.ExpDate == nil || c.ExpNoticePeriod == nil {
+		return contractevents.ContractRenewalDue{}, fmt.Errorf("renewal-due contract with DID %s has no expiration date or notice period", c.DID)
+	}
+	state, err := contractstate.NewContractState(c.State)
+	if err != nil {
+		return contractevents.ContractRenewalDue{}, fmt.Errorf("could not create state for contract with DID %s: %w", c.DID, err)
+	}
+	var policy *expirationpolicy.ExpirationPolicy
+	if c.ExpPolicy != nil {
+		p, err := expirationpolicy.NewExpirationPolicy(*c.ExpPolicy)
+		if err != nil {
+			return contractevents.ContractRenewalDue{}, fmt.Errorf("could not create expiration policy: %w", err)
+		}
+		policy = &p
+	}
+	return contractevents.ContractRenewalDue{
+		DID:             c.DID,
+		ContractVersion: c.ContractVersion,
+		State:           state,
+		ExpDate:         *c.ExpDate,
+		ExpNoticePeriod: *c.ExpNoticePeriod,
+		ExpPolicy:       policy,
+		Responsible:     c.Responsible,
+		OccurredAt:      now,
+	}, nil
 }
