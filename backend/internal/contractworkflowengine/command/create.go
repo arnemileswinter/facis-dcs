@@ -288,6 +288,14 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		normalizedContractData = &seeded
 	}
 
+	normalizedContractData, _, err = stampSharedDetailsIntoContractData(normalizedContractData, sharedContractDetails{
+		Name:        contractTemplate.Name,
+		Description: contractTemplate.Description,
+	})
+	if err != nil {
+		return err
+	}
+
 	data, evt := withCreationTimestamp(db.Contract{
 		DID:             cmd.DID,
 		Origin:          localPeer,

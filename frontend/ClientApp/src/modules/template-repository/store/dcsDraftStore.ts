@@ -722,6 +722,10 @@ interface CanonicalDocumentInput {
   documentId?: string
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   templateType?: TemplateTypeValue
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
@@ -750,6 +754,19 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
     ...(input.description ? { 'dcs:description': input.description } : {}),
     ...(input.customMetaData?.length ? { 'dcs:customMetaData': input.customMetaData } : {}),
   }
+  const contractSharedDetails =
+    input.documentType === 'dcs:Contract'
+      ? {
+          ...(input.startDate ? { 'dcs:startDate': { '@value': input.startDate, '@type': 'xsd:dateTime' } } : {}),
+          ...(input.expirationDate
+            ? { 'dcs:expirationDate': { '@value': input.expirationDate, '@type': 'xsd:dateTime' } }
+            : {}),
+          ...(input.expirationNoticePeriod !== undefined
+            ? { 'dcs:expirationNoticePeriod': input.expirationNoticePeriod }
+            : {}),
+          ...(input.expirationPolicy ? { 'dcs:expirationPolicy': input.expirationPolicy } : {}),
+        }
+      : {}
   const metadata =
     input.documentType === 'dcs:ContractTemplate'
       ? {
@@ -758,7 +775,7 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
           'dcs:templateType':
             input.templateType === TemplateType.contractTemplate ? 'dcs:ContractTemplate' : 'dcs:Component',
         }
-      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata }
+      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata, ...contractSharedDetails }
 
   return {
     '@type': input.documentType,
@@ -806,6 +823,10 @@ export interface ContractDocumentInput {
   storedDocument?: DcsContractData
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
   contractFields: DcsContractField[]

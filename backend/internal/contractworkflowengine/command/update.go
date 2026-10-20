@@ -185,6 +185,30 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		}
 	}
 
+	// Mirror Shared Contract Details into dcs:metadata so the PDF embed carries
+	// Description / dates / expiration for the peer (initial replication).
+	docForStamp := cmd.ContractData
+	if docForStamp == nil {
+		docForStamp = oldData.ContractData
+	}
+
+	stamped, stampedChanged, err := stampSharedDetailsIntoContractData(docForStamp, sharedContractDetails{
+		Name:            cmd.Name,
+		Description:     cmd.Description,
+		StartDate:       cmd.StartDate,
+		ExpDate:         cmd.ExpDate,
+		ExpPolicy:       expPolicy,
+		ExpNoticePeriod: cmd.ExpNoticePeriod,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if stampedChanged {
+		cmd.ContractData = stamped
+	}
+
 	newData := db.ContractUpdateData{
 		DID:             cmd.DID,
 		Name:            cmd.Name,
