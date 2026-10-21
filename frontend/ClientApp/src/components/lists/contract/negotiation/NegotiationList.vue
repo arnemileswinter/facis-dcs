@@ -137,6 +137,12 @@ async function buildComparison(negotiation: ContractNegotiation): Promise<Propos
         exp_policy: superseded.exp_policy ?? live.exp_policy,
         contract_data: superseded.contract_data ?? live.contract_data,
       })
+    } else {
+      // History gap: keep live content for the diff, but label the proposal round.
+      formalBase = immutableSnapshot({
+        ...live,
+        contract_version: negotiation.contract_version,
+      })
     }
   }
   const current = immutableSnapshot(proposalComparisonBaseline(formalBase, negotiation))

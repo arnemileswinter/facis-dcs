@@ -678,7 +678,13 @@ func createRemoteQuery(data db.Contract) (*string, []interface{}, error) {
 
 	addParam("template_did", data.TemplateDID)
 	addParam("template_version", data.TemplateVersion)
-	addParam("created_at", data.CreatedAt)
+	// created_at is set on insert only. PeerPdfReceiver's re-ship path leaves
+	// CreatedAt as the zero time; writing it here used to overwrite a real
+	// creation timestamp with 0001-01-01 and bury the contract at the end of
+	// created_at DESC lists.
+	if !data.CreatedAt.IsZero() {
+		addParam("created_at", data.CreatedAt)
+	}
 	addParam("created_by", data.CreatedBy)
 	addParam("updated_at", data.UpdatedAt)
 	addParam("origin", data.Origin)

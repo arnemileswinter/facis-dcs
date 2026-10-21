@@ -13,16 +13,14 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
-import ContractProposalReview from '@/components/contract/ContractProposalReview.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { ContractState } from '@/types/contract-state'
-import { activeNegotiations, contractWithAcceptedProposals } from '@/utils/contract-negotiations'
+import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
@@ -51,17 +49,25 @@ const isAuditingAuthorized = computed(
     (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
+// Proposals belong on Negotiate — View is read-only and must not expose them.
 const tabs = computed(() =>
   contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
     'details',
     'content',
-    'proposals',
     'audit',
     'structure',
   ]),
 )
 
-const activeProposalCount = computed(() => activeNegotiations(contract.value).length)
+watch(
+  tabs,
+  (list) => {
+    if (!list.some((tab) => tab.id === activeTab.value)) {
+      contractEditorUiStore.setActiveTab('details')
+    }
+  },
+  { immediate: true },
+)
 
 // The view holds its own copy from retrieve-by-id rather than the contracts
 // store, so anything that changes the contract has to re-run THIS fetch: a
@@ -73,16 +79,6 @@ const loadContract = async () => {
     contract.value = await contractWorkflowService.retrieveById({ did: id })
     const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
     applyContractDataToDraft(baseline?.contract_data)
-    // Only jump to Proposals while the round is still open. After settle/sign
-    // the same rows remain as history; forcing Proposals hides Details (Global
-    // Name, deployment target) behind v-show and breaks view/deploy e2e.
-    const state = contract.value?.state
-    if (
-      activeNegotiations(contract.value).length > 0 &&
-      (state === ContractState.offered || state === ContractState.negotiation)
-    ) {
-      contractEditorUiStore.setActiveTab('proposals')
-    }
   } catch (err: unknown) {
     console.error('Failed to load contract', err)
   }
@@ -129,11 +125,8 @@ const reloadContract = () => {
   void loadContract()
 }
 
-const localInstanceDid = ref('')
-
-onMounted(async () => {
+onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
-  localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
   if (contracts.value.length === 0) void contractsStore.loadContracts()
 })
 
@@ -208,12 +201,6 @@ const exportBundle = async () => {
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
-                <span
-                  v-if="tab.id === 'proposals' && activeProposalCount > 0"
-                  class="ml-2 badge badge-sm badge-warning"
-                >
-                  {{ activeProposalCount }}
-                </span>
               </a>
             </div>
           </div>
@@ -326,16 +313,6 @@ const exportBundle = async () => {
                     <ContractMachineReadableView v-if="shownContract" :contract="shownContract" />
                   </div>
                 </div>
-              </div>
-
-              <div v-show="activeTab === 'proposals'">
-                <ContractProposalReview
-                  v-if="contract"
-                  :contract="contract"
-                  :local-instance-did="localInstanceDid"
-                  @responded="reloadContract"
-                  @refresh="reloadContract"
-                />
               </div>
 
               <template v-if="isAuditingAuthorized">

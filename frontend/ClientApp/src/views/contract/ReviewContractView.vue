@@ -18,12 +18,15 @@ import { useContractEditorUiStore } from '@contract-workflow-engine/store/contra
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import ContractVerificationFindingsDialog from '@/components/contract/ContractVerificationFindingsDialog.vue'
+import PeerProposalPendingAlert from '@/components/contract/PeerProposalPendingAlert.vue'
 import ReviewBlockAnnotationsPanel from '@/components/contract/ReviewBlockAnnotationsPanel.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
+import { hasPendingPeerProposalAfterSettle } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
 import {
   annotationCount,
@@ -91,6 +94,9 @@ const verificationResult = computed(() => {
 })
 
 const contract: Ref<Contract | null> = ref(null)
+const localInstanceDid = ref('')
+
+const showPeerProposalAlert = computed(() => hasPendingPeerProposalAfterSettle(contract.value, localInstanceDid.value))
 
 watch(
   () => !!route.params.did,
@@ -99,6 +105,9 @@ watch(
       try {
         const id = route.params.did
         if (id && !Array.isArray(id)) {
+          if (!localInstanceDid.value) {
+            localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
+          }
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
         }
@@ -274,6 +283,10 @@ const exportPDF = async () => {
                 :headline="story.headline"
                 :narrative="story.narrative"
                 :actions="toBannerActions(story.actionHints)"
+              />
+              <PeerProposalPendingAlert
+                :show="showPeerProposalAlert"
+                message="Peer sent a change proposal. Suggest rejecting and continuing negotiation."
               />
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor :contract="contract" disabled />

@@ -37,6 +37,32 @@ export function locallyActionableNegotiations(
   })
 }
 
+/** States past local settle where a late peer proposal should surface as a warning. */
+const postNegotiationStates = new Set(['SUBMITTED', 'REVIEWED', 'APPROVED'])
+
+/**
+ * True when this instance already left negotiation (Submit/Review/Approve) but
+ * still owes Accept/Reject on a **peer-authored** proposal for the **current**
+ * formal version — typically shipped after local Submit.
+ *
+ * Does not use locallyActionableNegotiations: that helper also surfaces older
+ * rounds (open author "Not required" nulls) and treats `participantId` as the
+ * human issuer, so Review/Approve (which only know the instance DID) false-positive.
+ */
+export function hasPendingPeerProposalAfterSettle(
+  contract: Contract | null | undefined,
+  localInstanceDid: string,
+): boolean {
+  if (!contract || !localInstanceDid || !postNegotiationStates.has(contract.state)) return false
+  return (contract.negotiations ?? []).some((negotiation) => {
+    if (negotiation.contract_version !== contract.contract_version) return false
+    if (negotiation.created_by === localInstanceDid) return false
+    return negotiation.negotiation_decisions.some(
+      (decision) => decision.negotiator === localInstanceDid && !decision.decision,
+    )
+  })
+}
+
 /**
  * True when any proposal for this round still needs handling before Submit:
  * we owe Accept/Reject, or our proposal still waits on the peer (missing or

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   acceptedNegotiations,
   contractWithAcceptedProposals,
+  hasPendingPeerProposalAfterSettle,
   hasUnresolvedProposals,
   isAcceptedForEditorBaseline,
   isFullyAcceptedNegotiation,
@@ -187,5 +188,69 @@ describe('accepted negotiation fold', () => {
     expect(proposalComparisonBaseline(contract, first).name).toBe('Formal name')
     expect(proposalComparisonBaseline(contract, second).name).toBe('Accepted name')
     expect(proposalComparisonBaseline(contract, second).contract_data).toEqual(firstData)
+  })
+})
+
+describe('hasPendingPeerProposalAfterSettle', () => {
+  const local = 'did:web:local'
+  const peer = 'did:web:peer'
+
+  it('is true when APPROVED and a peer proposal on the current version still needs our decision', () => {
+    const contract = baseContract({
+      state: 'APPROVED',
+      contract_version: 2,
+      negotiations: [
+        negotiation({
+          created_by: peer,
+          contract_version: 2,
+          negotiation_decisions: [
+            { negotiator: local, decision: undefined },
+            { negotiator: peer, decision: undefined },
+          ],
+        }),
+      ],
+    })
+    expect(hasPendingPeerProposalAfterSettle(contract, local)).toBe(true)
+  })
+
+  it('is false while still in NEGOTIATION', () => {
+    const contract = baseContract({
+      state: 'NEGOTIATION',
+      negotiations: [
+        negotiation({
+          created_by: peer,
+          negotiation_decisions: [{ negotiator: local, decision: undefined }],
+        }),
+      ],
+    })
+    expect(hasPendingPeerProposalAfterSettle(contract, local)).toBe(false)
+  })
+
+  it('ignores older-round author nulls and already-accepted peer proposals', () => {
+    const contract = baseContract({
+      state: 'SUBMITTED',
+      contract_version: 4,
+      negotiations: [
+        negotiation({
+          id: 'own-v1',
+          created_by: local,
+          contract_version: 1,
+          negotiation_decisions: [
+            { negotiator: local, decision: undefined },
+            { negotiator: peer, decision: 'ACCEPTED' },
+          ],
+        }),
+        negotiation({
+          id: 'peer-v3',
+          created_by: peer,
+          contract_version: 3,
+          negotiation_decisions: [
+            { negotiator: local, decision: 'ACCEPTED' },
+            { negotiator: peer, decision: undefined },
+          ],
+        }),
+      ],
+    })
+    expect(hasPendingPeerProposalAfterSettle(contract, local)).toBe(false)
   })
 })
