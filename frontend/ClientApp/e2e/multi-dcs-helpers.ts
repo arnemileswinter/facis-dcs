@@ -1404,21 +1404,26 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
     }
 
     // Own proposals render "Your proposal" without an Accept path. Peer cards
-    // are every "Change proposal by" row that is not our own. Treating "≥2
-    // cards" as done while a peer card still lacked an Awaiting badge skipped
-    // Accept and left Submit blocked on unresolved proposals.
+    // are every "Change proposal by" row that is not our own. Only cards with
+    // "Awaiting your decision" are Acceptable — after Accept the peer card
+    // stays listed (same formal version) without that badge. Do not treat
+    // "peer card present, no Awaiting" as a permanent wait (that hung
+    // acceptOpenDecisionsOn after a successful Accept). A short grace covers
+    // late list/DID paint;
+    // product already gates NegotiationList on localInstanceDid.
     const proposalCards = inst.page.locator('li.list-row').filter({ hasText: 'Change proposal by:' })
     const ownCards = proposalCards.filter({ hasText: 'Your proposal' })
     const peerCards = proposalCards.filter({ hasNotText: 'Your proposal' })
     const awaiting = inst.page.locator('li.list-row').filter({ hasText: 'Awaiting your decision' })
     const submit = inst.page.getByTestId('submit-negotiation')
+    const refresh = inst.page.getByTestId('refresh-proposals')
     await expect
       .poll(
         async () => {
           if ((await awaiting.count()) > 0) return 'awaiting'
           if (await submit.isEnabled().catch(() => false)) return 'settled'
           if ((await ownCards.count()) > 0 && (await peerCards.count()) === 0) return 'settled'
-          if ((await peerCards.count()) > 0) return 'peer-pending'
+          if ((await peerCards.count()) > 0) return 'peer-idle'
           return 'loading'
         },
         {
@@ -1430,9 +1435,9 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
 
     if ((await awaiting.count()) === 0) {
       if ((await peerCards.count()) === 0) break
-      // Party DID may still be loading (Accept keys off localInstanceDid). Refresh
-      // while waiting so a late DID / decision row can surface the Awaiting badge.
-      const refresh = inst.page.getByTestId('refresh-proposals')
+      // Grace for a late Awaiting badge, then stop: remaining peer cards are
+      // already decided (or not ours to Accept). Submit's enablement gate
+      // still fails the suite if a real open decision was skipped.
       await expect
         .poll(
           async () => {
@@ -1440,14 +1445,13 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
             if (await refresh.isEnabled().catch(() => false)) {
               await refresh.click().catch(() => undefined)
             }
-            return 'peer-pending'
+            return 'peer-idle'
           },
-          {
-            timeout: 60_000,
-            message: `${inst.origin} peer proposals on ${contractDid} never became Acceptable`,
-          },
+          { timeout: 15_000 },
         )
         .toEqual('awaiting')
+        .catch(() => undefined)
+      if ((await awaiting.count()) === 0) break
     }
 
     const card = awaiting.first()
