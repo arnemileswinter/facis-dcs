@@ -279,7 +279,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Audit',
       order: 5,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
+      roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'ARCHIVE_MANAGER'],
     },
   },
   {

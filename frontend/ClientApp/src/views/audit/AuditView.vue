@@ -7,8 +7,11 @@ import { auditingService } from '@/services/auditing-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
+import ActionHistoryPanel from '@/views/audit/ActionHistoryPanel.vue'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
+
+type AuditPageTab = 'compliance' | 'action-history'
 
 const auditFindingsByScope = ref<Partial<Record<AuditScope, AuditFinding[]>>>({})
 const auditErrorsByScope = ref<Partial<Record<AuditScope, string>>>({})
@@ -19,6 +22,7 @@ const reportLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingFormat = ref<AuditReportFormat | null>(null)
 const selectedScope = ref<AuditScope>('contracts')
 const didFilter = ref('')
+const activeTab = ref<AuditPageTab>('compliance')
 
 // Deep-link drill-down (DCS-FR-CSA-21): the archive dashboard links here
 // with ?scope=archive&did=<did> so a row lands on that contract's trail.
@@ -32,8 +36,39 @@ if (
 if (typeof route.query.did === 'string' && route.query.did) {
   didFilter.value = route.query.did
 }
+
+function setActiveTab(tab: AuditPageTab) {
+  activeTab.value = tab
+}
 const justification = ref('')
 const authStore = useAuthStore()
+
+// PAC /compliance audit: Auditor + Archive Manager (POST /pac/audit).
+// Action history (contract/template audit trail): Auditor + Compliance Officer.
+const canSeeComplianceAudit = computed(
+  () => !!authStore.user?.roles.some((role) => role === 'AUDITOR' || role === 'ARCHIVE_MANAGER'),
+)
+const canSeeActionHistory = computed(
+  () => !!authStore.user?.roles.some((role) => role === 'AUDITOR' || role === 'COMPLIANCE_OFFICER'),
+)
+const showAuditTabList = computed(() => canSeeComplianceAudit.value && canSeeActionHistory.value)
+
+watch(
+  [canSeeComplianceAudit, canSeeActionHistory],
+  () => {
+    if (activeTab.value === 'compliance' && !canSeeComplianceAudit.value && canSeeActionHistory.value) {
+      activeTab.value = 'action-history'
+    } else if (activeTab.value === 'action-history' && !canSeeActionHistory.value && canSeeComplianceAudit.value) {
+      activeTab.value = 'compliance'
+    } else if (!canSeeComplianceAudit.value && canSeeActionHistory.value) {
+      activeTab.value = 'action-history'
+    } else if (canSeeComplianceAudit.value && !canSeeActionHistory.value) {
+      activeTab.value = 'compliance'
+    }
+  },
+  { immediate: true },
+)
+
 const isArchiveManagerOnly = computed(
   () => authStore.user?.roles.includes('ARCHIVE_MANAGER') && !authStore.user?.roles.includes('AUDITOR'),
 )
@@ -463,13 +498,39 @@ function formatDateTime(value?: string): string {
 </script>
 
 <template>
-  <div class="mb-4 flex justify-between border-b border-base-content/10 bg-base-100 p-4">
+  <div class="mb-4 border-b border-base-content/10 bg-base-100 p-4">
     <h2 class="text-2xl/7 font-bold sm:truncate sm:text-3xl sm:tracking-tight">
       {{ $route.meta.name }}
     </h2>
+    <div v-if="showAuditTabList" role="tablist" class="tabs-border mt-4 tabs">
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'compliance' }"
+        :aria-selected="activeTab === 'compliance'"
+        @click="setActiveTab('compliance')"
+      >
+        Compliance Audit
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'action-history' }"
+        :aria-selected="activeTab === 'action-history'"
+        @click="setActiveTab('action-history')"
+      >
+        Action History
+      </button>
+    </div>
   </div>
 
-  <section class="space-y-4 px-4">
+  <section v-if="activeTab === 'action-history' && canSeeActionHistory" class="space-y-4 px-4 pb-8">
+    <ActionHistoryPanel />
+  </section>
+
+  <section v-if="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
     <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
       <div
         v-if="hasExecutedAudit"

@@ -4,7 +4,13 @@ import { useRoute } from 'vue-router'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractAuditList from '@/components/lists/contract/ContractAuditList.vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import type { DcsBlock, DcsLayoutNode } from '@/models/dcs-jsonld'
 import type { ContractAuditResponse } from '@/models/responses/contract-response'
+
+defineProps<{
+  blocks?: DcsBlock[]
+  layout?: DcsLayoutNode[]
+}>()
 
 const route = useRoute()
 const editorStore = useContractEditorUiStore()
@@ -43,5 +49,5 @@ watch(
   <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
   <div v-else-if="loadError" role="alert" class="alert alert-error">{{ loadError }}</div>
   <div v-else-if="data.length < 1">No audit data</div>
-  <ContractAuditList v-else :audits="data" />
+  <ContractAuditList v-else :audits="data" :blocks="blocks" :layout="layout" />
 </template>

@@ -27,6 +27,7 @@ interface TemplateDraftState {
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
   version: number | null
+  created_at: string | null
   updated_at: string | null
   created_by: string
   responsible: ContractTemplateResponsible | null

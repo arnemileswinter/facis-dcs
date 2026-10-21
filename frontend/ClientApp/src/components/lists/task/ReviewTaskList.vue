@@ -64,6 +64,10 @@ const getContractName = (task: ContractReviewTask) => {
   return contractsStore.findContractByDid(task.did)?.name ?? 'Nameless Contract'
 }
 
+const getContractResponsible = (task: ContractReviewTask) => {
+  return contractsStore.findContractByDid(task.did)?.responsible
+}
+
 const getContractState = (task: ContractReviewTask) => {
   return contractsStore.findContractByDid(task.did)?.state
 }
@@ -115,7 +119,13 @@ onUnmounted(() => stateFilterStore.reset())
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
       <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
-        <TaskListSearch class="flex-1" :tasks="tasks" @search-result="applySearchResult" />
+        <TaskListSearch
+          class="flex-1"
+          :tasks="tasks"
+          placeholder="Search contracts"
+          :contract-search-defaults="{ state: ContractState.submitted }"
+          @search-result="applySearchResult"
+        />
         <ListStateFilter
           label="Review Task"
           :filters="reviewTaskStates"
@@ -135,15 +145,23 @@ onUnmounted(() => stateFilterStore.reset())
                 <div class="badge badge-accent">{{ toProperCase(task.type) }} Task</div>
                 <div class="badge badge-secondary">{{ task.state }}</div>
               </h2>
-              <div class="flex justify-between">
-                <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
-                <div v-else-if="task.type === 'contract' && task.contract_version">
-                  Version: {{ task.contract_version }}
+              <div class="flex min-w-0 items-end justify-between gap-4">
+                <div class="flex min-w-0 flex-col gap-0.5 text-sm leading-snug">
+                  <div v-if="task.type === 'template' && task.version">Version: {{ task.version }}</div>
+                  <div v-else-if="task.type === 'contract' && task.contract_version">
+                    Version: {{ task.contract_version }}
+                  </div>
+                  <template v-if="task.type === 'contract' && getContractResponsible(task)">
+                    <div v-if="getContractResponsible(task)?.creator" class="min-w-0 break-all">
+                      Responsible party: {{ getContractResponsible(task)?.creator }}
+                    </div>
+                    <div v-if="getContractResponsible(task)?.counterparty" class="min-w-0 break-all">
+                      Counterparty: {{ getContractResponsible(task)?.counterparty }}
+                    </div>
+                  </template>
+                  <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
                 </div>
-              </div>
-              <div class="flex justify-between">
-                <div>Creation date: {{ new Date(task.created_at).toLocaleDateString() }}</div>
-                <div class="card-actions justify-end">
+                <div class="card-actions shrink-0 justify-end">
                   <RouterLink
                     :to="{
                       name: resolveViewRouteName(task),

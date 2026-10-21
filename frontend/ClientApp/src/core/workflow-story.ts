@@ -189,7 +189,7 @@ export function contractStory(
       return story(
         'NEGOTIATION',
         'This contract is in negotiation',
-        'The counterparty proposed changes. Compare versions and respond under Negotiation Tasks. Each accepted adjustment creates a new version of the same contract.',
+        'The counterparty proposed changes. Compare proposals and respond under Negotiation Tasks. Accepted proposals stay pending until Submit merges them into a new formal version.',
         [{ label: 'Open Negotiation Tasks', routeName: 'tasks.negotiations' }],
       )
     case 'SUBMITTED':

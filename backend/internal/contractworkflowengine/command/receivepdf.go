@@ -51,6 +51,7 @@ type PeerPdfReceiveCmd struct {
 type PeerPdfReceiver struct {
 	DB        *sqlx.DB
 	CRepo     db.ContractRepo
+	NRepo     db.NegotiationRepo
 	RTRepo    db.ReviewTaskRepo
 	ATRepo    db.ApprovalTaskRepo
 	NTRepo    db.NegotiationTaskRepo
@@ -92,7 +93,8 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// is already this instance's native DCS form — the exact bytes the originator
 	// embedded — so it is used as-is, with no dialect round-trip.
 	payload := datatype.JSON(cmd.Payload)
-	templateIRI, templateVersion, name := parseShippedContractMeta(cmd.Payload)
+	templateIRI, templateVersion := parseShippedTemplateProvenance(cmd.Payload)
+	shared := parseShippedSharedDetails(cmd.Payload)
 	now := time.Now().UTC()
 
 	data := db.Contract{
@@ -101,10 +103,24 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		ContractData:    &payload,
 		TemplateDID:     templateIRI,
 		TemplateVersion: templateVersion,
-		Name:            name,
+		Name:            shared.Name,
+		Description:     shared.Description,
+		StartDate:       shared.StartDate,
+		ExpDate:         shared.ExpDate,
+		ExpPolicy:       shared.ExpPolicy,
+		ExpNoticePeriod: shared.ExpNoticePeriod,
 	}
 
 	if existing != nil {
+		// Before adopting a post-Submit re-ship, rebuild the expected document
+		// from this instance's formal base and confirmed Accepts.
+		// Counteroffer / signed-artifact re-ships with no local Accepts adopt
+		// without reconstruct (ADR-13 PDF exchange).
+		if h.NRepo != nil {
+			if err := VerifyShippedAgainstLocalRound(ctx, tx, h.CRepo, h.NRepo, cmd.ContractIRI, existing.ContractVersion, cmd.Payload); err != nil {
+				return err
+			}
+		}
 		// A re-ship (a counteroffer or a settled/signed version) refreshes the
 		// content but must not clobber this instance's own local RBAC progress —
 		// its intrinsic state is private and advances through its own workflow.
@@ -224,12 +240,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	return tx.Commit()
 }
 
-// parseShippedContractMeta pulls the template provenance and title out of the
+// parseShippedTemplateProvenance pulls the template DID and version out of the
 // shipped contract's JSON-LD (derivedFromTemplate.@id ends in the template IRI).
-func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersion int, name *string) {
+func parseShippedTemplateProvenance(payload []byte) (templateIRI string, templateVersion int) {
 	var doc map[string]any
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return "", 0, nil
+		return "", 0
 	}
 	if prov, ok := doc["derivedFromTemplate"].(map[string]any); ok {
 		if id, ok := prov["@id"].(string); ok {
@@ -239,10 +255,5 @@ func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersi
 			templateVersion = int(v)
 		}
 	}
-	if meta, ok := doc["dcs:metadata"].(map[string]any); ok {
-		if t, ok := meta["dcs:title"].(string); ok && t != "" {
-			name = &t
-		}
-	}
-	return templateIRI, templateVersion, name
+	return templateIRI, templateVersion
 }

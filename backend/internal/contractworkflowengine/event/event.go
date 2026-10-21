@@ -222,6 +222,13 @@ func (e UpdateEvent) GetDID() string {
 	return e.DID
 }
 
+// BlockAnnotation is one review note targeting a layout block @id.
+// Persisted on SubmitEvent → outbox_events.event_data.
+type BlockAnnotation struct {
+	BlockID string `json:"block_id"`
+	Comment string `json:"comment"`
+}
+
 // SubmitEvent is emitted when a contract is submitted
 type SubmitEvent struct {
 	DID             string                 `json:"did"`
@@ -233,6 +240,7 @@ type SubmitEvent struct {
 	ContractVersion int                    `json:"contract_version"`
 	ActionFlag      *actionflag.ActionFlag `json:"action_flag,omitempty"`
 	Comments        []string               `json:"comments"`
+	Annotations     []BlockAnnotation      `json:"annotations,omitempty"`
 	UserRoles       userrole.UserRoles     `json:"user_roles"`
 }
 
@@ -596,6 +604,28 @@ func (e RejectNegotiationEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e RejectNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
+// WithdrawNegotiationEvent is emitted when the proposal author retracts their
+// change request before any counterparty has accepted it.
+type WithdrawNegotiationEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	NegotiationID   string             `json:"negotiation_id"`
+	WithdrawnBy     string             `json:"withdrawn_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e WithdrawNegotiationEvent) EventType() string {
+	return eventtype.WithdrawRespond.String()
+}
+
+// GetDID implements the Event interface.
+func (e WithdrawNegotiationEvent) GetDID() string {
 	return e.DID
 }
 

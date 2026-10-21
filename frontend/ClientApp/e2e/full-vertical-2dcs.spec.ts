@@ -8,6 +8,7 @@ import {
   assertSigningRefusedUntilCounterpartySettles,
   authorContractTemplate,
   authorSemanticComponent,
+  awaitPeerRedlineOn,
   counterOffer,
   createContractViaUi,
   deployContract,
@@ -174,22 +175,17 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
 
     // B redlines 20000 -> 10000 through the SRS §3.1.1 Save-draft leg: the
     // redline is staged as B's party draft, survives leaving the Negotiate
-    // view, and only "Change Proposal" makes it real — the chain growth
-    // asserted below comes from the propose; the save ships nothing to A.
-    // Once proposed, the counter-offer applies the value to contract_data
-    // immediately, so the negotiated PDF re-renders with the redline and
-    // re-ships to A over the PDF exchange (the C2PA chain grows on both).
+    // view, and only "Change Proposal" makes it real. Propose does not apply
+    // or re-ship a PDF; the proposal syncs to A on the negotiation outbound
+    // channel. C2PA grows later when Accept+Submit merges and ships.
     await stagedCounterOffer(b, contractDid, { value: '10000' })
-    bChain = await assertManifestChainGrew(b, contractDid, bChain)
-    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    await awaitPeerRedlineOn(a, contractDid, { label: 'Payment Amount', value: '10000' })
     await saveArtifact(b, contractDid, '02-counter-10k-B')
     await saveArtifact(a, contractDid, '02-counter-10k-A')
 
-    // A counters 10000 -> 15000: the redline runs the other direction and ships
-    // back, growing the chain again on both instances.
+    // A counters with 15000: proposal syncs to B the same way.
     await counterOffer(a, contractDid, { value: '15000' })
-    aChain = await assertManifestChainGrew(a, contractDid, aChain)
-    bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    await awaitPeerRedlineOn(b, contractDid, { label: 'Payment Amount', value: '15000' })
     await saveArtifact(a, contractDid, '03-counter-15k-A')
     await saveArtifact(b, contractDid, '03-counter-15k-B')
   })
@@ -207,12 +203,11 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
 
-    // Clears whatever B still owes a decision on before it settles. Only B's
-    // OWN 10000 counter is listed here: a change request is recorded on the
-    // instance that proposed it and never crosses the boundary (ADR-13 ships
-    // documents, not negotiation rows), so A's 15000 counter reached B as the
-    // document B now holds, not as something to accept. The settle handshake
-    // itself is the mutual approve + settlement ship asserted below.
+    // Proposals sync both ways: A must Accept B's 10000, B must Accept A's
+    // 15000, before either Submit can merge the round. settleToApprovedOn
+    // accepts open decisions then submits; run both sides so each holds the
+    // peer's Accept before (or as) it closes the round.
+    await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
     // Settle = consolidate to APPROVED via the real submit → review → approve UI
@@ -220,7 +215,10 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     // Each instance runs its OWN submit → review → approve: the intrinsic state
     // is local RBAC, so A approving says nothing about B's copy — B's reviewer
     // and approver still have to act, and the signing gate is per instance.
+    // Submit-merge ships the formal PDF; C2PA grows here, not on Propose.
     await settleToApprovedOn(a, contractDid)
+    aChain = await assertManifestChainGrew(a, contractDid, aChain)
+    bChain = await assertManifestChainGrew(b, contractDid, bChain)
 
     // A is now APPROVED and has shipped its own settlement, but B has not
     // settled: A's signer is offered the contract and is still refused, because
