@@ -18,7 +18,7 @@ import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { getLocalDIDFile } from '@/services/did-service'
+import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { ContractState } from '@/types/contract-state'
@@ -126,7 +126,7 @@ const localInstanceDid = ref('')
 
 onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
-  localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
+  localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
   if (contracts.value.length === 0) void contractsStore.loadContracts()
 })
 

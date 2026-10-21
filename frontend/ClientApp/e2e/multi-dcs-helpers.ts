@@ -1416,9 +1416,9 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       .poll(
         async () => {
           if ((await awaiting.count()) > 0) return 'awaiting'
-          if ((await peerCards.count()) > 0) return 'peer'
           if (await submit.isEnabled().catch(() => false)) return 'settled'
           if ((await ownCards.count()) > 0 && (await peerCards.count()) === 0) return 'settled'
+          if ((await peerCards.count()) > 0) return 'peer-pending'
           return 'loading'
         },
         {
@@ -1428,12 +1428,29 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
       )
       .not.toEqual('loading')
 
-    let card = awaiting.first()
     if ((await awaiting.count()) === 0) {
       if ((await peerCards.count()) === 0) break
-      card = peerCards.first()
+      // Party DID may still be loading (Accept keys off localInstanceDid). Refresh
+      // while waiting so a late DID / decision row can surface the Awaiting badge.
+      const refresh = inst.page.getByTestId('refresh-proposals')
+      await expect
+        .poll(
+          async () => {
+            if ((await awaiting.count()) > 0) return 'awaiting'
+            if (await refresh.isEnabled().catch(() => false)) {
+              await refresh.click().catch(() => undefined)
+            }
+            return 'peer-pending'
+          },
+          {
+            timeout: 60_000,
+            message: `${inst.origin} peer proposals on ${contractDid} never became Acceptable`,
+          },
+        )
+        .toEqual('awaiting')
     }
 
+    const card = awaiting.first()
     const showBtn = card.getByRole('button', { name: 'Show', exact: true })
     if (await showBtn.isVisible().catch(() => false)) {
       await showBtn.click()

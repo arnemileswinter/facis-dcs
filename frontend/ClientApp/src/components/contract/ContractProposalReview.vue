@@ -62,12 +62,13 @@ defineExpose({
           Change requests for this contract version. Accept or reject when asked.
         </p>
         <NegotiationList
-          v-if="hasActiveNegotiations"
+          v-if="hasActiveNegotiations && props.localInstanceDid"
           :contract="contract"
           :local-instance-did="props.localInstanceDid"
           :participant-id="participantId"
           @responded="handleResponded"
         />
+        <p v-else-if="hasActiveNegotiations" class="text-sm text-base-content/60">Loading party identity…</p>
         <p v-else class="text-sm text-base-content/60">No active proposals for this contract.</p>
       </div>
     </section>

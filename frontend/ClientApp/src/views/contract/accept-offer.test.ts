@@ -25,6 +25,7 @@ const getLocalDIDFile = vi.fn(() => Promise.resolve({ id: LOCAL_PEER }))
 
 vi.mock('@/services/did-service', () => ({
   getLocalDIDFile: (...args: unknown[]) => getLocalDIDFile(...(args as [])),
+  resolveLocalInstanceDid: async () => (await getLocalDIDFile()).id,
 }))
 
 const contractDocument = {

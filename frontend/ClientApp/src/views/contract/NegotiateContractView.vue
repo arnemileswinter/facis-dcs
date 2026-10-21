@@ -25,7 +25,7 @@ import ContractManagerActions from '@/components/contract/ContractManagerActions
 import ContractProposalReview from '@/components/contract/ContractProposalReview.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
-import { getLocalDIDFile } from '@/services/did-service'
+import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
@@ -100,6 +100,12 @@ const verificationResult = computed(() => {
 const contract: Ref<Contract | null> = ref(null)
 const editedContract: Ref<Contract | null> = ref(null)
 
+// Decisions are keyed by this party's DCS instance did:web, not by the
+// logged-in user's issuer (that is the signatory's organization). Declared
+// before loadContract — the watch(immediate) path calls loadContract during
+// setup, so a later const would hit the temporal dead zone.
+const localInstanceDid = ref('')
+
 // Formal row plus every fully accepted proposal for this version. Details/
 // Content and further Change Proposals start from this; the stored formal
 // contract is unchanged until Submit merges.
@@ -169,6 +175,11 @@ const loadContract = async () => {
   try {
     const id = route.params.did
     if (id && !Array.isArray(id)) {
+      // Party DID must land before proposal badges/Submit gates evaluate —
+      // an empty localInstanceDid hides Accept forever (ownDecision never matches).
+      if (!localInstanceDid.value) {
+        localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
+      }
       contract.value = await contractWorkflowService.retrieveById({ did: id })
       const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
       editedContract.value = baseline ? { ...baseline } : null
@@ -387,10 +398,6 @@ const submitContract = async () => {
 // acceptance never lands here. Counting every row therefore deadlocked the
 // federated round: the peer's pending decision disabled our Submit forever, and
 // responding to it matched no row (the respond updates WHERE negotiator = us).
-// Identifies which negotiation decisions are OURS: decisions are keyed by the
-// party's DCS instance did:web, not by the logged-in user's issuer (that is the
-// signatory's organization and never matches a party).
-const localInstanceDid = ref('')
 
 // Submit waits until every proposal is handled (peer Accept/Reject on ours,
 // or our Accept/Reject on theirs). Author "Not required" nulls do not count.
@@ -489,7 +496,9 @@ onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract' })
   // Our own party identity, used to tell our pending decisions from the peer's.
   // Resolve before the first actionable-tab check on reload after respond.
-  localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
+  if (!localInstanceDid.value) {
+    localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
+  }
   if (locallyActionableNegotiations(contract.value, localInstanceDid.value, issuer.value ?? '').length > 0) {
     contractEditorUiStore.setActiveTab('proposals')
   }
