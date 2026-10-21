@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import NegotiationList from '@/components/lists/contract/negotiation/NegotiationList.vue'
-import { getLocalDIDFile } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { activeNegotiations } from '@/utils/contract-negotiations'
 import type { Contract } from '@/models/contract/contract'
 
 const props = defineProps<{
   contract: Contract
+  localInstanceDid: string
 }>()
 
 const emit = defineEmits<{
@@ -19,8 +19,6 @@ const isRefreshing = ref(false)
 
 const authStore = useAuthStore()
 const participantId = computed(() => authStore.user?.issuer ?? '')
-
-const localInstanceDid = ref('')
 
 const hasActiveNegotiations = computed(() => activeNegotiations(props.contract).length > 0)
 
@@ -37,14 +35,6 @@ const refreshProposals = () => {
     isRefreshing.value = false
   }, 800)
 }
-
-watch(
-  () => props.contract.did,
-  async () => {
-    localInstanceDid.value = (await getLocalDIDFile().catch(() => ({ id: '' }))).id
-  },
-  { immediate: true },
-)
 
 defineExpose({
   hasActiveNegotiations,
@@ -74,7 +64,7 @@ defineExpose({
         <NegotiationList
           v-if="hasActiveNegotiations"
           :contract="contract"
-          :local-instance-did="localInstanceDid"
+          :local-instance-did="props.localInstanceDid"
           :participant-id="participantId"
           @responded="handleResponded"
         />

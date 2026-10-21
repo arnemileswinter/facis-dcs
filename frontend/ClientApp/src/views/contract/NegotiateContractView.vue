@@ -669,6 +669,7 @@ const exportPDF = async () => {
                 <ContractProposalReview
                   v-if="contract"
                   :contract="contract"
+                  :local-instance-did="localInstanceDid"
                   @responded="handleNegotiationResponded"
                   @refresh="handleNegotiationResponded"
                 />

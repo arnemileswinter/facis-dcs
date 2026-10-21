@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applySession, type DcsRole, expect, mintSession } from './dcs-test'
+import { applySession, type DcsRole, E2E_ORG_A, E2E_ORG_B, expect, mintSession } from './dcs-test'
 import { selectBilateralClauseRoles, selectOriginatorRole } from './lifecycle-helpers'
 import {
   E2E_API_BASE,
@@ -40,14 +40,20 @@ export interface Instance {
   gotoAs(role: DcsRole, url: string): Promise<void>
 }
 
-function makeInstance(page: Page, context: BrowserContext, origin: string, apiBase: string): Instance {
+function makeInstance(
+  page: Page,
+  context: BrowserContext,
+  origin: string,
+  apiBase: string,
+  organization: string,
+): Instance {
   return {
     page,
     context,
     origin,
     apiBase,
     async gotoAs(role, url) {
-      await applySession(context, page, origin, mintSession(role, apiBase))
+      await applySession(context, page, origin, mintSession(role, apiBase, organization))
       await page.goto(url)
       // Two instances mean two browser contexts, and Chromium throttles timers
       // in pages it considers hidden. The signing ceremony dialog advances on a
@@ -62,7 +68,7 @@ function makeInstance(page: Page, context: BrowserContext, origin: string, apiBa
 
 /** Wraps the test's own fixture page/context as instance A (the originator). */
 export function instanceA(page: Page, context: BrowserContext, origin: string): Instance {
-  return makeInstance(page, context, origin, E2E_API_BASE)
+  return makeInstance(page, context, origin, E2E_API_BASE, E2E_ORG_A)
 }
 
 /** Opens a second browser context/page for instance B (the counterparty), on
@@ -70,7 +76,7 @@ export function instanceA(page: Page, context: BrowserContext, origin: string): 
 export async function openInstanceB(browser: Browser): Promise<Instance> {
   const context = await browser.newContext({ baseURL: E2E_FRONTEND_B_ORIGIN })
   const page = await context.newPage()
-  return makeInstance(page, context, E2E_FRONTEND_B_ORIGIN, E2E_API_BASE_B)
+  return makeInstance(page, context, E2E_FRONTEND_B_ORIGIN, E2E_API_BASE_B, E2E_ORG_B)
 }
 
 /** What one run of the Secure Contract Viewer's signing ceremony produced: the
