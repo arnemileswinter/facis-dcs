@@ -11,10 +11,12 @@ const (
 	Apply                EventType = "APPLY_SIGNATURE"
 	Applied              EventType = "APPLIED_SIGNATURE"
 	Validate             EventType = "VALIDATE_SIGNATURE"
+	ValidateFailed       EventType = "VALIDATE_SIGNATURE_FAILED"
 	Verify               EventType = "VERIFY_SIGNATURE"
 	RetrieveAll          EventType = "RETRIEVE_ALL_CONTRACTS"
 	RetrieveByID         EventType = "RETRIEVE_CONTRACT_BY_ID"
 	Revoke               EventType = "REVOKE_SIGNATURE"
+	RevokeFailed         EventType = "REVOKE_SIGNATURE_FAILED"
 	ComplianceValidation EventType = "COMPLIANCE_VALIDATION"
 	Audit                EventType = "AUDIT_CONTRACT_TEMPLATE"
 	SigningRequest       EventType = "SIGNING_REQUEST"
@@ -25,10 +27,12 @@ var validStates = map[EventType]bool{
 	Apply:                true,
 	Applied:              true,
 	Validate:             true,
+	ValidateFailed:       true,
 	Verify:               true,
 	RetrieveAll:          true,
 	RetrieveByID:         true,
 	Revoke:               true,
+	RevokeFailed:         true,
 	ComplianceValidation: true,
 	Audit:                true,
 	SigningRequest:       true,
