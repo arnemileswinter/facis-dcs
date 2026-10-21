@@ -402,7 +402,7 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
@@ -508,7 +508,7 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),

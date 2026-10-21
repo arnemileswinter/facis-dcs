@@ -357,7 +357,7 @@ test('full vertical through the real UI', async ({ page, loginAs }) => {
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
     )
-    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await page.getByTestId('submit-negotiation').click()
     await accepted
     await assertPdfExport(page, 'contract', contractDid, 'contract in negotiation')
   })

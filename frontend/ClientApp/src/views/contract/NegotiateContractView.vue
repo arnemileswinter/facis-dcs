@@ -775,7 +775,7 @@ const exportPDF = async () => {
           @click="submitContract"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Submit
+          {{ hasAcceptedProposals ? 'Submit' : 'Submit review' }}
         </button>
         <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
       </div>

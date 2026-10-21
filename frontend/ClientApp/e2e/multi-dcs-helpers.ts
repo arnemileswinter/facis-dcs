@@ -1371,7 +1371,7 @@ export async function awaitPeerRedlineOn(
  * Submit still fails, on the same assertion.
  */
 async function openNegotiateView(inst: Instance, contractDid: string): Promise<void> {
-  const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
+  const submit = inst.page.getByTestId('submit-negotiation')
   for (let attempt = 0; attempt < 2; attempt++) {
     await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     const mounted = await submit
@@ -1495,39 +1495,65 @@ export async function acceptOpenDecisionsOn(inst: Instance, contractDid: string)
   ).toHaveCount(0)
 }
 
+async function localContractState(inst: Instance, contractDid: string): Promise<string> {
+  const auth = await apiAuthHeaders(inst, 'Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  expect(
+    resp.ok(),
+    `retrieve ${contractDid} on ${inst.origin}: HTTP ${resp.status()} ${await resp.text()}`,
+  ).toBeTruthy()
+  return String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
+}
+
 /**
- * Stage 7 settle — drives an instance's contract from an open negotiation round
- * to APPROVED through the real UI, the SRS consolidation path (there is no
- * /contract/settle route; ACCEPTED is not a contract state). Accepts the
- * outstanding change request (NegotiationList Show → Accept → /contract/respond),
- * submits the merged round (NEGOTIATION → SUBMITTED), reviews it (SUBMITTED →
- * REVIEWED), and approves it (REVIEWED → APPROVED, EventApprove). Mirrors the
- * proven single-instance submit→review→approve sequence.
+ * Accept open decisions, then Submit / Submit review until SUBMITTED, then
+ * review → approve to APPROVED. A Submit with accepted proposals merges and
+ * stays NEGOTIATION; Submit review advances to SUBMITTED.
  */
 export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
-  await acceptOpenDecisionsOn(inst, contractDid)
+  for (let round = 0; round < 5; round++) {
+    await acceptOpenDecisionsOn(inst, contractDid)
 
-  // Peer Accept of our proposal lands asynchronously; the negotiate view only
-  // polls sync for ~10s, so reload until Submit unlocks rather than waiting on
-  // one stale page load.
-  const submit = inst.page.getByRole('button', { name: 'Submit', exact: true })
-  await expect(async () => {
-    await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
-    await expect(submit).toBeEnabled({ timeout: 10_000 })
-  }).toPass({
-    timeout: 120_000,
-    intervals: [2_000, 5_000, 10_000],
-  })
-  const submitted = inst.page.waitForResponse(
-    (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
-    { timeout: 30_000 },
-  )
-  await submit.click()
-  await submitted
+    const submit = inst.page.getByTestId('submit-negotiation')
+    await expect(async () => {
+      await inst.gotoAs('Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+      await expect(submit).toBeEnabled({ timeout: 10_000 })
+    }).toPass({
+      timeout: 120_000,
+      intervals: [2_000, 5_000, 10_000],
+    })
+    const submitted = inst.page.waitForResponse(
+      (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
+      { timeout: 30_000 },
+    )
+    await submit.click()
+    await submitted
 
-  // Review: SUBMITTED -> REVIEWED. The reviewer arrives the way the reviewer
-  // finds work — the Review Tasks tab row, which points at the review view only
-  // while the task is open and the contract is SUBMITTED.
+    let after = ''
+    await expect
+      .poll(
+        async () => {
+          after = await localContractState(inst, contractDid)
+          return after === 'SUBMITTED' || after === 'NEGOTIATION' ? after : 'other'
+        },
+        {
+          timeout: 30_000,
+          message: `${inst.origin} post-submit state for ${contractDid} never settled`,
+        },
+      )
+      .not.toEqual('other')
+    if (after === 'SUBMITTED') break
+    expect(
+      after,
+      `${inst.origin} submit round ${round + 1} on ${contractDid} left state ${after}; expected NEGOTIATION (merge) or SUBMITTED`,
+    ).toBe('NEGOTIATION')
+    if (round === 4) {
+      expect(after, `${inst.origin} never reached SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
+    }
+  }
+
   await openContractFromTaskTab(inst, 'Contract Reviewer', 'reviews', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/review\//)
   const forwarded = inst.page.waitForResponse(
@@ -1554,9 +1580,7 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
 }
 
 /**
- * Stage 9 — the Contract Manager deploys the fully-signed contract to the target
- * system through the real UI: the "Deploy" action in ContractManagerActions
- * (SIGNED -> ACTIVE, EventDeploy), gated on the Manager role and SIGNED state.
+ * Contract Manager deploys a SIGNED contract (EventDeploy → ACTIVE).
  */
 export async function deployContract(inst: Instance, contractDid: string): Promise<void> {
   // The manager finds the signed contract in the list and opens it; a SIGNED
@@ -1564,6 +1588,12 @@ export async function deployContract(inst: Instance, contractDid: string): Promi
   // the Deploy action lives.
   await openContractFromList(inst, 'Contract Manager', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/view\//)
+
+  // Picker is on Contract Details (v-show); Proposals may be the active tab.
+  const detailsTab = inst.page.getByRole('tab', { name: /contract details/i })
+  if (await detailsTab.isVisible().catch(() => false)) {
+    await detailsTab.click()
+  }
 
   // A contract deploys to the target system it designates (ADR-25), so the
   // manager picks one first. The registry is seeded by the chart
