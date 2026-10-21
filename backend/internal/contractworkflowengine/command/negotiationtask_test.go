@@ -229,10 +229,35 @@ type proposedChange struct {
 	data db.NegotiationCreateData
 }
 
-func (r *negotiationRepoFake) Create(_ context.Context, _ *sqlx.Tx, data db.NegotiationCreateData, _ []string) (*time.Time, error) {
-	r.proposed = append(r.proposed, proposedChange{id: fmt.Sprintf("negotiation-%d", len(r.proposed)+1), data: data})
+func (r *negotiationRepoFake) Create(_ context.Context, _ *sqlx.Tx, data db.NegotiationCreateData, _ []string) (string, *time.Time, error) {
+	id := fmt.Sprintf("negotiation-%d", len(r.proposed)+1)
+	r.proposed = append(r.proposed, proposedChange{id: id, data: data})
 	now := time.Now().UTC()
-	return &now, nil
+	return id, &now, nil
+}
+
+func (r *negotiationRepoFake) ReadDecisionID(_ context.Context, _ *sqlx.Tx, negotiationID, _ string) (string, error) {
+	return "decision-for-" + negotiationID, nil
+}
+
+func (r *negotiationRepoFake) ReadNegotiationByID(_ context.Context, _ *sqlx.Tx, id string) (*db.NegotiationData, error) {
+	for _, row := range r.proposed {
+		if row.id == id {
+			return &db.NegotiationData{
+				ID:              row.id,
+				DID:             row.data.DID,
+				ContractVersion: row.data.ContractVersion,
+				ChangeRequest:   row.data.ChangeRequest,
+				CreatedBy:       row.data.CreatedBy,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *negotiationRepoFake) ReadDecisionByID(_ context.Context, _ *sqlx.Tx, id string) (*db.NegotiationDecisionData, error) {
+	decision := "ACCEPTED"
+	return &db.NegotiationDecisionData{ID: id, Negotiator: localPeerDID, Decision: &decision}, nil
 }
 
 func (r *negotiationRepoFake) Accept(_ context.Context, _ *sqlx.Tx, id string, _ string) error {
@@ -260,6 +285,10 @@ func (r *negotiationRepoFake) ReadCreatedByByNegotiationID(_ context.Context, _ 
 }
 
 func (r *negotiationRepoFake) DeleteDraft(context.Context, *sqlx.Tx, string, string) error {
+	return nil
+}
+
+func (r *negotiationRepoFake) EnsureOpenDecision(context.Context, *sqlx.Tx, string, string) error {
 	return nil
 }
 
@@ -615,12 +644,12 @@ func TestEveryContractVersionBumpCarriesTheNegotiationTasksForward(t *testing.T)
 	for file, fn := range map[string]string{
 		"submit.go":     "Handle",
 		"receivepdf.go": "Handle",
-		"negotiate.go":  "Handle",
 	} {
 		calls := callsIn(t, file, fn)
 		require.Contains(t, calls, "RollForward",
 			"%s bumps the contract version without carrying the negotiation tasks to the new round", file)
 	}
+	require.NotContains(t, callsIn(t, "negotiate.go", "Handle"), "RollForward")
 }
 
 // callsIn returns the names of every function and method called anywhere inside

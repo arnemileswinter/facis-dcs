@@ -19,6 +19,9 @@ const (
 	AcceptOffer   EventType = "ACCEPT_OFFER_CONTRACT"
 	AcceptRespond EventType = "ACCEPT_RESPOND_CONTRACT"
 	RejectRespond EventType = "REJECT_RESPOND_CONTRACT"
+	// WithdrawRespond records the author retracting their own change proposal
+	// before any counterparty accepted it.
+	WithdrawRespond EventType = "WITHDRAW_RESPOND_CONTRACT"
 	// NegotiationChangeSuperseded records that folding a round discarded the
 	// content of a change request that stands at ACCEPTED, because a later
 	// accepted request set the same fields (last-accepted-wins). Without it

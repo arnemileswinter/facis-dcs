@@ -360,6 +360,7 @@ func main() {
 	cweATRepo := cwerepo.PostgresApprovalTaskRepo{}
 	cweNTRepo := cwerepo.PostgresNegotiationTaskRepo{}
 	cweNRepo := cwerepo.PostgresNegotiationRepo{}
+	cweNORepo := cwerepo.PostgresNegotiationOutboundRepo{}
 	cweCTRepo := cwerepo.PostgresContractTemplateRepo{}
 	cweCronJob := contractworkflowengine2.CronJob{DB: db, CRepo: &cweRepo}
 	cweCronJob.Start(ctx, db)
@@ -482,13 +483,16 @@ func main() {
 	// gate verifies every attachment a counterparty's shipped PDF carries.
 	counterpartyPoAGate := dcstodcs2.CounterpartyPoAGate{Trust: authCfg.Trust}
 	dcsToDcsSynchronizer := dcstodcs2.DCSToDCSSynchronizer{
-		DB:               db,
-		CRepo:            &cweRepo,
-		SRepo:            &syncRepo,
-		Artifacts:        artifactStore,
-		DIDDocument:      *didDocument,
-		TrustGate:        trustGate,
-		SettlementSender: dcstodcs2.HTTPSettlementSender{},
+		DB:                db,
+		CRepo:             &cweRepo,
+		SRepo:             &syncRepo,
+		NRepo:             &cweNRepo,
+		NORepo:            &cweNORepo,
+		Artifacts:         artifactStore,
+		DIDDocument:       *didDocument,
+		TrustGate:         trustGate,
+		SettlementSender:  dcstodcs2.HTTPSettlementSender{},
+		NegotiationSender: dcstodcs2.HTTPNegotiationSender{},
 	}
 	dcsToDcsSynchronizer.StartSynchronizerJob(ctx, cepSubClient)
 
@@ -823,7 +827,7 @@ func main() {
 		}
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
 		// The credentials this instance issued verify against its own published

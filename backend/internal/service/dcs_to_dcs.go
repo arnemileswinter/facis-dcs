@@ -264,7 +264,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		}
 	}
 
-	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, Artifacts: s.Artifacts}
+	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, NRepo: s.NRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, Artifacts: s.Artifacts}
 	if err := receiver.Handle(ctx, command.PeerPdfReceiveCmd{
 		ContractIRI:  req.ContractIri,
 		Counterparty: req.FromPeerDid,
@@ -277,6 +277,12 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			return nil, contractworkflowengine.MakeBadRequest(
 				fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", req.ContractIri, err))
 		}
+
+		if errors.Is(err, command.ErrShippedDisagreesWithLocalRound) {
+			return nil, contractworkflowengine.MakeBadRequest(
+				fmt.Errorf("post_pdf rejected: %w", err))
+		}
+
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 

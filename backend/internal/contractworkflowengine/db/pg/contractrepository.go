@@ -43,12 +43,14 @@ func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, da
 	statement := `
         INSERT INTO contracts (
             did, origin, created_at, created_by, updated_at, state, name,
-            description, contract_data, template_did, template_version, responsible
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            description, contract_data, template_did, template_version, responsible,
+            start_date, exp_date, exp_policy, exp_notice_period
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     `
 	_, err := tx.ExecContext(ctx, statement,
 		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.UpdatedAt, data.State, data.Name,
-		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible)
+		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible,
+		data.StartDate, data.ExpDate, data.ExpPolicy, data.ExpNoticePeriod)
 	return err
 }
 
@@ -576,7 +578,7 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		paramIndex++
 	}
 	if len(values.ContractData) > 0 {
-		conditions += ` search_vector @@ plainto_tsquery('english', $` + strconv.Itoa(paramIndex) + `) AND`
+		conditions += ` did IN (SELECT did FROM contracts WHERE search_vector @@ plainto_tsquery('english', $` + strconv.Itoa(paramIndex) + `)) AND`
 		params = append(params, values.ContractData)
 		paramIndex++
 	}

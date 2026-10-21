@@ -277,9 +277,9 @@ func TestSettlementIsReadFromTheArtifactNotTheLocalWorkflowState(t *testing.T) {
 	}
 }
 
-// negotiate applies a structured redline to contract_data straight away and
-// re-ships the result, so that is the change the settled-agreement gate has to
-// stand in front of.
+// Submit applies a structured redline to contract_data and re-ships the
+// result, so that is the change the settled-agreement gate has to stand in
+// front of.
 func TestStructuredRedlineRewritesTheDocument(t *testing.T) {
 	redline, err := datatype.NewJSON(map[string]any{
 		"contract_data": map[string]any{"dcs:documentStructure": map[string]any{}},

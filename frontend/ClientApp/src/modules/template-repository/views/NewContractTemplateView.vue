@@ -52,10 +52,12 @@ watch(
             return
           }
           const uneditableStates = [
+            TemplateState.reviewed,
+            TemplateState.approved,
+            TemplateState.deleted,
             TemplateState.deprecated,
             TemplateState.registered,
             TemplateState.published,
-            TemplateState.registered,
           ].map((s) => s.toLowerCase())
           templateEditorUiStore.setTemplateEditable(!uneditableStates.includes(template.state.toLowerCase()))
 
@@ -66,7 +68,9 @@ watch(
             templateType: template.template_type,
             state: template.state,
             version: template.version ?? null,
+            created_at: template.created_at ?? null,
             updated_at: template.updated_at ?? null,
+            created_by: template.created_by,
             responsible: template.responsible ?? null,
           })
         })

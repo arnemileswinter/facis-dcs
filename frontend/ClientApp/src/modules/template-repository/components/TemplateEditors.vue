@@ -10,6 +10,7 @@ import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
 import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
 import DetailsEditor from '@template-repository/components/DetailsEditor.vue'
 import MetaDataEditor from '@template-repository/components/MetaDataEditor.vue'
+import TemplateProvenance from '@template-repository/components/TemplateProvenance.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import { useAuthStore } from '@/stores/auth-store'
@@ -96,8 +97,10 @@ const isAuditingAuthorized = computed(
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Clauses
               </h2>
-              <ClauseEditor />
-              <div class="divider text-xs text-base-content/70">existing clauses</div>
+              <ClauseEditor v-if="templateEditorUiStore.isTemplateEditable" />
+              <div v-if="templateEditorUiStore.isTemplateEditable" class="divider text-xs text-base-content/70">
+                existing clauses
+              </div>
               <ClausesEditor />
             </div>
           </div>
@@ -143,11 +146,13 @@ const isAuditingAuthorized = computed(
         <!-- META TAB -->
         <div v-show="activeTab === 'meta'">
           <div class="card border border-base-300 bg-base-100 shadow-sm">
-            <div class="card-body">
+            <div class="card-body gap-5">
               <h2 class="card-title text-sm">
                 <span class="badge w-8 badge-sm badge-primary">0{{ currentTabNumber }}</span>
                 Meta Data
               </h2>
+              <TemplateProvenance />
+              <div class="divider my-0 text-xs text-base-content/40">custom metadata</div>
               <MetaDataEditor />
             </div>
           </div>

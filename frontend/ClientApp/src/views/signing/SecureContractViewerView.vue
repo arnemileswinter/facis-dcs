@@ -320,6 +320,7 @@ async function validate() {
                   :blocks="dcsDraftStore.blocks"
                   :semantic-conditions="dcsDraftStore.semanticConditions"
                   :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                  :disabled="true"
                 />
               </div>
               <p v-else class="text-sm text-base-content/70 italic">This contract has no renderable clause content.</p>

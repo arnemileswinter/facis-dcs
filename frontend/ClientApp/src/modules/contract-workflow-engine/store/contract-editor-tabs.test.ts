@@ -33,16 +33,36 @@ describe('contract editor tabs', () => {
   it('withholds a tab the calling view cannot render', () => {
     signIn(['CONTRACT_CREATOR'])
 
-    expect(tabIds(ContractState.negotiation, ['details', 'content', 'diff', 'audit'])).toEqual([
+    expect(tabIds(ContractState.negotiation, ['details', 'content', 'diff', 'proposals', 'audit'])).toEqual([
       'details',
       'content',
       'diff',
+      'proposals',
     ])
     expect(tabIds(ContractState.draft, ['details', 'content', 'audit', 'structure'])).toEqual([
       'details',
       'content',
       'structure',
     ])
+  })
+
+  it('offers Diff View for submitted and draft when the view renders it', () => {
+    signIn(['CONTRACT_REVIEWER'])
+
+    expect(tabIds(ContractState.submitted, ['details', 'content', 'diff', 'audit'])).toEqual([
+      'details',
+      'content',
+      'diff',
+    ])
+    expect(tabIds(ContractState.draft, ['details', 'content', 'diff'])).toContain('diff')
+    expect(tabIds(ContractState.submitted, ['details', 'content', 'audit'])).not.toContain('diff')
+  })
+
+  it('offers Proposals when the view renders it', () => {
+    signIn(['CONTRACT_CREATOR'])
+
+    expect(tabIds(ContractState.offered, ['details', 'content', 'proposals'])).toContain('proposals')
+    expect(tabIds(ContractState.negotiation, ['details', 'content'])).not.toContain('proposals')
   })
 
   it('offers the audit tab to the roles /contract/audit scopes', () => {
