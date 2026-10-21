@@ -11,11 +11,11 @@ import (
 )
 
 type SyncFail struct {
-	ID          uint64    `db:"id"`
-	DID         string    `db:"did"`
-	RetryCount  int       `db:"retry_count"`
-	CreatedAt   time.Time `db:"created_at"`
-	LastTriedAt time.Time `db:"last_tried_at"`
+	ID          uint64     `db:"id"`
+	DID         string     `db:"did"`
+	RetryCount  int        `db:"retry_count"`
+	CreatedAt   time.Time  `db:"created_at"`
+	LastTriedAt *time.Time `db:"last_tried_at"`
 	// GateIncidentRecorded mirrors sync_fails.gate_incident_recorded (see
 	// CreateOrUpdateSyncFailEntry) — read here only so GetPendingSyncFails'
 	// `SELECT *` has a destination for every column; the retry scheduler

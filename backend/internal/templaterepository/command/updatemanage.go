@@ -70,7 +70,10 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 
 	if oldData.State == contracttemplatestate.Published.String() ||
 		oldData.State == contracttemplatestate.Deprecated.String() ||
-		oldData.State == contracttemplatestate.Registered.String() {
+		oldData.State == contracttemplatestate.Registered.String() ||
+		oldData.State == contracttemplatestate.Approved.String() ||
+		oldData.State == contracttemplatestate.Reviewed.String() ||
+		oldData.State == contracttemplatestate.Deleted.String() {
 		return errors.New("invalid contract template state")
 	}
 

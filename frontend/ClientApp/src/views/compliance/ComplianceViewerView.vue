@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
+import ComplianceReportPanel from '@/components/compliance/ComplianceReportPanel.vue'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import {
   type SignatureAuditEntry,
@@ -11,6 +12,12 @@ import {
   type SignatureViewResult,
 } from '@/services/signature-management-service'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  poaOrganizationDisplay,
+  poaRolesDisplay,
+  signerDisplayName,
+  summaryIssuerDisplay,
+} from '@/utils/credential-chain-evidence'
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import {
@@ -21,6 +28,8 @@ import {
   signatureLevelLabel,
   signatureStatusIndicator,
 } from '@/utils/signature-verdict'
+import type { ClauseComplianceReport } from '@/utils/clause-compliance-report'
+import type { PartyComplianceReport } from '@/utils/party-compliance-report'
 
 // The Signature Compliance Viewer (DCS-FR-SM-05/-07/-08, DCS-FR-SM-18/-21/-26):
 // a tabbed dashboard over the signed contracts an Auditor / Compliance Officer /
@@ -243,6 +252,19 @@ function statusIndicator(status: string) {
   return signatureStatusIndicator(status)
 }
 
+function formatSignedAt(iso: string | undefined): string {
+  if (!iso?.trim()) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const day = d.getUTCDate()
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const mon = months[d.getUTCMonth()]
+  const year = d.getUTCFullYear()
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${day} ${mon} ${year}, ${hh}:${mm} UTC`
+}
+
 function signatureLevel(sig: SignatureViewItem): string {
   return signatureLevelLabel(sig.credential_type)
 }
@@ -262,18 +284,61 @@ function levelMeetsRequirement(sig: SignatureViewItem): boolean {
   return achieved >= required
 }
 
+const exportPartyReport = ref<PartyComplianceReport | null>(null)
+const exportClauseReport = ref<ClauseComplianceReport | null>(null)
+
+function onComplianceReportReady(payload: { party: PartyComplianceReport; clause: ClauseComplianceReport }) {
+  exportPartyReport.value = payload.party
+  exportClauseReport.value = payload.clause
+}
+
 // --- Report export --------------------------------------------------------
 
 function buildReport() {
+  const parties = exportPartyReport.value
+  const clauses = exportClauseReport.value
   return {
     contract_did: selected.value?.did,
     contract_name: selected.value?.name,
     contract_state: view.value?.contract_state,
     generated_at: new Date().toISOString(),
+    report_scope: parties?.scope_note,
     dss_report: activeDss.value,
     integrity_findings: integrityFindings.value,
     validation_findings: validateResult.value?.findings ?? [],
     compliance_findings: complianceResult.value?.findings ?? [],
+    parties: (parties?.parties ?? []).map((p) => ({
+      signature_status: p.status_label,
+      signer: p.signer,
+      signer_did: p.signer_did,
+      signing_level: p.credential_type,
+      authorized_role: p.authorized_role,
+      signed_at: p.signed_at,
+      non_conformance: p.non_conformance,
+      // retained for consumers that still key off party_label / assessment
+      party_label: p.party_label,
+      field_name: p.field_name,
+      assessment: p.assessment,
+    })),
+    contract_findings: parties?.contract_findings ?? [],
+    clauses: {
+      scope_note: clauses?.scope_note,
+      clauses_available: clauses?.clauses_available ?? false,
+      findings_available: clauses?.findings_available ?? false,
+      clauses_unavailable_reason: clauses?.clauses_unavailable_reason,
+      findings_unavailable_reason: clauses?.findings_unavailable_reason,
+      sections: (clauses?.clauses ?? []).map((c) => ({
+        clause_id: c.clause_id,
+        title: c.title,
+        status: c.status,
+        assessment_run: c.assessment_run,
+        applicable_checks: c.applicable_checks,
+        assessment: c.assessment,
+        verdict_note: c.verdict_note,
+        non_conformance: c.findings.map((f) => f.message),
+      })),
+      unassigned_findings: (clauses?.unassigned_findings ?? []).map((f) => f.message),
+    },
     signatures: view.value?.signatures ?? [],
     audit_entries: auditEntries.value ?? [],
   }
@@ -330,6 +395,39 @@ function exportPdf() {
         <li>Signing time: ${escapeHtml(dss.signing_time ?? '—')}</li>
       </ul>`
     : ''
+  const partyHtml = report.parties.length
+    ? report.parties
+        .map(
+          (p) => `<section style="border:1px solid #ddd;padding:12px;margin:12px 0">
+        <p class="meta">
+          Signature status: ${escapeHtml(p.signature_status)}<br>
+          Signer: ${escapeHtml(p.signer)}<br>
+          Signing level: ${escapeHtml(p.signing_level)}<br>
+          Authorized role: ${escapeHtml(p.authorized_role ?? '—')}<br>
+          Signed at: ${escapeHtml(p.signed_at ?? '—')}<br>
+          Non-conformance: ${escapeHtml(p.non_conformance.length ? p.non_conformance.join('; ') : 'No party-specific findings')}
+        </p>
+      </section>`,
+        )
+        .join('')
+    : '<p class="meta">No local signing evidence on this instance.</p>'
+  const clauseSections = report.clauses?.sections ?? []
+  const clauseHtml = clauseSections.length
+    ? clauseSections
+        .map(
+          (c) => `<section style="border:1px solid #ddd;padding:12px;margin:12px 0">
+        <h3 style="margin:0 0 8px">${escapeHtml(c.title)}</h3>
+        <p class="meta">
+          Status: ${escapeHtml(c.status ?? c.assessment)}<br>
+          Assessment run: ${escapeHtml(c.assessment_run ?? '—')}<br>
+          Applicable checks: ${escapeHtml(c.applicable_checks ?? 'Not established')}<br>
+          Non-conformance: ${escapeHtml(c.non_conformance.length ? c.non_conformance.join('; ') : 'No clause-specific findings')}<br>
+          ${c.verdict_note ? escapeHtml(c.verdict_note) : ''}
+        </p>
+      </section>`,
+        )
+        .join('')
+    : `<p class="meta">${escapeHtml(report.clauses?.clauses_unavailable_reason ?? report.clauses?.findings_unavailable_reason ?? 'No clause sections available for this role/data combination.')}</p>`
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(reportFilename('pdf'))}</title>
     <style>
       body{font-family:system-ui,sans-serif;margin:2rem;color:#111}
@@ -342,8 +440,15 @@ function exportPdf() {
         Contract: ${escapeHtml(report.contract_name ?? report.contract_did)}<br>
         DID: ${escapeHtml(report.contract_did)}<br>
         State: ${escapeHtml(report.contract_state)}<br>
-        Generated: ${escapeHtml(report.generated_at)}
+        Generated: ${escapeHtml(report.generated_at)}<br>
+        ${escapeHtml(report.report_scope)}
       </p>
+      <h2>By Party</h2>
+      ${partyHtml}
+      ${rows('Contract-level findings', report.contract_findings)}
+      <h2>By Clauses</h2>
+      ${clauseHtml}
+      ${rows('Unassigned content findings', report.clauses?.unassigned_findings ?? [])}
       <h2>Signatures</h2>
       <table><thead><tr><th>Signer</th><th>Field</th><th>Level</th><th>Qualification</th><th>Status</th><th>Signed at</th><th>Certificate subject</th><th>Content hash</th></tr></thead>
       <tbody>${sigRows || '<tr><td colspan="8">No signatures</td></tr>'}</tbody></table>
@@ -406,8 +511,12 @@ function exportPdf() {
           <li v-for="contract in filteredContracts" :key="contract.did" class="max-w-full min-w-0 overflow-hidden">
             <button
               type="button"
-              :class="{ active: selected?.did === contract.did }"
-              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden"
+              class="flex w-full max-w-full min-w-0 flex-col items-start gap-0 overflow-hidden border-l-4 transition-none"
+              :class="
+                selected?.did === contract.did ? 'border-primary bg-base-100' : 'border-transparent bg-transparent'
+              "
+              :aria-current="selected?.did === contract.did ? 'true' : undefined"
+              data-testid="compliance-contract-row"
               @click="selectContract(contract)"
             >
               <span class="max-w-full truncate font-medium">{{ contract.name ?? contract.did }}</span>
@@ -482,32 +591,111 @@ function exportPdf() {
                 <span v-if="!canManage" class="text-xs text-base-content/50">Requires Contract Manager role.</span>
               </div>
 
-              <div v-if="activeDss" class="card border border-base-content/10 bg-base-100">
-                <div class="card-body p-4">
-                  <div class="flex items-center gap-2">
-                    <h3 class="font-semibold">EU DSS Validation (ETSI EN 319 102-1)</h3>
+              <div v-if="activeDss" class="card border border-base-content/10 bg-base-100" data-testid="dss-validation">
+                <div class="card-body gap-4 p-4 text-sm">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-semibold">EU DSS Validation — PDF Signature</h3>
                     <span class="badge" :class="dssIndicator(activeDss.indication).cls">
                       {{ dssIndicator(activeDss.indication).label }}
                     </span>
                   </div>
-                  <dl class="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt class="inline font-medium">Signer identity:</dt>
-                      <dd class="inline break-all">{{ activeDss.signed_by ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Signature level:</dt>
-                      <dd class="inline">{{ activeDss.signature_format ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Timestamp:</dt>
-                      <dd class="inline">{{ activeDss.signing_time ?? '—' }}</dd>
-                    </div>
-                    <div>
-                      <dt class="inline font-medium">Sub-indication:</dt>
-                      <dd class="inline">{{ activeDss.sub_indication ?? '—' }}</dd>
-                    </div>
-                  </dl>
+
+                  <section aria-labelledby="dss-cert-details-heading">
+                    <h4 id="dss-cert-details-heading" class="mb-2 font-medium text-base-content">
+                      Certificate &amp; Signature Details
+                    </h4>
+                    <dl class="space-y-1">
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Sub-indication</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ activeDss.sub_indication ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signer identity</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ activeDss.signed_by ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signature format</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80">
+                          {{ activeDss.signature_format ?? '—' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-44 shrink-0 text-base-content/60">Signing time</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80">
+                          {{ formatSignedAt(activeDss.signing_time) }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+                </div>
+              </div>
+              <div
+                v-else
+                class="rounded-box border border-dashed border-base-content/20 bg-base-200/30 p-4 text-sm text-base-content/70"
+                data-testid="dss-validation-unavailable"
+              >
+                EU DSS validation is not available for this contract. Trust-anchor and timestamp validation results
+                appear here when a DSS report is returned by
+                <span class="font-mono text-xs">/signature/view</span>
+                or
+                <span class="font-mono text-xs">/signature/validate</span>
+                .
+              </div>
+
+              <div
+                v-for="(sig, sigIndex) in view.signatures"
+                :key="`credential-chain-${sig.signer_did}-${sig.field_name ?? sigIndex}`"
+                data-testid="credential-chain"
+                class="card border border-base-content/10 bg-base-100"
+              >
+                <div class="card-body gap-4 p-4 text-sm">
+                  <div>
+                    <h3 class="font-semibold">Signing Credentials &amp; Authorization — Local Signature Record</h3>
+                    <p v-if="activeDss" class="text-base-content/60">
+                      DCS local signature record (not the EU DSS PDF validation above)
+                    </p>
+                    <p v-else class="text-base-content/60">Local signer information recorded during signing</p>
+                  </div>
+
+                  <section :aria-labelledby="`credential-chain-signer-${sigIndex}`">
+                    <h4 :id="`credential-chain-signer-${sigIndex}`" class="mb-2 font-medium text-base-content">
+                      Signer &amp; Authorization
+                    </h4>
+                    <dl class="space-y-1">
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Signer</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">{{ signerDisplayName(sig) }}</dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Organization</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ poaOrganizationDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Authorized Roles</dt>
+                        <dd class="m-0 min-w-0 break-words text-base-content/80">
+                          {{ poaRolesDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Signed at</dt>
+                        <dd class="m-0 min-w-0 text-base-content/80" data-testid="credential-chain-timestamp">
+                          {{ formatSignedAt(sig.signed_at) }}
+                        </dd>
+                      </div>
+                      <div class="flex items-baseline gap-x-3">
+                        <dt class="w-52 shrink-0 text-base-content/60">Summary credential issuer</dt>
+                        <dd class="m-0 min-w-0 break-all text-base-content/80">
+                          {{ summaryIssuerDisplay(sig) ?? 'Unavailable' }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
                 </div>
               </div>
 
@@ -570,7 +758,7 @@ function exportPdf() {
               </p>
             </div>
 
-            <!-- Compliance Checks tab: signature level (QES/AES), credential status, roles -->
+            <!-- Compliance Checks tab: party-segmented report (PACM-07 partial) + level table -->
             <div v-else-if="activeTab === 'compliance'" class="space-y-4">
               <div class="flex items-center gap-2">
                 <button class="btn btn-sm btn-primary" :disabled="!canManage || busy" @click="runCompliance">
@@ -580,7 +768,17 @@ function exportPdf() {
                 <span v-if="!canManage" class="text-xs text-base-content/50">Requires Contract Manager role.</span>
               </div>
 
+              <ComplianceReportPanel
+                v-if="selected"
+                :contract-did="selected.did"
+                :signatures="view?.signatures ?? []"
+                :compliance-findings="complianceResult?.findings ?? []"
+                :integrity-findings="integrityFindings"
+                @report-ready="onComplianceReportReady"
+              />
+
               <div class="overflow-x-auto">
+                <h3 class="mb-2 font-semibold">Signature level detail</h3>
                 <table class="table w-full table-zebra">
                   <thead>
                     <tr>

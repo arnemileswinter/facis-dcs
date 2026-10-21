@@ -512,16 +512,28 @@ class ContractService:
         # POST /contract/verify was removed (commit 2712047e, "Remove unneeded
         # code") — validation now runs server-side inside submit, so the
         # reviewer submit no longer needs a prior verify call.
-        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
-        retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
-        assert retrieve.status_code == 200, retrieve.text
-        updated_at = retrieve.json().get("updated_at")
+        # Same lost-update retry as the creator submits above: async PDF/C2PA
+        # writers can bump updated_at between retrieve and reviewer submit.
+        import time as _time  # noqa: PLC0415
 
-        review_submit = post_json(
-            context,
-            contract_submit_url(context),
-            ContractService._contract_reviewer_submit_payload(context, did, updated_at),
-            headers=reviewer_h,
+        reviewer_h = AuthService.get_headers_for_roles(["Contract Reviewer"])
+        review_submit = None
+        for _ in range(4):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, did), headers=reviewer_h)
+            assert retrieve.status_code == 200, retrieve.text
+            updated_at = retrieve.json().get("updated_at")
+            review_submit = post_json(
+                context,
+                contract_submit_url(context),
+                ContractService._contract_reviewer_submit_payload(context, did, updated_at),
+                headers=reviewer_h,
+            )
+            if review_submit.status_code != 409 and "updated elsewhere" not in review_submit.text.lower():
+                break
+            _time.sleep(1)
+        assert review_submit is not None and review_submit.status_code == 200, (
+            f"reviewer forward-to-approval failed for '{contract_name}': "
+            f"{review_submit.status_code if review_submit is not None else 'no request'} "
+            f"{review_submit.text if review_submit is not None else ''}"
         )
-        assert review_submit.status_code == 200, review_submit.text
         ContractService._refresh_contract(context, contract_name)

@@ -886,6 +886,9 @@ def _close_the_round_on_a(context):
     counterparty (dcstodcs shipSettlement)."""
     c_did = context.cross_instance_contract_did
     creator_h = context.cross_instance_creator_headers
+    _wait_pending_negotiation_sync_clear(
+        context, context.base_url_a, creator_h, "closing the round on instance A"
+    )
     with _as_instance(context, context.base_url_a):
         for _ in range(4):
             if _cross_instance_state(context, context.base_url_a) == "SUBMITTED":
@@ -1095,9 +1098,10 @@ def _first_clause_content(document: dict):
 
 @when("instance A redlines the reopened contract")
 def step_when_a_redlines_reopened_contract(context):
-    """A structured redline (a change_request carrying contract_data), which
-    negotiate.go applies to the document immediately and the regenerator
-    re-ships to the counterparty as a fresh PDF (ADR-13).
+    """A structured redline (change_request.contract_data). Propose does not
+    apply it to the formal document; it records the proposal and syncs it to
+    the peer on the negotiation outbound channel. Formal apply + PDF ship
+    happen on Accept+Submit (see the Then step below).
 
     This is the call requireUnsettledAgreement gates. It is made by the same
     participant that submitted the round — the negotiation decision it records
@@ -1134,14 +1138,83 @@ def step_when_a_redlines_reopened_contract(context):
 
 @then("the redlined document reaches instance B within a few seconds")
 def step_then_redline_reaches_b(context):
-    """The redline travels as a re-rendered PDF over the DCS-to-DCS exchange,
-    and instance B has to hold it BEFORE it runs its own round: B settles
-    whatever document it holds, and a B that settled the pre-redline version
-    would name a digest instance A's settlement never matches — the signing
-    gate would then refuse both parties forever, for a divergence this scenario
-    did not intend to create."""
+    """The redline first arrives as a synced proposal; B Accepts; A Submit
+    merges and ships the formal PDF. B must hold that formal document BEFORE it
+    settles — otherwise settlement digests diverge and signing deadlocks.
+
+    (Feature wording still says "document"; the formal document only appears
+    after Accept+Submit, which this step drives.)"""
+    c_did = context.cross_instance_contract_did
     deadline = time.monotonic() + 120
+    negotiation_id = None
+    while time.monotonic() < deadline:
+        body, _ = _cross_instance_contract(context, context.base_url_b)
+        for negotiation in body.get("negotiations") or []:
+            blob = json.dumps(negotiation.get("change_request") or {})
+            if _REDLINED_CLAUSE_TEXT in blob:
+                negotiation_id = negotiation.get("id")
+                break
+        if negotiation_id:
+            break
+        time.sleep(3)
+    assert negotiation_id, (
+        f"Expected instance A's redline proposal to sync to instance B for "
+        f"{c_did} within a few seconds"
+    )
+
+    counterparty_h = AuthService.get_headers_for_roles(
+        _B_COUNTERPARTY_ROLES,
+        api_base=context.base_url_b,
+        organization=_B_COUNTERPARTY_ORG,
+    )
+    with _as_instance(context, context.base_url_b):
+        resp = post_json(
+            context,
+            f"{context.base_url_b}/contract/respond",
+            {
+                "id": str(negotiation_id),
+                "did": c_did,
+                "action_flag": "ACCEPTING",
+                "rejected_by": "",
+                "rejection_reason": "",
+            },
+            headers=counterparty_h,
+        )
+        assert resp.status_code == 200, (
+            f"instance B accepting the redline proposal failed: {resp.status_code} {resp.text}"
+        )
+
+    # B's ACCEPT must reach A before A's Submit can fold the round; otherwise
+    # a premature submit advances to SUBMITTED without merging and the next
+    # attempt hits the reviewer branch as "invalid user permission".
+    creator_h = context.cross_instance_creator_headers
+    _wait_pending_negotiation_sync_clear(
+        context, context.base_url_b, counterparty_h, "A merging the accepted redline"
+    )
+
+    # Fold the accepted redline on A and ship the formal PDF to B.
+    with _as_instance(context, context.base_url_a):
+        for _ in range(4):
+            retrieve = get_with_headers(context, contract_retrieve_by_id_url(context, c_did), headers=creator_h)
+            assert retrieve.status_code == 200, retrieve.text
+            body = retrieve.json()
+            if str(body.get("state", "")).upper() == "SUBMITTED":
+                break
+            try:
+                if _first_clause_content(body.get("contract_data")).get("@list") == [_REDLINED_CLAUSE_TEXT]:
+                    break
+            except AssertionError:
+                pass
+            resp = post_json(
+                context,
+                f"{context.base_url_a}/contract/submit",
+                {"did": c_did, "updated_at": body.get("updated_at")},
+                headers=creator_h,
+            )
+            assert resp.status_code == 200, f"submit merge of redline failed: {resp.status_code} {resp.text}"
+
     observed = None
+    deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         body, _ = _cross_instance_contract(context, context.base_url_b)
         try:
@@ -1152,9 +1225,8 @@ def step_then_redline_reaches_b(context):
             return
         time.sleep(3)
     raise AssertionError(
-        f"Expected instance A's redline to reach instance B's copy of "
-        f"{context.cross_instance_contract_did} over the PDF exchange, last observed clause "
-        f"content: {observed!r}"
+        f"Expected instance A's merged redline to reach instance B's formal copy of "
+        f"{c_did} over the PDF exchange, last observed clause content: {observed!r}"
     )
 
 
@@ -1938,6 +2010,33 @@ _B_COUNTERPARTY_ORG = "BDD Peer Trust Counterparty"
 _B_COUNTERPARTY_ROLES = ["Contract Manager", "Contract Negotiator"]
 
 
+def _wait_pending_negotiation_sync_clear(context, base_url: str, headers: dict, what: str):
+    """Submit refuses while this instance still has undelivered negotiation
+    outbound (PROPOSAL / ACCEPT / OFFER_ACCEPTED, …). BDD used to race the
+    synchronizer and fail with ErrNegotiationSyncPending; wait until retrieve
+    reports the queue drained."""
+    c_did = context.cross_instance_contract_did
+    deadline = time.monotonic() + 90
+    last_pending = None
+    while time.monotonic() < deadline:
+        with _as_instance(context, base_url):
+            retrieve = get_with_headers(
+                context, contract_retrieve_by_id_url(context, c_did), headers=headers
+            )
+        assert retrieve.status_code == 200, (
+            f"could not read {c_did} on {base_url} while waiting for negotiation sync "
+            f"before {what}: {retrieve.status_code} {retrieve.text}"
+        )
+        last_pending = retrieve.json().get("pending_negotiation_sync")
+        if not last_pending:
+            return
+        time.sleep(2)
+    raise AssertionError(
+        f"negotiation outbound for {c_did} on {base_url} was still pending "
+        f"(pending_negotiation_sync={last_pending!r}) after 90s before {what}"
+    )
+
+
 def _post_on_b_with_fresh_updated_at(context, path: str, payload: dict, headers: dict, what: str):
     """POST a mutating contract command to instance B, reading updated_at from
     B's OWN copy immediately beforehand. B's copy moves without B acting — the
@@ -2002,6 +2101,11 @@ def step_when_drive_to_approved_on_b(context):
             },
             counterparty_h,
             "opening the negotiation on the received offer",
+        )
+
+        # Negotiate enqueues a PROPOSAL toward A; Submit is gated on peer ACK.
+        _wait_pending_negotiation_sync_clear(
+            context, context.base_url_b, counterparty_h, "submit after opening negotiation on B"
         )
 
         # Submit, from the participant that opened the round, until the round

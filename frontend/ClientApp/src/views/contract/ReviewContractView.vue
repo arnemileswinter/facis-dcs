@@ -9,6 +9,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { useSemanticValueVerification } from '@contract-workflow-engine/composables/useSemanticValueVerification'
@@ -17,12 +18,19 @@ import { useContractEditorUiStore } from '@contract-workflow-engine/store/contra
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
 import ContractVerificationFindingsDialog from '@/components/contract/ContractVerificationFindingsDialog.vue'
+import ReviewBlockAnnotationsPanel from '@/components/contract/ReviewBlockAnnotationsPanel.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { ContractState } from '@/types/contract-state'
 import { reportActionError } from '@/utils/report-action-error'
+import {
+  annotationCount,
+  draftToAnnotations,
+  incompleteAnnotationCount,
+  type ReviewAnnotationDraft,
+} from '@/utils/review-block-annotations'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -44,6 +52,8 @@ const contractContentValuesStore = useContractContentValuesStore()
 const confirmationDialog = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-dialog')
 
 const isSubmitting = ref(false)
+/** Frontend-only drafts until Reject/Approve submit. */
+const annotationDraft = ref<ReviewAnnotationDraft>({})
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
@@ -56,7 +66,12 @@ const isAuditingAuthorized = computed(
 )
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content', 'audit']),
+  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
+    'details',
+    'content',
+    'diff',
+    'audit',
+  ]),
 )
 
 const story = computed(() =>
@@ -134,8 +149,10 @@ const forwardToApproval = async (comment: string) => {
     updated_at: currentContract.updated_at,
     forward_to: 'APPROVAL',
     comments: comment ? [comment] : [],
+    annotations: draftToAnnotations(annotationDraft.value),
   })
   if (response.did) {
+    annotationDraft.value = {}
     await navStore.goToPreviousRoute()
   }
 }
@@ -143,8 +160,20 @@ const forwardToApproval = async (comment: string) => {
 const returnToNegotiation = async () => {
   if (!contract.value) return
   try {
+    const ready = annotationCount(annotationDraft.value)
+    const incomplete = incompleteAnnotationCount(annotationDraft.value)
+    if (incomplete > 0) {
+      contractEditorUiStore.setActiveTab('content')
+      reportActionError(
+        new Error(
+          `${incomplete} annotation(s) still need text. Fill them in under Annotations (Contract Content), or remove them.`,
+        ),
+        'Return contract to negotiation',
+      )
+      return
+    }
     const confirmationResult = await confirmationDialog.value?.reveal({
-      message: 'Comment findings',
+      message: ready > 0 ? `Return to negotiation with ${ready} annotation(s).` : 'Comment findings',
       editor: { requiredText: false, placeholder: 'Comments, findings...' },
     })
     if (confirmationResult?.isCanceled) return
@@ -155,8 +184,10 @@ const returnToNegotiation = async () => {
       updated_at: contract.value.updated_at,
       forward_to: 'REJECT',
       comments: comment ? [comment] : [],
+      annotations: draftToAnnotations(annotationDraft.value),
     })
     if (response.did) {
+      annotationDraft.value = {}
       await navStore.goToPreviousRoute()
     }
   } catch (err) {
@@ -248,21 +279,50 @@ const exportPDF = async () => {
                 <ContractDetailsEditor :contract="contract" disabled />
               </div>
 
-              <div v-show="activeTab === 'content'">
+              <div v-show="activeTab === 'content'" class="space-y-6">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
-                  <div class="card-body gap-5">
-                    <div>
-                      <TemplatePreview
-                        :layout="dcsDraftStore.layout"
-                        :blocks="dcsDraftStore.blocks"
-                        :semantic-conditions="dcsDraftStore.semanticConditions"
-                        :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
-                        :verification-result="verificationResult"
-                        :set-semantic-condition-value="setSemanticConditionValue"
-                      />
-                    </div>
+                  <div class="card-body">
+                    <TemplatePreview
+                      :layout="dcsDraftStore.layout"
+                      :blocks="dcsDraftStore.blocks"
+                      :semantic-conditions="dcsDraftStore.semanticConditions"
+                      :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
+                      :verification-result="verificationResult"
+                      :set-semantic-condition-value="setSemanticConditionValue"
+                    />
                   </div>
                 </div>
+                <div
+                  v-if="contract?.state === ContractState.submitted && isReviewer"
+                  class="card border border-base-300 bg-base-100 shadow-sm"
+                >
+                  <div class="card-body">
+                    <ReviewBlockAnnotationsPanel
+                      v-model="annotationDraft"
+                      :blocks="dcsDraftStore.blocks"
+                      :layout="dcsDraftStore.layout"
+                      :disabled="isSubmitting"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  v-if="contract"
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                  :current-details="{
+                    name: contract.name,
+                    description: contract.description,
+                    contract_version: contract.contract_version,
+                    start_date: contract.start_date,
+                    exp_date: contract.exp_date,
+                    exp_policy: contract.exp_policy,
+                    exp_notice_period: contract.exp_notice_period,
+                  }"
+                />
               </div>
 
               <template v-if="isAuditingAuthorized">
@@ -270,7 +330,7 @@ const exportPDF = async () => {
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView />
+                      <AuditView :blocks="dcsDraftStore.blocks" :layout="dcsDraftStore.layout" />
                     </div>
                   </div>
                 </div>

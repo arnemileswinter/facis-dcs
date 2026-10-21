@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
 import type { Contract } from '@/models/contract/contract'
 
 const props = defineProps<{
@@ -24,6 +24,8 @@ const expirationPolicies = [
 interface ContractDetailData {
   name?: string
   description?: string
+  start_date?: string
+  exp_date?: string
   exp_notice_period?: string
   exp_policy?: string
 }
@@ -32,10 +34,47 @@ const nameId = useId()
 const descriptionId = useId()
 const nameErrorId = useId()
 const descriptionErrorId = useId()
+const startDateId = useId()
+const expDateId = useId()
 const exp_notice_periodId = useId()
 const exp_policyId = useId()
 
 const originalContract = ref(Object.assign({}, contract.value))
+
+const minSelectableDate = computed(() => {
+  const d = new Date()
+  d.setUTCHours(0, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+})
+
+function toDateInputValue(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toISOString().slice(0, 10)
+}
+
+function fromDateInputValue(dateOnly: string): string | undefined {
+  if (!dateOnly) return undefined
+  return `${dateOnly}T00:00:00Z`
+}
+
+const startDateInput = computed({
+  get: () => toDateInputValue(inserted.value?.start_date ?? contract.value.start_date),
+  set: (value: string) => {
+    if (inserted.value) return
+    contract.value.start_date = fromDateInputValue(value)
+  },
+})
+
+const expDateInput = computed({
+  get: () => toDateInputValue(inserted.value?.exp_date ?? contract.value.exp_date),
+  set: (value: string) => {
+    if (inserted.value) return
+    contract.value.exp_date = fromDateInputValue(value)
+  },
+})
 </script>
 
 <template>
@@ -111,6 +150,56 @@ const originalContract = ref(Object.assign({}, contract.value))
         <p v-if="props.descriptionError && !inserted?.description" :id="descriptionErrorId" class="text-sm text-error">
           {{ props.descriptionError }}
         </p>
+      </fieldset>
+
+      <fieldset class="fieldset border-none p-0">
+        <legend class="fieldset-legend">Start date</legend>
+        <label :for="startDateId" class="sr-only">Start date</label>
+        <input
+          v-if="!inserted?.start_date"
+          :id="startDateId"
+          v-model="startDateInput"
+          type="date"
+          class="input-bordered input w-full"
+          data-testid="contract-start-date"
+          :min="minSelectableDate"
+          :disabled="disabled"
+          :class="{ 'border-2 input-primary': !!inserted && originalContract.start_date !== contract.start_date }"
+        />
+        <input
+          v-else
+          :id="startDateId"
+          :value="toDateInputValue(inserted.start_date)"
+          type="date"
+          class="input-bordered input w-full"
+          :class="{ 'text-red-400': inserted.start_date !== contract.start_date }"
+          disabled
+        />
+      </fieldset>
+
+      <fieldset class="fieldset border-none p-0">
+        <legend class="fieldset-legend">Expiration date</legend>
+        <label :for="expDateId" class="sr-only">Expiration date</label>
+        <input
+          v-if="!inserted?.exp_date"
+          :id="expDateId"
+          v-model="expDateInput"
+          type="date"
+          class="input-bordered input w-full"
+          data-testid="contract-exp-date"
+          :min="minSelectableDate"
+          :disabled="disabled"
+          :class="{ 'border-2 input-primary': !!inserted && originalContract.exp_date !== contract.exp_date }"
+        />
+        <input
+          v-else
+          :id="expDateId"
+          :value="toDateInputValue(inserted.exp_date)"
+          type="date"
+          class="input-bordered input w-full"
+          :class="{ 'text-red-400': inserted.exp_date !== contract.exp_date }"
+          disabled
+        />
       </fieldset>
 
       <fieldset class="fieldset border-none p-0">
