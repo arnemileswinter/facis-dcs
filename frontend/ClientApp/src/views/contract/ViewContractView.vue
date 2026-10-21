@@ -73,7 +73,14 @@ const loadContract = async () => {
     contract.value = await contractWorkflowService.retrieveById({ did: id })
     const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
     applyContractDataToDraft(baseline?.contract_data)
-    if (activeNegotiations(contract.value).length > 0) {
+    // Only jump to Proposals while the round is still open. After settle/sign
+    // the same rows remain as history; forcing Proposals hides Details (Global
+    // Name, deployment target) behind v-show and breaks view/deploy e2e.
+    const state = contract.value?.state
+    if (
+      activeNegotiations(contract.value).length > 0 &&
+      (state === ContractState.offered || state === ContractState.negotiation)
+    ) {
       contractEditorUiStore.setActiveTab('proposals')
     }
   } catch (err: unknown) {

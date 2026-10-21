@@ -95,17 +95,18 @@ async function expectErasureBadge(inst: Instance, contractDid: string, badge: st
  *  "Content erased" message — a clean end state, not a crash. */
 async function expectErasedExportMessage(inst: Instance, contractDid: string, contractName: string): Promise<void> {
   await inst.gotoAs('Contract Manager', `/ui/contracts/view/${contractDid}`)
+  const detailsTab = inst.page.getByRole('tab', { name: /contract details/i })
+  if (await detailsTab.isVisible().catch(() => false)) {
+    await detailsTab.click()
+  }
   const exportAnswered = inst.page.waitForResponse((r) => r.url().includes(`/pdf/export/contract/`), {
     timeout: 120_000,
   })
   await inst.page.getByRole('button', { name: 'Export PDF' }).click()
   await exportAnswered
   await expect(inst.page.getByText('Content erased. Encryption keys destroyed.')).toBeVisible({ timeout: 30_000 })
-  // The view survives the refusal: the contract's metadata keeps rendering.
-  // It identifies the contract by name — the only DID on this view is the
-  // template's — so the name is what proves the Postgres-side record survived
-  // the shred.
-  await expect(inst.page.getByRole('textbox', { name: 'Global Name' })).toHaveValue(contractName)
+  // Metadata on Details proves the Postgres row survived the shred.
+  await expect(inst.page.getByTestId('contract-global-name')).toHaveValue(contractName)
 }
 
 test('archive deletion shreds the encryption keys on both instances', async ({ page, context, browser }) => {

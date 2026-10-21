@@ -1620,6 +1620,10 @@ export async function deployContract(inst: Instance, contractDid: string): Promi
       designateResponse.ok(),
       `designate target on ${inst.origin}: HTTP ${designateResponse.status()}`,
     ).toBeTruthy()
+    // reloadContract may re-select Proposals when history remains; Details holds the name.
+    if (await detailsTab.isVisible().catch(() => false)) {
+      await detailsTab.click()
+    }
     await expect(inst.page.getByTestId('contract-target-name')).toBeVisible({ timeout: 15_000 })
   }
 
