@@ -207,6 +207,13 @@ func TestBothSigningEntryPointsReachTheSettlementGate(t *testing.T) {
 		if !reaches(graph, entry, "assertCounterpartiesSettled") {
 			t.Errorf("%s does not reach assertCounterpartiesSettled: an instance can sign a version the counterparty never agreed to", entry)
 		}
+
+		// Shared Contract Details must agree with dcs:metadata in addition to
+		// mutual settlement digests over contract_data.
+		if !reaches(graph, entry, "AssertSharedDetailsConsistent") {
+			t.Errorf("%s does not reach AssertSharedDetailsConsistent: signing can proceed with mismatched shared Contract Details", entry)
+		}
+
 		// The settlement gate is an ADDITIONAL condition (plan WP4). A refactor
 		// that swapped one for the other would trade a peer-evidence check for a
 		// local-state check, or the reverse — both regressions, neither visible

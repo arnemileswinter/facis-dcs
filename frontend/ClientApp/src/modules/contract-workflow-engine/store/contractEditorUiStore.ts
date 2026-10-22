@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from '@/stores/auth-store'
 import { contractAuditRoles } from '@/types/contract-audit-roles'
-import { ContractState } from '@/types/contract-state'
 import type { ContractState as ContractStateType } from '@/types/contract-state'
 import type {
   ContractEditorTabId,
@@ -17,6 +16,7 @@ const defaultState: Readonly<ContractEditorUiState> = {
     { id: 'clauses', label: 'Clauses' },
     { id: 'builder', label: 'Builder' },
     { id: 'diff', label: 'Diff View' },
+    { id: 'proposals', label: 'Proposals' },
     { id: 'audit', label: 'Audit History' },
     { id: 'structure', label: 'Structure' },
   ],
@@ -30,14 +30,11 @@ export const useContractEditorUiStore = defineStore(storeId, {
     },
     // `rendered` is the set of tabs the calling view actually has a pane for;
     // a tab outside it would select an empty page body.
-    availableTabs(contractState: ContractStateType, rendered: ContractEditorTabId[]) {
+    availableTabs(_contractState: ContractStateType, rendered: ContractEditorTabId[]) {
       const isAuditingAuthorized =
         contractAuditRoles.some((role) => useAuthStore().user?.roles?.includes(role)) ?? false
 
-      const forState: ContractEditorTabId[] =
-        contractState === ContractState.negotiation
-          ? ['details', 'content', 'diff', 'structure']
-          : ['details', 'content', 'structure']
+      const forState: ContractEditorTabId[] = ['details', 'content', 'diff', 'proposals', 'structure']
 
       return this.tabs.filter(
         (tab) =>

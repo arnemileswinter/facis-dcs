@@ -83,8 +83,15 @@ const canSubmitContract = computed(
     (contract.value.state === ContractState.draft || contract.value.state === ContractState.rejected),
 )
 
+const isContractMutable = computed(
+  () =>
+    !isEditMode.value ||
+    contract.value?.state === ContractState.draft ||
+    contract.value?.state === ContractState.rejected,
+)
+
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
-  if (!isEditMode.value) return null
+  if (!isEditMode.value || !isContractMutable.value) return null
   return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
     contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
 })
@@ -106,6 +113,10 @@ function buildCurrentContractData(): ContractData | undefined {
     storedDocument: contract.value.contract_data,
     name: contract.value.name,
     description: contract.value.description,
+    startDate: contract.value.start_date,
+    expirationDate: contract.value.exp_date,
+    expirationNoticePeriod: currentExpNoticePeriod(),
+    expirationPolicy: contract.value.exp_policy,
     blocks: dcsDraftStore.blocks,
     layout: dcsDraftStore.layout,
     contractFields: dcsDraftStore.contractFields,
@@ -130,6 +141,8 @@ async function saveContractDraftForSubmit(): Promise<Contract> {
   await contractWorkflowService.update({
     did: contract.value.did,
     updated_at: contract.value.updated_at,
+    start_date: contract.value.start_date,
+    exp_date: contract.value.exp_date,
     exp_notice_period: currentExpNoticePeriod(),
     exp_policy: contract.value.exp_policy,
     name: contract.value.name,
@@ -215,6 +228,7 @@ const createContract = async ({ counterparty, originatorRole, parties }: Partici
 }
 
 const updateContract = async () => {
+  if (!isContractMutable.value) return
   if (!(await verifyContractDetails())) return
   isSubmitting.value = true
   try {
@@ -222,6 +236,8 @@ const updateContract = async () => {
       await contractWorkflowService.update({
         did: contract.value.did,
         updated_at: contract.value.updated_at,
+        start_date: contract.value.start_date,
+        exp_date: contract.value.exp_date,
         exp_notice_period: currentExpNoticePeriod(),
         exp_policy: contract.value.exp_policy,
         name: contract.value.name,
@@ -285,9 +301,8 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          const uneditableStates = [ContractState.approved, ContractState.terminated].map((s) => s.toLowerCase())
           templateEditorUiStore.setTemplateEditable(
-            !uneditableStates.includes(contract.value?.state.toLowerCase() ?? ''),
+            contract.value?.state === ContractState.draft || contract.value?.state === ContractState.rejected,
           )
         }
       } catch (err: unknown) {
@@ -492,6 +507,7 @@ onBeforeRouteLeave(() => {
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor
                   :contract="contract"
+                  :disabled="!isContractMutable"
                   :name-error="nameError ?? undefined"
                   :description-error="descriptionError ?? undefined"
                 />
@@ -507,6 +523,7 @@ onBeforeRouteLeave(() => {
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
                         :set-semantic-condition-value="setSemanticConditionValue"
+                        :disabled="!isContractMutable"
                       />
                     </div>
                     <template v-if="dcsDraftStore.contractData.length">
@@ -567,7 +584,7 @@ onBeforeRouteLeave(() => {
           @submit="createContract"
         />
         <button
-          v-if="isEditMode"
+          v-if="isEditMode && isContractMutable"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting || !canSubmit"
           @click="updateContract"

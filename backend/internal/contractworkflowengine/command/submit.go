@@ -3,9 +3,11 @@ package command
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -28,15 +30,16 @@ import (
 )
 
 type SubmitCmd struct {
-	DID          string                 `json:"did"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	SubmittedBy  string                 `json:"submitted_by"`
-	ActionFlag   *actionflag.ActionFlag `json:"action_flag"`
-	Comments     []string               `json:"comments"`
-	ContractData *datatype.JSON         `json:"contract_data"`
-	HolderDID    string                 `json:"holder_did"`
-	UserRoles    userrole.UserRoles     `json:"user_roles"`
-	CauserDID    string                 `json:"causer_did"`
+	DID          string                           `json:"did"`
+	UpdatedAt    time.Time                        `json:"updated_at"`
+	SubmittedBy  string                           `json:"submitted_by"`
+	ActionFlag   *actionflag.ActionFlag           `json:"action_flag"`
+	Comments     []string                         `json:"comments"`
+	Annotations  []contractevents.BlockAnnotation `json:"annotations,omitempty"`
+	ContractData *datatype.JSON                   `json:"contract_data"`
+	HolderDID    string                           `json:"holder_did"`
+	UserRoles    userrole.UserRoles               `json:"user_roles"`
+	CauserDID    string                           `json:"causer_did"`
 }
 
 type Submitter struct {
@@ -46,6 +49,7 @@ type Submitter struct {
 	ATRepo      db.ApprovalTaskRepo
 	NRepo       db.NegotiationRepo
 	NTRepo      db.NegotiationTaskRepo
+	NORepo      db.NegotiationOutboundRepo
 	SRepo       db2.SyncRepository
 	DIDDocument identity.DIDDocument
 }
@@ -213,6 +217,13 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("not all negotiations are processed")
 		}
 
+		// Submit gate: every inter-enterprise Proposal/Decision for
+		// this contract must already have peer ACK before the round closes.
+		err = requireConfirmedNegotiationDelivery(ctx, tx, h.NORepo, localPeer, cmd.DID)
+		if err != nil {
+			return err
+		}
+
 		err = h.NTRepo.UpdateState(ctx, tx, processData.DID, cmd.CauserDID, processData.ContractVersion, negotiationtaskstate.Accepted.String())
 		if err != nil {
 			return fmt.Errorf("could not update negotiation task: %w", err)
@@ -279,6 +290,14 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 					if err := reseedPartiesAndSignatureFields(ctx, tx, h.CRepo, cmd.DID); err != nil {
 						return err
 					}
+				}
+
+				// Shared Contract Details live on the contracts row and must
+				// also sit in dcs:metadata before the post-merge PDF ships, so
+				// the peer's reconstruct-and-verify and the settlement digest
+				// bind the same shared fields both enterprises signed.
+				if err := stampMergedSharedDetails(ctx, tx, h.CRepo, cmd.DID); err != nil {
+					return err
 				}
 
 				// Last-accepted-wins leaves accepted requests whose content the
@@ -430,6 +449,11 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 	}
 
+	annotations, err := normalizeSubmitAnnotations(ctx, tx, h, cmd, processData)
+	if err != nil {
+		return err
+	}
+
 	evt := contractevents.SubmitEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
@@ -438,6 +462,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		NewState:        nextState.String(),
 		ActionFlag:      cmd.ActionFlag,
 		Comments:        cmd.Comments,
+		Annotations:     annotations,
 		OccurredAt:      time.Now().UTC(),
 		HolderDID:       cmd.HolderDID,
 		UserRoles:       cmd.UserRoles,
@@ -485,4 +510,124 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 
 func canSubmitUpdatedContractData(state string) bool {
 	return state == contractstate.Draft.String() || state == contractstate.Rejected.String()
+}
+
+// normalizeSubmitAnnotations trims annotations and, when any are present,
+// checks each block_id exists in the contract document for this version.
+func normalizeSubmitAnnotations(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	h *Submitter,
+	cmd SubmitCmd,
+	processData *db.ContractProcessData,
+) ([]contractevents.BlockAnnotation, error) {
+	if len(cmd.Annotations) == 0 {
+		return nil, nil
+	}
+
+	out := make([]contractevents.BlockAnnotation, 0, len(cmd.Annotations))
+	for _, a := range cmd.Annotations {
+		blockID := strings.TrimSpace(a.BlockID)
+		comment := strings.TrimSpace(a.Comment)
+		if blockID == "" || comment == "" {
+			return nil, errors.New("each annotation requires a non-empty block_id and comment")
+		}
+		out = append(out, contractevents.BlockAnnotation{BlockID: blockID, Comment: comment})
+	}
+
+	contract, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read contract data for annotation validation: %w", err)
+	}
+
+	var raw any
+	if cmd.ContractData != nil && cmd.ContractData.IsNotNullValue() {
+		raw = cmd.ContractData
+	} else if contract.ContractData != nil {
+		raw = contract.ContractData
+	}
+
+	known, err := collectDocumentBlockIDs(raw)
+	if err != nil {
+		return nil, fmt.Errorf("could not index contract blocks for annotations: %w", err)
+	}
+
+	for _, a := range out {
+		if !known[a.BlockID] {
+			return nil, fmt.Errorf("annotation block_id %q is not present in contract version %d", a.BlockID, processData.ContractVersion)
+		}
+	}
+
+	return out, nil
+}
+
+func collectDocumentBlockIDs(contractDocument any) (map[string]bool, error) {
+	doc, err := normalizeSubmitDocument(contractDocument)
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[string]bool{}
+	var walk func(any)
+
+	walk = func(current any) {
+		switch value := current.(type) {
+		case map[string]any:
+			if id, ok := value["@id"].(string); ok {
+				id = strings.TrimSpace(id)
+				if id != "" {
+					out[id] = true
+				}
+			}
+			for _, nested := range value {
+				walk(nested)
+			}
+		case []any:
+			for _, nested := range value {
+				walk(nested)
+			}
+		}
+	}
+	walk(doc)
+
+	return out, nil
+}
+
+func normalizeSubmitDocument(raw any) (map[string]any, error) {
+	switch v := raw.(type) {
+	case nil:
+		return nil, errors.New("contract document is required")
+	case map[string]any:
+		return v, nil
+	case *datatype.JSON:
+		if v == nil {
+			return nil, errors.New("contract document is required")
+		}
+
+		var doc map[string]any
+		if err := json.Unmarshal(*v, &doc); err != nil {
+			return nil, err
+		}
+
+		return doc, nil
+	case datatype.JSON:
+		var doc map[string]any
+		if err := json.Unmarshal(v, &doc); err != nil {
+			return nil, err
+		}
+
+		return doc, nil
+	default:
+		bytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("unsupported contract document type %T: %w", raw, err)
+		}
+
+		var doc map[string]any
+		if err := json.Unmarshal(bytes, &doc); err != nil {
+			return nil, err
+		}
+
+		return doc, nil
+	}
 }

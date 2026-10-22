@@ -235,6 +235,14 @@ type ContractRepo interface {
 	// dcs:parentContract references did, ordered by did.
 	ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
 	ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
+	// ReadRenewalDueContracts returns the SIGNED or ACTIVE contracts whose
+	// notice period before exp_date has started and that have no renewal
+	// notice for their current exp_date yet (DCS-FR-CWE-22).
+	ReadRenewalDueContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
+	// ClaimRenewalNotice records the renewal notice for (did, expDate). It
+	// returns false when the notice is already recorded, so the caller emits
+	// the event at most once per expiry date.
+	ClaimRenewalNotice(ctx context.Context, tx *sqlx.Tx, did string, expDate time.Time) (bool, error)
 	StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data ContractArchiveEntry) error
 	ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]ContractArchiveEntry, error)
 	// MarkArchiveEntryDeleted soft-deletes every not-yet-deleted archive

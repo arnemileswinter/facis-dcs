@@ -45,12 +45,14 @@ func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, da
 	statement := `
         INSERT INTO contracts (
             did, origin, created_at, created_by, updated_at, state, name,
-            description, contract_data, template_did, template_version, responsible
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            description, contract_data, template_did, template_version, responsible,
+            start_date, exp_date, exp_policy, exp_notice_period
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     `
 	_, err := tx.ExecContext(ctx, statement,
 		data.DID, data.Origin, data.CreatedAt, data.CreatedBy, data.UpdatedAt, data.State, data.Name,
-		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible)
+		data.Description, data.ContractData, data.TemplateDID, data.TemplateVersion, data.Responsible,
+		data.StartDate, data.ExpDate, data.ExpPolicy, data.ExpNoticePeriod)
 	return err
 }
 
@@ -288,6 +290,42 @@ func (r *PostgresContractRepo) ReadExpiredContracts(ctx context.Context, tx *sql
 	}
 
 	return cts, nil
+}
+
+func (r *PostgresContractRepo) ReadRenewalDueContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
+	query := `
+    SELECT c.did, c.origin, c.state, c.name, c.description, c.created_by, c.created_at, c.updated_at, c.contract_version,
+           c.start_date, c.exp_date, c.exp_policy, c.exp_notice_period, c.responsible, c.template_did, c.template_version
+    FROM contracts c
+    WHERE c.exp_date IS NOT NULL
+    AND c.exp_notice_period > 0
+    AND c.state IN ('SIGNED', 'ACTIVE')
+    AND c.exp_date >= NOW()
+    AND c.exp_date - make_interval(days => c.exp_notice_period) <= NOW()
+    AND NOT EXISTS (
+        SELECT 1 FROM contract_renewal_notices n WHERE n.did = c.did AND n.exp_date = c.exp_date
+    )
+`
+	var cts []db.ContractMetadata
+	if err := tx.SelectContext(ctx, &cts, query); err != nil {
+		return nil, err
+	}
+	return cts, nil
+}
+
+func (r *PostgresContractRepo) ClaimRenewalNotice(ctx context.Context, tx *sqlx.Tx, did string, expDate time.Time) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_renewal_notices (did, exp_date) VALUES ($1, $2)
+        ON CONFLICT (did, exp_date) DO NOTHING
+    `, did, expDate)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data db.ContractArchiveEntry) error {
@@ -551,7 +589,7 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		paramIndex++
 	}
 	if len(values.ContractData) > 0 {
-		conditions += ` search_vector @@ plainto_tsquery('english', $` + strconv.Itoa(paramIndex) + `) AND`
+		conditions += ` did IN (SELECT did FROM contracts WHERE search_vector @@ plainto_tsquery('english', $` + strconv.Itoa(paramIndex) + `)) AND`
 		params = append(params, values.ContractData)
 		paramIndex++
 	}

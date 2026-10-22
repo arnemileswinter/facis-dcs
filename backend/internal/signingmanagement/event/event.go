@@ -64,18 +64,32 @@ func (e SearchEvent) GetDID() string {
 	return "*"
 }
 
-// ValidateEvent is emitted when a signature is validated.
+// Outcome values of a Validate or Revoke audit entry (DCS-FR-SM-19).
+const (
+	OutcomeCompleted = "COMPLETED"
+	OutcomeFailed    = "FAILED"
+)
+
+// ValidateEvent is emitted when a signature validation completes or fails.
+// Findings is the validation result; Error is set only for a failed attempt.
 type ValidateEvent struct {
 	DID             string             `json:"did"`
 	ContractVersion int                `json:"contract_version,omitempty"`
+	SignerDIDs      []string           `json:"signer_dids"`
+	Outcome         string             `json:"outcome"`
+	Findings        []string           `json:"findings"`
+	Error           string             `json:"error,omitempty"`
 	ValidatedBy     string             `json:"validated_by"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	HolderDID       string             `json:"holder_did"`
 	UserRoles       userrole.UserRoles `json:"user_roles"`
 }
 
-// EventType implements the Event interface.
+// EventType implements the Event interface. A failed attempt has its own type.
 func (e ValidateEvent) EventType() string {
+	if e.Outcome == OutcomeFailed {
+		return eventtype.ValidateFailed.String()
+	}
 	return eventtype.Validate.String()
 }
 
@@ -124,19 +138,27 @@ func (e AuditEvt) GetDID() string {
 	return e.DID
 }
 
-// RevokeEvent is emitted when a signature is revoked
+// RevokeEvent is emitted when a signature revocation completes or fails.
+// Error is set only for a failed attempt.
 type RevokeEvent struct {
 	DID             string             `json:"did"`
 	ContractVersion int                `json:"contract_version,omitempty"`
+	SignerDID       string             `json:"signer_did"`
+	Outcome         string             `json:"outcome"`
 	Reason          string             `json:"reason"`
+	Error           string             `json:"error,omitempty"`
 	RevokedBy       string             `json:"revoked_by"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	HolderDID       string             `json:"holder_did"`
 	UserRoles       userrole.UserRoles `json:"user_roles"`
 }
 
-// EventType implements the Event interface.
+// EventType implements the Event interface. A failed attempt has its own type:
+// dcstodcs ships the contract to peers on REVOKE_SIGNATURE.
 func (e RevokeEvent) EventType() string {
+	if e.Outcome == OutcomeFailed {
+		return eventtype.RevokeFailed.String()
+	}
 	return eventtype.Revoke.String()
 }
 

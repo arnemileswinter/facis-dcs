@@ -13,14 +13,17 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractProposalReview from '@/components/contract/ContractProposalReview.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
+import { activeNegotiations, contractWithAcceptedProposals } from '@/utils/contract-negotiations'
 import type { Contract } from '@/models/contract/contract'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
@@ -39,6 +42,10 @@ const { activeTab } = storeToRefs(contractEditorUiStore)
 const contract: Ref<Contract | null> = ref(null)
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 
+// Details/Content show formal + accepted proposals so the page matches what
+// Submit will merge; the stored formal row itself is unchanged until then.
+const shownContract = computed(() => (contract.value ? contractWithAcceptedProposals(contract.value) : null))
+
 const isAuditingAuthorized = computed(
   () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
@@ -47,10 +54,13 @@ const tabs = computed(() =>
   contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
     'details',
     'content',
+    'proposals',
     'audit',
     'structure',
   ]),
 )
+
+const activeProposalCount = computed(() => activeNegotiations(contract.value).length)
 
 // The view holds its own copy from retrieve-by-id rather than the contracts
 // store, so anything that changes the contract has to re-run THIS fetch: a
@@ -63,7 +73,18 @@ const loadContract = async () => {
     const loaded = await contractWorkflowService.retrieveById({ did: id })
     if (route.params.did !== id) return
     contract.value = loaded
-    applyContractDataToDraft(contract.value?.contract_data)
+    const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
+    applyContractDataToDraft(baseline?.contract_data)
+    // Only jump to Proposals while the round is still open. After settle/sign
+    // the same rows remain as history; forcing Proposals hides Details (Global
+    // Name, deployment target) behind v-show and breaks view/deploy e2e.
+    const state = contract.value?.state
+    if (
+      activeNegotiations(contract.value).length > 0 &&
+      (state === ContractState.offered || state === ContractState.negotiation)
+    ) {
+      contractEditorUiStore.setActiveTab('proposals')
+    }
   } catch (err: unknown) {
     console.error('Failed to load contract', err)
   }
@@ -97,7 +118,10 @@ const ancestors = computed(() => {
 const childContracts = computed(() => contracts.value.filter((c) => c.parent_contract_did === contract.value?.did))
 
 const contractTitle = computed(
-  () => contract.value?.name ?? contract.value?.contract_data?.['dcs:metadata']?.['dcs:title'] ?? contract.value?.did,
+  () =>
+    shownContract.value?.name ??
+    shownContract.value?.contract_data?.['dcs:metadata']?.['dcs:title'] ??
+    shownContract.value?.did,
 )
 
 // After the target is designated the contract's updated_at moves on, so this
@@ -107,8 +131,11 @@ const reloadContract = () => {
   void loadContract()
 }
 
-onMounted(() => {
+const localInstanceDid = ref('')
+
+onMounted(async () => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
+  localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
   if (contracts.value.length === 0) void contractsStore.loadContracts()
 })
 
@@ -185,6 +212,12 @@ const exportBundle = async () => {
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
+                <span
+                  v-if="tab.id === 'proposals' && activeProposalCount > 0"
+                  class="ml-2 badge badge-sm badge-warning"
+                >
+                  {{ activeProposalCount }}
+                </span>
               </button>
             </div>
           </div>
@@ -194,7 +227,7 @@ const exportBundle = async () => {
           <div class="mx-auto max-w-4xl p-6">
             <div class="grid grid-cols-1 gap-4">
               <div v-show="activeTab === 'details'">
-                <ContractDetailsEditor :contract="contract" disabled />
+                <ContractDetailsEditor v-if="shownContract" :contract="shownContract" disabled />
 
                 <!-- Where this contract deploys to (ADR-25) -->
                 <div class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
@@ -294,9 +327,19 @@ const exportBundle = async () => {
                          the document it renders (UC-04 stimulus 5). After it,
                          not before: the readable contract is what a person
                          came for. -->
-                    <ContractMachineReadableView :contract="contract" />
+                    <ContractMachineReadableView v-if="shownContract" :contract="shownContract" />
                   </div>
                 </div>
+              </div>
+
+              <div v-show="activeTab === 'proposals'">
+                <ContractProposalReview
+                  v-if="contract"
+                  :contract="contract"
+                  :local-instance-did="localInstanceDid"
+                  @responded="reloadContract"
+                  @refresh="reloadContract"
+                />
               </div>
 
               <template v-if="isAuditingAuthorized">
@@ -304,7 +347,12 @@ const exportBundle = async () => {
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView v-if="contract" :contract="contract" />
+                      <AuditView
+                        v-if="contract"
+                        :contract="contract"
+                        :blocks="dcsDraftStore.blocks"
+                        :layout="dcsDraftStore.layout"
+                      />
                     </div>
                   </div>
                 </div>

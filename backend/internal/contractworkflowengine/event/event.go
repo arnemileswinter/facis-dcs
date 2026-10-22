@@ -222,6 +222,13 @@ func (e UpdateEvent) GetDID() string {
 	return e.DID
 }
 
+// BlockAnnotation is one review note targeting a layout block @id.
+// Persisted on SubmitEvent → outbox_events.event_data.
+type BlockAnnotation struct {
+	BlockID string `json:"block_id"`
+	Comment string `json:"comment"`
+}
+
 // SubmitEvent is emitted when a contract is submitted
 type SubmitEvent struct {
 	DID             string                 `json:"did"`
@@ -233,6 +240,7 @@ type SubmitEvent struct {
 	ContractVersion int                    `json:"contract_version"`
 	ActionFlag      *actionflag.ActionFlag `json:"action_flag,omitempty"`
 	Comments        []string               `json:"comments"`
+	Annotations     []BlockAnnotation      `json:"annotations,omitempty"`
 	UserRoles       userrole.UserRoles     `json:"user_roles"`
 }
 
@@ -599,6 +607,28 @@ func (e RejectNegotiationEvent) GetDID() string {
 	return e.DID
 }
 
+// WithdrawNegotiationEvent is emitted when the proposal author retracts their
+// change request before any counterparty has accepted it.
+type WithdrawNegotiationEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	NegotiationID   string             `json:"negotiation_id"`
+	WithdrawnBy     string             `json:"withdrawn_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e WithdrawNegotiationEvent) EventType() string {
+	return eventtype.WithdrawRespond.String()
+}
+
+// GetDID implements the Event interface.
+func (e WithdrawNegotiationEvent) GetDID() string {
+	return e.DID
+}
+
 // NegotiationChangeSupersededEvent records the change requests whose content
 // the fold of a round dropped. Each entry names one accepted request, the
 // later accepted request that overwrote it, and the fields that did not reach
@@ -837,6 +867,29 @@ func (e ContractExpired) EventType() string {
 
 // GetDID implements the Event interface.
 func (e ContractExpired) GetDID() string {
+	return e.DID
+}
+
+// ContractRenewalDue is emitted when the notice period before a contract's
+// expiry date starts, so the parties can renew in time (DCS-FR-CWE-22).
+type ContractRenewalDue struct {
+	DID             string                             `json:"did"`
+	ContractVersion int                                `json:"contract_version"`
+	State           contractstate.ContractState        `json:"state"`
+	ExpDate         time.Time                          `json:"exp_date"`
+	ExpNoticePeriod int                                `json:"exp_notice_period"`
+	ExpPolicy       *expirationpolicy.ExpirationPolicy `json:"exp_policy"`
+	Responsible     *db.Responsible                    `json:"responsible,omitempty"`
+	OccurredAt      time.Time                          `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ContractRenewalDue) EventType() string {
+	return eventtype.ContractRenewalDue.String()
+}
+
+// GetDID implements the Event interface.
+func (e ContractRenewalDue) GetDID() string {
 	return e.DID
 }
 

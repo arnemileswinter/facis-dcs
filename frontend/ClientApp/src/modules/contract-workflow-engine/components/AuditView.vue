@@ -6,9 +6,10 @@ import ContractAuditList from '@/components/lists/contract/ContractAuditList.vue
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import ContractEvidencePanel from './ContractEvidencePanel.vue'
 import type { Contract } from '@/models/contract/contract'
+import type { DcsBlock, DcsLayoutNode } from '@/models/dcs-jsonld'
 import type { ContractAuditResponse } from '@/models/responses/contract-response'
 
-const props = defineProps<{ contract: Contract }>()
+const props = defineProps<{ contract: Contract; blocks?: DcsBlock[]; layout?: DcsLayoutNode[] }>()
 const route = useRoute()
 const editorStore = useContractEditorUiStore()
 const data: Ref<ContractAuditResponse> = ref([])
@@ -50,5 +51,5 @@ watch(
   <div v-if="isLoading" class="loading loading-sm loading-spinner"></div>
   <div v-else-if="loadError" role="alert" class="alert alert-error">{{ loadError }}</div>
   <div v-else-if="data.length < 1">No audit data</div>
-  <ContractAuditList v-else :audits="data" />
+  <ContractAuditList v-else :audits="data" :blocks="blocks" :layout="layout" />
 </template>

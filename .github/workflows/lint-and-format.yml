@@ -85,11 +85,10 @@ jobs:
             exit 1
           fi
 
-      - name: Install Goa
-        run: go install goa.design/goa/v3/cmd/goa@v3
-
+      # go run uses the goa version pinned in go.mod, as the Dockerfile does.
+      # "goa@v3" resolves to the newest release, which can need a newer Go.
       - name: Generate Goa code
-        run: goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -133,9 +132,7 @@ jobs:
       # The generated transport is gitignored; tests build against it.
       - name: Generate Goa transport
         working-directory: backend
-        run: |
-          go install goa.design/goa/v3/cmd/goa@v3
-          goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Backend unit tests
         working-directory: backend

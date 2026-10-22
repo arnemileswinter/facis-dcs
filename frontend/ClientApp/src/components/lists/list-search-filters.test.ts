@@ -69,3 +69,26 @@ describe('P09 shared combined search request', () => {
     wrapper.unmount()
   })
 })
+
+it.each(['Enter', ' '])('selects a named filter with %s and focuses the first popover option', async (key) => {
+  const wrapper = mount(ListSearch, {
+    attachTo: document.body,
+    props: {
+      items: [],
+      emptyItem: { did: '', name: '' },
+      filterLabels: { did: 'DID', name: 'Name' },
+      searchFn: vi.fn().mockResolvedValue([]),
+    },
+  })
+  const popover = wrapper.get('#list-popover-search')
+  const hidePopover = vi.fn()
+  Object.assign(popover.element, { hidePopover })
+  await popover.trigger('toggle', { newState: 'open' })
+  const options = popover.findAll('a')
+  expect(popover.attributes('aria-label')).toBe('Select search filter')
+  expect(document.activeElement).toBe(options[0]!.element)
+  await options[1]!.trigger('keydown', { key })
+  expect(wrapper.get('#list-btn-search').text()).toBe('Name')
+  expect(hidePopover).toHaveBeenCalled()
+  wrapper.unmount()
+})

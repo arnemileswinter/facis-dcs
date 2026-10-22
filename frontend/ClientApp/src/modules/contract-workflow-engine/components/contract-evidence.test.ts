@@ -1,16 +1,22 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import AuditView from './AuditView.vue'
 import ContractEvidencePanel from './ContractEvidencePanel.vue'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractEvidence } from '@/models/contract/contract-evidence'
+import type { DcsBlock, DcsLayoutNode } from '@/models/dcs-jsonld'
 
 const mocks = vi.hoisted(() => ({
   auth: { user: { roles: ['CONTRACT_MANAGER'] } },
   listEvidence: vi.fn(),
+  audit: vi.fn(),
   storeEvidence: vi.fn(),
   retrieveEvidence: vi.fn(),
   downloadBlob: vi.fn(),
 }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ params: { did: 'did:test:contract' } }) }))
 vi.mock('@/stores/auth-store', () => ({ useAuthStore: () => mocks.auth }))
 vi.mock('@/services/contract-workflow-service', () => ({ contractWorkflowService: mocks }))
 vi.mock('@/utils/download-blob', () => ({ downloadBlob: mocks.downloadBlob }))
@@ -111,4 +117,33 @@ describe('F10 evidence lifecycle', () => {
     expect(mocks.downloadBlob).toHaveBeenCalledOnce()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
+})
+
+it('renders contract evidence alongside the audit trail with block and layout context', async () => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useContractEditorUiStore().setActiveTab('audit')
+  mocks.listEvidence.mockResolvedValue([evidence])
+  mocks.audit.mockResolvedValue([
+    {
+      id: 1,
+      component: 'CONTRACT_WORKFLOW_ENGINE',
+      event_type: 'CONTRACT_REJECTED',
+      created_at: contract.updated_at,
+      event_data: { annotations: [{ block_id: 'clause', comment: 'Clarify this term' }] },
+    },
+  ])
+  const blocks: DcsBlock[] = [
+    { '@id': 'clause', '@type': 'dcs:Clause', 'dcs:title': 'Delivery clause', 'dcs:content': '' },
+  ]
+  const layout: DcsLayoutNode[] = []
+  const wrapper = mount(AuditView, { props: { contract, blocks, layout }, global: { plugins: [pinia] } })
+  await flushPromises()
+  expect(wrapper.findComponent(ContractEvidencePanel).exists()).toBe(true)
+  expect(wrapper.text()).toContain('proof.bin')
+  const audit = wrapper.findComponent({ name: 'ContractAuditList' })
+  expect(audit.exists()).toBe(true)
+  expect(audit.props('blocks')).toEqual(blocks)
+  expect(audit.props('layout')).toEqual(layout)
+  wrapper.unmount()
 })

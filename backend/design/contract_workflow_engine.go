@@ -57,6 +57,13 @@ var ContractUpdateResponse = Type("ContractUpdateResponse", func() {
 	Required("did")
 })
 
+var ContractBlockAnnotation = Type("ContractBlockAnnotation", func() {
+	Description("One block-level review annotation: targets a layout block @id")
+	Attribute("block_id", String, "dcs:documentStructure layout / block @id")
+	Attribute("comment", String, "Reviewer annotation text")
+	Required("block_id", "comment")
+})
+
 var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Description("Contract submit request")
 
@@ -68,6 +75,7 @@ var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 
 	Attribute("forward_to", String, "Action flag: approval | reject")
 	Attribute("comments", ArrayOf(String), "Optional comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Optional block-level review annotations")
 	Attribute("contract_data", Any, "Optional updated contract data to persist atomically before submit validation")
 
 	Required("did", "updated_at")
@@ -299,6 +307,8 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("negotiations", ArrayOf(ContractNegotiationItem), "List with negotiations for that contract")
 
+	Attribute("pending_negotiation_sync", Boolean, "True when this instance still has outbound Proposals or Decisions for the contract that the peer has not acknowledged")
+
 	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract, each carrying the verdict the target system reached (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33)")
 
 	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
@@ -355,6 +365,7 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 	Attribute("contract_data", String, "Search value for full text search in contract data")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -466,7 +477,7 @@ var ContractNegotiationRespondRequest = Type("ContractNegotiationRespondRequest"
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
-	Attribute("action_flag", String, "Decision for that negotiation (ACCEPTING | REJECTING)")
+	Attribute("action_flag", String, "Decision for that negotiation (ACCEPTING | REJECTING | WITHDRAWING)")
 	Attribute("rejection_reason", String, "The reason for that rejection")
 
 	Required("id", "did", "action_flag")
@@ -1164,7 +1175,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 	})
 
 	Method("respond", func() {
-		Description("Accept or reject a specific negotiation change request (action_flag: ACCEPTING | REJECTING). Forwarded to the contract's origin peer if the local node is not the origin. Unlike most other state-mutating contract endpoints, this one does not require updated_at and is therefore not covered by the optimistic-concurrency timestamp check.")
+		Description("Accept, reject, or withdraw a specific negotiation change request (action_flag: ACCEPTING | REJECTING | WITHDRAWING). WITHDRAWING is only for the proposal author and only while no counterparty has accepted it. Forwarded to the contract's origin peer if the local node is not the origin. Unlike most other state-mutating contract endpoints, this one does not require updated_at and is therefore not covered by the optimistic-concurrency timestamp check.")
 		Meta("dcs:requirements", "DCS-IR-CWE-03", "DCS-IR-CWE-05", "DCS-IR-CWE-06")
 
 		Security(JWTAuth, func() {
@@ -1441,6 +1452,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("description")
 			Param("contract_data")
 			Param("parent_did")
+			Param("valid_until")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

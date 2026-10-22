@@ -64,7 +64,9 @@ watch(
           partyType: template.party_type,
           state: template.state,
           version: template.version ?? null,
+          created_at: template.created_at ?? null,
           updated_at: template.updated_at ?? null,
+          created_by: template.created_by,
         })
       })
       .catch((error: unknown) => {

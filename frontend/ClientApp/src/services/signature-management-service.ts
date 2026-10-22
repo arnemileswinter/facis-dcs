@@ -132,6 +132,9 @@ export interface SignatureViewItem {
   qualified?: boolean
   signer_cert_subject?: string
   signer_cert_serial?: string
+  poa_organization?: string
+  poa_roles?: string[]
+  summary_issuer?: string
 }
 
 export interface SignatureViewResult {
@@ -150,6 +153,39 @@ export interface SignatureAuditEntry {
   did?: string
   created_at: string
   res_log_pred_cid?: string
+}
+
+export interface SignatureClauseReportFinding {
+  rule_id?: string
+  severity: string
+  message: string
+  path?: string
+  field_iri?: string
+  focus_node?: string
+  source?: string
+  clause_ids?: string[]
+}
+
+export interface SignatureClauseReportSection {
+  clause_id: string
+  title?: string
+  /** not_assessed | undetermined | warnings_only | issues_identified | compliant */
+  status: string
+  findings: SignatureClauseReportFinding[]
+  assessment_run: string
+  /** Display: Not established | None | check ids */
+  applicable_checks: string
+  /** not_established | none | established */
+  applicable_checks_status: string
+  verdict_note?: string
+}
+
+export interface SignatureClauseReportResult {
+  did: string
+  assessment_run: string
+  scope_note?: string
+  clauses: SignatureClauseReportSection[]
+  unassigned_findings: SignatureClauseReportFinding[]
 }
 
 export type CeremonyStatus = 'pending' | 'verified' | 'expired' | 'failed'
@@ -283,5 +319,12 @@ export const signatureManagementService = {
 
   async getAudit(did: string): Promise<SignatureAuditEntry[]> {
     return http.get<SignatureAuditEntry[]>('/signature/audit', { params: { did } }).then((res) => res.data ?? [])
+  },
+
+  /** PACM-07 clause projection: live SHACL findings mapped conservatively to clause @ids. */
+  async getClauseReport(did: string): Promise<SignatureClauseReportResult> {
+    return http
+      .get<SignatureClauseReportResult>('/signature/clause-report', { params: { did } })
+      .then((res) => res.data)
   },
 }
