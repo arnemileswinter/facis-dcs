@@ -128,6 +128,14 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 		return err
 	}
 
+	// Federated contracts may not advance to APPROVED until this instance holds
+	// matching settlements from every remote party.
+	declared := validation.RequiredSignatureFields([]byte(*contractForPolicyValidation.ContractData))
+	err = AssertCounterpartiesSettled(ctx, tx, h.SRepo, cmd.DID, localPeer, contractForPolicyValidation.Responsible, declared)
+	if err != nil {
+		return err
+	}
+
 	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.CauserDID, approvaltaskstate.Approved.String())
 	if err != nil {
 		return fmt.Errorf("could not update approval task state: %w", err)

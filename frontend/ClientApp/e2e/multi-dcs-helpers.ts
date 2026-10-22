@@ -1507,6 +1507,30 @@ async function localContractState(inst: Instance, contractDid: string): Promise<
   return String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
 }
 
+/** Approve stays disabled until own + matching peer settlements are held. */
+async function waitForSettlementReadyOn(inst: Instance, contractDid: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const auth = await apiAuthHeaders(inst, 'Contract Approver', `/ui/contracts/approve/${contractDid}`)
+        const resp = await inst.page.request.get(
+          `${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`,
+          { headers: auth },
+        )
+        if (!resp.ok()) return `http_${resp.status()}`
+        const body = (await resp.json()) as { settlement_ready?: boolean; settlement_ready_detail?: string }
+        if (body.settlement_ready === true) return 'ready'
+        return body.settlement_ready_detail || 'not_ready'
+      },
+      {
+        timeout: 120_000,
+        intervals: [2_000, 5_000, 10_000],
+        message: `${inst.origin} settlement_ready never became true for ${contractDid}`,
+      },
+    )
+    .toBe('ready')
+}
+
 /**
  * Accept open decisions, then Submit / Submit review until SUBMITTED, then
  * review → approve to APPROVED. A Submit with accepted proposals merges and
@@ -1570,11 +1594,14 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   // Approve: REVIEWED -> APPROVED, found the same way in the Approval Tasks tab.
   await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
+  await waitForSettlementReadyOn(inst, contractDid)
+  const approveBtn = inst.page.getByRole('button', { name: 'Approve', exact: true })
+  await expect(approveBtn).toBeEnabled({ timeout: 30_000 })
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await approveBtn.click()
   await confirmModalOn(inst, 'Confirm')
   await approved
 }

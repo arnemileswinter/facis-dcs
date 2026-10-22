@@ -234,6 +234,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrProposalAlreadyAccepted) ||
 		errors.Is(err, command.ErrAgreementSettled) ||
 		errors.Is(err, command.ErrOwnAgreementSettled) ||
+		errors.Is(err, command.ErrCounterpartiesNotSettled) ||
 		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, command.ErrNegotiationSyncPending) ||
 		errors.Is(err, db.ErrNoMatchingDecision) {
@@ -782,6 +783,34 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		pendingSync = len(undelivered) > 0
 	}
 
+	settlementReady := true
+	var settlementReadyDetail *string
+	if s.SRepo != nil {
+		settleTx, err := s.DB.BeginTxx(ctx, nil)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+
+		var declared []string
+		if contractResult.ContractData != nil && contractResult.ContractData.IsNotNullValue() {
+			declared = validation.RequiredSignatureFields([]byte(*contractResult.ContractData))
+		}
+
+		ready, detail, settleErr := command.SettlementReady(
+			ctx, settleTx, s.SRepo, req.Did, localPeer, contractResult.Responsible, declared)
+		_ = settleTx.Rollback()
+
+		if settleErr != nil {
+			return nil, contractworkflowengine.MakeInternalError(settleErr)
+		}
+
+		settlementReady = ready
+
+		if detail != "" {
+			settlementReadyDetail = &detail
+		}
+	}
+
 	return &contractworkflowengine.ContractRetrieveByIDResponse{
 		Did:                    contractResult.DID,
 		ContractVersion:        contractResult.ContractVersion,
@@ -797,6 +826,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveByID(ctx context.Context, req *cont
 		TemplateVersion:        contractResult.TemplateVersion,
 		Negotiations:           negotiationList,
 		PendingNegotiationSync: &pendingSync,
+		SettlementReady:        &settlementReady,
+		SettlementReadyDetail:  settlementReadyDetail,
 		StartDate:              startDate,
 		ExpDate:                expDate,
 		ExpPolicy:              expPolicy,

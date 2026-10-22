@@ -307,6 +307,9 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("pending_negotiation_sync", Boolean, "True when this instance still has outbound Proposals or Decisions for the contract that the peer has not acknowledged")
 
+	Attribute("settlement_ready", Boolean, "True when this instance holds its own settlement and matching peer settlements for every remote party signature slot (Approve/Sign precondition); true for contracts with no remote party slots")
+	Attribute("settlement_ready_detail", String, "When settlement_ready is false, a short reason suitable for a UI warning")
+
 	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract, each carrying the verdict the target system reached (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33)")
 
 	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
