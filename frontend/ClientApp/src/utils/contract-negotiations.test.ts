@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   acceptedNegotiations,
+  activeNegotiations,
   contractWithAcceptedProposals,
   hasPendingPeerProposalAfterSettle,
   hasUnresolvedProposals,
@@ -188,6 +189,44 @@ describe('accepted negotiation fold', () => {
     expect(proposalComparisonBaseline(contract, first).name).toBe('Formal name')
     expect(proposalComparisonBaseline(contract, second).name).toBe('Accepted name')
     expect(proposalComparisonBaseline(contract, second).contract_data).toEqual(firstData)
+  })
+})
+
+describe('activeNegotiations', () => {
+  it('keeps older rejected proposals visible after a version bump', () => {
+    const contract = baseContract({
+      contract_version: 4,
+      negotiations: [
+        negotiation({
+          id: 'rejected-v2',
+          contract_version: 2,
+          negotiation_decisions: [
+            { negotiator: 'did:web:local', decision: 'REJECTED' },
+            { negotiator: 'did:web:peer', decision: 'CLOSED' },
+          ],
+        }),
+        negotiation({
+          id: 'accepted-v3',
+          contract_version: 3,
+          negotiation_decisions: [
+            { negotiator: 'did:web:local', decision: 'ACCEPTED' },
+            { negotiator: 'did:web:peer', decision: 'CLOSED' },
+          ],
+        }),
+        negotiation({
+          id: 'current-v4',
+          contract_version: 4,
+          negotiation_decisions: [
+            { negotiator: 'did:web:local', decision: undefined },
+            { negotiator: 'did:web:peer', decision: undefined },
+          ],
+        }),
+      ],
+    })
+    const ids = activeNegotiations(contract).map((entry) => entry.id)
+    expect(ids).toContain('rejected-v2')
+    expect(ids).toContain('current-v4')
+    expect(ids).not.toContain('accepted-v3')
   })
 })
 

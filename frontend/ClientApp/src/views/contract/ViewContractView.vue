@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, type Ref, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -9,6 +9,7 @@ import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
 import ContractStructureTree from '@contract-workflow-engine/components/ContractStructureTree.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
+import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
@@ -21,13 +22,16 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { ContractState } from '@/types/contract-state'
 import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
+import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { UserRole } from '@/types/user-role'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
 const route = useRoute()
+const router = useRouter()
 
 const authStore = useAuthStore()
+const { isCreator } = useContractPermissions()
 const contractsStore = useContractsStore()
 const { contracts } = storeToRefs(contractsStore)
 const dcsDraftStore = useDcsDraftStore()
@@ -39,6 +43,28 @@ const { activeTab } = storeToRefs(contractEditorUiStore)
 
 const contract: Ref<Contract | null> = ref(null)
 const verificationResult: Ref<VerificationResult | null> = ref(null)
+const isReopening = ref(false)
+
+const canReopenNegotiation = computed(() => isCreator.value && contract.value?.state === ContractState.rejected)
+
+/** REJECTED → NEGOTIATION only, no content rewrite. */
+const reopenNegotiation = async () => {
+  if (!contract.value || !canReopenNegotiation.value) return
+  isReopening.value = true
+  try {
+    const response = await contractWorkflowService.submit({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+    })
+    if (response.did) {
+      await router.push({ name: ROUTES.CONTRACTS.NEGOTIATE, params: { did: response.did } })
+    }
+  } catch (err) {
+    reportActionError(err, 'Reopen negotiation')
+  } finally {
+    isReopening.value = false
+  }
+}
 
 // Details/Content show formal + accepted proposals so the page matches what
 // Submit will merge; the stored formal row itself is unchanged until then.
@@ -390,6 +416,15 @@ const exportBundle = async () => {
         </button>
         <button class="btn btn-outline md:w-36" :disabled="exporting || !contract" @click="exportBundle">
           Export bundle
+        </button>
+        <button
+          v-if="canReopenNegotiation"
+          class="btn flex-1 btn-primary"
+          :disabled="isReopening"
+          @click="reopenNegotiation"
+        >
+          <span v-if="isReopening" class="loading loading-sm loading-spinner"></span>
+          Reopen negotiation
         </button>
         <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
       </div>

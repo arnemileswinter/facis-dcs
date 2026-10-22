@@ -2,18 +2,19 @@ import type { Contract } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 
 /**
- * Proposals for the current formal version (and any older row that still has an
- * open decision). Used for the Proposals list so Accept/Reject history stays
- * visible after the counterparty has decided — Submit merges on version bump.
+ * Proposals shown in the Proposals list: current formal version, any older row
+ * that still has an open decision, and any rejected proposal (Reject + CLOSED
+ * must not hide history after a version bump or A/B decision sync gap).
  */
 export function activeNegotiations(contract: Contract | null | undefined): ContractNegotiation[] {
   if (!contract) return []
   return (
-    contract.negotiations?.filter(
-      (negotiation) =>
-        negotiation.contract_version === contract.contract_version ||
-        negotiation.negotiation_decisions.some((decision) => !decision.decision),
-    ) ?? []
+    contract.negotiations?.filter((negotiation) => {
+      if (negotiation.contract_version === contract.contract_version) return true
+      return negotiation.negotiation_decisions.some(
+        (decision) => !decision.decision || decision.decision === 'REJECTED',
+      )
+    }) ?? []
   )
 }
 

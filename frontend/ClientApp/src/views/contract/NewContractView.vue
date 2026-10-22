@@ -77,18 +77,10 @@ const draftContracts = computed(() => contractStore.contracts.filter((c) => c.st
 
 const canSubmit = computed(() => isEditMode.value || (hasApprovedTemplates.value && selectedTemplate.value !== null))
 const canSubmitContract = computed(
-  () =>
-    isEditMode.value &&
-    contract.value !== null &&
-    (contract.value.state === ContractState.draft || contract.value.state === ContractState.rejected),
+  () => isEditMode.value && contract.value !== null && contract.value.state === ContractState.draft,
 )
 
-const isContractMutable = computed(
-  () =>
-    !isEditMode.value ||
-    contract.value?.state === ContractState.draft ||
-    contract.value?.state === ContractState.rejected,
-)
+const isContractMutable = computed(() => !isEditMode.value || contract.value?.state === ContractState.draft)
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   if (!isEditMode.value || !isContractMutable.value) return null
@@ -272,25 +264,6 @@ const submitContract = async () => {
   }
 }
 
-const submitRejectedContract = async () => {
-  if (!contract.value || !(await verifyContractDetails()) || !verifySemanticValues()) return
-  isSubmitting.value = true
-  try {
-    const updatedContract = await saveContractDraftForSubmit()
-    const response = await contractWorkflowService.submit({
-      did: updatedContract.did,
-      updated_at: updatedContract.updated_at,
-    })
-    if (response.did) {
-      await router.push({ name: ROUTES.CONTRACTS.LIST })
-    }
-  } catch (error) {
-    reportActionError(error, 'Resubmit contract')
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
 watch(
   isEditMode,
   async (value) => {
@@ -301,9 +274,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          templateEditorUiStore.setTemplateEditable(
-            contract.value?.state === ContractState.draft || contract.value?.state === ContractState.rejected,
-          )
+          templateEditorUiStore.setTemplateEditable(contract.value?.state === ContractState.draft)
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract')
@@ -597,15 +568,6 @@ onBeforeRouteLeave(() => {
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
           @click="submitContract"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Submit
-        </button>
-        <button
-          v-else-if="contract?.state === ContractState.rejected && canSubmitContract"
-          class="btn flex-1 btn-primary"
-          :disabled="isSubmitting"
-          @click="submitRejectedContract"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Submit
