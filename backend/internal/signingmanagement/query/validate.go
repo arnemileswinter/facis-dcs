@@ -80,8 +80,36 @@ type Validator struct {
 	LocalPeer string
 }
 
+// Handle validates the contract's signatures. A failed attempt is audited as
+// VALIDATE_SIGNATURE_FAILED (DCS-FR-SM-19).
 func (h *Validator) Handle(ctx context.Context, cmd ValidateQry) (*ValidationResult, error) {
+	result, err := h.validate(ctx, cmd)
+	if err != nil {
+		failed := validateEvent(cmd, 0, nil, nil, time.Now().UTC())
+		failed.Outcome = signingmanagementevents.OutcomeFailed
+		failed.Error = err.Error()
+		if auditErr := event.CreateInOwnTx(ctx, h.DB, failed, componenttype.SignatureManagement); auditErr != nil {
+			log.Printf("could not audit failed validation of %s: %v", cmd.DID, auditErr)
+		}
+	}
+	return result, err
+}
 
+func validateEvent(cmd ValidateQry, contractVersion int, signerDIDs, findings []string, occurredAt time.Time) signingmanagementevents.ValidateEvent {
+	return signingmanagementevents.ValidateEvent{
+		DID:             cmd.DID,
+		ContractVersion: contractVersion,
+		SignerDIDs:      signerDIDs,
+		Outcome:         signingmanagementevents.OutcomeCompleted,
+		Findings:        findings,
+		ValidatedBy:     cmd.ValidatedBy,
+		OccurredAt:      occurredAt,
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
+	}
+}
+
+func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -123,14 +151,16 @@ func (h *Validator) Handle(ctx context.Context, cmd ValidateQry) (*ValidationRes
 
 	signingEvidence := collectSigningEvidence(evidence.Documents)
 
-	evt := signingmanagementevents.ValidateEvent{
-		DID:             cmd.DID,
-		ContractVersion: processData.ContractVersion,
-		ValidatedBy:     cmd.ValidatedBy,
-		OccurredAt:      time.Now().UTC(),
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
+	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not load signatures: %w", err)
 	}
+	signerDIDs := make([]string, 0, len(signatures))
+	for _, sig := range signatures {
+		signerDIDs = append(signerDIDs, sig.SignerDID)
+	}
+
+	evt := validateEvent(cmd, processData.ContractVersion, signerDIDs, findings, time.Now().UTC())
 	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {
 		return nil, fmt.Errorf("could not create event: %w", err)

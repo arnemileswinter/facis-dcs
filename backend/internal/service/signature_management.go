@@ -665,18 +665,13 @@ func mapDSSReport(r *dss.Report) *signaturemanagement.SMDSSReport {
 }
 
 func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemanagement.SMContractRevokeRequest) (res *signaturemanagement.SMContractRevokeResponse, err error) {
-	reason, err := command.NormalizeRevocationReason(req.Reason)
-	if err != nil {
-		return nil, signaturemanagement.MakeBadRequest(err)
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	qry := command.RevokeCmd{
 		DID:       req.Did,
 		SignerDID: req.SignerDid,
-		Reason:    reason,
+		Reason:    req.Reason,
 		RevokedBy: middleware.GetParticipantID(ctx),
 		HolderDID: middleware.GetHolderDID(ctx),
 		UserRoles: middleware.GetUserRoles(ctx),

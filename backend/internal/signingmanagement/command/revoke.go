@@ -49,7 +49,36 @@ type Revoker struct {
 	CRepo db.ContractRepo
 }
 
+// Handle revokes the signature. A failed attempt is audited as
+// REVOKE_SIGNATURE_FAILED (DCS-FR-SM-19).
 func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
+	err := h.revoke(ctx, cmd)
+	if err != nil {
+		failed := revokeEvent(cmd, 0, time.Now().UTC())
+		failed.Outcome = signingmanagementevents.OutcomeFailed
+		failed.Error = err.Error()
+		if auditErr := event.CreateInOwnTx(ctx, h.DB, failed, componenttype.SignatureManagement); auditErr != nil {
+			log.Printf("could not audit failed revocation of %s: %v", cmd.DID, auditErr)
+		}
+	}
+	return err
+}
+
+func revokeEvent(cmd RevokeCmd, contractVersion int, occurredAt time.Time) signingmanagementevents.RevokeEvent {
+	return signingmanagementevents.RevokeEvent{
+		DID:             cmd.DID,
+		ContractVersion: contractVersion,
+		SignerDID:       cmd.SignerDID,
+		Outcome:         signingmanagementevents.OutcomeCompleted,
+		Reason:          cmd.Reason,
+		RevokedBy:       cmd.RevokedBy,
+		OccurredAt:      occurredAt,
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
+	}
+}
+
+func (h *Revoker) revoke(ctx context.Context, cmd RevokeCmd) error {
 	reason, err := NormalizeRevocationReason(cmd.Reason)
 	if err != nil {
 		return err
@@ -93,15 +122,7 @@ func (h *Revoker) Handle(ctx context.Context, cmd RevokeCmd) error {
 	}
 
 	occurredAt := time.Now().UTC()
-	evt := signingmanagementevents.RevokeEvent{
-		DID:             cmd.DID,
-		ContractVersion: processData.ContractVersion,
-		Reason:          cmd.Reason,
-		RevokedBy:       cmd.RevokedBy,
-		OccurredAt:      occurredAt,
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
-	}
+	evt := revokeEvent(cmd, processData.ContractVersion, occurredAt)
 	err = event.Create(ctx, tx, evt, componenttype.SignatureManagement)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
