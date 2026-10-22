@@ -20,6 +20,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -131,7 +132,12 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	if err != nil {
 		return nil, fmt.Errorf("could not read the previous term's signatures: %w", err)
 	}
-	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion, priorSignatures)
+	originalPDF, err := h.CRepo.ReadPDFState(ctx, tx, cmd.OriginalDID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the original contract's PDF state: %w", err)
+	}
+	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion,
+		signedDocumentReference(originalPDF), priorSignatures)
 	if err != nil {
 		return nil, fmt.Errorf("could not attach renewal reference: %w", err)
 	}
@@ -308,8 +314,9 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 // signatureReferences returns one dcs:signatures entry per party node of the
 // original that carries a signatory: the party, its signatory and the Power of
 // Attorney they signed under. These are the predicates unsignRenewedDocument
-// clears from the copy. The document records counterparty signatures synced
-// from a peer too, unlike the local contract_signatures rows.
+// clears from the copy. A countersignature applied to an already signed PDF
+// stamps no party node (apply.go contractDocumentForSignature), so only the
+// signed PDF holds it: see signedDocumentReference.
 func signatureReferences(raw *datatype.JSON) ([]any, error) {
 	if raw == nil {
 		return nil, nil
@@ -337,6 +344,16 @@ func signatureReferences(raw *datatype.JSON) ([]any, error) {
 	return refs, nil
 }
 
+// signedDocumentReference returns the IPFS reference of the original's stored
+// PDF when that artifact holds a signature, else "". The PDF carries every
+// PAdES signature of the original, the counterparty's included.
+func signedDocumentReference(state *db.ContractPDFState) string {
+	if state == nil || state.IPFSCID == "" || !provenance.ArtifactCarriesSignature(state.C2PAState) {
+		return ""
+	}
+	return "ipfs://" + state.IPFSCID
+}
+
 // attachRenewsContractReference adds the dcs:renewsContract back-reference
 // (DCS-FR-CWE-11: "retaining linked metadata and signatures", "reference
 // links"; DCS-FR-CSA-15: "retain references to the prior contract's version,
@@ -344,8 +361,8 @@ func signatureReferences(raw *datatype.JSON) ([]any, error) {
 // plain top-level JSON-LD property, distinct from dcs:parentContract (ADR-7's
 // frame-agreement hierarchy link, which must stay child->parent only and
 // singular) — a renewal is not a sub-contract of the original, it supersedes
-// it. dcs:signatures is omitted when the original carries no signature.
-func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int, signatures []any) (*datatype.JSON, error) {
+// it. dcs:signedDocument and dcs:signatures are omitted when empty.
+func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int, signedDocument string, signatures []any) (*datatype.JSON, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(*raw, &doc); err != nil {
 		return nil, fmt.Errorf("could not decode contract data: %w", err)
@@ -353,6 +370,9 @@ func attachRenewsContractReference(raw *datatype.JSON, originalDID string, origi
 	reference := map[string]any{
 		"@id":         base.ResourceIRI("contract", originalDID),
 		"dcs:version": originalVersion,
+	}
+	if signedDocument != "" {
+		reference["dcs:signedDocument"] = map[string]any{"@id": signedDocument}
 	}
 	if len(signatures) > 0 {
 		reference["dcs:signatures"] = signatures

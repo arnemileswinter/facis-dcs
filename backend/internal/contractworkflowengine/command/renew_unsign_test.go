@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/contractworkflowengine/db"
 
 	"github.com/stretchr/testify/require"
 )
@@ -184,7 +185,7 @@ func TestRenewalReferencesThePreviousTermsSignatures(t *testing.T) {
 	require.NoError(t, err)
 	renewal, err := unsignRenewedDocument(signedTermDocument(t))
 	require.NoError(t, err)
-	renewal, err = attachRenewsContractReference(renewal, "contract-1", 3, signatures)
+	renewal, err = attachRenewsContractReference(renewal, "contract-1", 3, "ipfs://bafy-signed", signatures)
 	require.NoError(t, err)
 
 	var doc map[string]any
@@ -192,6 +193,7 @@ func TestRenewalReferencesThePreviousTermsSignatures(t *testing.T) {
 	reference, ok := doc["dcs:renewsContract"].(map[string]any)
 	require.True(t, ok)
 	require.EqualValues(t, 3, reference["dcs:version"])
+	require.Equal(t, map[string]any{"@id": "ipfs://bafy-signed"}, reference["dcs:signedDocument"])
 	require.JSONEq(t, `[
 		{"dcs:party": {"@id": "`+originDID+`"}, "dcs:hasSignatory": {"@id": "did:jwk:alice"}, "dcs:hasPowerOfAttorney": {"@id": "`+originDID+`"}},
 		{"dcs:party": {"@id": "`+counterpartyDID+`"}, "dcs:hasSignatory": {"@id": "did:jwk:bob"}, "dcs:hasPowerOfAttorney": {"@id": "`+counterpartyDID+`"}}
@@ -205,12 +207,22 @@ func TestRenewalOfAnUnsignedContractReferencesNoSignatures(t *testing.T) {
 
 	signatures, err := signatureReferences(&seeded)
 	require.NoError(t, err)
-	renewal, err := attachRenewsContractReference(&seeded, "contract-1", 1, signatures)
+	renewal, err := attachRenewsContractReference(&seeded, "contract-1", 1, "", signatures)
 	require.NoError(t, err)
 
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(*renewal, &doc))
 	require.NotContains(t, doc["dcs:renewsContract"], "dcs:signatures")
+	require.NotContains(t, doc["dcs:renewsContract"], "dcs:signedDocument")
+}
+
+// A countersignature on an already signed PDF stamps no party node, so the
+// signed artifact is the only reference to it. An unsigned render is not one.
+func TestSignedDocumentReferenceNamesOnlyASignedArtifact(t *testing.T) {
+	require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: "active"}))
+	require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-draft", C2PAState: "draft"}))
+	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active"}))
+	require.Empty(t, signedDocumentReference(nil))
 }
 
 func mustJSON(t *testing.T, v any) string {
