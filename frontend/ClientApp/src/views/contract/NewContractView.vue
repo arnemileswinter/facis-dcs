@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isAxiosError } from 'axios'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -127,20 +128,39 @@ function currentExpNoticePeriod(): number | undefined {
   return Number.isFinite(numericValue) ? numericValue : undefined
 }
 
+function isUpdatedElsewhereConflict(error: unknown): boolean {
+  if (!isAxiosError(error)) return false
+  if (error.response?.status === 409) return true
+  const message = error.response?.data?.message
+  return typeof message === 'string' && message.toLowerCase().includes('updated elsewhere')
+}
+
 async function saveContractDraftForSubmit(): Promise<Contract> {
   if (!contract.value) throw new Error('No contract selected')
 
-  await contractWorkflowService.update({
-    did: contract.value.did,
-    updated_at: contract.value.updated_at,
-    start_date: contract.value.start_date,
-    exp_date: contract.value.exp_date,
-    exp_notice_period: currentExpNoticePeriod(),
-    exp_policy: contract.value.exp_policy,
-    name: contract.value.name,
-    description: contract.value.description,
-    contract_data: buildCurrentContractData(),
-  })
+  // Create / parent-link / async PDF can advance updated_at before Submit's
+  // save-Update; one reload+retry matches the server 409 temporary conflict.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await contractWorkflowService.update({
+        did: contract.value.did,
+        updated_at: contract.value.updated_at,
+        start_date: contract.value.start_date,
+        exp_date: contract.value.exp_date,
+        exp_notice_period: currentExpNoticePeriod(),
+        exp_policy: contract.value.exp_policy,
+        name: contract.value.name,
+        description: contract.value.description,
+        contract_data: buildCurrentContractData(),
+      })
+      break
+    } catch (error) {
+      if (!isUpdatedElsewhereConflict(error) || attempt === 1) throw error
+      const refreshed = await contractWorkflowService.retrieveById({ did: contract.value.did })
+      if (!refreshed) throw error
+      contract.value = refreshed
+    }
+  }
 
   const updatedContract = await contractWorkflowService.retrieveById({ did: contract.value.did })
   if (!updatedContract) throw new Error('Could not reload contract after update')

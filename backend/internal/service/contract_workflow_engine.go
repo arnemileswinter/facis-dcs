@@ -143,6 +143,25 @@ func (s *contractWorkflowEnginesrvc) runWorkflowGate(ctx context.Context, gate, 
 }
 
 func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGate(ctx context.Context, run workflowgate.Run) error {
+	err := s.resumeReviewedWorkflowGateOnce(ctx, run)
+	if err == nil || !errors.Is(err, base.ErrUpdatedElsewhere) {
+		return err
+	}
+
+	// Async PDF/audit can bump updated_at between refreshReviewedRun and the
+	// resumed command (same lost-update class as client 409 conflicts). One
+	// re-read + retry closes that window without ignoring real content races.
+	processData, readErr := s.CRepo.ReadProcessDataByDID(ctx, nil, run.ContractDID)
+	if readErr != nil {
+		return err
+	}
+
+	run.ContractUpdatedAt = processData.UpdatedAt
+
+	return s.resumeReviewedWorkflowGateOnce(ctx, run)
+}
+
+func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.Context, run workflowgate.Run) error {
 	stringValue := func(name string) string {
 		value, _ := run.Continuation[name].(string)
 		return value
