@@ -287,6 +287,42 @@ func (r *PostgresContractRepo) ReadExpiredContracts(ctx context.Context, tx *sql
 	return cts, nil
 }
 
+func (r *PostgresContractRepo) ReadRenewalDueContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
+	query := `
+    SELECT c.did, c.origin, c.state, c.name, c.description, c.created_by, c.created_at, c.updated_at, c.contract_version,
+           c.start_date, c.exp_date, c.exp_policy, c.exp_notice_period, c.responsible, c.template_did, c.template_version
+    FROM contracts c
+    WHERE c.exp_date IS NOT NULL
+    AND c.exp_notice_period > 0
+    AND c.state IN ('SIGNED', 'ACTIVE')
+    AND c.exp_date >= NOW()
+    AND c.exp_date - make_interval(days => c.exp_notice_period) <= NOW()
+    AND NOT EXISTS (
+        SELECT 1 FROM contract_renewal_notices n WHERE n.did = c.did AND n.exp_date = c.exp_date
+    )
+`
+	var cts []db.ContractMetadata
+	if err := tx.SelectContext(ctx, &cts, query); err != nil {
+		return nil, err
+	}
+	return cts, nil
+}
+
+func (r *PostgresContractRepo) ClaimRenewalNotice(ctx context.Context, tx *sqlx.Tx, did string, expDate time.Time) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_renewal_notices (did, exp_date) VALUES ($1, $2)
+        ON CONFLICT (did, exp_date) DO NOTHING
+    `, did, expDate)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data db.ContractArchiveEntry) error {
 	statement := `
         INSERT INTO contract_archive_entries (

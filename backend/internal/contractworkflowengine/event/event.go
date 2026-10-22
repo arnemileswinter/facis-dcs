@@ -869,6 +869,29 @@ func (e ContractExpired) GetDID() string {
 	return e.DID
 }
 
+// ContractRenewalDue is emitted when the notice period before a contract's
+// expiry date starts, so the parties can renew in time (DCS-FR-CWE-22).
+type ContractRenewalDue struct {
+	DID             string                             `json:"did"`
+	ContractVersion int                                `json:"contract_version"`
+	State           contractstate.ContractState        `json:"state"`
+	ExpDate         time.Time                          `json:"exp_date"`
+	ExpNoticePeriod int                                `json:"exp_notice_period"`
+	ExpPolicy       *expirationpolicy.ExpirationPolicy `json:"exp_policy"`
+	Responsible     *db.Responsible                    `json:"responsible,omitempty"`
+	OccurredAt      time.Time                          `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ContractRenewalDue) EventType() string {
+	return eventtype.ContractRenewalDue.String()
+}
+
+// GetDID implements the Event interface.
+func (e ContractRenewalDue) GetDID() string {
+	return e.DID
+}
+
 // RetrieveAllTemplatesEvent is emitted when template data is retrieved.
 type RetrieveAllTemplatesEvent struct {
 	RetrievedBy string             `json:"retrieved_by"`

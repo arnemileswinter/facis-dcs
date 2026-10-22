@@ -73,9 +73,9 @@ not a coverage hole.
 
 | Status | Meaning | Count |
 |---|---|---|
-| ✅ Covered | scenario(s) or Playwright specs assert the requirement end-to-end | 156 |
+| ✅ Covered | scenario(s) or Playwright specs assert the requirement end-to-end | 158 |
 | 🔧 In progress | being implemented | 0 |
-| 🟡 Partial | core behavior asserted; named residue not (yet) provable | 42 |
+| 🟡 Partial | core behavior asserted; named residue not (yet) provable | 40 |
 | 📋 Not BDD-verifiable | infrastructure/process requirement — verified outside the automated harnesses | 24 |
 | ❌ Deviation | capability not implemented in the product; recorded deviation | 3 |
 | | **Total** | **225** |
@@ -138,7 +138,7 @@ not a coverage hole.
 | DCS-FR-CWE-19 | Contract Signing | ✅ Covered | 22 end-to-end AES signing with ceremony, status tracked (ceremony + e2e scenarios). |
 | DCS-FR-CWE-20 | Store Contract in Archive | ✅ Covered | 05 archive-at-SIGNED scenario (tagged @DCS-FR-CWE-20). |
 | DCS-FR-CWE-21 | Retrieve Contract from Archive | ✅ Covered | 07 archive retrieve/search with RBAC. |
-| DCS-FR-CWE-22 | Contract Renewal Management | ✅ Covered | Renewal workflow endpoint (see CWE-11). |
+| DCS-FR-CWE-22 | Contract Renewal Management | ✅ Covered | Renewal workflow endpoint (see CWE-11); `contract.renewal_due` webhook once per expiry date when the notice period starts (backend unit tests, no BDD scenario). |
 | DCS-FR-CWE-23 | Contract Termination | ✅ Covered | 06 termination via API, removed from active flows (state TERMINATED). |
 | DCS-FR-CWE-24 | Contract Management Dashboard | ✅ Covered | Dashboard UI; backing search/status APIs covered (03 state-filtered search, 07). UI now asserted: e2e/dashboards.spec.ts (contract dashboard lists contracts with lifecycle state). |
 | DCS-FR-CWE-25 | Contract Review and Approval Interface | 🟡 Partial | Approval API surface covered (03/contract_approval); dedicated reviewer UI out of harness scope. |
@@ -188,7 +188,7 @@ not a coverage hole.
 | DCS-FR-CSA-01 | Tamper-Proof Contract Storage | ✅ Covered | Merkle-checkpointed, TSA-anchored audit trail (ADR-16) + tamper scenarios (03/format_review tampered-PDF) prove tamper-evidence. A submitted PDF may add a signature but never redefine the contract: the submit path compares the embedded JSON-LD against the prepared document, deliberately the opposite of the federation rule where an inbound PDF is authoritative. |
 | DCS-FR-CSA-02 | Role-Based Access Control | ✅ Covered | 07 role-outside-archive-scope denied; access audited (20 export audit-log scenario). |
 | DCS-FR-CSA-03 | Proof-of-Existence | ✅ Covered | TSA timestamp + IPFS anchoring per event (05 TSA receipt, 08 audit anchoring). |
-| DCS-FR-CSA-04 | Contract Expiry & Renewal Tracking | 🟡 Partial | Expiry detection + banner proven (19). Configurable-threshold alert notifications not modeled — deviation note. |
+| DCS-FR-CSA-04 | Contract Expiry & Renewal Tracking | ✅ Covered | Expiry detection + banner proven (19); expiring-contract alerts respect the configured expiry window (07); `contract.renewal_due` webhook at the per-contract notice period (backend unit tests). |
 | DCS-FR-CSA-05 | Hierarchical Contract Storage | ✅ Covered | 20 sibling-isolation + party-scoped-bundle scenarios: hierarchy preserved and scoped in archive/bundles. |
 | DCS-FR-CSA-06 | Machine-Readable Contract Storage | ✅ Covered | JSON-LD stored + exported alongside PDF (20 bundle members; 05 deploy-payload shape); sync validated pre-archive via verify. |
 | DCS-FR-CSA-07 | Automated Compliance Checks | 🟡 Partial | ODRL/structural gates block non-compliant contracts before they can reach SIGNED/archive (18 approve/sign gates, 20 export refusal); a distinct archive-time re-check is not separate from the workflow gate. |
@@ -204,7 +204,7 @@ not a coverage hole.
 | DCS-FR-CSA-17 | Contract Deletion | ✅ Covered | Archive delete scenarios (07, tagged @DCS-FR-CSA-17) incl. audit logging. |
 | DCS-FR-CSA-18 | Audit Log for Contract Storage and Retrieval | ✅ Covered | 20 export RBAC + audit-entry scenarios (tagged @DCS-FR-CSA-18); archive audit endpoint covered (07). |
 | DCS-FR-CSA-19 | Compliance Verification for Archived Contracts | 🟡 Partial | Audit entries retrievable per component (07/08); automated compliance flagging of archived entries beyond workflow gates not modeled. |
-| DCS-FR-CSA-20 | Automated Contract Monitoring and Alerts | 🟡 Partial | pac/monitor continuous monitoring (08); configurable UI/email alert delivery not modeled — deviation note. |
+| DCS-FR-CSA-20 | Automated Contract Monitoring and Alerts | ✅ Covered | pac/monitor continuous monitoring (08); API alert delivery as `contract.expired` (02) and `contract.renewal_due` (backend unit tests) webhooks, configurable per subscription. |
 | DCS-FR-CSA-21 | Contract Archive Dashboard | 📋 Not BDD-verifiable | Dashboard UI; backing stats/search APIs covered (07). |
 | DCS-FR-CSA-22 | Contract Search Interface | 📋 Not BDD-verifiable | Search UI; backing API covered (07 archive search). |
 | DCS-FR-CSA-23 | Contract Expiration and Renewal Management UI | 📋 Not BDD-verifiable | Expiry/renewal UI; backing expiry + renewal APIs covered (19, 06). |
@@ -426,7 +426,6 @@ not a coverage hole.
 |---|---|---|
 | QES execution | DCS-FR-SM-01 | Needs qualified TSP/QSCD; AES delivered |
 | PoA credential acquisition + chain-walk | DCS-FR-SM-03/04, UC-14 | PoA presented at login with status checking; issuer chain-walk is deferred roadmap work — 14 pack keeps tagged @skip placeholders |
-| Configurable expiry/alert notifications | DCS-FR-CSA-04/20 | Detection covered; delivery channels absent |
 | FIDO2/WebAuthn | DCS-IR-HI-02 | No WebAuthn endpoints |
 | TPM sealing / remote attestation | DCS-IR-HI-03, DCS-NFR-SEC-17 | Platform concern, not implemented |
 | "Replaced" C2PA lifecycle banner | (19 lifecycle-banner subset) | Explicit scope decision, tracked in 19 pack header |

@@ -49,6 +49,7 @@ const (
 	Renew                       EventType = "RENEW_CONTRACT"
 	RecordEvidence              EventType = "RECORD_EVIDENCE"
 	ContractExpired             EventType = "CONTRACT_EXPIRED"
+	ContractRenewalDue          EventType = "CONTRACT_RENEWAL_DUE"
 	RetrieveAllTemplates        EventType = "RETRIEVE_ALL_TEMPLATES"
 	RemoteActionRequestEvent    EventType = "REMOTE_ACTION_REQUEST"
 	Offer                       EventType = "OFFER_CONTRACT"
