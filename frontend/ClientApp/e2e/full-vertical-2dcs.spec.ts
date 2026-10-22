@@ -2,10 +2,12 @@ import { expect, test } from './dcs-test'
 import {
   acceptOfferOn,
   acceptOpenDecisionsOn,
+  advanceToSubmittedOn,
+  approveWhenSettlementReadyOn,
+  assertApproveBlockedUntilSettlementReady,
   assertManifestChainGrew,
   assertNotYetSignable,
   assertReceivedInState,
-  assertSigningRefusedUntilCounterpartySettles,
   authorContractTemplate,
   authorSemanticComponent,
   awaitPeerRedlineOn,
@@ -13,6 +15,7 @@ import {
   createContractViaUi,
   deployContract,
   fillContractAmountOn,
+  forwardReviewOn,
   instanceA,
   manifestChainLength,
   offerToCounterparty,
@@ -21,7 +24,6 @@ import {
   registerTemplateOn,
   resolveDidWeb,
   saveArtifact,
-  settleToApprovedOn,
   signOnInstance,
   stagedCounterOffer,
   submitReviewApproveTemplateOn,
@@ -42,12 +44,13 @@ import { E2E_FRONTEND_ORIGIN } from '../playwright.config'
  *
  * Exercises the merged backend R5/R5c work: the negotiation counter-offer
  * round-trip (each adjustment ships a new PDF, chain grows), the
- * settle/consolidation gate (signing refused pre-settle; extrinsic phase
+ * settle/consolidation gate (signing refused pre-APPROVED; extrinsic phase
  * proposed→agreed→executed on the retrieve API), the mutual settlement gate
- * (signing refused while the counterparty has not settled this version, and
- * opening once its shipped settlement artifact arrives), and cross-instance
- * double signing (B signs on A's signed PDF). The single-instance full-vertical.spec.ts
- * stays as the local-only lifecycle coverage until this supersedes it.
+ * (Approve blocked while the counterparty has not settled this version; both
+ * instances Submit so settlements exchange before either Approve), and
+ * cross-instance double signing (B signs on A's signed PDF). The single-instance
+ * full-vertical.spec.ts stays as the local-only lifecycle coverage until this
+ * supersedes it.
  *
  * Every stage from 4 on ARRIVES at least once the way a human does — a row found
  * in a list or a task tab, then that page's own action — instead of navigating
@@ -194,45 +197,36 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
   // ADR-2 state machine gates EventSign until APPROVED; ADR-13 extrinsic lifecycle
   // → agreed]: consolidation/settle = reaching APPROVED via the real submit →
   // review → approve flow on each instance (not a fabricated /contract/settle
-  // route). Signing is refused twice over — before APPROVED by the local state
-  // machine, and after it while the COUNTERPARTY has not settled, which local
-  // state cannot answer; the extrinsic lifecycle flips proposed → agreed on both
-  // sides.
-  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; signing gated pre-settle and pre-counterparty', async () => {
-    // The signing gate holds pre-settle: B's signer cannot sign an unapproved
+  // route). Signing is refused pre-APPROVED by the local state machine; Approve
+  // itself is refused while the COUNTERPARTY has not settled (settlement ships
+  // on Submit→SUBMITTED). Both instances must Submit before either Approve.
+  await test.step('Stage 7 [DCS-IR-CWE-10, ADR-2, ADR-13]: settle = APPROVED; Approve gated on peer settlement', async () => {
+    // The signing gate holds pre-APPROVED: B's signer cannot sign an unapproved
     // contract — the Secure Contract Viewer's signing list does not offer it.
     await assertNotYetSignable(b, contractDid)
 
     // Proposals sync both ways: A must Accept B's 10000, B must Accept A's
-    // 15000, before either Submit can merge the round. settleToApprovedOn
-    // accepts open decisions then submits; run both sides so each holds the
-    // peer's Accept before (or as) it closes the round.
+    // 15000, before either Submit can merge the round.
     await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
-    // Settle = consolidate to APPROVED via the real submit → review → approve UI
-    // (no /contract/settle route; APPROVED is the settled state, not "ACCEPTED").
-    // Each instance runs its OWN submit → review → approve: the intrinsic state
-    // is local RBAC, so A approving says nothing about B's copy — B's reviewer
-    // and approver still have to act, and the signing gate is per instance.
+    // A Submits first (records + ships A's settlement). Review can advance, but
+    // Approve stays blocked until B's matching settlement arrives.
     // Submit-merge ships the formal PDF; C2PA grows here, not on Propose.
-    await settleToApprovedOn(a, contractDid)
+    await advanceToSubmittedOn(a, contractDid)
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
+    await forwardReviewOn(a, contractDid)
+    await assertApproveBlockedUntilSettlementReady(a, contractDid)
 
-    // A is now APPROVED and has shipped its own settlement, but B has not
-    // settled: A's signer is offered the contract and is still refused, because
-    // signing claims BOTH parties agreed this version and A holds no evidence
-    // that B did. Absence of that evidence is not agreement — this is the gate
-    // the live demo instances went straight past, signing while the peer was
-    // still negotiating.
-    await assertSigningRefusedUntilCounterpartySettles(a, contractDid, 'Instance A Signatory')
+    // B Submits the same document, shipping B's settlement to A. Approve then
+    // opens on the peer evidence — the gate the live demos skipped.
+    await advanceToSubmittedOn(b, contractDid)
+    await approveWhenSettlementReadyOn(a, contractDid)
 
-    // B settles the same document, which ships B's settlement to A. Stage 8
-    // then signs on both instances: that it succeeds at all is the other half
-    // of this assertion — the gate opens on the peer's evidence arriving, not
-    // on anything A does.
-    await settleToApprovedOn(b, contractDid)
+    // Intrinsic state is local RBAC: B still has to review + approve its copy.
+    await forwardReviewOn(b, contractDid)
+    await approveWhenSettlementReadyOn(b, contractDid)
     await assertReceivedInState(a, contractDid, 'APPROVED')
     await assertReceivedInState(b, contractDid, 'APPROVED')
     await saveArtifact(a, contractDid, '07-settle-A')

@@ -18,7 +18,9 @@ import {
   publishShapeOnInstance,
   registerTemplateOn,
   resolveDidWeb,
-  settleToApprovedOn,
+  advanceToSubmittedOn,
+  approveWhenSettlementReadyOn,
+  forwardReviewOn,
   signOnInstance,
   stagedCounterOffer,
   submitReviewApproveTemplateOn,
@@ -163,10 +165,16 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
-    await settleToApprovedOn(a, contractDid)
+    // Both must Submit (exchange settlements) before either Approve — the
+    // settlement_ready gate refuses Approve without a matching peer settlement.
+    await advanceToSubmittedOn(a, contractDid)
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     bChain = await assertManifestChainGrew(b, contractDid, bChain)
-    await settleToApprovedOn(b, contractDid)
+    await advanceToSubmittedOn(b, contractDid)
+    await forwardReviewOn(a, contractDid)
+    await approveWhenSettlementReadyOn(a, contractDid)
+    await forwardReviewOn(b, contractDid)
+    await approveWhenSettlementReadyOn(b, contractDid)
     await signOnInstance(a, contractDid, 'Erasure Signatory')
     await assertReceivedInState(a, contractDid, 'SIGNED')
   })

@@ -1507,20 +1507,31 @@ async function localContractState(inst: Instance, contractDid: string): Promise<
   return String(((await resp.json()) as { state?: string }).state ?? '').toUpperCase()
 }
 
+async function retrieveSettlementReady(
+  inst: Instance,
+  contractDid: string,
+): Promise<{ ready: boolean; detail: string }> {
+  const auth = await apiAuthHeaders(inst, 'Contract Approver', `/ui/contracts/approve/${contractDid}`)
+  const resp = await inst.page.request.get(`${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`, {
+    headers: auth,
+  })
+  if (!resp.ok()) {
+    return { ready: false, detail: `http_${resp.status()}` }
+  }
+  const body = (await resp.json()) as { settlement_ready?: boolean; settlement_ready_detail?: string }
+  return {
+    ready: body.settlement_ready === true,
+    detail: body.settlement_ready_detail || (body.settlement_ready === true ? 'ready' : 'not_ready'),
+  }
+}
+
 /** Approve stays disabled until own + matching peer settlements are held. */
 async function waitForSettlementReadyOn(inst: Instance, contractDid: string): Promise<void> {
   await expect
     .poll(
       async () => {
-        const auth = await apiAuthHeaders(inst, 'Contract Approver', `/ui/contracts/approve/${contractDid}`)
-        const resp = await inst.page.request.get(
-          `${inst.apiBase}/contract/retrieve/${encodeURIComponent(contractDid)}`,
-          { headers: auth },
-        )
-        if (!resp.ok()) return `http_${resp.status()}`
-        const body = (await resp.json()) as { settlement_ready?: boolean; settlement_ready_detail?: string }
-        if (body.settlement_ready === true) return 'ready'
-        return body.settlement_ready_detail || 'not_ready'
+        const { ready, detail } = await retrieveSettlementReady(inst, contractDid)
+        return ready ? 'ready' : detail
       },
       {
         timeout: 120_000,
@@ -1532,11 +1543,38 @@ async function waitForSettlementReadyOn(inst: Instance, contractDid: string): Pr
 }
 
 /**
- * Accept open decisions, then Submit / Submit review until SUBMITTED, then
- * review → approve to APPROVED. A Submit with accepted proposals merges and
- * stays NEGOTIATION; Submit review advances to SUBMITTED.
+ * Mutual settlement gate at Approve — after this instance has submitted (and
+ * reviewed) but before the peer ships a matching settlement, Approve stays
+ * blocked. Distinct from assertSigningRefusedUntilCounterpartySettles: Approve
+ * now refuses first, so a 2DCS flow never reaches APPROVED without peer evidence.
  */
-export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+export async function assertApproveBlockedUntilSettlementReady(inst: Instance, contractDid: string): Promise<void> {
+  const { ready, detail } = await retrieveSettlementReady(inst, contractDid)
+  expect(
+    ready,
+    `${inst.origin} settlement_ready was true for ${contractDid} before the peer settled (detail=${detail})`,
+  ).toBe(false)
+
+  await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
+  await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
+  await expect(
+    inst.page.getByRole('button', { name: 'Approve', exact: true }),
+    `${inst.origin} Approve enabled for ${contractDid} while settlement_ready is false`,
+  ).toBeDisabled()
+}
+
+/**
+ * Accept open decisions, then Submit until SUBMITTED. That transition records
+ * and ships this instance's settlement; peer Approve stays blocked until it
+ * arrives. A Submit with accepted proposals may merge and stay NEGOTIATION —
+ * Submit review advances to SUBMITTED.
+ */
+export async function advanceToSubmittedOn(inst: Instance, contractDid: string): Promise<void> {
+  const before = await localContractState(inst, contractDid)
+  if (before === 'SUBMITTED' || before === 'REVIEWED' || before === 'APPROVED' || before === 'SIGNED') {
+    return
+  }
+
   for (let round = 0; round < 5; round++) {
     await acceptOpenDecisionsOn(inst, contractDid)
 
@@ -1577,6 +1615,15 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
       expect(after, `${inst.origin} never reached SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
     }
   }
+}
+
+/** Reviewer Approve: SUBMITTED → REVIEWED. */
+export async function forwardReviewOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'REVIEWED' || state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} forwardReview expected SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
 
   await openContractFromTaskTab(inst, 'Contract Reviewer', 'reviews', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/review\//)
@@ -1590,8 +1637,19 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     .getByRole('button', { name: 'Confirm approval', exact: true })
     .click()
   await forwarded
+}
 
-  // Approve: REVIEWED -> APPROVED, found the same way in the Approval Tasks tab.
+/**
+ * Approver Approve once settlement_ready: REVIEWED → APPROVED. In 2DCS both
+ * instances must have advanced to SUBMITTED (settlements exchanged) first.
+ */
+export async function approveWhenSettlementReadyOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} approve expected REVIEWED for ${contractDid}`).toBe('REVIEWED')
+
   await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
   await waitForSettlementReadyOn(inst, contractDid)
@@ -1604,6 +1662,18 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
   await approveBtn.click()
   await confirmModalOn(inst, 'Confirm')
   await approved
+}
+
+/**
+ * Accept open decisions, Submit until SUBMITTED, review → approve to APPROVED.
+ * Single-DCS (no remote party slots) is settlement_ready immediately. For
+ * 2DCS, call advanceToSubmittedOn on BOTH instances before either
+ * approveWhenSettlementReadyOn — otherwise the peer settlement never arrives.
+ */
+export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+  await advanceToSubmittedOn(inst, contractDid)
+  await forwardReviewOn(inst, contractDid)
+  await approveWhenSettlementReadyOn(inst, contractDid)
 }
 
 /**
