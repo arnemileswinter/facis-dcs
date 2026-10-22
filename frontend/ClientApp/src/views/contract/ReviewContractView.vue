@@ -302,6 +302,7 @@ const exportPDF = async () => {
                       :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                       :verification-result="verificationResult"
                       :set-semantic-condition-value="setSemanticConditionValue"
+                      disabled
                     />
                   </div>
                 </div>
