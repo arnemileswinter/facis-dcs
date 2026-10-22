@@ -223,6 +223,19 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
 	}
+	peerSignatures, err := trustgate.PeerSignatures(localPeer, embeddedEvidence)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
+	}
+	if syncSignature != nil && len(peerSignatures) > 0 {
+		evidence, err := json.Marshal(peerSignatures)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		revalidatedAt := time.Now().UTC()
+		syncSignature.PoAEvidence = evidence
+		syncSignature.PoARevalidatedAt = &revalidatedAt
+	}
 
 	// Semantic bundle (ADR-8): the shipped contract's dcs:effectiveShapes pin was
 	// written from the SENDER's hub, so the shape libraries it names travel with

@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -329,6 +330,19 @@ func (r *PostgresContractRepo) LoadSignatures(ctx context.Context, tx *sqlx.Tx, 
 		return nil, err
 	}
 	return records, nil
+}
+
+func (r *PostgresContractRepo) ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error) {
+	var evidence []byte
+	err := tx.GetContext(ctx, &evidence,
+		`SELECT poa_evidence FROM contract_sync_signatures WHERE did = $1 AND poa_evidence IS NOT NULL`, did)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return evidence, nil
 }
 
 func (r *PostgresContractRepo) CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {
