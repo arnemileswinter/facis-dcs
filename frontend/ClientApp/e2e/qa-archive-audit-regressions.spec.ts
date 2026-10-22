@@ -229,3 +229,318 @@ test('F02 Archive Manager cannot see or request the access log panel', async ({ 
   await expect(page.locator('summary').filter({ hasText: /^Access attempts$/ })).toHaveCount(0)
   expect(requests).toBe(0)
 })
+
+for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
+  for (const width of [390, 768, 1280, 3440]) {
+    test(`Archive layout ${role} at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await authenticate(page, role)
+      const longName = 'Archived supply agreement — '.repeat(5)
+      await page.route('**/archive/statistics', (route) =>
+        json(route, {
+          archived_total: 2,
+          archived_contracts: 1,
+          storage_bytes: 6250,
+          compliant_total: 1,
+          flagged_total: 1,
+          deleted_total: 0,
+          expiring_contracts: [{ did, name: longName, exp_date: '2026-11-01T00:00:00Z' }],
+          recent_actions: [
+            {
+              did,
+              actor: 'did:web:long-actor.test:'.repeat(5),
+              event_type: 'STORE_ARCHIVED_CONTRACT',
+              occurred_at: '2026-10-20T10:00:00Z',
+            },
+          ],
+        }),
+      )
+      await page.route('**/archive/retrieve', (route) =>
+        json(route, {
+          contracts: [1, 2].map((contract_version) => ({
+            did,
+            name: longName,
+            state: 'SIGNED',
+            contract_version,
+            archive_summary: 'Long archive summary '.repeat(15),
+            archive_tags: ['long-tag'.repeat(25)],
+          })),
+        }),
+      )
+      await page.route('**/archive/erasure-status**', (route) =>
+        json(route, { did, local_status: width === 768 ? 'shredded' : 'live', peers: [] }),
+      )
+      await page.goto('/ui/archive/dashboard')
+      const dashboard = page.getByTestId('archive-dashboard')
+      await expect(dashboard).toBeVisible()
+      if (role !== 'Auditor') {
+        const toggle = page.getByRole('button', { name: 'Additional filters' })
+        await toggle.focus()
+        await page.keyboard.press('Enter')
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        await page.getByLabel('Tag', { exact: true }).fill('retained')
+        await toggle.focus()
+        await page.keyboard.press('Space')
+        await expect(toggle).toBeFocused()
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        await expect(page.getByLabel('Tag', { exact: true })).not.toBeVisible()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Reset search' })).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('link', { name: `${longName}, version 1`, exact: true })).toBeFocused()
+        const open = page.locator('.archive-entry-link')
+        await expect(open).toHaveCount(2)
+        for (const version of [1, 2]) {
+          const link = open.nth(version - 1)
+          await expect(link).toBeVisible()
+          const url = new URL((await link.getAttribute('href')) ?? '', page.url())
+          expect(url.searchParams.get('did')).toBe(did)
+          expect(url.searchParams.get('contract_version')).toBe(String(version))
+          const box = await link.boundingBox()
+          expect(box!.x).toBeGreaterThanOrEqual(0)
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+        }
+        if (role === 'Archive Manager') {
+          const list = await page.getByTestId('archive-entries').boundingBox()
+          const stats = await page.getByTestId('archive-statistics').boundingBox()
+          expect(list!.y).toBeLessThan(stats!.y)
+          await page.getByTestId(`erasure-badge-${did}`).first().click()
+          await expect(page.getByTestId(`erasure-details-${did}`).first()).toContainText(
+            width === 768 ? 'Keys destroyed' : 'Encryption keys are live',
+          )
+          await page.getByTestId(`archive-delete-${did}`).first().click()
+          await expect(page.getByPlaceholder('Justification')).toBeVisible()
+          await expect(page.getByRole('dialog').getByRole('checkbox')).toBeVisible()
+          await expect(page.getByRole('dialog')).toContainText(
+            'Encryption keys will be destroyed on both instances (irreversible)',
+          )
+          await expect(page.getByTestId('confirmation-confirm')).toBeDisabled()
+          await page.getByPlaceholder('Justification').fill('Layout verification')
+          await expect(page.getByTestId('confirmation-confirm')).toBeDisabled()
+          await page.getByRole('dialog').getByRole('checkbox').check()
+          await expect(page.getByTestId('confirmation-confirm')).toBeEnabled()
+          await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+        }
+      }
+      if (role !== 'Contract Observer') {
+        await expect(page.getByTestId('stat-flagged')).toHaveText('1')
+        const audit = page.getByTestId('archive-recent-actions').getByRole('link')
+        expect(await audit.getAttribute('href')).toContain('scope=archive')
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      ).toBe(true)
+      const bounds = await dashboard.boundingBox()
+      expect(bounds!.width).toBeLessThanOrEqual(1536)
+      if (width === 3440) {
+        const parent = await dashboard.locator('..').boundingBox()
+        expect(Math.abs(bounds!.x - parent!.x - (parent!.x + parent!.width - bounds!.x - bounds!.width))).toBeLessThan(
+          2,
+        )
+      }
+      await page.getByRole('heading', { name: 'Contract Archive Dashboard' }).scrollIntoViewIfNeeded()
+      await page.screenshot({
+        path: testInfo.outputPath(`archive-${role.replaceAll(' ', '-')}-${width}.png`),
+        fullPage: true,
+      })
+      if (role !== 'Contract Observer') {
+        await page.getByTestId('archive-recent-actions').scrollIntoViewIfNeeded()
+        await page.screenshot({
+          path: testInfo.outputPath(`overview-${role.replaceAll(' ', '-')}-${width}.png`),
+          fullPage: true,
+        })
+      }
+      if (role === 'Auditor') {
+        await page.getByTestId('archive-recent-actions').getByRole('link').click()
+        await expect(page.locator('#select-scope')).toHaveValue('archive')
+        await expect(page.locator('#input-did')).toHaveValue(did)
+      } else {
+        await page.route('**/api/archive/detail**', (route) =>
+          json(route, { did, name: longName, contract_version: 2, state: 'SIGNED' }),
+        )
+        await page.locator('.archive-entry-link').nth(1).click()
+        await expect(page).toHaveURL(/archive\/detail\?.*contract_version=2/)
+        expect(new URL(page.url()).searchParams.get('did')).toBe(did)
+      }
+    })
+  }
+}
+
+for (const [role, width] of [
+  ['Archive Manager', 1280],
+  ['Archive Manager', 3440],
+  ['Auditor', 1280],
+] as const) {
+  test(`Archive compact overview ${role} at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await authenticate(page, role)
+    await page.route('**/archive/statistics', (route) =>
+      json(route, {
+        archived_total: 1,
+        archived_contracts: 1,
+        storage_bytes: 6250,
+        compliant_total: 1,
+        flagged_total: 0,
+        deleted_total: 0,
+        expiring_contracts: [],
+        recent_actions: [],
+      }),
+    )
+    await page.route('**/archive/retrieve', (route) =>
+      json(route, {
+        contracts: [
+          {
+            did,
+            name: 'Supply agreement 2026',
+            contract_version: 1,
+            state: 'SIGNED',
+            archive_summary: 'Signed supply agreement for the current year.',
+            archive_tags: ['supply', '2026'],
+          },
+        ],
+      }),
+    )
+    await page.route('**/archive/erasure-status**', (route) => json(route, { did, local_status: 'live', peers: [] }))
+    await page.goto('/ui/archive/dashboard')
+    await expect(page.getByTestId('archive-expiring')).toContainText(
+      'No archived contracts expire within the next 30 days.',
+    )
+    await expect(page.getByTestId('archive-recent-actions')).toContainText('No archive operations recorded yet.')
+    await expect(page.getByTestId('stat-storage-volume')).toHaveText('6.1 KiB')
+    expect((await page.getByTestId('archive-expiring').boundingBox())!.height).toBeLessThan(160)
+    await page.screenshot({
+      path: testInfo.outputPath(`compact-${role.replaceAll(' ', '-')}-${width}.png`),
+      fullPage: true,
+    })
+  })
+}
+
+for (const width of [390, 1280, 3440]) {
+  for (const mode of ['observer', 'live', 'shredded']) {
+    test(`Archive clickable entries ${mode} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await authenticate(page, mode === 'observer' ? 'Contract Observer' : 'Archive Manager')
+      const name = 'Supply agreement '.repeat(12)
+      await page.route('**/archive/statistics', (route) =>
+        json(route, {
+          archived_total: 2,
+          archived_contracts: 1,
+          storage_bytes: 100,
+          compliant_total: 2,
+          flagged_total: 0,
+          deleted_total: 0,
+          expiring_contracts: [],
+          recent_actions: [],
+        }),
+      )
+      await page.route('**/archive/retrieve', (route) =>
+        json(route, {
+          contracts: [1, 2].map((contract_version) => ({
+            did,
+            name,
+            state: 'SIGNED',
+            contract_version,
+            archive_summary: contract_version === 1 ? 'Summary '.repeat(30) : undefined,
+            archive_tags: ['long-tag'.repeat(30)],
+          })),
+        }),
+      )
+      await page.route('**/archive/erasure-status**', (route) => json(route, { did, local_status: mode, peers: [] }))
+      await page.route('**/api/archive/detail**', (route) =>
+        json(route, {
+          did,
+          name,
+          contract_version: Number(new URL(route.request().url()).searchParams.get('contract_version')),
+          state: 'SIGNED',
+        }),
+      )
+      await page.goto('/ui/archive/dashboard')
+      const rows = page.getByTestId(`archive-entry-${did}`)
+      await expect(rows).toHaveCount(2)
+      const link = rows.first().getByRole('link', { name: `${name}, version 1`, exact: true })
+      await expect(rows.first().locator('a[href*="/archive/detail"]')).toHaveCount(1)
+      await expect(page.getByText('Open contract', { exact: true })).toHaveCount(0)
+      await expect(link).toHaveCSS('text-decoration-line', 'none')
+      await link.hover()
+      await expect(link).toHaveCSS('text-decoration-line', 'none')
+      await page.screenshot({ path: `/tmp/facis-archive-clickable/hover-${mode}-${width}.png` })
+      await link.focus()
+      await expect(link).toBeFocused()
+      expect(await link.evaluate((element) => getComputedStyle(element, '::after').outlineStyle)).toBe('solid')
+      await page.screenshot({ path: `/tmp/facis-archive-clickable/focus-${mode}-${width}.png` })
+      await link.press('Enter')
+      await expect(page).toHaveURL(/archive\/detail\?.*contract_version=1/)
+      expect(new URL(page.url()).searchParams.get('did')).toBe(did)
+      await page.goBack()
+      await rows
+        .first()
+        .getByRole('link', { name: `${name}, version 1`, exact: true })
+        .click()
+      await expect(page).toHaveURL(/archive\/detail\?.*contract_version=1/)
+      await page.goBack()
+      const second = rows.nth(1)
+      await second.scrollIntoViewIfNeeded()
+      const box = await second.boundingBox()
+      await second.click({ position: { x: box!.width - 3, y: box!.height - 3 } })
+      await expect(page).toHaveURL(/archive\/detail\?.*contract_version=2/)
+      expect(new URL(page.url()).searchParams.get('did')).toBe(did)
+      await page.goBack()
+      for (const [label, target, version, corner] of [
+        ['DID', rows.first().locator('.font-mono'), 1, false],
+        ['Version', rows.first().locator('td').nth(1), 1, false],
+        ['State', rows.first().locator('td').nth(2).locator('.badge'), 1, false],
+        ['Summary', rows.first().getByTestId(`archive-annotation-${did}`).locator('div').first(), 1, false],
+        ['Not annotated', rows.nth(1).getByText('Not annotated'), 2, false],
+        ['Tags', rows.first().getByTestId(`archive-annotation-${did}`).locator('.badge'), 1, false],
+        ['First row edge', rows.first(), 1, true],
+        ['Second row edge', rows.nth(1), 2, true],
+      ] as const) {
+        await test.step(`coordinate click on ${label}`, async () => {
+          await target.scrollIntoViewIfNeeded()
+          const bounds = await target.boundingBox()
+          await page.mouse.click(
+            bounds!.x + (corner ? 2 : bounds!.width / 2),
+            bounds!.y + (corner ? 2 : bounds!.height / 2),
+          )
+          await expect
+            .soft(page, `${label} opens version ${version}`)
+            .toHaveURL(new RegExp(`archive/detail\\?.*contract_version=${version}`), { timeout: 2000 })
+          if (page.url().includes('/archive/detail')) expect(new URL(page.url()).searchParams.get('did')).toBe(did)
+          await page.goto('/ui/archive/dashboard')
+        })
+      }
+      if (mode !== 'observer') {
+        for (const keyboard of [false, true]) {
+          const activate = async (control: ReturnType<Page['getByRole']>) => {
+            if (keyboard) await control.press('Enter')
+            else await control.click()
+          }
+          await activate(rows.first().getByTestId(`erasure-badge-${did}`))
+          await expect(page.getByTestId(`erasure-details-${did}`).first()).toContainText(
+            mode === 'live' ? 'Encryption keys are live' : 'Keys destroyed',
+          )
+          await expect(page).toHaveURL(/archive\/dashboard$/)
+          const details = page.getByTestId(`erasure-details-${did}`).first()
+          await details.scrollIntoViewIfNeeded()
+          const detailBox = await details.boundingBox()
+          await page.mouse.click(detailBox!.x + detailBox!.width / 2, detailBox!.y + detailBox!.height / 2)
+          await expect(page).toHaveURL(/archive\/dashboard$/)
+          await activate(rows.first().getByTestId(`erasure-badge-${did}`))
+          for (const action of ['annotate', 'delete']) {
+            await activate(rows.first().getByTestId(`archive-${action}-${did}`))
+            await expect(page.getByRole('dialog')).toBeVisible()
+            await expect(page).toHaveURL(/archive\/dashboard$/)
+            await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+          }
+          await activate(rows.first().getByRole('link', { name: 'Audit', exact: true }))
+          await expect(page).toHaveURL(/audit\?scope=archive/)
+          expect(new URL(page.url()).searchParams.get('did')).toBe(did)
+          await page.goBack()
+        }
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      ).toBe(true)
+    })
+  }
+}

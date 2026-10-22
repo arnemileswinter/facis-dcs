@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDownIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
@@ -34,6 +35,13 @@ const isArchiveManager = computed(() => authStore.user?.roles.includes('ARCHIVE_
 const canReadEntries = computed(() => isArchiveManager.value || !!authStore.user?.roles.includes('CONTRACT_OBSERVER'))
 const canReadStatistics = computed(() => isArchiveManager.value || !!authStore.user?.roles.includes('AUDITOR'))
 const search = ref<ArchiveSearch>({})
+const showAdditionalFilters = ref(false)
+const additionalFilterCount = computed(
+  () =>
+    Object.entries(search.value).filter(
+      ([key, value]) => !['name', 'state'].includes(key) && value !== '' && value != null,
+    ).length,
+)
 const entriesLoading = ref(false)
 let entriesRequest = 0
 onBeforeUnmount(() => entriesRequest++)
@@ -184,159 +192,89 @@ function shortDid(did: string): string {
 </script>
 
 <template>
-  <div class="space-y-6 p-4" data-testid="archive-dashboard">
-    <h1 class="text-2xl font-bold">Contract Archive Dashboard</h1>
-
-    <div v-if="loading" class="flex justify-center p-8">
-      <span class="loading loading-lg loading-spinner" />
-    </div>
-    <div v-else-if="error" class="alert alert-error" data-testid="archive-dashboard-error">{{ error }}</div>
-
-    <template v-else-if="statistics">
-      <!-- Archived contract statistics + storage volume + compliance status -->
-      <div class="stats w-full stats-vertical shadow lg:stats-horizontal" data-testid="archive-statistics">
-        <div class="stat">
-          <div class="stat-title">Archived contracts</div>
-          <div class="stat-value" data-testid="stat-archived-contracts">{{ statistics.archived_contracts }}</div>
-          <div class="stat-desc">{{ statistics.archived_total }} entries across all versions</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Storage volume</div>
-          <div class="stat-value text-primary" data-testid="stat-storage-volume">{{ storageDisplay }}</div>
-          <div class="stat-desc">snapshots and evidence</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Compliant</div>
-          <div class="stat-value text-success" data-testid="stat-compliant">{{ statistics.compliant_total }}</div>
-          <div class="stat-desc">complete evidence sets</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Flagged</div>
-          <div class="stat-value" :class="statistics.flagged_total > 0 ? 'text-error' : ''" data-testid="stat-flagged">
-            {{ statistics.flagged_total }}
-          </div>
-          <div class="stat-desc">incomplete evidence (DCS-FR-CSA-19)</div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Deleted</div>
-          <div class="stat-value" data-testid="stat-deleted">{{ statistics.deleted_total }}</div>
-          <div class="stat-desc">soft-deleted entries</div>
-        </div>
-      </div>
-
-      <div class="grid gap-6 lg:grid-cols-2">
-        <!-- Expiring contracts -->
-        <section class="card bg-base-100 shadow" data-testid="archive-expiring">
-          <div class="card-body">
-            <h2 class="card-title">Expiring within 30 days</h2>
-            <p v-if="statistics.expiring_contracts.length === 0" class="text-sm opacity-70">
-              No archived contracts expire within the next 30 days.
-            </p>
-            <table v-else class="table table-zebra table-sm">
-              <thead>
-                <tr>
-                  <th>Contract</th>
-                  <th>Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="contract in statistics.expiring_contracts" :key="contract.did">
-                  <td>
-                    <RouterLink
-                      :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: contract.did } }"
-                      class="link link-primary"
-                      :data-testid="`expiring-${contract.did}`"
-                    >
-                      {{ contract.name || shortDid(contract.did) }}
-                    </RouterLink>
-                  </td>
-                  <td>{{ formatTimestamp(contract.exp_date) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- Recent actions -->
-        <section class="card bg-base-100 shadow" data-testid="archive-recent-actions">
-          <div class="card-body">
-            <h2 class="card-title">Recent actions</h2>
-            <p v-if="statistics.recent_actions.length === 0" class="text-sm opacity-70">
-              No archive operations recorded yet.
-            </p>
-            <table v-else class="table table-zebra table-sm">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Operation</th>
-                  <th>Actor</th>
-                  <th>Contract</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(action, index) in statistics.recent_actions" :key="index">
-                  <td>{{ formatTimestamp(action.occurred_at) }}</td>
-                  <td>{{ action.event_type }}</td>
-                  <td class="max-w-40 truncate" :title="action.actor">{{ action.actor }}</td>
-                  <td>
-                    <RouterLink
-                      v-if="action.did"
-                      :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: action.did } }"
-                      class="link link-primary"
-                    >
-                      {{ shortDid(action.did) }}
-                    </RouterLink>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </template>
+  <div class="mx-auto w-full max-w-screen-2xl min-w-0 space-y-6 p-4 lg:p-6" data-testid="archive-dashboard">
+    <header>
+      <h1 class="text-2xl font-bold">Contract Archive Dashboard</h1>
+      <p class="mt-1 text-sm text-base-content/70">
+        Find archived contracts, review evidence and track archive activity.
+      </p>
+    </header>
 
     <!-- Archived contract entries with key-erasure state and delete-with-shred -->
-    <section v-if="canReadEntries" class="card bg-base-100 shadow" data-testid="archive-entries">
-      <div class="card-body">
+    <section
+      v-if="canReadEntries"
+      class="card min-w-0 border border-base-300 bg-base-100 shadow-sm"
+      data-testid="archive-entries"
+    >
+      <div class="card-body min-w-0 p-4 sm:p-6">
         <h2 class="card-title">Archived contracts</h2>
-        <form class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="loadEntries">
-          <label class="fieldset">
-            Name
-            <input v-model="search.name" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            DID
-            <input v-model="search.did" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            Party
-            <input v-model="search.party" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            State
-            <select v-model="search.state" class="select w-full">
-              <option :value="undefined">All states</option>
-              <option v-for="state in contractStates" :key="state" :value="state">{{ state }}</option>
-            </select>
-          </label>
-          <label class="fieldset">
-            Tag
-            <input v-model="search.tag" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            Version
-            <input v-model.number="search.contract_version" type="number" min="1" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            Valid from
-            <input v-model="search.valid_from" type="date" class="input w-full" />
-          </label>
-          <label class="fieldset">
-            Valid until
-            <input v-model="search.valid_until" type="date" class="input w-full" />
-          </label>
-          <button class="btn btn-primary" type="submit" :disabled="entriesLoading">Search archive</button>
-          <button class="btn btn-outline" type="button" @click="resetSearch">Reset search</button>
+        <p class="text-sm text-base-content/70">Search the archive and open a preserved contract version.</p>
+        <form class="my-3 space-y-3" @submit.prevent="loadEntries">
+          <div class="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_auto]">
+            <label class="fieldset min-w-0">
+              Name
+              <input v-model="search.name" class="input w-full" placeholder="Search by contract name" />
+            </label>
+            <label class="fieldset min-w-0">
+              State
+              <select v-model="search.state" class="select w-full">
+                <option :value="undefined">All states</option>
+                <option v-for="state in contractStates" :key="state" :value="state">{{ state }}</option>
+              </select>
+            </label>
+            <button class="btn mb-1 btn-primary" type="submit" :disabled="entriesLoading">
+              <MagnifyingGlassIcon class="size-4" aria-hidden="true" />
+              Search archive
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              :aria-expanded="showAdditionalFilters"
+              aria-controls="archive-additional-filters"
+              @click="showAdditionalFilters = !showAdditionalFilters"
+            >
+              <ChevronDownIcon
+                class="size-4 transition-transform"
+                :class="{ 'rotate-180': showAdditionalFilters }"
+                aria-hidden="true"
+              />
+              Additional filters
+              <span v-if="additionalFilterCount" class="badge badge-sm badge-primary">{{ additionalFilterCount }}</span>
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" @click="resetSearch">Reset search</button>
+          </div>
+          <div
+            v-show="showAdditionalFilters"
+            id="archive-additional-filters"
+            class="grid gap-3 rounded-box bg-base-200/50 p-4 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            <label class="fieldset min-w-0">
+              DID
+              <input v-model="search.did" class="input w-full" />
+            </label>
+            <label class="fieldset min-w-0">
+              Party
+              <input v-model="search.party" class="input w-full" />
+            </label>
+            <label class="fieldset min-w-0">
+              Tag
+              <input v-model="search.tag" class="input w-full" />
+            </label>
+            <label class="fieldset min-w-0">
+              Version
+              <input v-model.number="search.contract_version" type="number" min="1" class="input w-full" />
+            </label>
+            <label class="fieldset min-w-0">
+              Valid from
+              <input v-model="search.valid_from" type="date" class="input w-full" />
+            </label>
+            <label class="fieldset min-w-0">
+              Valid until
+              <input v-model="search.valid_until" type="date" class="input w-full" />
+            </label>
+          </div>
         </form>
         <p v-if="entriesLoading" role="status">Loading archived contracts…</p>
         <div v-else-if="entriesError" class="alert alert-error" data-testid="archive-entries-error">
@@ -345,44 +283,57 @@ function shortDid(did: string): string {
         <p v-else-if="entries.length === 0" class="text-sm opacity-70" data-testid="archive-entries-empty">
           No archived contracts.
         </p>
-        <div v-else class="overflow-x-auto">
-          <table class="table table-zebra table-sm">
+        <div v-else class="min-w-0">
+          <table class="archive-contracts table w-full table-fixed">
             <thead>
               <tr>
-                <th>Contract</th>
-                <th>Version</th>
+                <th class="w-1/3">Contract</th>
+                <th class="w-20">Version</th>
                 <th>State</th>
                 <th>Annotation</th>
                 <th v-if="isArchiveManager">Encryption</th>
-                <th></th>
+                <th v-if="isArchiveManager"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               <template v-for="entry in entries" :key="`${entry.did}-${entry.contract_version}`">
-                <tr :data-testid="`archive-entry-${entry.did}`">
+                <tr class="archive-entry" :data-testid="`archive-entry-${entry.did}`">
                   <td>
                     <RouterLink
                       :to="{
                         name: ROUTES.ARCHIVE.DETAIL,
                         query: { did: entry.did, contract_version: entry.contract_version },
                       }"
-                      class="link link-primary"
+                      class="archive-entry-link font-semibold wrap-anywhere"
+                      :aria-label="`${entry.name || entry.did}, version ${entry.contract_version}`"
                     >
                       {{ entry.name || shortDid(entry.did) }}
                     </RouterLink>
-                    <div class="font-mono text-xs opacity-70">{{ shortDid(entry.did) }}</div>
+                    <div class="mt-1 font-mono text-xs opacity-70" :title="entry.did">{{ shortDid(entry.did) }}</div>
                   </td>
-                  <td>{{ entry.contract_version }}</td>
+                  <td>
+                    <span class="mr-1 text-base-content/70 lg:hidden">Version</span>
+                    {{ entry.contract_version }}
+                  </td>
                   <td>
                     <span class="badge badge-ghost badge-sm">{{ entry.state }}</span>
                   </td>
                   <td :data-testid="`archive-annotation-${entry.did}`">
-                    <div v-if="entry.archive_summary" class="max-w-xs truncate text-sm">
+                    <div
+                      v-if="entry.archive_summary"
+                      class="line-clamp-2 text-sm wrap-anywhere"
+                      :title="entry.archive_summary"
+                    >
                       {{ entry.archive_summary }}
                     </div>
                     <div v-else class="text-sm opacity-50">Not annotated</div>
                     <div v-if="entry.archive_tags?.length" class="mt-1 flex flex-wrap gap-1">
-                      <span v-for="tag in entry.archive_tags" :key="tag" class="badge badge-ghost badge-xs">
+                      <span
+                        v-for="tag in entry.archive_tags"
+                        :key="tag"
+                        class="badge block max-w-full truncate badge-ghost badge-xs"
+                        :title="tag"
+                      >
                         {{ tag }}
                       </span>
                     </div>
@@ -391,7 +342,8 @@ function shortDid(did: string): string {
                     <button
                       v-if="erasureStatuses[entry.did]?.local_status === 'shredded'"
                       type="button"
-                      class="badge cursor-pointer badge-sm badge-error"
+                      class="btn h-auto min-h-8 btn-outline btn-sm btn-error"
+                      :aria-expanded="expandedErasureDid === entry.did"
                       :data-testid="`erasure-badge-${entry.did}`"
                       @click="toggleErasureDetails(entry.did)"
                     >
@@ -400,22 +352,23 @@ function shortDid(did: string): string {
                     <button
                       v-else-if="erasureStatuses[entry.did]"
                       type="button"
-                      class="badge cursor-pointer badge-ghost badge-sm"
+                      class="btn h-auto min-h-8 btn-ghost btn-sm"
+                      :aria-expanded="expandedErasureDid === entry.did"
                       :data-testid="`erasure-badge-${entry.did}`"
                       @click="toggleErasureDetails(entry.did)"
                     >
                       Keys live
                     </button>
                   </td>
-                  <td v-if="isArchiveManager" class="text-right">
+                  <td v-if="isArchiveManager" class="space-y-1">
                     <RouterLink
                       :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: entry.did } }"
-                      class="link"
+                      class="btn btn-ghost btn-sm"
                     >
                       Audit
                     </RouterLink>
                     <button
-                      class="btn btn-ghost btn-xs"
+                      class="btn btn-ghost btn-sm"
                       :disabled="annotating"
                       :data-testid="`archive-annotate-${entry.did}`"
                       @click="annotateEntry(entry)"
@@ -423,7 +376,7 @@ function shortDid(did: string): string {
                       Annotate
                     </button>
                     <button
-                      class="btn text-error btn-ghost btn-xs"
+                      class="btn text-error btn-ghost btn-sm"
                       :disabled="deleting"
                       :data-testid="`archive-delete-${entry.did}`"
                       @click="deleteEntry(entry)"
@@ -434,7 +387,10 @@ function shortDid(did: string): string {
                 </tr>
                 <tr v-if="expandedErasureDid === entry.did && expandedStatus">
                   <td colspan="6">
-                    <div class="space-y-2 p-2 text-sm" :data-testid="`erasure-details-${entry.did}`">
+                    <div
+                      class="space-y-2 overflow-x-auto p-2 text-sm wrap-anywhere"
+                      :data-testid="`erasure-details-${entry.did}`"
+                    >
                       <template v-if="expandedStatus.local_status === 'shredded'">
                         <div>
                           <span class="font-medium">Keys destroyed</span>
@@ -486,11 +442,193 @@ function shortDid(did: string): string {
       </div>
     </section>
 
+    <h2 v-if="canReadStatistics" class="text-lg font-semibold">Archive overview</h2>
+
+    <div v-if="loading" class="flex justify-center p-8">
+      <span class="loading loading-lg loading-spinner" />
+    </div>
+    <div v-else-if="error" class="alert alert-error" data-testid="archive-dashboard-error">{{ error }}</div>
+
+    <template v-else-if="statistics">
+      <!-- Archived contract statistics + storage volume + compliance status -->
+      <div class="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-5" data-testid="archive-statistics">
+        <div class="stat min-w-0 rounded-box border border-base-300 bg-base-100 p-4">
+          <div class="stat-title">Archived contracts</div>
+          <div class="stat-value text-2xl" data-testid="stat-archived-contracts">
+            {{ statistics.archived_contracts }}
+          </div>
+          <div class="stat-desc whitespace-normal">{{ statistics.archived_total }} entries across all versions</div>
+        </div>
+        <div class="stat min-w-0 rounded-box border border-base-300 bg-base-100 p-4">
+          <div class="stat-title">Storage volume</div>
+          <div class="stat-value text-2xl text-primary" data-testid="stat-storage-volume">{{ storageDisplay }}</div>
+          <div class="stat-desc whitespace-normal">snapshots and evidence</div>
+        </div>
+        <div class="stat min-w-0 rounded-box border border-base-300 bg-base-100 p-4">
+          <div class="stat-title">Compliant</div>
+          <div class="stat-value text-2xl text-success" data-testid="stat-compliant">
+            {{ statistics.compliant_total }}
+          </div>
+          <div class="stat-desc whitespace-normal">complete evidence sets</div>
+        </div>
+        <div
+          class="stat min-w-0 rounded-box border bg-base-100 p-4"
+          :class="statistics.flagged_total > 0 ? 'border-error bg-error/5' : 'border-base-300'"
+        >
+          <div class="stat-title">Flagged</div>
+          <div
+            class="stat-value text-2xl"
+            :class="statistics.flagged_total > 0 ? 'text-error' : ''"
+            data-testid="stat-flagged"
+          >
+            {{ statistics.flagged_total }}
+          </div>
+          <div class="stat-desc whitespace-normal">incomplete evidence</div>
+        </div>
+        <div class="stat min-w-0 rounded-box border border-base-300 bg-base-100 p-4">
+          <div class="stat-title">Deleted</div>
+          <div class="stat-value text-2xl" data-testid="stat-deleted">{{ statistics.deleted_total }}</div>
+          <div class="stat-desc whitespace-normal">soft-deleted entries</div>
+        </div>
+      </div>
+
+      <div class="grid items-start gap-6 lg:grid-cols-2">
+        <!-- Expiring contracts -->
+        <section
+          class="card min-w-0 border border-base-300 bg-base-100"
+          :class="{ 'border-warning': statistics.expiring_contracts.length > 0 }"
+          data-testid="archive-expiring"
+        >
+          <div class="card-body min-w-0 p-4 sm:p-6">
+            <h2 class="card-title text-base">
+              Expiring within 30 days
+              <span v-if="statistics.expiring_contracts.length" class="badge badge-sm badge-warning">
+                {{ statistics.expiring_contracts.length }}
+              </span>
+            </h2>
+            <p v-if="statistics.expiring_contracts.length === 0" class="text-sm opacity-70">
+              No archived contracts expire within the next 30 days.
+            </p>
+            <div v-else class="overflow-x-auto" tabindex="0" role="region" aria-label="Expiring contracts">
+              <table class="table table-zebra table-sm">
+                <thead>
+                  <tr>
+                    <th>Contract</th>
+                    <th>Expires</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="contract in statistics.expiring_contracts" :key="contract.did">
+                    <td>
+                      <RouterLink
+                        :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: contract.did } }"
+                        class="link link-primary"
+                        :data-testid="`expiring-${contract.did}`"
+                      >
+                        {{ contract.name || shortDid(contract.did) }}
+                      </RouterLink>
+                    </td>
+                    <td>{{ formatTimestamp(contract.exp_date) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Recent actions -->
+        <section class="card min-w-0 border border-base-300 bg-base-100" data-testid="archive-recent-actions">
+          <div class="card-body min-w-0 p-4 sm:p-6">
+            <h2 class="card-title text-base">Recent actions</h2>
+            <p v-if="statistics.recent_actions.length === 0" class="text-sm opacity-70">
+              No archive operations recorded yet.
+            </p>
+            <div v-else class="overflow-x-auto" tabindex="0" role="region" aria-label="Recent archive actions">
+              <table class="table table-zebra table-sm">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Operation</th>
+                    <th>Actor</th>
+                    <th>Contract</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(action, index) in statistics.recent_actions" :key="index">
+                    <td>{{ formatTimestamp(action.occurred_at) }}</td>
+                    <td>{{ action.event_type }}</td>
+                    <td class="max-w-40 truncate" :title="action.actor">{{ action.actor }}</td>
+                    <td>
+                      <RouterLink
+                        v-if="action.did"
+                        :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: action.did } }"
+                        class="link link-primary"
+                      >
+                        {{ shortDid(action.did) }}
+                      </RouterLink>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </template>
+
     <ConfirmationModal ref="confirmation-modal" />
   </div>
 </template>
 
 <style scoped>
+.archive-entry {
+  position: relative;
+}
+.archive-entry:hover {
+  background: var(--color-base-200);
+}
+.archive-entry-link,
+.archive-entry-link:hover {
+  text-decoration: none;
+}
+.archive-entry-link::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: '';
+}
+.archive-entry-link:focus-visible {
+  outline: none;
+}
+.archive-entry-link:focus-visible::after {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.archive-entry button,
+.archive-entry a:not(.archive-entry-link) {
+  position: relative;
+  z-index: 2;
+}
+
+@media (max-width: 1023px) {
+  .archive-contracts,
+  .archive-contracts tbody,
+  .archive-contracts tr,
+  .archive-contracts td {
+    display: block;
+    width: 100%;
+  }
+  .archive-contracts thead {
+    display: none;
+  }
+  .archive-contracts tr {
+    padding: 1rem 0;
+  }
+  .archive-contracts td {
+    padding: 0.375rem 0;
+  }
+}
+
 .stat-title,
 .stat-desc {
   color: color-mix(in oklab, var(--color-base-content) /* var(--color-base-content) */ 70%, transparent);

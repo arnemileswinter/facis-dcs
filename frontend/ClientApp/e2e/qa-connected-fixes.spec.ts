@@ -44,6 +44,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
   let version = ''
   await test.step('P04 archive summary survives reload and a tags-only update', async () => {
     await gotoAs(page, loginAs, 'Archive Manager', '/ui/archive/dashboard')
+    await page.getByRole('button', { name: 'Additional filters' }).click()
     await page.getByLabel('DID', { exact: true }).fill(did)
     await page.getByRole('button', { name: 'Search archive', exact: true }).click()
     const row = page.getByTestId(`archive-entry-${did}`).last()
@@ -75,6 +76,7 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
   await test.step('P05 observer searches and opens the immutable exact archive version', async () => {
     await gotoAs(page, loginAs, 'Contract Observer', '/ui/archive/dashboard')
     await expect(page.getByTestId('archive-statistics')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Additional filters' }).click()
     await page.getByLabel('DID', { exact: true }).fill(did)
     await page.getByLabel('Version', { exact: true }).fill(version)
     await page.getByLabel('Tag', { exact: true }).fill('connected-qa')
