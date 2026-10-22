@@ -60,8 +60,9 @@ type PeerPdfReceiver struct {
 
 // Handle upserts the local copy from the shipped contract's JSON-LD. A first
 // ship creates the copy owned by the counterparty (its origin); a later ship
-// updates the content and bumps the local version. The contract lands in
-// NEGOTIATION — the settlement and signing phases are separate ships (ADR-13).
+// snapshots the held version, updates the content and bumps the local version.
+// The contract lands in NEGOTIATION — the settlement and signing phases are
+// separate ships (ADR-13).
 func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) error {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -134,6 +135,11 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		data.Origin = existing.Origin
 		data.CreatedBy = existing.CreatedBy
 		data.ContractVersion = existing.ContractVersion + 1
+		// Snapshot the current row to contract_history before the re-ship
+		// replaces it and bumps contract_version (ADR-0006).
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI); err != nil {
+			return fmt.Errorf("could not create history entry for did %s: %w", cmd.ContractIRI, err)
+		}
 		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
 		}
