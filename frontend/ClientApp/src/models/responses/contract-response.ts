@@ -58,6 +58,10 @@ export interface ContractRetrieveByIdResponse {
   negotiations: ContractNegotiation[]
   /** True when outbound Proposals/Decisions still await peer ACK. */
   pending_negotiation_sync?: boolean
+  /** True when own + matching peer settlements are held (Approve/Sign gate). */
+  settlement_ready?: boolean
+  /** When settlement_ready is false, short reason for a UI warning. */
+  settlement_ready_detail?: string
   /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
 }

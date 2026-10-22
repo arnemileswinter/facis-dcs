@@ -20,7 +20,13 @@ import (
 // contract_version is whatever the sequence under test actually produced.
 type receivedContractRepoFake struct {
 	db.ContractRepo
-	row *db.Contract
+	row            *db.Contract
+	historyEntries int
+}
+
+func (r *receivedContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
+	r.historyEntries++
+	return nil
 }
 
 func (r *receivedContractRepoFake) ReadProcessDataByDIDOrNil(context.Context, *sqlx.Tx, string) (*db.ContractProcessData, error) {
@@ -173,6 +179,8 @@ func TestATwiceReceivedOfferKeepsItsAcceptedTaskOnTheContractsCurrentRound(t *te
 	require.NoError(t, receiver.Handle(ctx, peerShipCmd()))
 
 	require.Equal(t, 2, contracts.row.ContractVersion)
+	require.Equal(t, 1, contracts.historyEntries,
+		"re-ship must snapshot the held version before bumping (ADR-0006)")
 	task := currentRoundTask(t, tasks, contracts)
 	require.NotNil(t, task, "the responder's Negotiations tab row is stranded on round %d while the contract is on round %d",
 		tasks.rows[0].ContractVersion, contracts.row.ContractVersion)

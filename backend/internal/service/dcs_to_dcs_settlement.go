@@ -140,9 +140,9 @@ func contractDocumentOf(contract *cwedb.Contract) []byte {
 // countersign.
 //
 // The own settlement carries most of the weight here: the receive path replaces
-// the stored document with the peer's shipped copy without snapshotting the one
+// the stored document with the peer's shipped copy after snapshotting the one
 // it replaces, so a version this instance agreed to and was then shipped past
-// leaves no other trace. It is also exactly the version the signing gate
+// remains in contract_history. It is also exactly the version the signing gate
 // compares against, so a settlement matching it names the document both sides
 // stood behind.
 //
