@@ -35,7 +35,7 @@ func (r *PostgresCeremonyRepo) GetCeremonyByID(ctx context.Context, tx *sqlx.Tx,
 		       signer_did, vp_token, pid_claims, kb_sd_hash, created_at, verified_at, expires_at,
 		       prepared_pdf, prepared_pdf_sha256, request_nonce, request_expires_at, credential_type,
 		       published_by, published_holder_did, published_roles, consumed_at,
-		       poa_organization, poa_roles,
+		       poa_organization, poa_roles, poa_vp_token,
 		       pinned_payload, pinned_payload_sha256, pinned_content_hash, pinned_renderer_version,
 		       pinned_signed_count, pinned_contract_version, required_credential_type,
 		       signer_cert_subject, signer_cert_serial
