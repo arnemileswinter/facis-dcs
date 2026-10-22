@@ -127,7 +127,11 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	if err != nil {
 		return nil, fmt.Errorf("could not clear the previous term's signature attribution: %w", err)
 	}
-	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion)
+	priorSignatures, err := signatureReferences(original.ContractData)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the previous term's signatures: %w", err)
+	}
+	renewalContractData, err := attachRenewsContractReference(unsignedContractData, cmd.OriginalDID, original.ContractVersion, priorSignatures)
 	if err != nil {
 		return nil, fmt.Errorf("could not attach renewal reference: %w", err)
 	}
@@ -301,22 +305,59 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 	return &encoded, nil
 }
 
-// attachRenewsContractReference adds the dcs:renewsContract back-reference
-// (DCS-FR-CWE-11: "reference links"; DCS-FR-CSA-15: "retain references to
-// the prior contract's version [and] ID") to an already-normalized contract
-// document. It is a plain top-level JSON-LD property, distinct from
-// dcs:parentContract (ADR-7's frame-agreement hierarchy link, which must
-// stay child->parent only and singular) — a renewal is not a sub-contract of
-// the original, it supersedes it.
-func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int) (*datatype.JSON, error) {
+// signatureReferences returns one dcs:signatures entry per party node of the
+// original that carries a signatory: the party, its signatory and the Power of
+// Attorney they signed under. These are the predicates unsignRenewedDocument
+// clears from the copy. The document records counterparty signatures synced
+// from a peer too, unlike the local contract_signatures rows.
+func signatureReferences(raw *datatype.JSON) ([]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
 	var doc map[string]any
 	if err := json.Unmarshal(*raw, &doc); err != nil {
 		return nil, fmt.Errorf("could not decode contract data: %w", err)
 	}
-	doc["dcs:renewsContract"] = map[string]any{
+	nodes, _ := doc["dcs:parties"].([]any)
+	var refs []any
+	for _, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok || node["dcs:hasSignatory"] == nil {
+			continue
+		}
+		ref := map[string]any{
+			"dcs:party":        map[string]any{"@id": node["@id"]},
+			"dcs:hasSignatory": node["dcs:hasSignatory"],
+		}
+		if poa, ok := node["dcs:hasPowerOfAttorney"]; ok {
+			ref["dcs:hasPowerOfAttorney"] = poa
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
+// attachRenewsContractReference adds the dcs:renewsContract back-reference
+// (DCS-FR-CWE-11: "retaining linked metadata and signatures", "reference
+// links"; DCS-FR-CSA-15: "retain references to the prior contract's version,
+// ID, and signatures") to an already-normalized contract document. It is a
+// plain top-level JSON-LD property, distinct from dcs:parentContract (ADR-7's
+// frame-agreement hierarchy link, which must stay child->parent only and
+// singular) — a renewal is not a sub-contract of the original, it supersedes
+// it. dcs:signatures is omitted when the original carries no signature.
+func attachRenewsContractReference(raw *datatype.JSON, originalDID string, originalVersion int, signatures []any) (*datatype.JSON, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(*raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not decode contract data: %w", err)
+	}
+	reference := map[string]any{
 		"@id":         base.ResourceIRI("contract", originalDID),
 		"dcs:version": originalVersion,
 	}
+	if len(signatures) > 0 {
+		reference["dcs:signatures"] = signatures
+	}
+	doc["dcs:renewsContract"] = reference
 	encoded, err := datatype.NewJSON(doc)
 	if err != nil {
 		return nil, fmt.Errorf("could not encode contract data: %w", err)
