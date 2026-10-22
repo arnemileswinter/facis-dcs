@@ -165,8 +165,8 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
     await acceptOpenDecisionsOn(a, contractDid)
     await acceptOpenDecisionsOn(b, contractDid)
 
-    // Both must Submit (exchange settlements) before either Approve — the
-    // settlement_ready gate refuses Approve without a matching peer settlement.
+    // Both Submit first so settlements are exchanged before Sign (Sign still
+    // requires matching peer settlement; Approve itself does not block on it).
     await advanceToSubmittedOn(a, contractDid)
     aChain = await assertManifestChainGrew(a, contractDid, aChain)
     bChain = await assertManifestChainGrew(b, contractDid, bChain)

@@ -80,8 +80,6 @@ const showSettlementNotReadyAlert = computed(
   () => contract.value?.state === ContractState.reviewed && !settlementReady.value,
 )
 
-const canApprove = computed(() => isApprover.value && settlementReady.value)
-
 watch(
   () => !!route.params.did,
   async (value) => {
@@ -319,7 +317,7 @@ const exportPDF = async () => {
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"
-          :disabled="!canApprove || isSubmitting"
+          :disabled="!isApprover || isSubmitting"
           @click="approve"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
