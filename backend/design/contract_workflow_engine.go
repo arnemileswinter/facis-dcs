@@ -574,7 +574,7 @@ var ContractTerminateResponse = Type("ContractTerminateResponse", func() {
 })
 
 var ContractRenewRequest = Type("ContractRenewRequest", func() {
-	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID and version.")
+	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID, version and signatures: the signed PDF, which holds every signature, and the signatory and Power of Attorney the original's document records. The new instance carries no signature and needs fresh signatures.")
 
 	Token("token", String, "JWT token")
 
