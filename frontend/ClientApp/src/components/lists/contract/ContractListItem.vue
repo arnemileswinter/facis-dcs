@@ -15,9 +15,7 @@ const { isCreator } = useContractPermissions()
 const contractsStore = useContractsStore()
 
 const canEdit = computed(() => {
-  return (
-    (props.contract.state === ContractState.draft || props.contract.state === ContractState.rejected) && isCreator.value
-  )
+  return props.contract.state === ContractState.draft && isCreator.value
 })
 
 const hasNegotiationTask = computed(() => contractsStore.hasNegotiationTask(props.contract))

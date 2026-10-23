@@ -240,7 +240,7 @@ export function contractStory(
       return story(
         'REJECTED',
         'This contract was rejected',
-        'It was returned with findings. Address the comments, adjust the values under Contract Content and resubmit. (Contract Creator)',
+        'Approval returned it with findings. Review the audit trail, then reopen negotiation to continue the round without rewriting the formal document here. (Contract Creator)',
       )
     case 'WITHDRAWN':
       return story(

@@ -241,14 +241,6 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     await saveArtifact(b, contractDid, '07-settle-B')
   })
 
-  // ---- Stage 8 [DCS-IR-SM-02/-03/-04 viewer verify/apply/validate signature;
-  // DCS-IR-SI-04 Wallet & TSP Signing Integration; SRS §1 AES + PAdES/JAdES;
-  // ADR-12 wallet-driven signing; ADR-3 signing semantics; DCS-OR-C2PA-003
-  // lifecycle → active]: both sign via the Secure Contract Viewer wallet ceremony
-  // (not a /signature/apply route). A signs A's field → ships to B → B signs ON
-  // TOP (incremental PAdES) → B ships the double-signed PDF back to A. The
-  // double-signed artifact CONVERGES on both: two AcroForm sigs, banner active,
-  // veraPDF PDF/A-3a PASS, c2patool valid, DSS validates both as AES + PAdES-B-T.
   await test.step('Stage 8 [DCS-IR-SM-03, DCS-IR-SI-04, ADR-12]: both sign; double-signed artifact verifies', async () => {
     // DCS-FR-CWE-01
     await signOnInstance(a, contractDid, 'Instance A Signatory')
