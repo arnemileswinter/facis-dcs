@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"digital-contracting-service/internal/base/ecutil"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -47,8 +49,8 @@ func holderCNF(t *testing.T) (jwt.MapClaims, string) {
 	jwk := JWK{
 		Kty: "EC",
 		Crv: "P-256",
-		X:   base64URL(key.X),
-		Y:   base64URL(key.Y),
+		X:   ecutil.MustJWKX(ecutil.AsPublic(key)),
+		Y:   ecutil.MustJWKY(ecutil.AsPublic(key)),
 	}
 	did, err := DIDJWKFromPublicJWK(jwk)
 	if err != nil {
