@@ -7,7 +7,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"math/big"
 	"net/url"
 	"testing"
@@ -93,10 +92,6 @@ func TestHolderSubject(t *testing.T) {
 	if _, err := HolderSubject(claims); err == nil {
 		t.Fatal("a did:jwk sub naming a different key than cnf.jwk was accepted")
 	}
-}
-
-func base64URL(v *big.Int) string {
-	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, 32)))
 }
 
 // --- x5c leaves as real issuers actually carry them ---
