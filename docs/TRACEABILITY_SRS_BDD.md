@@ -127,7 +127,7 @@ not a coverage hole.
 | DCS-FR-CWE-08 | Version Control | ✅ Covered | Version history via /contract/retrieve_history_by_id — 'Track version history during negotiation' (03). |
 | DCS-FR-CWE-09 | SLA & Compliance Monitoring | ✅ Covered | 05 KPI ingestion + SLA-violation flag scenarios (tagged @DCS-FR-CWE-09). |
 | DCS-FR-CWE-10 | Contract Expiry | ✅ Covered | 19 expiry-cron scenario: 'expired' lifecycle banner after cron fires. |
-| DCS-FR-CWE-11 | Contract Renewal | ✅ Covered | POST /contract/renew; renewal keeps refs to prior DID/version (06 pack). |
+| DCS-FR-CWE-11 | Contract Renewal | ✅ Covered | POST /contract/renew; renewal keeps refs to prior DID/version (06 pack) and signatures (two-instance Playwright vertical). |
 | DCS-FR-CWE-12 | Termination Handling | ✅ Covered | 06/contract_termination: terminate with reason, double-termination guard (tagged @DCS-FR-CWE-11/12). |
 | DCS-FR-CWE-13 | Contract Creation | ✅ Covered | 03/contract_creation create-from-template, editable versioned draft. The RED-NOT-RUN bilateral-role scenarios specify deduplicated absolute role URIs, percent-encoded party fragments, originator binding, and rejection of short or unknown roles (`features/03_contract_creation/contract_creation.feature:21`, `features/03_contract_creation/contract_creation.feature:32`); focused backend tests cover URI membership and the bad-request mapping (`backend/internal/contractworkflowengine/command/originatorparty_test.go:12`, `backend/internal/service/contract_create_errors_test.go:13`). |
 | DCS-FR-CWE-14 | Contract Submission for Review | ✅ Covered | 03 state-machine submit→review→approve chain; 'Submit contract for review after negotiation'. |
@@ -199,7 +199,7 @@ not a coverage hole.
 | DCS-FR-CSA-12 | Retrieve Contract from Archive | ✅ Covered | 07 archive retrieval with RBAC + audit (20 export audit-log). |
 | DCS-FR-CSA-13 | Search Contracts | ✅ Covered | Metadata/state search (07) plus full-text content search over the whole contract JSON-LD (stored tsvector, GIN-indexed) — 07 full-text scenario with positive and negative queries. |
 | DCS-FR-CSA-14 | Contract Expiration Handling | ✅ Covered | 19 expired banner + expiry cron; expired contracts excluded from active workflows. |
-| DCS-FR-CSA-15 | Contract Renewal and Extension | ✅ Covered | Renewal contract linked to archived original (06, tagged @DCS-FR-CSA-15). |
+| DCS-FR-CSA-15 | Contract Renewal and Extension | ✅ Covered | Renewal contract linked to archived original (06, tagged @DCS-FR-CSA-15); signature refs (signed PDF, signatory attribution) in the two-instance Playwright vertical. |
 | DCS-FR-CSA-16 | Contract Termination | ✅ Covered | 06 termination with reason recorded; terminated contracts remain retrievable read-only (07 search by state). |
 | DCS-FR-CSA-17 | Contract Deletion | ✅ Covered | Archive delete scenarios (07, tagged @DCS-FR-CSA-17) incl. audit logging. |
 | DCS-FR-CSA-18 | Audit Log for Contract Storage and Retrieval | ✅ Covered | 20 export RBAC + audit-entry scenarios (tagged @DCS-FR-CSA-18); archive audit endpoint covered (07). |

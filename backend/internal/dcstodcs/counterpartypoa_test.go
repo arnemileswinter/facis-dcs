@@ -254,3 +254,21 @@ func TestCounterpartyPoAGate_EvidenceWithoutAPresentationIsAccepted(t *testing.T
 		[]json.RawMessage{attachment(summaryVC(testSignedParty, testSignedSignatory), "")}))
 	assert.Empty(t, seen)
 }
+
+// The receiving instance records what it accepted for each signature a peer
+// owns, because a countersignature on an already signed PDF never reaches its
+// contract document. Its own signatures stay out: they were judged where they
+// were made.
+func TestPeerSignaturesRecordsEachPeerSignatureAndItsPowerOfAttorney(t *testing.T) {
+	const thirdParty = "did:web:third.example"
+	signatures, err := PeerSignatures(testLocalParty, []json.RawMessage{
+		evidenceFor(testLocalParty),
+		evidenceFor(testSignedParty),
+		attachment(summaryVC(thirdParty, "did:jwk:third"), ""),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []PeerSignature{
+		{Party: testSignedParty, Signatory: testSignedSignatory, PoAOrganization: testSignedParty},
+		{Party: thirdParty, Signatory: "did:jwk:third"},
+	}, signatures)
+}
