@@ -1,10 +1,15 @@
 package contractworkflowengine
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -113,4 +118,55 @@ func TestNewExpiredEventRejectsAnUnknownPolicy(t *testing.T) {
 	c.ExpPolicy = &policy
 	_, err := newExpiredEvent(c, time.Now())
 	require.Error(t, err)
+}
+
+// outboxOnlyDriver swallows the outbox INSERT of event.Create; every other
+// read and write goes through expiryRepoFake.
+type outboxOnlyDriver struct{}
+
+func (outboxOnlyDriver) Open(string) (driver.Conn, error) { return outboxOnlyConn{}, nil }
+
+type outboxOnlyConn struct{}
+
+func (outboxOnlyConn) Prepare(string) (driver.Stmt, error) { return outboxOnlyStmt{}, nil }
+func (outboxOnlyConn) Close() error                        { return nil }
+func (outboxOnlyConn) Begin() (driver.Tx, error)           { return outboxOnlyTx{}, nil }
+
+type outboxOnlyStmt struct{}
+
+func (outboxOnlyStmt) Close() error                               { return nil }
+func (outboxOnlyStmt) NumInput() int                              { return -1 }
+func (outboxOnlyStmt) Exec([]driver.Value) (driver.Result, error) { return driver.RowsAffected(1), nil }
+func (outboxOnlyStmt) Query([]driver.Value) (driver.Rows, error)  { return nil, io.EOF }
+
+type outboxOnlyTx struct{}
+
+func (outboxOnlyTx) Commit() error   { return nil }
+func (outboxOnlyTx) Rollback() error { return nil }
+
+func init() { sql.Register("cron-outbox-only", outboxOnlyDriver{}) }
+
+type expiryRepoFake struct {
+	database.ContractRepo
+	states map[string]string
+}
+
+func (r *expiryRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, did string, state string) error {
+	r.states[did] = state
+	return nil
+}
+
+// The cron job persists EXPIRED for a contract without a policy too.
+func TestExpiryTaskExpiresAContractWithoutPolicy(t *testing.T) {
+	raw, err := sql.Open("cron-outbox-only", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	tx, err := sqlx.NewDb(raw, "postgres").Beginx()
+	require.NoError(t, err)
+
+	repo := &expiryRepoFake{states: map[string]string{}}
+	c := renewalDueContract()
+	c.ExpPolicy = nil
+	require.NoError(t, expiryTask{repo}.handle(context.Background(), tx, c))
+	require.Equal(t, contractstate.Expired.String(), repo.states[c.DID])
 }
