@@ -24,6 +24,7 @@ import (
 	contractworkflowenginesvr "digital-contracting-service/gen/http/contract_workflow_engine/server"
 	dcstodcssvr "digital-contracting-service/gen/http/dcs_to_dcs/server"
 	didsvr "digital-contracting-service/gen/http/did_service/server"
+	infosvr "digital-contracting-service/gen/http/info/server"
 	keyinventorysvr "digital-contracting-service/gen/http/key_inventory/server"
 	pdfgenerationsvr "digital-contracting-service/gen/http/pdf_generation/server"
 	processauditandcompliancesvr "digital-contracting-service/gen/http/process_audit_and_compliance/server"
@@ -31,6 +32,7 @@ import (
 	signaturemanagementsvr "digital-contracting-service/gen/http/signature_management/server"
 	templatecatalogueintegrationsvr "digital-contracting-service/gen/http/template_catalogue_integration/server"
 	templaterepositorysvr "digital-contracting-service/gen/http/template_repository/server"
+	geninfo "digital-contracting-service/gen/info"
 	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
@@ -140,7 +142,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints,
 	dcsToDcsEndpoints *dcstodcs.Endpoints, pdfGenerationEndpoints *pdfgeneration.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints,
 	signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints,
-	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
+	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, infoEndpoints *geninfo.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
 	var (
@@ -177,6 +179,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		c2paServer                         *c2pasvr.Server
 		semanticHubServer                  *semantichubsvr.Server
 		keyInventoryServer                 *keyinventorysvr.Server
+		infoServer                         *infosvr.Server
 	)
 	{
 		eh := errorHandler(ctx)
@@ -194,11 +197,14 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		c2paServer = c2pasvr.New(c2paEndpoints, apiMux, dec, enc, eh, ef)
 		semanticHubServer = semantichubsvr.New(semanticHubEndpoints, apiMux, dec, enc, eh, ef)
 		keyInventoryServer = keyinventorysvr.New(keyInventoryEndpoints, apiMux, dec, enc, eh, ef)
+		infoServer = infosvr.New(infoEndpoints, apiMux, dec, enc, eh, ef)
 	}
 
 	// did.json is served at the origin root (did:web well-known path), outside
 	// the API prefix.
 	didsvr.Mount(mux, didServer)
+	infosvr.Mount(mux, infoServer)
+	infosvr.Mount(apiMux, infoServer)
 	// The C2PA manifest store is the public sibling of did.json (ADR-4,
 	// DCS-OR-C2PA-008): an external verifier resolves a contract's provenance
 	// from the manifest URL alone, so the route has to answer at the origin
