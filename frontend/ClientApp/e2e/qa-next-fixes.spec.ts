@@ -190,9 +190,11 @@ for (const width of [390, 1440]) {
     await page.keyboard.press('Space')
     await expect(metadata.getByText('Frozen description', { exact: true })).not.toBeVisible()
     await page.getByTestId('machine-readable-toggle').press('Enter')
-    expect(JSON.parse(await page.getByTestId('machine-readable-payload').innerText())).toEqual(
-      richSnapshot.contract_data,
-    )
+    await expect
+      .poll(async () =>
+        JSON.parse((await page.getByTestId('machine-readable-payload').textContent())?.trim() || 'null'),
+      )
+      .toEqual(richSnapshot.contract_data)
     await expect(page.getByRole('button', { name: 'Annotate' })).toHaveCount(0)
     await noOverflow(page)
   })
