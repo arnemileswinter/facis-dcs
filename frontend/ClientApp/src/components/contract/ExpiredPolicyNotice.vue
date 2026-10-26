@@ -16,7 +16,7 @@ const nextStep: Record<ExpirationPolicy, string> = {
     'Its expiration policy is renewal: a Contract Manager renews it to continue the agreement.',
   [ExpirationPolicy.termination]:
     'Its expiration policy is termination: a Contract Manager terminates it to close the agreement formally.',
-  [ExpirationPolicy.archiving]: 'Its expiration policy is archiving: it is not renewed.',
+  [ExpirationPolicy.archiving]: 'Its expiration policy is archiving: signed contracts stay in the archive.',
 }
 
 const message = computed(() => {

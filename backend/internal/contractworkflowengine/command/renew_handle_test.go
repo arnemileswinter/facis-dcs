@@ -71,7 +71,7 @@ func TestRenewerMovesAnExpiredTermForward(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, repo.updates, 1)
-	require.Equal(t, now.UTC().Truncate(24*time.Hour), *repo.updates[0].StartDate)
+	require.Equal(t, now.UTC().Truncate(24*time.Hour).Add(24*time.Hour), *repo.updates[0].StartDate)
 	require.True(t, repo.updates[0].ExpDate.After(now))
 
 	require.NotNil(t, repo.created)

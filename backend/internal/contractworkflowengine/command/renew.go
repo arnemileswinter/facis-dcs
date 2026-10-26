@@ -171,7 +171,8 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 		renewalContractData = &seeded
 	}
 
-	newStartDate, newExpDate, err := renewalTerm(original.StartDate, original.ExpDate, cmd.NewStartDate, cmd.NewExpDate, time.Now().UTC())
+	newStartDate, newExpDate, err := renewalTerm(original.StartDate, original.ExpDate, cmd.NewStartDate, cmd.NewExpDate,
+		original.State == contractstate.Terminated.String(), time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -396,18 +397,22 @@ func attachRenewsContractReference(raw *datatype.JSON, originalDID string, origi
 }
 
 // renewalTerm returns the renewal's start and expiry. The renewal follows the
-// original: it starts at the original's expiry, or today if that has passed,
-// and runs for the original's term length. A copied expiry would end the
-// renewal together with the original, and a past one makes the new DRAFT read
-// EXPIRED at once (contracts_effective view). Given dates win; a given start
-// without a given expiry still gets the original's term length. Without both
-// original dates the length is unknown, so the expiry stays empty.
-func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time) (*time.Time, *time.Time, error) {
+// original: it starts at the original's expiry, or tomorrow if that is
+// earlier, and runs for the original's term length. A copied expiry would end
+// the renewal together with the original, and a past one makes the new DRAFT
+// read EXPIRED at once (contracts_effective view). Given dates win; a given
+// start without a given expiry still gets the original's term length. Without
+// the original's start or expiry the length is unknown, so the expiry stays
+// empty. A terminated original never reached its expiry, so its renewal
+// starts tomorrow. Dates before tomorrow are refused, as Update refuses them,
+// so the draft stays editable.
+func renewalTerm(origStart, origExp, newStart, newExp *time.Time, terminated bool, now time.Time) (*time.Time, *time.Time, error) {
+	tomorrow := now.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
 	var start, exp *time.Time
 	if origExp != nil {
 		s := origExp.UTC()
-		if today := now.UTC().Truncate(24 * time.Hour); today.After(s) {
-			s = today
+		if terminated || tomorrow.After(s) {
+			s = tomorrow
 		}
 		start = &s
 	}
@@ -422,8 +427,11 @@ func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time)
 		e := addTerm(*start, origStart.UTC(), origExp.UTC())
 		exp = &e
 	}
-	if exp != nil && !exp.After(now) {
-		return nil, nil, fmt.Errorf("%w: expiration date must be in the future", ErrInvalidRenewalTerm)
+	if start != nil && start.Before(tomorrow) {
+		return nil, nil, fmt.Errorf("%w: start date must be at least one day in the future", ErrInvalidRenewalTerm)
+	}
+	if exp != nil && exp.Before(tomorrow) {
+		return nil, nil, fmt.Errorf("%w: expiration date must be at least one day in the future", ErrInvalidRenewalTerm)
 	}
 	if start != nil && exp != nil && !exp.After(*start) {
 		return nil, nil, fmt.Errorf("%w: expiration date must be after start date", ErrInvalidRenewalTerm)
@@ -433,13 +441,21 @@ func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time)
 
 // addTerm adds the term from origStart to origExp to from. A term of whole
 // calendar months is added as months, so a yearly term keeps its anniversary
-// across leap years.
+// across leap years and a monthly term keeps the month end.
 func addTerm(from, origStart, origExp time.Time) time.Time {
 	months := (origExp.Year()-origStart.Year())*12 + int(origExp.Month()) - int(origStart.Month())
-	if months > 0 && origStart.AddDate(0, months, 0).Equal(origExp) {
-		return from.AddDate(0, months, 0)
+	if months > 0 && addMonths(origStart, months).Equal(origExp) {
+		return addMonths(from, months)
 	}
 	return from.Add(origExp.Sub(origStart))
+}
+
+// addMonths adds months to t and clamps the day to the target month's last
+// day: Jan 31 plus one month is Feb 28 (or 29), not Mar 3 as with AddDate.
+func addMonths(t time.Time, months int) time.Time {
+	first := time.Date(t.Year(), t.Month()+time.Month(months), 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+	lastDay := first.AddDate(0, 1, -1).Day()
+	return first.AddDate(0, 0, min(t.Day(), lastDay)-1)
 }
 
 // stampRenewalTerm writes the renewal's term into dcs:metadata. The copy

@@ -581,8 +581,8 @@ var ContractRenewRequest = Type("ContractRenewRequest", func() {
 	Attribute("did", String, "Decentralized Identifier of the contract to renew")
 	Attribute("updated_at", String, "The caller's view of the original contract's last update timestamp (optimistic concurrency guard)")
 
-	Attribute("new_start_date", String, "Optional start date for the new renewal term; defaults to the original's expiry date, or today if the original has expired")
-	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; must lie in the future and after the start date. Defaults to the start date plus the original's term length; without the original's start and expiry dates it stays empty.")
+	Attribute("new_start_date", String, "Optional start date for the new renewal term; at least one day in the future. Defaults to the original's expiry date, or tomorrow if that is earlier; empty if the original has no expiry date")
+	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; at least one day in the future and after the start date. Defaults to the start date plus the original's term length; empty without either of the original's start and expiry dates.")
 	Attribute("new_exp_policy", String, "Optional expiry policy for the new renewal term; defaults to the original's expiry policy if omitted")
 	Attribute("new_exp_notice_period", Int, "Optional notice period (in days) for the new renewal term; defaults to the original's notice period if omitted")
 

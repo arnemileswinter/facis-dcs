@@ -14,7 +14,7 @@ describe('expired policy notice', () => {
   it.each<[ExpirationPolicy, string]>([
     ['RENEWAL', 'renews it'],
     ['TERMINATION', 'terminates it'],
-    ['ARCHIVING', 'not renewed'],
+    ['ARCHIVING', 'stay in the archive'],
   ])('names the next step for %s', (policy, step) => {
     const found = notice('EXPIRED', policy)
     expect(found.exists()).toBe(true)

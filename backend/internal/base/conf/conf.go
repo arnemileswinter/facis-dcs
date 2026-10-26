@@ -5,6 +5,7 @@
 package conf
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -131,11 +132,16 @@ func ArchiveExpiringWindow() time.Duration {
 // DCS_ARCHIVE_RETENTION_YEARS. 0 means no retention policy: archive entries get
 // no retention_until and deletion stays permitted. Any non-positive or
 // unparsable value counts as 0. Values above maxArchiveRetentionYears count as
-// that maximum: a larger one overflows the timestamp column and fails archival.
+// that maximum, with a log line: far larger values overflow the Postgres
+// timestamp range and fail archival at signing.
 func ArchiveRetentionYears() int {
 	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_RETENTION_YEARS")); v != "" {
 		if years, err := strconv.Atoi(v); err == nil && years > 0 {
-			return min(years, maxArchiveRetentionYears)
+			if years > maxArchiveRetentionYears {
+				log.Printf("DCS_ARCHIVE_RETENTION_YEARS=%d exceeds the maximum; using %d", years, maxArchiveRetentionYears)
+				return maxArchiveRetentionYears
+			}
+			return years
 		}
 	}
 	return 0
