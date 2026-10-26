@@ -39,6 +39,8 @@ database:
 # (create it before install, high-entropy value):
 #   kubectl create secret generic dcs-acceptance-hydra-secrets \
 #     --from-literal=secretsSystem="$(openssl rand -hex 32)"
+# For an existing Hydra with a persistent database, append the previous
+# system secret after a comma (see deployment/README.md, Hydra).
 # `clients[].client_secret` has no secretKeyRef equivalent: populate it via
 # `--set` from your secret manager at deploy time, never committed to a values
 # file.

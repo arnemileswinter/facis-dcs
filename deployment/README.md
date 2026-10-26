@@ -618,7 +618,7 @@ Two trust configurations follow from that:
 ### Hydra
 - Enable `hydra.enabled` and set `hydra.config.selfIssuerURL` to the public issuer URL
 - Create a Secret with a high-entropy system secret (`openssl rand -hex 32`, key `secretsSystem`) and set `hydra.secrets.systemSecretRef.name`. Outside dev mode the chart refuses to render without it.
-- Hydra encrypts stored keys with the system secret and does not re-encrypt existing data. For an existing Hydra with a persistent database, set the Secret value to `<new>,<old>`: Hydra encrypts with the first value and decrypts with all of them. The old value of a release without a secret is `<release>-hydra-system-secret-change-me`.
+- Hydra encrypts stored keys with the system secret and does not re-encrypt existing data. For an existing Hydra with a persistent database, set the Secret value to `<new>,<old>`: Hydra encrypts with the first value and decrypts with all of them. The old value is the previous `hydra.secrets.system`, or `<release>-hydra-system-secret-change-me` if none was set.
 - Register `dcs-client` redirect URIs via `hydra.clients` (see `values.dev.yml`):
   - **Valid Redirect URIs**: `https://<domain>/<path>/api/auth/callback`
   - **Valid Post Logout Redirect URIs**: `https://<domain>/<path>/api/auth/logout-complete`
