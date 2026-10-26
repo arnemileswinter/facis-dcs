@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, type Ref, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -40,6 +40,9 @@ const { preprocessContractData } = useContractDataPreprocess()
 const { activeTab } = storeToRefs(contractEditorUiStore)
 
 const contract: Ref<Contract | null> = ref(null)
+const loading = ref(false)
+const loadError = ref(false)
+let loadRequest = 0
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 // Details/Content show formal + accepted proposals so the page matches what
@@ -67,12 +70,17 @@ const activeProposalCount = computed(() => activeNegotiations(contract.value).le
 // store refresh leaves contract.value untouched and the page showing stale data.
 const loadContract = async () => {
   const id = route.params.did
+  const request = ++loadRequest
   if (!id || Array.isArray(id)) return
+  loading.value = true
+  contract.value = null
+  applyContractDataToDraft(undefined)
   try {
-    contract.value = null
     const loaded = await contractWorkflowService.retrieveById({ did: id })
-    if (route.params.did !== id) return
+    if (route.params.did !== id || request !== loadRequest) return
+    if (!loaded) throw new Error('Contract unavailable')
     contract.value = loaded
+    loadError.value = false
     const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
     applyContractDataToDraft(baseline?.contract_data)
     // Only jump to Proposals while the round is still open. After settle/sign
@@ -86,13 +94,18 @@ const loadContract = async () => {
       contractEditorUiStore.setActiveTab('proposals')
     }
   } catch (err: unknown) {
+    if (route.params.did !== id || request !== loadRequest) return
+    loadError.value = true
     console.error('Failed to load contract', err)
+  } finally {
+    if (request === loadRequest) loading.value = false
   }
 }
 
 watch(
   () => route.params.did,
   async (value) => {
+    loadError.value = false
     if (value) await loadContract()
   },
   { immediate: true },
@@ -140,6 +153,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  loadRequest++
   dcsDraftStore.reset({ workflow: 'contract' })
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
@@ -194,6 +208,12 @@ const exportBundle = async () => {
 
 <template>
   <div class="flex h-full flex-col">
+    <p v-if="loading" class="p-6" role="status">Loading contract…</p>
+    <div v-if="loadError" class="m-6 alert flex-wrap alert-error" role="alert">
+      <span>The contract could not be loaded. You may not have access.</span>
+      <button type="button" class="btn btn-sm" :disabled="loading" @click="loadContract">Retry</button>
+      <RouterLink :to="{ name: ROUTES.CONTRACTS.LIST }" class="link">Back to contracts</RouterLink>
+    </div>
     <div v-if="!!contract" class="flex flex-1 flex-col">
       <div class="flex flex-1 flex-col">
         <!-- Tabs -->
