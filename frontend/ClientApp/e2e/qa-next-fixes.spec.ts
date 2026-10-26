@@ -130,6 +130,73 @@ for (const width of [390, 1280]) {
     expect(forbiddenCalls).toEqual([])
   })
 }
+for (const width of [390, 1440]) {
+  test(`P05 ordered root and nested paragraphs keep inline segments at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await auth(page, 'Contract Observer')
+    const richSnapshot = {
+      ...snapshot,
+      contract_data: {
+        ...contractDocument,
+        'dcs:documentStructure': {
+          '@type': 'dcs:DocumentStructure',
+          'dcs:blocks': {
+            '@list': [
+              {
+                '@id': 'one',
+                '@type': 'dcs:Clause',
+                'dcs:content': { '@list': ['Root clause ', 'continues inline.'] },
+              },
+              { '@id': 'two', '@type': 'dcs:TextBlock', 'dcs:text': 'Root text block.' },
+              { '@id': 'section', '@type': 'dcs:Section', 'dcs:title': 'Nested section' },
+              { '@id': 'three', '@type': 'dcs:Clause', 'dcs:content': { '@list': ['Nested clause.'] } },
+              { '@id': 'four', '@type': 'dcs:TextBlock', 'dcs:text': 'Nested text block.' },
+            ],
+          },
+          'dcs:layout': [
+            {
+              '@id': 'root',
+              'dcs:isRoot': true,
+              'dcs:children': { '@list': [{ '@id': 'one' }, { '@id': 'two' }, { '@id': 'section' }] },
+            },
+            { '@id': 'section', 'dcs:children': { '@list': [{ '@id': 'three' }, { '@id': 'four' }] } },
+          ],
+        },
+      },
+    }
+    await page.route('**/api/archive/detail**', (route) => json(route, richSnapshot))
+    await page.goto(`/ui/archive/detail?did=${encodeURIComponent(did)}&contract_version=2`)
+    const content = page.getByRole('region', { name: 'Archived contract content' })
+    const texts = ['Root clause', 'continues inline.', 'Root text block.', 'Nested clause.', 'Nested text block.']
+    const boxes = []
+    for (const text of texts) {
+      const box = await content.getByText(text, { exact: text !== 'Root clause' }).boundingBox()
+      expect(box).not.toBeNull()
+      boxes.push(box!)
+    }
+    expect(Math.abs(boxes[0]!.y - boxes[1]!.y)).toBeLessThan(1)
+    expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.height + 8)
+    expect(boxes[3]!.y).toBeGreaterThan(boxes[2]!.y + boxes[2]!.height)
+    expect(boxes[4]!.y).toBeGreaterThan(boxes[3]!.y + boxes[3]!.height + 8)
+    const metadata = page.locator('details').filter({ has: page.locator('summary', { hasText: 'Archive metadata' }) })
+    await expect(metadata).not.toHaveAttribute('open', '')
+    await expect(metadata.getByText('Frozen description', { exact: true })).not.toBeVisible()
+    const metadataBox = await metadata.boundingBox()
+    const contentBox = await content.boundingBox()
+    expect(metadataBox!.y).toBeGreaterThanOrEqual(contentBox!.y + contentBox!.height)
+    await metadata.locator('summary').focus()
+    await page.keyboard.press('Enter')
+    await expect(metadata.getByText('Frozen description', { exact: true })).toBeVisible()
+    await page.keyboard.press('Space')
+    await expect(metadata.getByText('Frozen description', { exact: true })).not.toBeVisible()
+    await page.getByTestId('machine-readable-toggle').press('Enter')
+    expect(JSON.parse(await page.getByTestId('machine-readable-payload').innerText())).toEqual(
+      richSnapshot.contract_data,
+    )
+    await expect(page.getByRole('button', { name: 'Annotate' })).toHaveCount(0)
+    await noOverflow(page)
+  })
+}
 for (const status of [403, 404, 500]) {
   test(`P05 detail ${status} leaves no snapshot and retry recovers`, async ({ page }) => {
     await auth(page, 'Contract Observer')

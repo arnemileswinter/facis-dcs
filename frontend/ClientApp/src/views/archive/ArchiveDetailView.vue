@@ -76,22 +76,6 @@ watch(
           <dd>{{ contract.state }}</dd>
         </div>
         <div>
-          <dt class="font-semibold">Description</dt>
-          <dd>{{ contract.description }}</dd>
-        </div>
-        <div>
-          <dt class="font-semibold">Created by</dt>
-          <dd>{{ contract.created_by }}</dd>
-        </div>
-        <div>
-          <dt class="font-semibold">Created at</dt>
-          <dd>{{ contract.created_at }}</dd>
-        </div>
-        <div>
-          <dt class="font-semibold">Updated at</dt>
-          <dd>{{ contract.updated_at }}</dd>
-        </div>
-        <div>
           <dt class="font-semibold">Valid from</dt>
           <dd>{{ contract.start_date || '—' }}</dd>
         </div>
@@ -99,32 +83,6 @@ watch(
           <dt class="font-semibold">Valid until</dt>
           <dd>{{ contract.exp_date || '—' }}</dd>
         </div>
-        <div>
-          <dt class="font-semibold">Expiration policy</dt>
-          <dd>{{ contract.exp_policy || '—' }}</dd>
-        </div>
-        <div>
-          <dt class="font-semibold">Notice period</dt>
-          <dd>{{ contract.exp_notice_period ?? '—' }}</dd>
-        </div>
-        <template v-if="contract.responsible">
-          <div>
-            <dt class="font-semibold">Creator</dt>
-            <dd>{{ contract.responsible.creator }}</dd>
-          </div>
-          <div>
-            <dt class="font-semibold">Reviewers</dt>
-            <dd>{{ contract.responsible.reviewers?.join(', ') || '—' }}</dd>
-          </div>
-          <div>
-            <dt class="font-semibold">Approvers</dt>
-            <dd>{{ contract.responsible.approvers?.join(', ') || '—' }}</dd>
-          </div>
-          <div>
-            <dt class="font-semibold">Negotiators</dt>
-            <dd>{{ contract.responsible.negotiators?.join(', ') || '—' }}</dd>
-          </div>
-        </template>
       </dl>
       <section class="overflow-x-auto rounded-box border border-base-300 p-4" aria-label="Archived contract content">
         <TemplatePreview
@@ -135,6 +93,53 @@ watch(
           disabled
         />
       </section>
+      <details class="rounded-box border border-base-300 p-4">
+        <summary class="cursor-pointer font-semibold">Archive metadata</summary>
+        <dl class="mt-4 grid gap-2 break-words sm:grid-cols-2">
+          <div>
+            <dt class="font-semibold">Description</dt>
+            <dd>{{ contract.description }}</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Created by</dt>
+            <dd>{{ contract.created_by }}</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Created at</dt>
+            <dd>{{ contract.created_at }}</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Updated at</dt>
+            <dd>{{ contract.updated_at }}</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Expiration policy</dt>
+            <dd>{{ contract.exp_policy || '—' }}</dd>
+          </div>
+          <div>
+            <dt class="font-semibold">Notice period</dt>
+            <dd>{{ contract.exp_notice_period ?? '—' }}</dd>
+          </div>
+          <template v-if="contract.responsible">
+            <div>
+              <dt class="font-semibold">Creator</dt>
+              <dd>{{ contract.responsible.creator }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold">Reviewers</dt>
+              <dd>{{ contract.responsible.reviewers?.join(', ') || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold">Approvers</dt>
+              <dd>{{ contract.responsible.approvers?.join(', ') || '—' }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold">Negotiators</dt>
+              <dd>{{ contract.responsible.negotiators?.join(', ') || '—' }}</dd>
+            </div>
+          </template>
+        </dl>
+      </details>
       <ContractMachineReadableView :contract="contract" />
     </template>
   </div>

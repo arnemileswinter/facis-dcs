@@ -69,6 +69,30 @@ describe('P05 exact immutable snapshot lifecycle', () => {
       wrapper.unmount()
     },
   )
+  it('places full technical metadata after the document in a closed disclosure', async () => {
+    detail.mockResolvedValueOnce({
+      ...snapshot(),
+      description: 'Stored description',
+      start_date: '2026-10-01',
+      exp_date: '2027-10-01',
+    })
+    const wrapper = render()
+    await flushPromises()
+    const disclosure = wrapper.get('details')
+    expect(disclosure.attributes('open')).toBeUndefined()
+    expect(disclosure.get('summary').text()).toBe('Archive metadata')
+    expect(disclosure.text()).toContain('Stored description')
+    expect(disclosure.text()).toContain('Created bycreator')
+    const content = wrapper.get('section[aria-label="Archived contract content"]').element
+    expect(content.compareDocumentPosition(disclosure.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const identity = wrapper.get('dl')
+    expect(identity.text()).toContain('did:test:archive')
+    expect(identity.text()).toContain('SIGNED')
+    expect(identity.text()).toContain('2026-10-01')
+    expect(identity.text()).toContain('2027-10-01')
+    expect(identity.text()).not.toContain('Created by')
+    wrapper.unmount()
+  })
   it('removes the previous snapshot while another version loads and ignores stale replies', async () => {
     detail.mockResolvedValueOnce(snapshot())
     const wrapper = render()
