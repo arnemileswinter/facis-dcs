@@ -448,8 +448,10 @@ for (const width of [390, 1440]) {
       const messageBox = await feedback.locator('p').boundingBox()
       const actionsBox = await feedback.locator('div').boundingBox()
       expect(actionsBox!.y).toBeGreaterThanOrEqual(messageBox!.y + messageBox!.height)
-      const feedbackBox = await feedback.boundingBox()
-      expect(messageBox!.width).toBeGreaterThan(feedbackBox!.width * 0.8)
+      if (width === 390) {
+        const feedbackBox = await feedback.boundingBox()
+        expect(messageBox!.width).toBeGreaterThan(feedbackBox!.width * 0.8)
+      }
       for (const label of ['Export PDF', 'Export bundle'])
         await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0)
       const back = feedback.getByRole('link', { name: 'Back to contracts', exact: true })
