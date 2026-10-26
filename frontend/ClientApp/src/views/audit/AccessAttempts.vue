@@ -44,6 +44,14 @@ async function load(targetPage = 0, fresh = false) {
     loading.value = false
   }
 }
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(undefined, { timeZone: 'UTC' })
+}
+
+function shortActor(actor: string): string {
+  return actor.length > 24 ? `${actor.slice(0, 12)}…${actor.slice(-8)}` : actor
+}
 </script>
 
 <template>
@@ -54,12 +62,14 @@ async function load(targetPage = 0, fresh = false) {
         SUCCESS means access allowed; DENIED means permission refused; FAILED means authentication failed.
       </p>
       <form @submit.prevent="load(0, true)">
-        <fieldset :disabled="loading" class="flex flex-wrap items-end gap-3">
+        <fieldset :disabled="loading" class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end">
           <div class="min-w-0 flex-1">
             <label for="access-attempt-purpose" class="mb-1 block text-sm font-medium">Access log justification</label>
             <input id="access-attempt-purpose" v-model="justification" required class="input w-full" />
           </div>
-          <button type="submit" class="btn btn-primary" :disabled="!justification.trim()">Load access attempts</button>
+          <button type="submit" class="btn w-full btn-primary sm:w-auto" :disabled="!justification.trim()">
+            Load access attempts
+          </button>
         </fieldset>
       </form>
       <p v-if="error" role="alert" class="text-error">{{ error }}</p>
@@ -78,7 +88,7 @@ async function load(targetPage = 0, fresh = false) {
       >
         <table class="table table-sm">
           <caption class="sr-only">Access attempts and authorization outcomes</caption>
-          <thead>
+          <thead class="[&>tr>th]:sticky [&>tr>th]:top-0 [&>tr>th]:z-10 [&>tr>th]:bg-base-100">
             <tr>
               <th scope="col">Outcome</th>
               <th scope="col">Timestamp (UTC)</th>
@@ -108,9 +118,20 @@ async function load(targetPage = 0, fresh = false) {
                 </span>
               </td>
               <td>
-                <time :datetime="attempt.attempted_at">{{ attempt.attempted_at }}</time>
+                <time :datetime="attempt.attempted_at" :title="attempt.attempted_at">
+                  {{ formatTimestamp(attempt.attempted_at) }}
+                </time>
               </td>
-              <td>{{ attempt.attempt_by || '—' }}</td>
+              <td>
+                <details v-if="attempt.attempt_by && attempt.attempt_by.length > 24">
+                  <summary class="cursor-pointer font-mono text-xs" :title="attempt.attempt_by">
+                    <span class="sr-only">Full actor identifier:</span>
+                    {{ shortActor(attempt.attempt_by) }}
+                  </summary>
+                  <div class="mt-2 font-mono text-xs break-all">{{ attempt.attempt_by }}</div>
+                </details>
+                <span v-else>{{ attempt.attempt_by || '—' }}</span>
+              </td>
               <td>{{ attempt.roles.join(', ') || '—' }}</td>
               <td>{{ attempt.service }}</td>
               <td>{{ attempt.method }}</td>

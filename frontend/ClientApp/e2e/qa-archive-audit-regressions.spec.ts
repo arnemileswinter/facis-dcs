@@ -363,18 +363,20 @@ for (const width of [390, 1280]) {
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
 }
-test('F02 Archive Manager cannot see or request the access log panel', async ({ page }) => {
-  await authenticate(page, 'Archive Manager')
-  let requests = 0
-  await page.route('**/pac/access-attempts**', (route) => {
-    requests++
-    return json(route, { attempts: [] })
+for (const role of ['Archive Manager', 'Compliance Officer']) {
+  test(`F02 ${role} cannot see or request the access log panel`, async ({ page }) => {
+    await authenticate(page, role)
+    let requests = 0
+    await page.route('**/pac/access-attempts**', (route) => {
+      requests++
+      return json(route, { attempts: [] })
+    })
+    await page.goto('/ui/audit')
+    await expect(page.getByRole('heading', { name: 'Audit', exact: true })).toBeVisible()
+    await expect(page.locator('summary').filter({ hasText: /^Access attempts$/ })).toHaveCount(0)
+    expect(requests).toBe(0)
   })
-  await page.goto('/ui/audit')
-  await expect(page.getByRole('heading', { name: 'Audit', exact: true })).toBeVisible()
-  await expect(page.locator('summary').filter({ hasText: /^Access attempts$/ })).toHaveCount(0)
-  expect(requests).toBe(0)
-})
+}
 
 for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
   for (const width of [390, 768, 1280, 3440]) {
@@ -719,7 +721,18 @@ for (const width of [390, 1440]) {
     const originalTop = await executeTop()
     const summary = page.locator('summary').filter({ hasText: /^Access attempts$/ })
     await summary.press('Enter')
-    await page.getByLabel('Access log justification').fill('Review long access log')
+    const purpose = page.getByLabel('Access log justification')
+    const loadButton = page.getByRole('button', { name: 'Load access attempts' })
+    const purposeBox = (await purpose.boundingBox())!
+    const buttonBox = (await loadButton.boundingBox())!
+    if (width === 390) {
+      expect(buttonBox.y).toBeGreaterThanOrEqual(purposeBox.y + purposeBox.height)
+      expect(Math.abs(buttonBox.x - purposeBox.x)).toBeLessThanOrEqual(1)
+      expect(Math.abs(buttonBox.width - purposeBox.width)).toBeLessThanOrEqual(1)
+    } else {
+      expect(buttonBox.x).toBeGreaterThanOrEqual(purposeBox.x + purposeBox.width)
+    }
+    await purpose.fill('Review long access log')
     await page.getByRole('button', { name: 'Load access attempts' }).press('Enter')
     const region = page.getByRole('region', { name: 'Access attempts table' })
     await expect(region.locator('tbody tr')).toHaveCount(25)
@@ -746,10 +759,40 @@ for (const width of [390, 1440]) {
     expect(outcomeBox.x).toBeGreaterThanOrEqual(regionBox.x)
     expect(outcomeBox.x + outcomeBox.width).toBeLessThanOrEqual(regionBox.x + regionBox.width)
     expect(outcomeBox.y + outcomeBox.height).toBeLessThanOrEqual(regionBox.y + regionBox.height)
+    const actor = region.locator('tbody tr').first().locator('td').nth(2).locator('details')
+    const actorSummary = actor.locator('summary')
+    const fullActor = 'did:web:long-actor-'.repeat(30)
+    await expect(actorSummary).toHaveAttribute('title', fullActor)
+    await expect(actorSummary).toContainText('…')
+    await actorSummary.press('Enter')
+    await expect(actor).toHaveAttribute('open', '')
+    await expect(actor.locator('div')).toHaveText(fullActor)
+    await expect(actor.locator('div')).toBeVisible()
+    await actorSummary.press('Space')
+    await expect(actor).not.toHaveAttribute('open', '')
+    await expect(actor.locator('div')).not.toBeVisible()
+    const time = region.locator('tbody tr').first().locator('time')
+    await expect(time).toHaveAttribute('datetime', denied.attempted_at)
+    await expect(time).toHaveAttribute('title', denied.attempted_at)
+    await expect(time).not.toHaveText(denied.attempted_at)
+    await region.evaluate((element) => {
+      element.scrollLeft = 0
+    })
     await region.focus()
     await expect(region).toBeFocused()
     await page.keyboard.press('ArrowDown')
     await expect.poll(() => region.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await region.evaluate((element) => {
+      element.scrollTop = 200
+    })
+    await expect
+      .poll(async () => {
+        const header = (await region.locator('th').first().boundingBox())!
+        const box = (await region.boundingBox())!
+        return Math.abs(header.y - box.y)
+      })
+      .toBeLessThanOrEqual(1)
+    await expect(region.locator('th').first()).toHaveText('Outcome')
     expect(await region.locator('tbody tr').last().textContent()).toContain('LONG_DEVELOPMENT_ROLE_24')
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),

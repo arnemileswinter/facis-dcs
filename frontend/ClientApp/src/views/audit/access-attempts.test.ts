@@ -38,15 +38,17 @@ async function load(wrapper: ReturnType<typeof mount>, purpose = '  Investigate 
 }
 
 describe('access attempt audit view', () => {
-  it.each([{ roles: [] }, { roles: ['ARCHIVE_MANAGER'] }, { roles: ['SYSTEM_ADMINISTRATOR'] }])(
-    'does not expose access logs for roles $roles',
-    ({ roles }) => {
-      mocks.auth.user.roles = roles
-      const wrapper = mount(AccessAttempts)
-      expect(wrapper.find('details').exists()).toBe(false)
-      expect(mocks.accessAttempts).not.toHaveBeenCalled()
-    },
-  )
+  it.each([
+    { roles: [] },
+    { roles: ['ARCHIVE_MANAGER'] },
+    { roles: ['COMPLIANCE_OFFICER'] },
+    { roles: ['SYSTEM_ADMINISTRATOR'] },
+  ])('does not expose access logs for roles $roles', ({ roles }) => {
+    mocks.auth.user.roles = roles
+    const wrapper = mount(AccessAttempts)
+    expect(wrapper.find('details').exists()).toBe(false)
+    expect(mocks.accessAttempts).not.toHaveBeenCalled()
+  })
 
   it('requires explicit loading and a nonblank purpose, including mixed Auditor roles', async () => {
     mocks.auth.user.roles = ['ARCHIVE_MANAGER', 'AUDITOR']
@@ -90,7 +92,6 @@ describe('access attempt audit view', () => {
     await load(wrapper)
     const row = wrapper.get('tbody tr')
     for (const value of [
-      attempt.attempted_at,
       attempt.attempt_by!,
       ...attempt.roles,
       attempt.service,
@@ -102,6 +103,14 @@ describe('access attempt audit view', () => {
     ]) {
       expect(row.text()).toContain(value)
     }
+    const timestamp = row.get('time')
+    expect(timestamp.attributes('datetime')).toBe(attempt.attempted_at)
+    expect(timestamp.attributes('title')).toBe(attempt.attempted_at)
+    expect(timestamp.text()).toBe(new Date(attempt.attempted_at).toLocaleString(undefined, { timeZone: 'UTC' }))
+    expect(timestamp.text()).not.toBe(attempt.attempted_at)
+    expect(row.get('summary').attributes('title')).toBe(attempt.attempt_by)
+    expect(row.get('summary').text()).toContain('…')
+    expect(row.get('details div').text()).toBe(attempt.attempt_by)
     expect(row.find('img').exists()).toBe(false)
     expect(row.get('.badge-error').text()).toBe('DENIED')
     expect(wrapper.findAll('th')[0]?.text()).toBe('Outcome')
@@ -154,3 +163,24 @@ describe('access attempt audit view', () => {
     expect(wrapper.get('[role="status"]').text()).toContain('No access attempts found')
   })
 })
+
+it.each(['2026-10-15T12:00:00+02:00', 'invalid timestamp'])(
+  'preserves original timestamp %s and safely formats UTC',
+  async (timestamp) => {
+    mocks.accessAttempts.mockResolvedValue({
+      attempts: [{ ...attempt, attempt_by: 'short-actor', attempted_at: timestamp }],
+    })
+    const wrapper = mount(AccessAttempts)
+    await load(wrapper)
+    const time = wrapper.get('time')
+    expect(time.attributes('datetime')).toBe(timestamp)
+    expect(time.attributes('title')).toBe(timestamp)
+    const date = new Date(timestamp)
+    expect(time.text()).toBe(
+      Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString(undefined, { timeZone: 'UTC' }),
+    )
+    expect(wrapper.get('tbody tr').text()).toContain('short-actor')
+    expect(wrapper.find('tbody details').exists()).toBe(false)
+    wrapper.unmount()
+  },
+)
