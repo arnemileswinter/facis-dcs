@@ -21,6 +21,7 @@ const selectedFindingId = ref<number | string | null>(null)
 const auditLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingScope = ref<AuditScope | null>(null)
 const reportLoadingFormat = ref<AuditReportFormat | null>(null)
+const reportError = ref('')
 const selectedScope = ref<AuditScope>('contracts')
 const didFilter = ref('')
 const activeTab = ref<AuditPageTab>('compliance')
@@ -206,6 +207,10 @@ watch(
   { immediate: true },
 )
 
+watch(currentAuditQuery, () => {
+  reportError.value = ''
+})
+
 watch(selectedScope, () => {
   selectedFindingId.value = null
 })
@@ -230,6 +235,7 @@ watchDebounced(
 )
 
 const executeAudit = async () => {
+  reportError.value = ''
   const scope = selectedScope.value
   const query = currentAuditQuery.value
   auditLoadingScope.value = scope
@@ -262,9 +268,10 @@ const executeAudit = async () => {
 
 const generateReport = async (format: AuditReportFormat) => {
   const scope = selectedScope.value
+  const query = currentAuditQuery.value
+  reportError.value = ''
   reportLoadingScope.value = scope
   reportLoadingFormat.value = format
-  auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: undefined }
   try {
     const artifact = await auditingService.report({
       scope,
@@ -276,7 +283,7 @@ const generateReport = async (format: AuditReportFormat) => {
   } catch (err) {
     console.error('Audit Report Error:', err)
     claimReportedHttpError(err)
-    auditErrorsByScope.value = { ...auditErrorsByScope.value, [scope]: 'Audit report could not be generated.' }
+    if (query === currentAuditQuery.value) reportError.value = 'Audit report could not be generated.'
   } finally {
     reportLoadingScope.value = null
     reportLoadingFormat.value = null
@@ -612,41 +619,51 @@ function formatDateTime(value?: string): string {
           <span v-else>Execute Audit</span>
         </button>
 
-        <div class="flex flex-nowrap gap-2 sm:self-end">
-          <button
-            class="btn rounded-box whitespace-nowrap btn-outline"
-            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
-            @click="generateReport('json')"
-          >
-            <span
-              v-if="selectedReportLoading && reportLoadingFormat === 'json'"
-              class="loading loading-sm loading-spinner"
-            ></span>
-            <span v-else>JSON</span>
-          </button>
-          <button
-            class="btn rounded-box whitespace-nowrap btn-outline"
-            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
-            @click="generateReport('csv')"
-          >
-            <span
-              v-if="selectedReportLoading && reportLoadingFormat === 'csv'"
-              class="loading loading-sm loading-spinner"
-            ></span>
-            <span v-else>CSV</span>
-          </button>
-          <button
-            class="btn rounded-box whitespace-nowrap btn-outline"
-            :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
-            @click="generateReport('pdf')"
-          >
-            <span
-              v-if="selectedReportLoading && reportLoadingFormat === 'pdf'"
-              class="loading loading-sm loading-spinner"
-            ></span>
-            <span v-else>PDF</span>
-          </button>
-        </div>
+        <fieldset class="min-w-0 space-y-2 sm:self-end">
+          <legend class="text-sm font-medium">Download report</legend>
+          <div class="flex flex-nowrap gap-2">
+            <button
+              class="btn rounded-box whitespace-nowrap btn-outline"
+              :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+              @click="generateReport('json')"
+            >
+              <span
+                v-if="selectedReportLoading && reportLoadingFormat === 'json'"
+                aria-hidden="true"
+                class="loading loading-sm loading-spinner"
+              ></span>
+              <span>JSON</span>
+            </button>
+            <button
+              class="btn rounded-box whitespace-nowrap btn-outline"
+              :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+              @click="generateReport('csv')"
+            >
+              <span
+                v-if="selectedReportLoading && reportLoadingFormat === 'csv'"
+                aria-hidden="true"
+                class="loading loading-sm loading-spinner"
+              ></span>
+              <span>CSV</span>
+            </button>
+            <button
+              class="btn rounded-box whitespace-nowrap btn-outline"
+              :disabled="reportLoading || auditLoading || !hasExecutedAudit || !justification.trim()"
+              @click="generateReport('pdf')"
+            >
+              <span
+                v-if="selectedReportLoading && reportLoadingFormat === 'pdf'"
+                aria-hidden="true"
+                class="loading loading-sm loading-spinner"
+              ></span>
+              <span>PDF</span>
+            </button>
+          </div>
+          <p v-if="selectedReportLoading" role="status" class="text-sm">
+            Preparing {{ reportLoadingFormat?.toUpperCase() }} report…
+          </p>
+          <p v-if="reportError" role="alert" class="text-sm text-error">{{ reportError }}</p>
+        </fieldset>
       </div>
     </div>
 
@@ -726,11 +743,15 @@ function formatDateTime(value?: string): string {
       </details>
     </section>
 
-    <div v-if="!selectedAuditLoading && !error" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+    <div
+      v-if="!selectedAuditLoading && !error"
+      class="grid min-w-0 gap-4"
+      :class="{ 'xl:grid-cols-[minmax(0,1fr)_24rem]': selectedFinding }"
+    >
       <div class="min-w-0 overflow-x-auto rounded-box border border-base-content/10">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
           <h3 class="font-bold">Findings</h3>
-          <div class="flex flex-wrap items-center gap-2">
+          <div v-if="findings.length > 0" class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium opacity-70">Table filters</span>
             <details v-for="group in tableFilterGroups" :key="group.key" class="dropdown">
               <summary class="btn rounded-box btn-outline btn-sm">
@@ -768,7 +789,7 @@ function formatDateTime(value?: string): string {
             </details>
           </div>
         </div>
-        <table class="table table-zebra">
+        <table v-if="findings.length > 0" class="table table-zebra">
           <thead>
             <tr class="text-base-content/70">
               <th>Status</th>
@@ -803,27 +824,22 @@ function formatDateTime(value?: string): string {
               </td>
             </tr>
             <tr v-if="filteredFindings.length === 0">
-              <td colspan="3" class="py-8 text-center opacity-70">
-                {{
-                  hasExecutedAudit ? 'No findings match the selected filters.' : 'Select a scope and execute an audit.'
-                }}
-              </td>
+              <td colspan="3" class="py-8 text-center opacity-70">No findings match the selected filters.</td>
             </tr>
           </tbody>
         </table>
+        <p v-else-if="!hasExecutedAudit" class="p-4 text-sm opacity-70">Select a scope and execute an audit.</p>
       </div>
 
-      <aside class="min-h-80 rounded-box border border-base-content/10 bg-base-100 xl:sticky xl:top-4 xl:self-start">
+      <aside
+        v-if="selectedFinding"
+        class="rounded-box border border-base-content/10 bg-base-100 xl:sticky xl:top-4 xl:self-start"
+      >
         <div class="flex items-center justify-between border-b border-base-content/10 px-4 py-3">
           <h3 class="font-bold">Finding Details</h3>
-          <button v-if="selectedFinding" type="button" class="btn btn-ghost btn-xs" @click="selectedFindingId = null">
-            Close
-          </button>
+          <button type="button" class="btn btn-ghost btn-xs" @click="selectedFindingId = null">Close</button>
         </div>
-        <div v-if="!selectedFinding" class="p-4 text-sm opacity-70">
-          Select a row to inspect the corresponding audit evidence.
-        </div>
-        <div v-else class="space-y-4 p-4">
+        <div class="space-y-4 p-4">
           <div>
             <div class="mb-2 badge" :class="findingBadgeClass(selectedFinding)">
               {{ auditResultLabel(selectedFinding) }}

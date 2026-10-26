@@ -137,7 +137,7 @@ for (const width of [390, 1440]) {
     expect(posts[0]).toEqual({ did })
   })
 }
-async function audit(page: Page) {
+async function audit(page: Page, findings: Record<string, unknown>[] = []) {
   await authenticate(page, 'Auditor')
   await page.route('**/pac/audit', (route) =>
     json(route, {
@@ -146,7 +146,7 @@ async function audit(page: Page) {
       executed_at: '2026-10-15T10:00:00Z',
       scope: 'contracts',
       executor: { id: 'policy-engine', version: '1' },
-      findings: [],
+      findings,
     }),
   )
   await page.goto('/ui/audit')
@@ -177,10 +177,10 @@ test('P06 DID changes hide prior findings, filters and opened details', async ({
   await expect(page.locator('main aside')).toContainText('Only contract A was checked.')
   await page.getByLabel('DID (optional)').fill('did:test:different-contract')
   await expect(page.getByText('Context A check', { exact: true })).toHaveCount(0)
-  await expect(page.locator('main aside')).not.toContainText('Only contract A was checked.')
+  await expect(page.locator('main aside')).toHaveCount(0)
   await expect(page.getByText('Select a scope and execute an audit.', { exact: true })).toBeVisible()
   await expect(page.locator('.dropdown input[type="checkbox"]')).toHaveCount(0)
-  await expect(page.locator('.dropdown .badge')).toHaveText(['0/0', '0/0', '0/0', '0/0'])
+  await expect(page.locator('.dropdown')).toHaveCount(0)
   for (const format of ['JSON', 'CSV', 'PDF'])
     await expect(page.getByRole('button', { name: format, exact: true })).toBeDisabled()
 })
@@ -205,22 +205,89 @@ for (const [format, contentType, bytes] of [
     expect(await readFile(await download.path(), 'utf8')).toBe(bytes)
   })
 }
-for (const status of [404, 500]) {
-  test(`P06 JSON error ${status} displays once without downloading an error document`, async ({ page }) => {
+for (const width of [390, 1440]) {
+  for (const status of [404, 500]) {
+    test(`P06 report error ${status} preserves findings and details at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await audit(page, [{ rule_id: 'Preserved check', result: 'PASSED', reason: 'Preserved evidence' }])
+      await page.getByRole('row').filter({ hasText: 'Preserved check' }).press('Enter')
+      let attempts = 0
+      await page.route('**/pac/report?**', async (route) => {
+        attempts++
+        if (attempts === 1) return json(route, { message: 'Report unavailable' }, status)
+        await route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.4\nRetry report\n%%EOF' })
+      })
+      const downloads = page.getByRole('group', { name: 'Download report', exact: true })
+      await downloads.getByRole('button', { name: 'PDF', exact: true }).click()
+      await expect(page.getByRole('alert')).toHaveCount(1)
+      await expect(downloads.getByRole('alert')).toHaveText('Audit report could not be generated.')
+      await expect(page.getByText('Audit passed.', { exact: false })).toBeVisible()
+      await expect(page.locator('main aside')).toContainText('Preserved evidence')
+      await expect(page.getByRole('row').filter({ hasText: 'Preserved check' })).toHaveCount(1)
+      await expect(page.locator('.dropdown')).toHaveCount(4)
+      const promise = page.waitForEvent('download')
+      await downloads.getByRole('button', { name: 'PDF', exact: true }).click()
+      await promise
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      expect(attempts).toBe(2)
+    })
+  }
+  test(`P06 keeps format labels and announces report loading at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await audit(page)
-    let downloads = 0
-    page.on('download', () => downloads++)
-    await page.route('**/pac/report?**', (route) =>
-      json(
-        route,
-        { message: status === 404 ? 'Report unavailable after erasure' : 'Report generation unavailable' },
-        status,
-      ),
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    await page.route('**/pac/report?**', async (route) => {
+      await pending
+      await json(route, { reportId: 'qa-report', events: [] })
+    })
+    const group = page.getByRole('group', { name: 'Download report', exact: true })
+    await group.getByRole('button', { name: 'JSON', exact: true }).click()
+    await expect(group.getByRole('button', { name: 'JSON', exact: true })).toBeDisabled()
+    await expect(group.getByRole('status')).toHaveText('Preparing JSON report…')
+    await expect(group.locator('.loading')).toHaveAttribute('aria-hidden', 'true')
+    for (const format of ['JSON', 'CSV', 'PDF'])
+      await expect(group.getByRole('button', { name: format, exact: true })).toHaveText(format)
+    const download = page.waitForEvent('download')
+    finish()
+    await download
+    await expect(group.getByRole('status')).toHaveCount(0)
+  })
+  test(`P06 empty states show only relevant controls at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await authenticate(page, 'Auditor')
+    let executions = 0
+    await page.route('**/pac/audit', (route) =>
+      json(route, {
+        audit_id: 'empty-audit',
+        correlation_id: 'empty-correlation',
+        executed_at: '2026-10-26T10:00:00Z',
+        scope: 'contracts',
+        executor: { id: 'policy-engine', version: '1' },
+        findings: executions++ === 0 ? [] : [{ rule_id: 'Filter check', result: 'PASSED' }],
+      }),
     )
-    await page.getByRole('button', { name: 'PDF', exact: true }).click()
-    await expect(page.getByRole('alert')).toHaveText('Audit report could not be generated.')
-    await expect(page.getByRole('button', { name: 'PDF', exact: true })).toBeEnabled()
-    expect(downloads).toBe(0)
+    await page.goto('/ui/audit')
+    await expect(page.getByText('Select a scope and execute an audit.', { exact: true })).toBeVisible()
+    await expect(page.locator('.dropdown')).toHaveCount(0)
+    await expect(page.locator('main aside')).toHaveCount(0)
+    await page.getByLabel('Audit justification').fill('Review empty states')
+    await page.getByRole('button', { name: 'Execute Audit' }).click()
+    await expect(page.getByText('Audit completed. No matching entries were found.', { exact: true })).toBeVisible()
+    await expect(page.getByText('No findings match the selected filters.', { exact: true })).toHaveCount(0)
+    await expect(page.locator('.dropdown')).toHaveCount(0)
+    await expect(page.locator('main aside')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Execute Audit' }).click()
+    await expect(page.getByRole('row').filter({ hasText: 'Filter check' })).toBeVisible()
+    await expect(page.locator('main aside')).toHaveCount(0)
+    const statusFilter = page.locator('.dropdown').first()
+    await statusFilter.locator('summary').click()
+    await statusFilter.getByRole('button', { name: 'None', exact: true }).click()
+    await expect(page.getByText('No findings match the selected filters.', { exact: true })).toBeVisible()
+    await expect(page.locator('main aside')).toHaveCount(0)
+    await expect(page.locator('.dropdown')).toHaveCount(4)
   })
 }
 const denied = {

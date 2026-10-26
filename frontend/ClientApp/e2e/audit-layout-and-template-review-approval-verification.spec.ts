@@ -158,7 +158,8 @@ test.describe('audit and compliance layout at 1280px with expanded navigation', 
     // click by role.
     await page.locator('summary').filter({ hasText: 'Component' }).click()
     await page.getByRole('button', { name: 'None' }).click()
-    await expect(page.getByText('Select a row to inspect the corresponding audit evidence.')).toBeVisible()
+    await expect(details).toHaveCount(0)
+    await expect(page.getByText('No findings match the selected filters.', { exact: true })).toBeVisible()
 
     await page.getByLabel('DID (optional)').fill('did:web:example.test:other')
     for (let index = 0; index < (await exports.count()); index += 1) await expect(exports.nth(index)).toBeDisabled()

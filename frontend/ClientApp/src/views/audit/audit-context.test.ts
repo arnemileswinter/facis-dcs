@@ -5,10 +5,11 @@ import { useAuthStore } from '@/stores/auth-store'
 import AuditView from './AuditView.vue'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
-const audit = vi.hoisted(() => vi.fn())
+const { audit, report } = vi.hoisted(() => ({ audit: vi.fn(), report: vi.fn() }))
+vi.mock('@/utils/download-blob', () => ({ downloadBlob: vi.fn() }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
 vi.mock('@/services/archive-service', () => ({ archiveService: { erasureStatus: vi.fn().mockResolvedValue(null) } }))
-vi.mock('@/services/auditing-service', () => ({ auditingService: { audit } }))
+vi.mock('@/services/auditing-service', () => ({ auditingService: { audit, report } }))
 const finding: AuditFinding = {
   id: 'result-a',
   category: 'compliance_check',
@@ -34,7 +35,8 @@ function expectNoResult(wrapper: ReturnType<typeof render>) {
   expect(wrapper.text()).toContain('Select a scope and execute an audit.')
   expect(wrapper.findAll('tbody tr[tabindex]')).toHaveLength(0)
   expect(wrapper.findAll('.dropdown input[type="checkbox"]')).toHaveLength(0)
-  expect(wrapper.findAll('.dropdown .badge').map((badge) => badge.text())).toEqual(['0/0', '0/0', '0/0', '0/0'])
+  expect(wrapper.findAll('.dropdown')).toHaveLength(0)
+  expect(wrapper.find('aside').exists()).toBe(false)
   for (const format of ['JSON', 'CSV', 'PDF']) expect(button(wrapper, format).attributes('disabled')).toBeDefined()
 }
 
@@ -43,6 +45,7 @@ describe('P06 audit execution context', () => {
     setActivePinia(createPinia())
     useAuthStore().user = { issuer: 'org', holder: 'user', roles: ['AUDITOR'] }
     audit.mockReset()
+    report.mockReset()
   })
   it('clears findings, filter values and opened details on DID or scope changes', async () => {
     audit.mockResolvedValue([finding])
@@ -59,7 +62,7 @@ describe('P06 audit execution context', () => {
     await wrapper.get('#input-did').setValue('did:test:a')
     await flushPromises()
     expect(wrapper.findAll('tbody tr[tabindex]')).toHaveLength(1)
-    expect(wrapper.get('aside').text()).not.toContain('Contract A checked')
+    expect(wrapper.find('aside').exists()).toBe(false)
     await wrapper.get('#select-scope').setValue('templates')
     await flushPromises()
     expectNoResult(wrapper)
@@ -81,6 +84,91 @@ describe('P06 audit execution context', () => {
     resolve([finding])
     await flushPromises()
     expectNoResult(wrapper)
+    wrapper.unmount()
+  })
+  it.each([404, 500])('preserves findings, filters and selected details after report failure %s', async (status) => {
+    audit.mockResolvedValue([finding])
+    report
+      .mockRejectedValueOnce(new Error(`HTTP ${status}`))
+      .mockResolvedValueOnce({ bytes: '{}', contentType: 'application/json', filename: 'report.json' })
+    const wrapper = render()
+    await wrapper.get('#input-justification').setValue('Review report')
+    await button(wrapper, 'Execute Audit').trigger('click')
+    await flushPromises()
+    await wrapper.get('tbody tr[tabindex]').trigger('click')
+    await button(wrapper, 'JSON').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('fieldset [role="alert"]').text()).toBe('Audit report could not be generated.')
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Audit passed.')
+    expect(wrapper.findAll('.dropdown')).toHaveLength(4)
+    expect(wrapper.get('aside').text()).toContain('Contract A checked')
+    expect(wrapper.findAll('tbody tr[tabindex]')).toHaveLength(1)
+    expect(button(wrapper, 'JSON').attributes('disabled')).toBeUndefined()
+    await button(wrapper, 'JSON').trigger('click')
+    await flushPromises()
+    expect(report).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it.each(['did', 'scope'])('does not show a late report error after %s changes', async (context) => {
+    audit.mockResolvedValue([finding])
+    let reject!: (error: Error) => void
+    report.mockReturnValue(
+      new Promise((_, no) => {
+        reject = no
+      }),
+    )
+    const wrapper = render()
+    await wrapper.get('#input-justification').setValue('Review report')
+    await button(wrapper, 'Execute Audit').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'JSON').trigger('click')
+    expect(button(wrapper, 'JSON').text()).toBe('JSON')
+    expect(wrapper.get('fieldset [role="status"]').text()).toBe('Preparing JSON report…')
+    expect(wrapper.get('fieldset .loading').attributes('aria-hidden')).toBe('true')
+    const state = wrapper.vm as unknown as { didFilter: string; selectedScope: string }
+    if (context === 'did') state.didFilter = 'did:test:different'
+    else state.selectedScope = 'templates'
+    await flushPromises()
+    reject(new Error('Old report failure'))
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expectNoResult(wrapper)
+    wrapper.unmount()
+  })
+  it('distinguishes unexecuted, successfully empty and filtered empty states', async () => {
+    audit.mockResolvedValueOnce([]).mockResolvedValueOnce([finding])
+    const wrapper = render()
+    expectNoResult(wrapper)
+    await wrapper.get('#input-justification').setValue('Review empty results')
+    await button(wrapper, 'Execute Audit').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Audit completed. No matching entries were found.')
+    expect(wrapper.text()).not.toContain('Select a scope and execute an audit.')
+    expect(wrapper.text()).not.toContain('No findings match the selected filters.')
+    expect(wrapper.findAll('.dropdown')).toHaveLength(0)
+    expect(wrapper.find('aside').exists()).toBe(false)
+    await button(wrapper, 'Execute Audit').trigger('click')
+    await flushPromises()
+    await wrapper.get('.dropdown input[type="checkbox"]').setValue(false)
+    expect(wrapper.text()).toContain('No findings match the selected filters.')
+    expect(wrapper.text()).not.toContain('Audit completed. No matching entries were found.')
+    expect(wrapper.findAll('.dropdown')).toHaveLength(4)
+    wrapper.unmount()
+  })
+  it('clears a visible report error when the query changes', async () => {
+    audit.mockResolvedValue([finding])
+    report.mockRejectedValue(new Error('Report unavailable'))
+    const wrapper = render()
+    await wrapper.get('#input-justification').setValue('Review report')
+    await button(wrapper, 'Execute Audit').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'PDF').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Audit report could not be generated.')
+    await wrapper.get('#input-did').setValue('did:test:new')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })
