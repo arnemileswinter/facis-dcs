@@ -40,53 +40,70 @@ async function archive(page: Page) {
 }
 async function enterSummary(page: Page) {
   await page.getByTestId(`archive-annotate-${did}`).click()
-  await page.getByPlaceholder('Summary', { exact: true }).fill('  Retained QA archive summary  ')
+  await expect(page.getByRole('dialog')).toContainText(
+    'Leave empty to keep the existing summary. If none exists, one is generated from the contract metadata.',
+  )
+  await page.getByLabel('Summary', { exact: true }).fill('  Retained QA archive summary  ')
   await page.getByRole('dialog').getByRole('button', { name: 'Submit' }).click()
-  await expect(page.getByPlaceholder('e.g. supply, 2026, renewed')).toBeVisible()
+  await expect(page.getByLabel('Tags', { exact: true })).toBeVisible()
 }
-for (const failed of [false, true]) {
-  test(`P04 annotation ${failed ? 'failure is visible' : 'survives confirmation and reload; cancellation sends no POST'}`, async ({
-    page,
-  }) => {
-    await archive(page)
-    let storedSummary = 'Original summary'
-    const posts: unknown[] = []
-    await page.route('**/archive/retrieve', (route) =>
-      json(route, {
-        contracts: [
-          { did, name: 'QA archive contract', state: 'ARCHIVED', contract_version: 1, archive_summary: storedSummary },
-        ],
-      }),
-    )
-    await page.route('**/archive/annotate', async (route) => {
-      const body = route.request().postDataJSON() as { summary: string }
-      posts.push(body)
-      if (failed) return json(route, { message: 'Annotation storage unavailable' }, 500)
-      storedSummary = body.summary
-      await json(route, { did, summary: storedSummary, tags: [] })
-    })
-    await page.goto('/ui/archive/dashboard')
-    await enterSummary(page)
-    await page.getByRole('dialog').getByRole('button', { name: 'Submit' }).click()
-    await expect.poll(() => posts.length).toBe(1)
-    expect(posts[0]).toEqual({ did, summary: 'Retained QA archive summary' })
-    if (failed) await expect(page.getByRole('alert')).toContainText('Annotation storage unavailable')
-    const expected = failed ? 'Original summary' : 'Retained QA archive summary'
-    await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
-    await page.reload()
-    await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
-    for (const cancel of ['button', 'escape']) {
-      await page.getByTestId(`archive-annotate-${did}`).click()
-      if (cancel === 'button') await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
-      else await page.keyboard.press('Escape')
-      await expect(page.getByRole('dialog')).not.toBeVisible()
-      expect(posts).toHaveLength(1)
+for (const width of [390, 1440]) {
+  for (const failed of [false, true]) {
+    test(`P04 annotation ${failed ? 'failure is visible' : 'survives confirmation and reload; cancellation sends no POST'} at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await archive(page)
+      let storedSummary = 'Original summary'
+      const posts: unknown[] = []
+      await page.route('**/archive/retrieve', (route) =>
+        json(route, {
+          contracts: [
+            {
+              did,
+              name: 'QA archive contract',
+              state: 'ARCHIVED',
+              contract_version: 1,
+              archive_summary: storedSummary,
+            },
+          ],
+        }),
+      )
+      await page.route('**/archive/annotate', async (route) => {
+        const body = route.request().postDataJSON() as { summary: string }
+        posts.push(body)
+        if (failed) return json(route, { message: 'Annotation storage unavailable' }, 500)
+        storedSummary = body.summary
+        await json(route, { did, summary: storedSummary, tags: [] })
+      })
+      await page.goto('/ui/archive/dashboard')
       await enterSummary(page)
-      await page.keyboard.press('Escape')
-      await expect(page.getByRole('dialog')).not.toBeVisible()
-      expect(posts).toHaveLength(1)
-    }
-  })
+      await page.getByRole('dialog').getByRole('button', { name: 'Submit' }).click()
+      await expect.poll(() => posts.length).toBe(1)
+      expect(posts[0]).toEqual({ did, summary: 'Retained QA archive summary' })
+      if (failed) await expect(page.getByRole('alert')).toContainText('Annotation storage unavailable')
+      const expected = failed ? 'Original summary' : 'Retained QA archive summary'
+      await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
+      await page.reload()
+      await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
+      for (const cancel of ['button', 'escape']) {
+        const annotate = page.getByTestId(`archive-annotate-${did}`)
+        await annotate.press('Enter')
+        await expect(page.getByLabel('Summary', { exact: true })).toBeVisible()
+        if (cancel === 'button') await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+        else await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog')).not.toBeVisible()
+        expect(posts).toHaveLength(1)
+        await expect(annotate).toBeFocused()
+        await enterSummary(page)
+        if (cancel === 'button') await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).press('Enter')
+        else await page.keyboard.press('Escape')
+        await expect(page.getByRole('dialog')).not.toBeVisible()
+        expect(posts).toHaveLength(1)
+        await expect(annotate).toBeFocused()
+      }
+    })
+  }
 }
 async function audit(page: Page) {
   await authenticate(page, 'Auditor')

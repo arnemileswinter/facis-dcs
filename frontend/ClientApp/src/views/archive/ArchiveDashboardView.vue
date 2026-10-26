@@ -115,20 +115,18 @@ const expandedStatus = computed(() =>
 
 const annotating = ref(false)
 
-// DCS-FR-CSA-11: summary and tags are the only mutable part of an archive
-// entry. The dialog takes the summary; tags are entered on the same line,
-// comma-separated, because the shared modal offers a single text field.
+// DCS-FR-CSA-11: summary and tags are the only mutable part of an archive entry.
 async function annotateEntry(entry: ArchivedContract) {
   const dialog = confirmationModal.value
   if (!dialog) return
   const { isCanceled, data: summary } = await dialog.reveal({
-    message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to have one generated from the contract metadata.`,
-    editor: { requiredText: false, placeholder: 'Summary' },
+    message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to keep the existing summary. If none exists, one is generated from the contract metadata.`,
+    editor: { requiredText: false, label: 'Summary', placeholder: 'Summary' },
   })
   if (isCanceled) return
   const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
     message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
-    editor: { requiredText: false, placeholder: 'e.g. supply, 2026, renewed' },
+    editor: { requiredText: false, label: 'Tags', placeholder: 'e.g. supply, 2026, renewed' },
   })
   if (tagsCanceled) return
   const tagList = (tags ?? '')

@@ -4,6 +4,7 @@ import { computed, type Ref, ref, useId, useTemplateRef, watch } from 'vue'
 
 interface Editor {
   requiredText: boolean
+  label?: string
   placeholder?: string
 }
 
@@ -104,7 +105,9 @@ defineExpose<ModalExpose>({ reveal: reveal })
         <h3 :id="dialogTitleId" class="text-lg font-bold">Confirmation</h3>
         <p :id="dialogDescriptionId" class="text-md py-4">{{ modalData.message }}</p>
         <div v-if="modalData.editor" class="mx-auto flex w-full max-w-4xl flex-col gap-2 py-3">
-          <label :id="editorLabelId" class="sr-only" :for="inputTextId">Comment</label>
+          <label :id="editorLabelId" class="sr-only" :for="inputTextId">
+            {{ modalData.editor.label ?? 'Comment' }}
+          </label>
           <textarea
             :id="inputTextId"
             v-model="inputText"
