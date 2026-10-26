@@ -145,13 +145,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async retrieveById(request: ContractRetrieveByIdRequest) {
-    return http
-      .get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`)
-      .then((res) => ({ ...res.data }))
-      .catch((err: unknown) => {
-        console.error('Retrieve ID Error:', err)
-        return null
-      })
+    return http.get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`).then((res) => ({ ...res.data }))
   },
 
   async search(request: ContractSearchRequest) {

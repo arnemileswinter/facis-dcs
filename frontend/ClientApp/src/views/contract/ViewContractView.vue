@@ -24,6 +24,7 @@ import { useContractsStore } from '@/stores/contracts-store'
 import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import { activeNegotiations, contractWithAcceptedProposals } from '@/utils/contract-negotiations'
+import { claimReportedHttpError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
@@ -94,6 +95,7 @@ const loadContract = async () => {
       contractEditorUiStore.setActiveTab('proposals')
     }
   } catch (err: unknown) {
+    claimReportedHttpError(err)
     if (route.params.did !== id || request !== loadRequest) return
     loadError.value = true
     console.error('Failed to load contract', err)
@@ -209,10 +211,12 @@ const exportBundle = async () => {
 <template>
   <div class="flex h-full flex-col">
     <p v-if="loading" class="p-6" role="status">Loading contract…</p>
-    <div v-if="loadError" class="m-6 alert flex-wrap alert-error" role="alert">
-      <span>The contract could not be loaded. You may not have access.</span>
-      <button type="button" class="btn btn-sm" :disabled="loading" @click="loadContract">Retry</button>
-      <RouterLink :to="{ name: ROUTES.CONTRACTS.LIST }" class="link">Back to contracts</RouterLink>
+    <div v-if="loadError" class="m-6 alert block alert-error" role="alert">
+      <p>The contract could not be loaded. You may not have access.</p>
+      <div class="mt-3 flex flex-wrap items-center gap-4">
+        <button type="button" class="btn btn-sm" :disabled="loading" @click="loadContract">Retry</button>
+        <RouterLink :to="{ name: ROUTES.CONTRACTS.LIST }" class="link">Back to contracts</RouterLink>
+      </div>
     </div>
     <div v-if="!!contract" class="flex flex-1 flex-col">
       <div class="flex flex-1 flex-col">
@@ -431,19 +435,12 @@ const exportBundle = async () => {
         </div>
       </div>
     </div>
-    <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+    <div v-if="contract" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
-        <!-- Both exports need the loaded contract's DID; until it arrives the
-             handlers can only return silently, so the click looks like it did
-             nothing. Disable them while the contract is still loading. -->
-        <button class="btn btn-outline md:w-32" :disabled="exporting || !contract" @click="exportPDF">
-          Export PDF
-        </button>
-        <button class="btn btn-outline md:w-36" :disabled="exporting || !contract" @click="exportBundle">
-          Export bundle
-        </button>
-        <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
+        <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <button class="btn btn-outline md:w-36" :disabled="exporting" @click="exportBundle">Export bundle</button>
+        <ContractManagerActions :contract="contract" class="btn flex-1 btn-primary" />
       </div>
     </div>
   </div>

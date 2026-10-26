@@ -1,9 +1,12 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { AxiosError } from 'axios'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
+import { useErrorStore } from '@/stores/error-store'
+import { bindReportedHttpError } from '@/utils/report-action-error'
 import ViewContractView from './ViewContractView.vue'
 import type { Contract } from '@/models/contract/contract'
 
@@ -47,8 +50,7 @@ describe('F03 contract loading feedback', () => {
       )
       expect(wrapper.text()).not.toContain('Private backend details')
       expect(wrapper.findComponent({ name: 'ContractManagerActions' }).exists()).toBe(false)
-      for (const button of wrapper.findAll('button').filter((b) => b.text().startsWith('Export')))
-        expect(button.attributes('disabled')).toBeDefined()
+      expect(wrapper.findAll('button').filter((b) => b.text().startsWith('Export'))).toHaveLength(0)
       expect(wrapper.findComponent({ name: 'RouterLink' }).props('to')).toEqual({ name: 'contracts.list' })
       let resolve!: (value: Contract) => void
       retrieve.mockReturnValueOnce(new Promise<Contract>((res) => (resolve = res)))
@@ -59,10 +61,36 @@ describe('F03 contract loading feedback', () => {
       resolve(contract)
       await flushPromises()
       expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      expect(wrapper.findAll('button').filter((b) => b.text().startsWith('Export'))).toHaveLength(2)
       expect(wrapper.findComponent({ name: 'ContractDetailsEditor' }).props('contract').did).toBe(contract.did)
       wrapper.unmount()
     },
   )
+  it.each([false, true])('claims only the bound Axios toast, including stale failure: %s', async (stale) => {
+    const errors = useErrorStore()
+    const unrelatedId = errors.add('Unrelated failure')
+    const backendError = new AxiosError('Private backend denial')
+    const errorId = errors.add('Private backend denial')
+    bindReportedHttpError(backendError, errorId)
+    let reject!: (error: unknown) => void
+    retrieve.mockReturnValueOnce(
+      new Promise<Contract>((_, rej) => {
+        reject = rej
+      }),
+    )
+    const wrapper = render()
+    if (stale) {
+      retrieve.mockResolvedValueOnce(contract)
+      route.params.did = 'did:test:next'
+      await flushPromises()
+    }
+    reject(backendError)
+    await flushPromises()
+    expect(errors.errors).toEqual([{ id: unrelatedId, type: 'error', message: 'Unrelated failure' }])
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(stale ? 0 : 1)
+    expect(wrapper.text()).not.toContain('Private backend denial')
+    wrapper.unmount()
+  })
   it.each(['resolve', 'reject'])('ignores a previous DID response that later %ss', async (outcome) => {
     let resolve!: (value: Contract) => void
     let reject!: (error: Error) => void

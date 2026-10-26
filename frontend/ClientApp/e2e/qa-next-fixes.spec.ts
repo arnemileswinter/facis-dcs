@@ -424,39 +424,50 @@ test('F10 observers cannot access evidence controls or trigger evidence requests
 })
 
 for (const width of [390, 1440]) {
-  test(`F03 denied contract has feedback and keyboard retry at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-    await auth(page, 'Contract Manager')
-    let retrieveCount = 0
-    let retryRoute: Route | undefined
-    await page.route('**/contract/retrieve**', async (route) => {
-      if (!route.request().url().includes('/retrieve/'))
-        return json(route, { contracts: [], review_tasks: [], approval_tasks: [], negotiation_tasks: [] })
-      retrieveCount++
-      if (retrieveCount === 1) return json(route, { message: 'not authorized to access this contract' }, 403)
-      retryRoute = route
+  for (const status of [403, 404, 500]) {
+    test(`F03 ${status} contract has one feedback and keyboard retry at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await auth(page, 'Contract Manager')
+      let retrieveCount = 0
+      let retryRoute: Route | undefined
+      await page.route('**/contract/retrieve**', async (route) => {
+        if (!route.request().url().includes('/retrieve/'))
+          return json(route, { contracts: [], review_tasks: [], approval_tasks: [], negotiation_tasks: [] })
+        retrieveCount++
+        if (retrieveCount === 1) return json(route, { message: 'Private backend failure' }, status)
+        retryRoute = route
+      })
+      await page.goto(`/ui/contracts/view/${encodeURIComponent(did)}`)
+      const feedback = page.getByRole('alert').filter({ hasText: 'The contract could not be loaded.' })
+      await expect(feedback).toContainText('You may not have access.')
+      await expect(page.getByRole('alert')).toHaveCount(1)
+      await expect(page.getByText('Private backend failure', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('tab')).toHaveCount(0)
+      const messageBox = await feedback.locator('p').boundingBox()
+      const actionsBox = await feedback.locator('div').boundingBox()
+      expect(actionsBox!.y).toBeGreaterThanOrEqual(messageBox!.y + messageBox!.height)
+      const feedbackBox = await feedback.boundingBox()
+      expect(messageBox!.width).toBeGreaterThan(feedbackBox!.width * 0.8)
+      for (const label of ['Export PDF', 'Export bundle'])
+        await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0)
+      const back = feedback.getByRole('link', { name: 'Back to contracts', exact: true })
+      await expect(back).toHaveAttribute('href', /\/contracts$/)
+      await back.focus()
+      await expect(back).toBeFocused()
+      await noOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`contract-denied-${width}.png`), fullPage: true })
+      const retry = feedback.getByRole('button', { name: 'Retry', exact: true })
+      await retry.press('Enter')
+      await expect(page.getByRole('status')).toHaveText('Loading contract…')
+      await expect(retry).toBeDisabled()
+      await expect.poll(() => retrieveCount).toBe(2)
+      expect(decodeURIComponent(new URL(retryRoute!.request().url()).pathname)).toContain(did)
+      await json(retryRoute!, snapshot)
+      await expect(feedback).toHaveCount(0)
+      await expect(page.getByRole('tab', { name: 'Contract Details' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Export PDF', exact: true })).toBeEnabled()
+      await expect(page.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled()
+      await noOverflow(page)
     })
-    await page.goto(`/ui/contracts/view/${encodeURIComponent(did)}`)
-    const feedback = page.getByRole('alert').filter({ hasText: 'The contract could not be loaded.' })
-    await expect(feedback).toContainText('You may not have access.')
-    await expect(page.getByRole('tab')).toHaveCount(0)
-    for (const label of ['Export PDF', 'Export bundle'])
-      await expect(page.getByRole('button', { name: label, exact: true })).toBeDisabled()
-    const back = feedback.getByRole('link', { name: 'Back to contracts', exact: true })
-    await expect(back).toHaveAttribute('href', /\/contracts$/)
-    await back.focus()
-    await expect(back).toBeFocused()
-    await noOverflow(page)
-    await page.screenshot({ path: testInfo.outputPath(`contract-denied-${width}.png`), fullPage: true })
-    const retry = feedback.getByRole('button', { name: 'Retry', exact: true })
-    await retry.press('Enter')
-    await expect(page.getByRole('status')).toHaveText('Loading contract…')
-    await expect(retry).toBeDisabled()
-    await expect.poll(() => retrieveCount).toBe(2)
-    expect(decodeURIComponent(new URL(retryRoute!.request().url()).pathname)).toContain(did)
-    await json(retryRoute!, snapshot)
-    await expect(feedback).toHaveCount(0)
-    await expect(page.getByRole('tab', { name: 'Contract Details' })).toBeVisible()
-    await noOverflow(page)
-  })
+  }
 }
