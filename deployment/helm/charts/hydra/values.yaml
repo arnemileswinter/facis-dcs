@@ -35,10 +35,9 @@ route:
     - /.well-known
 
 secrets:
-  # Hydra's system secret. Outside dev mode, set systemSecretRef; an inline
-  # `system` value must have at least 32 characters and no "change-me". The
-  # chart refuses to render otherwise. Dev mode falls back to a fixed
-  # placeholder. systemSecretRef wins when both are set.
+  # Hydra's system secret. Outside dev mode, systemSecretRef is required and
+  # the chart refuses to render without it. `system` (inline) applies in dev
+  # mode only, with a fixed placeholder as fallback.
   system: ""
   systemSecretRef:
     name: ""

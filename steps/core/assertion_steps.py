@@ -3,6 +3,7 @@ import ast
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 import requests as _requests
 
@@ -105,8 +106,11 @@ def step_when_internal_request(context, method, endpoint):
     if endpoint == "/metrics":
         origin = os.getenv("BDD_DCS_METRICS_ORIGIN", "").strip().rstrip("/")
         if not origin:
-            scheme, _, host = context.base_url.split("/", 3)[:3]
-            origin = f"{scheme}//{host.rsplit(':', 1)[0]}:9464"
+            # The metrics listener is plain HTTP on the backend host.
+            host = urlsplit(context.base_url).hostname or "localhost"
+            if ":" in host:
+                host = f"[{host}]"
+            origin = f"http://{host}:{os.getenv('DCS_METRICS_PORT', '9464')}"
     else:
         origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
     if not origin:

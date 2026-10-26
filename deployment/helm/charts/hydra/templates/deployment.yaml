@@ -3,13 +3,9 @@
 {{- $consent := .Values.config.consentURL -}}
 {{- $logout := .Values.config.logoutURL -}}
 {{- $systemRef := .Values.secrets.systemSecretRef | default dict -}}
-{{- $inline := .Values.secrets.system | default "" | toString -}}
-{{- if and (ne (toString .Values.config.dev) "true") (not $systemRef.name) -}}
-{{- if not $inline -}}
-{{- fail "hydra.secrets.systemSecretRef.name is required when hydra.config.dev is false: create a Secret with a high-entropy value (e.g. openssl rand -hex 32) and reference it" -}}
-{{- else if or (lt (len $inline) 32) (contains "change-me" $inline) -}}
-{{- fail "hydra.secrets.system is a placeholder or shorter than 32 characters: use hydra.secrets.systemSecretRef with a high-entropy value (e.g. openssl rand -hex 32)" -}}
-{{- end -}}
+{{- $dev := eq (toString .Values.config.dev) "true" -}}
+{{- if and (not $dev) (not $systemRef.name) -}}
+{{- fail "hydra.secrets.systemSecretRef.name is required when hydra.config.dev is false: create a Secret with a high-entropy value (e.g. openssl rand -hex 32) and reference it; hydra.secrets.system is for dev mode only" -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +35,7 @@ spec:
             - |
               set -e
               hydra migrate sql --yes "$DSN"
-              exec hydra serve all {{- if .Values.config.dev }} --dev{{- end }}
+              exec hydra serve all {{- if $dev }} --dev{{- end }}
           env:
             - name: DSN
               value: {{ .Values.config.dsn | quote }}
@@ -75,7 +71,7 @@ spec:
             # HTTP local dev (config.dev) must not mark cookies Secure — browsers treat
             # localhost as secure, but non-browser clients (testWallet) do not.
             - name: SERVE_COOKIES_SECURE
-              value: {{ if .Values.config.dev }}"false"{{ else }}"true"{{ end }}
+              value: {{ if $dev }}"false"{{ else }}"true"{{ end }}
             - name: SERVE_COOKIES_SAME_SITE_MODE
               value: "Lax"
             # Issue JWT access tokens (default is opaque "ory_at_..." reference tokens).

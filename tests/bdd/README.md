@@ -97,6 +97,7 @@ NS=<namespace of instance A>
 kubectl -n "$NS" port-forward svc/<release>-postgresql 5432:5432 &
 kubectl -n "$NS" port-forward svc/<release>-dss        18099:8080 &
 kubectl -n "$NS" port-forward svc/<release>-orce       18880:1880 &
+kubectl -n "$NS" port-forward svc/<fullname>-metrics   19464:9464 &
 
 BACKEND_POD=$(kubectl -n "$NS" get pod \
   -l app.kubernetes.io/component=backend,app.kubernetes.io/instance=<release> \
@@ -118,6 +119,7 @@ wrong instance's token.
 | `BDD_PUBLIC_ORIGIN` | Instance A's origin, without the API path. |
 | `ISSUER_BASE_URL` | The ORCE issuer serving the status list your credentials name (ADR-34). Must be the URL the **backend** fetches: the verifier requires the status token's `sub` to equal the credential's URI. |
 | `DATABASE_URL` | `host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable`, through the port-forward above. |
+| `BDD_DCS_METRICS_ORIGIN` | `http://localhost:19464`, through the metrics port-forward above. The backend serves `/metrics` only on its metrics port. |
 | `BDD_DSS_URL` | `http://localhost:18099`. This is the EU DSS webapp acting as the external signature creation application. |
 | `BDD_HSMSIGN_EXEC` | `kubectl -n $NS exec $BACKEND_POD -c digital-contracting-service --` |
 | `BDD_IPFS_EXEC` | `kubectl -n $NS exec -i $IPFS_POD --` |
