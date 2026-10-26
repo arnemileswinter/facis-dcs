@@ -43,8 +43,9 @@ async function enterSummary(page: Page) {
   await expect(page.getByRole('dialog')).toContainText(
     'Leave empty to keep the existing summary. If none exists, one is generated from the contract metadata.',
   )
+  await expect(page.getByRole('dialog')).toHaveAccessibleName('Edit summary – 1 of 2')
   await page.getByLabel('Summary', { exact: true }).fill('  Retained QA archive summary  ')
-  await page.getByRole('dialog').getByRole('button', { name: 'Submit' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Next' }).click()
   await expect(page.getByLabel('Tags', { exact: true })).toBeVisible()
 }
 for (const width of [390, 1440]) {
@@ -65,6 +66,7 @@ for (const width of [390, 1440]) {
               state: 'ARCHIVED',
               contract_version: 1,
               archive_summary: storedSummary,
+              archive_tags: ['original', 'qa'],
             },
           ],
         }),
@@ -78,18 +80,23 @@ for (const width of [390, 1440]) {
       })
       await page.goto('/ui/archive/dashboard')
       await enterSummary(page)
-      await page.getByRole('dialog').getByRole('button', { name: 'Submit' }).click()
+      await expect(page.getByRole('dialog')).toHaveAccessibleName('Tags – 2 of 2')
+      await expect(page.getByLabel('Tags', { exact: true })).toHaveValue('original, qa')
+      await page.getByLabel('Tags', { exact: true }).fill('')
+      expect(posts).toHaveLength(0)
+      await page.getByRole('dialog').getByRole('button', { name: 'Save annotation' }).press('Enter')
       await expect.poll(() => posts.length).toBe(1)
       expect(posts[0]).toEqual({ did, summary: 'Retained QA archive summary' })
       if (failed) await expect(page.getByRole('alert')).toContainText('Annotation storage unavailable')
       const expected = failed ? 'Original summary' : 'Retained QA archive summary'
-      await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
+      await expect(page.getByTestId(`archive-annotation-${did}`).locator('div').first()).toHaveText(expected)
       await page.reload()
-      await expect(page.getByTestId(`archive-annotation-${did}`)).toHaveText(expected)
+      await expect(page.getByTestId(`archive-annotation-${did}`).locator('div').first()).toHaveText(expected)
       for (const cancel of ['button', 'escape']) {
         const annotate = page.getByTestId(`archive-annotate-${did}`)
         await annotate.press('Enter')
-        await expect(page.getByLabel('Summary', { exact: true })).toBeVisible()
+        await expect(page.getByRole('dialog')).toHaveAccessibleName('Edit summary – 1 of 2')
+        await expect(page.getByLabel('Summary', { exact: true })).toHaveValue(expected)
         if (cancel === 'button') await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
         else await page.keyboard.press('Escape')
         await expect(page.getByRole('dialog')).not.toBeVisible()
@@ -104,6 +111,31 @@ for (const width of [390, 1440]) {
       }
     })
   }
+}
+for (const width of [390, 1440]) {
+  test(`P04 missing annotations start empty and preserve omission semantics at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await archive(page)
+    await page.route('**/archive/retrieve', (route) =>
+      json(route, { contracts: [{ did, name: 'Without annotation', state: 'ARCHIVED', contract_version: 1 }] }),
+    )
+    const posts: unknown[] = []
+    await page.route('**/archive/annotate', async (route) => {
+      posts.push(route.request().postDataJSON())
+      await json(route, { did, summary: 'Generated summary', tags: [] })
+    })
+    await page.goto('/ui/archive/dashboard')
+    await page.getByTestId(`archive-annotate-${did}`).press('Enter')
+    await expect(page.getByRole('dialog')).toHaveAccessibleName('Edit summary – 1 of 2')
+    await expect(page.getByLabel('Summary', { exact: true })).toHaveValue('')
+    await page.getByRole('dialog').getByRole('button', { name: 'Next', exact: true }).press('Enter')
+    await expect(page.getByRole('dialog')).toHaveAccessibleName('Tags – 2 of 2')
+    await expect(page.getByLabel('Tags', { exact: true })).toHaveValue('')
+    expect(posts).toHaveLength(0)
+    await page.getByRole('dialog').getByRole('button', { name: 'Save annotation', exact: true }).press('Enter')
+    await expect.poll(() => posts.length).toBe(1)
+    expect(posts[0]).toEqual({ did })
+  })
 }
 async function audit(page: Page) {
   await authenticate(page, 'Auditor')

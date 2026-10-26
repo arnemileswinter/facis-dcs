@@ -120,13 +120,22 @@ async function annotateEntry(entry: ArchivedContract) {
   const dialog = confirmationModal.value
   if (!dialog) return
   const { isCanceled, data: summary } = await dialog.reveal({
+    title: 'Edit summary – 1 of 2',
+    confirmLabel: 'Next',
     message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to keep the existing summary. If none exists, one is generated from the contract metadata.`,
-    editor: { requiredText: false, label: 'Summary', placeholder: 'Summary' },
+    editor: { requiredText: false, label: 'Summary', placeholder: 'Summary', initialValue: entry.archive_summary },
   })
   if (isCanceled) return
   const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
+    title: 'Tags – 2 of 2',
+    confirmLabel: 'Save annotation',
     message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
-    editor: { requiredText: false, label: 'Tags', placeholder: 'e.g. supply, 2026, renewed' },
+    editor: {
+      requiredText: false,
+      label: 'Tags',
+      placeholder: 'e.g. supply, 2026, renewed',
+      initialValue: entry.archive_tags?.join(', '),
+    },
   })
   if (tagsCanceled) return
   const tagList = (tags ?? '')
