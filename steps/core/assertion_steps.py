@@ -97,11 +97,18 @@ def step_when_request_with_payload(context, method, endpoint, payload=None):
 
 @when('the system sends "{method}" request to internal endpoint "{endpoint}"')
 def step_when_internal_request(context, method, endpoint):
-    # Internal endpoints (e.g. /metrics) live at the service root, outside the
-    # API prefix; the ingress does not route them. Prefer the direct service
-    # origin (port-forward set up by run_bdd_helm.sh), falling back to the
-    # base URL's origin for local air/Vite runs.
-    origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
+    # Internal endpoints live at the service root, outside the API prefix; the
+    # ingress does not route them. Prefer the direct service origin
+    # (port-forward set up by run_bdd_helm.sh), falling back to the base URL's
+    # origin for local air/Vite runs. /metrics has its own listener
+    # (DCS_METRICS_PORT, default 9464).
+    if endpoint == "/metrics":
+        origin = os.getenv("BDD_DCS_METRICS_ORIGIN", "").strip().rstrip("/")
+        if not origin:
+            scheme, _, host = context.base_url.split("/", 3)[:3]
+            origin = f"{scheme}//{host.rsplit(':', 1)[0]}:9464"
+    else:
+        origin = os.getenv("BDD_DCS_INTERNAL_ORIGIN", "").strip().rstrip("/")
     if not origin:
         origin = "/".join(context.base_url.split("/", 3)[:3])
     url = origin + endpoint

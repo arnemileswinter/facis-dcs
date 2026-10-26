@@ -3,8 +3,13 @@
 {{- $consent := .Values.config.consentURL -}}
 {{- $logout := .Values.config.logoutURL -}}
 {{- $systemRef := .Values.secrets.systemSecretRef | default dict -}}
-{{- if not (or .Values.config.dev $systemRef.name .Values.secrets.system) -}}
+{{- $inline := .Values.secrets.system | default "" | toString -}}
+{{- if and (ne (toString .Values.config.dev) "true") (not $systemRef.name) -}}
+{{- if not $inline -}}
 {{- fail "hydra.secrets.systemSecretRef.name is required when hydra.config.dev is false: create a Secret with a high-entropy value (e.g. openssl rand -hex 32) and reference it" -}}
+{{- else if or (lt (len $inline) 32) (contains "change-me" $inline) -}}
+{{- fail "hydra.secrets.system is a placeholder or shorter than 32 characters: use hydra.secrets.systemSecretRef with a high-entropy value (e.g. openssl rand -hex 32)" -}}
+{{- end -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment

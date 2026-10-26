@@ -305,9 +305,9 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}()
 }
 
-// newOuterMux routes /orce/* to the webhook platform and everything else to
-// Goa. It does not serve /metrics: that is on the metrics listener (see
-// serveMetrics), which the ingress does not route to.
+// newOuterMux routes /orce/* to the webhook platform, the status list and
+// /readyz to their handlers, and everything else to Goa. It does not serve
+// /metrics: that is on the metrics listener (see serveMetrics).
 func newOuterMux(webhookPlatform, statusList, goaMux http.Handler) *http.ServeMux {
 	outerMux := http.NewServeMux()
 	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
@@ -332,9 +332,10 @@ func newMetricsHandler() http.Handler {
 }
 
 // serveMetrics serves Prometheus metrics on DCS_METRICS_PORT (default 9464).
-// The chart's ingress routes only the http port, so /metrics stays
-// cluster-internal.
-func serveMetrics(ctx context.Context, wg *sync.WaitGroup, errc chan error) {
+// The chart exposes that port only through a ClusterIP Service, so /metrics
+// stays cluster-internal. A listener failure is logged and does not stop the
+// service: metrics are not needed to serve contracts.
+func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
 	port := os.Getenv("DCS_METRICS_PORT")
 	if port == "" {
 		port = defaultMetricsPort
@@ -347,7 +348,7 @@ func serveMetrics(ctx context.Context, wg *sync.WaitGroup, errc chan error) {
 		go func() {
 			log.Printf(ctx, "metrics server listening on %q", srv.Addr)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-				errc <- fmt.Errorf("metrics server: %w", err)
+				log.Errorf(ctx, err, "metrics server stopped; /metrics is unavailable")
 			}
 		}()
 		<-ctx.Done()

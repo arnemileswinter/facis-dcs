@@ -8,6 +8,9 @@ cleanup() {
   if [[ -f .tmp/port-forward-dcs.pid ]]; then
     kill "$(cat .tmp/port-forward-dcs.pid)" >/dev/null 2>&1 || true
   fi
+  if [[ -f .tmp/port-forward-metrics.pid ]]; then
+    kill "$(cat .tmp/port-forward-metrics.pid)" >/dev/null 2>&1 || true
+  fi
   if [[ -f .tmp/port-forward-orce.pid ]]; then
     kill "$(cat .tmp/port-forward-orce.pid)" >/dev/null 2>&1 || true
   fi
@@ -240,7 +243,7 @@ fi
 # run — possibly against a DIFFERENT cluster/kubeconfig — binds first, the
 # nc readiness check below then passes against the squatter, and every
 # DB/ORCE test seam silently talks to the wrong stack.
-for harness_port in 5432 18991 18880; do
+for harness_port in 5432 18991 19464 18880; do
   fuser -k -n tcp "$harness_port" >/dev/null 2>&1 || true
 done
 sleep 1
@@ -281,6 +284,25 @@ until nc -z 127.0.0.1 "$LOCAL_FORWARD_PORT" 2>/dev/null; do
 done
 export BDD_DCS_INTERNAL_ORIGIN="http://localhost:$LOCAL_FORWARD_PORT"
 echo "Port-forward on $LOCAL_FORWARD_PORT is ready"
+
+# /metrics is on its own ClusterIP Service, not on the API port.
+METRICS_LOCAL_FORWARD_PORT="${METRICS_LOCAL_FORWARD_PORT:-19464}"
+echo "Starting port-forward for DCS metrics (${DCS_SERVICE}-metrics)"
+"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/${DCS_SERVICE}-metrics" \
+  "$METRICS_LOCAL_FORWARD_PORT:9464" > .tmp/port-forward-metrics.log 2>&1 &
+echo $! > .tmp/port-forward-metrics.pid
+
+deadline=$(( $(date +%s) + 30 ))
+until nc -z 127.0.0.1 "$METRICS_LOCAL_FORWARD_PORT" 2>/dev/null; do
+  if [ "$(date +%s)" -gt "$deadline" ]; then
+    echo "Timed out waiting for port-forward on $METRICS_LOCAL_FORWARD_PORT"
+    cat .tmp/port-forward-metrics.log || true
+    exit 1
+  fi
+  sleep 1
+done
+export BDD_DCS_METRICS_ORIGIN="http://localhost:$METRICS_LOCAL_FORWARD_PORT"
+echo "Port-forward on $METRICS_LOCAL_FORWARD_PORT is ready"
 
 # The wallet-driven signing scenarios call the EU DSS demonstration webapp
 # (charts/dss) as the external SCA that computes getDataToSign/signDocument.

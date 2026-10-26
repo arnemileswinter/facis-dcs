@@ -11,13 +11,22 @@ import (
 
 func TestServeFrontendSetsFramingAndCSPHeaders(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o600); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{"index.html": "<html></html>", "app.js": "1"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
+	noIndex := t.TempDir()
 
-	for _, path := range []string{"/ui/", "/ui/contracts/42", "/ui/../etc/passwd"} {
+	for _, tc := range []struct{ dir, path string }{
+		{dir, "/ui/"},                 // index.html
+		{dir, "/ui/contracts/42"},     // client route, index.html fallback
+		{dir, "/ui/app.js"},           // asset
+		{noIndex, "/ui/contracts/42"}, // 404
+	} {
+		path := tc.path
 		rec := httptest.NewRecorder()
-		serveFrontend(rec, httptest.NewRequest(http.MethodGet, path, nil), dir, "/ui")
+		serveFrontend(rec, httptest.NewRequest(http.MethodGet, path, nil), tc.dir, "/ui")
 
 		if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
 			t.Errorf("%s: X-Frame-Options = %q, want DENY", path, got)
