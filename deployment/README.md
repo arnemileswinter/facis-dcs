@@ -617,9 +617,13 @@ Two trust configurations follow from that:
 
 ### Hydra
 - Enable `hydra.enabled` and set `hydra.config.selfIssuerURL` to the public issuer URL
+- Create a Secret with a high-entropy system secret (`openssl rand -hex 32`, key `secretsSystem`) and set `hydra.secrets.systemSecretRef.name`. Outside dev mode the chart refuses to render without it.
 - Register `dcs-client` redirect URIs via `hydra.clients` (see `values.dev.yml`):
   - **Valid Redirect URIs**: `https://<domain>/<path>/api/auth/callback`
   - **Valid Post Logout Redirect URIs**: `https://<domain>/<path>/api/auth/logout-complete`
+
+### Metrics
+- The backend serves Prometheus `/metrics` on `service.metricsPort` (default 9464), not on the API port. The ingress routes only the API port. Do not route the metrics port publicly.
 
 ### Keycloak (Federated Catalogue only)
 - FC integration uses `fcKeycloak.realmURL` / `FC_KEYCLOAK_REALM_URL`

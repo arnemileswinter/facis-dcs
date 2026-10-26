@@ -28,6 +28,8 @@ securityContext: {}
 service:
   type: ClusterIP
   port: 8991
+  # Prometheus /metrics. Not routed by the ingress; scraped in-cluster only.
+  metricsPort: 9464
 
 serviceMonitor:
   enabled: false

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -224,19 +226,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	// Mount frontend static file server (uses base mux, not API mux)
 	mountFrontend(mux)
 
-	// Outer mux: routes /orce/* to the webhook platform, everything else to Goa.
-	outerMux := http.NewServeMux()
-	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
-	// The status list for the credentials this deployment issues (ADR-34). It
-	// sits here rather than in the generated API surface for two reasons: it is
-	// served at the origin root, the way did.json is, so a verifier holding only
-	// a credential can reach it without knowing this deployment's API prefix; and
-	// its media type is the routing signal a verifier uses, which Goa's response
-	// encoder would renegotiate to application/json.
-	outerMux.Handle(provenance.StatusListPath, provenance.StatusListHandler(statusList))
-	outerMux.Handle("/metrics", promhttp.Handler())
-	mountReadinessEndpoint(outerMux)
-	outerMux.Handle("/", mux)
+	outerMux := newOuterMux(webhookPlatform, provenance.StatusListHandler(statusList), mux)
 
 	var handler http.Handler = outerMux
 	handler = middleware.RateLimitAuthenticated(conf.APIRateLimitPerMinute(), handler)
@@ -311,6 +301,60 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		err := srv.Shutdown(ctx)
 		if err != nil {
 			log.Printf(ctx, "failed to shutdown: %v", err)
+		}
+	}()
+}
+
+// newOuterMux routes /orce/* to the webhook platform and everything else to
+// Goa. It does not serve /metrics: that is on the metrics listener (see
+// serveMetrics), which the ingress does not route to.
+func newOuterMux(webhookPlatform, statusList, goaMux http.Handler) *http.ServeMux {
+	outerMux := http.NewServeMux()
+	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
+	// The status list for the credentials this deployment issues (ADR-34). It
+	// sits here rather than in the generated API surface for two reasons: it is
+	// served at the origin root, the way did.json is, so a verifier holding only
+	// a credential can reach it without knowing this deployment's API prefix; and
+	// its media type is the routing signal a verifier uses, which Goa's response
+	// encoder would renegotiate to application/json.
+	outerMux.Handle(provenance.StatusListPath, statusList)
+	mountReadinessEndpoint(outerMux)
+	outerMux.Handle("/", goaMux)
+	return outerMux
+}
+
+const defaultMetricsPort = "9464"
+
+func newMetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	return mux
+}
+
+// serveMetrics serves Prometheus metrics on DCS_METRICS_PORT (default 9464).
+// The chart's ingress routes only the http port, so /metrics stays
+// cluster-internal.
+func serveMetrics(ctx context.Context, wg *sync.WaitGroup, errc chan error) {
+	port := os.Getenv("DCS_METRICS_PORT")
+	if port == "" {
+		port = defaultMetricsPort
+	}
+	srv := &http.Server{Addr: net.JoinHostPort("", port), Handler: newMetricsHandler(), ReadHeaderTimeout: time.Second * 60}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go func() {
+			log.Printf(ctx, "metrics server listening on %q", srv.Addr)
+			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				errc <- fmt.Errorf("metrics server: %w", err)
+			}
+		}()
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf(ctx, "failed to shutdown metrics server: %v", err)
 		}
 	}()
 }
@@ -437,11 +481,6 @@ func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 
 func metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/metrics" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(wrapped, r)

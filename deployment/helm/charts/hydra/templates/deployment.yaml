@@ -2,7 +2,10 @@
 {{- $login := .Values.config.loginURL -}}
 {{- $consent := .Values.config.consentURL -}}
 {{- $logout := .Values.config.logoutURL -}}
-{{- $systemSecret := .Values.secrets.system | default (printf "%s-hydra-system-secret-change-me" .Release.Name) -}}
+{{- $systemRef := .Values.secrets.systemSecretRef | default dict -}}
+{{- if not (or .Values.config.dev $systemRef.name .Values.secrets.system) -}}
+{{- fail "hydra.secrets.systemSecretRef.name is required when hydra.config.dev is false: create a Secret with a high-entropy value (e.g. openssl rand -hex 32) and reference it" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,7 +39,14 @@ spec:
             - name: DSN
               value: {{ .Values.config.dsn | quote }}
             - name: SECRETS_SYSTEM
-              value: {{ $systemSecret | quote }}
+              {{- if $systemRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $systemRef.name | quote }}
+                  key: {{ $systemRef.key | default "secretsSystem" | quote }}
+              {{- else }}
+              value: {{ .Values.secrets.system | default (printf "%s-hydra-system-secret-change-me" .Release.Name) | quote }}
+              {{- end }}
             - name: URLS_SELF_ISSUER
               value: {{ $issuer | quote }}
             - name: URLS_LOGIN

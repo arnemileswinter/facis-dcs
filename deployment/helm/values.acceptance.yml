@@ -35,16 +35,18 @@ database:
     name: dcs-acceptance-db-credentials
     key: DATABASE_URL
 
-# Hydra (OAuth2/OIDC): `secrets.system` and `clients[].client_secret` are
-# genuinely plaintext-only fields in this chart version — the Hydra
-# sub-chart has no secretKeyRef equivalent yet (verified against
-# deployment/helm/charts/hydra/values.yaml; Deviation Register follow-up
-# candidate, not yet an entry since it wasn't part of the original 13).
-# Populate both via `--set` from your secret manager at deploy time, never
-# committed to a values file:
-#   helm upgrade ... --set hydra.secrets.system="$(vault read -field=value ...)"
+# Hydra (OAuth2/OIDC): the system secret comes from a Kubernetes Secret
+# (create it before install, high-entropy value):
+#   kubectl create secret generic dcs-acceptance-hydra-secrets \
+#     --from-literal=secretsSystem="$(openssl rand -hex 32)"
+# `clients[].client_secret` has no secretKeyRef equivalent: populate it via
+# `--set` from your secret manager at deploy time, never committed to a values
+# file.
 hydra:
   enabled: true
+  secrets:
+    systemSecretRef:
+      name: dcs-acceptance-hydra-secrets
   config:
     dev: false
     selfIssuerURL: "https://acceptance.dcs.example.org"

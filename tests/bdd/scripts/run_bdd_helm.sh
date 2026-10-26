@@ -260,8 +260,8 @@ until nc -z 127.0.0.1 5432 2>/dev/null; do
 done
 echo "Port-forward on 5432 is ready"
 
-# Direct service access for endpoints Traefik does not route (e.g. /metrics,
-# which the backend serves at its root, outside the API prefix).
+# Direct service access for endpoints Traefik does not route (endpoints the
+# backend serves at its root, outside the API prefix).
 DCS_SERVICE="${DCS_SERVICE:-$DCS_DEPLOYMENT}"
 LOCAL_FORWARD_PORT="${LOCAL_FORWARD_PORT:-18991}"
 SERVICE_PORT="${SERVICE_PORT:-8991}"
