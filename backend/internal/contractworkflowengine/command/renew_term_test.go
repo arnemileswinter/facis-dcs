@@ -17,45 +17,57 @@ func day(y int, m time.Month, d int) *time.Time {
 
 var renewalNow = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 
-// A renewal of a running contract keeps its term.
-func TestRenewalTermCopiesARunningTerm(t *testing.T) {
+// A renewal of a running contract starts when the original ends.
+func TestRenewalTermFollowsARunningTerm(t *testing.T) {
 	start, exp, err := renewalTerm(day(2026, 1, 1), day(2027, 1, 1), nil, nil, renewalNow)
 	require.NoError(t, err)
-	require.Equal(t, day(2026, 1, 1), start)
-	require.Equal(t, day(2027, 1, 1), exp)
+	require.Equal(t, day(2027, 1, 1), start)
+	require.Equal(t, day(2028, 1, 1), exp)
 }
 
-// A copied past expiry makes the new DRAFT read EXPIRED at once, so the term
-// moves forward by whole terms of the original's length.
-func TestRenewalTermMovesAnExpiredTermForward(t *testing.T) {
+// An expired original's renewal starts today and runs a full term.
+func TestRenewalTermStartsAnExpiredTermToday(t *testing.T) {
 	start, exp, err := renewalTerm(day(2025, 10, 1), day(2026, 10, 1), nil, nil, renewalNow)
 	require.NoError(t, err)
-	require.Equal(t, day(2026, 10, 1), start)
-	require.Equal(t, day(2027, 10, 1), exp)
+	require.Equal(t, day(2026, 10, 23), start)
+	require.Equal(t, day(2027, 10, 23), exp)
 }
 
-func TestRenewalTermSkipsTermsThatAlsoLieInThePast(t *testing.T) {
-	start, exp, err := renewalTerm(day(2026, 1, 1), day(2026, 4, 1), nil, nil, renewalNow)
+// A short term that expired long ago still gets a full term, not the rest of
+// the term that contains today.
+func TestRenewalTermGivesALongExpiredShortTermAFullTerm(t *testing.T) {
+	origStart := renewalNow.AddDate(0, 0, -59)
+	origExp := renewalNow.AddDate(0, 0, -29)
+	start, exp, err := renewalTerm(&origStart, &origExp, nil, nil, renewalNow)
 	require.NoError(t, err)
-	length := day(2026, 4, 1).Sub(*day(2026, 1, 1))
-	require.Equal(t, day(2026, 4, 1).Add(2*length), *start)
-	require.Equal(t, start.Add(length), *exp)
-	require.True(t, start.Before(renewalNow) || start.Equal(renewalNow))
-	require.True(t, exp.After(renewalNow))
+	require.Equal(t, day(2026, 10, 23), start)
+	require.Equal(t, day(2026, 10, 23).Add(30*24*time.Hour), *exp)
+}
+
+func TestRenewalTermKeepsTheAnniversaryOfAYearlyTerm(t *testing.T) {
+	start, exp, err := renewalTerm(day(2027, 2, 28), day(2028, 2, 28), nil, nil, renewalNow)
+	require.NoError(t, err)
+	require.Equal(t, day(2028, 2, 28), start)
+	require.Equal(t, day(2029, 2, 28), exp)
 }
 
 func TestRenewalTermWithoutAStartLeavesTheExpiryEmpty(t *testing.T) {
-	start, exp, err := renewalTerm(nil, day(2026, 10, 1), nil, nil, renewalNow)
+	start, exp, err := renewalTerm(nil, day(2027, 1, 1), nil, nil, renewalNow)
+	require.NoError(t, err)
+	require.Equal(t, day(2027, 1, 1), start)
+	require.Nil(t, exp)
+
+	start, exp, err = renewalTerm(nil, nil, nil, nil, renewalNow)
 	require.NoError(t, err)
 	require.Nil(t, start)
 	require.Nil(t, exp)
 }
 
-func TestRenewalTermKeepsAGivenStartForAnExpiredTerm(t *testing.T) {
+func TestRenewalTermRunsAGivenStartForTheOriginalsTerm(t *testing.T) {
 	start, exp, err := renewalTerm(day(2025, 10, 1), day(2026, 10, 1), day(2026, 11, 1), nil, renewalNow)
 	require.NoError(t, err)
 	require.Equal(t, day(2026, 11, 1), start)
-	require.Equal(t, day(2026, 11, 1).Add(day(2026, 10, 1).Sub(*day(2025, 10, 1))), *exp)
+	require.Equal(t, day(2027, 11, 1), exp)
 }
 
 func TestRenewalTermTakesGivenDates(t *testing.T) {
@@ -63,6 +75,23 @@ func TestRenewalTermTakesGivenDates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, day(2026, 11, 1), start)
 	require.Equal(t, day(2027, 11, 1), exp)
+
+	start, exp, err = renewalTerm(day(2025, 10, 1), day(2026, 10, 1), nil, day(2027, 11, 1), renewalNow)
+	require.NoError(t, err)
+	require.Equal(t, day(2026, 10, 23), start)
+	require.Equal(t, day(2027, 11, 1), exp)
+}
+
+// Given dates are stored in UTC, so the row and dcs:metadata agree.
+func TestRenewalTermNormalizesGivenDatesToUTC(t *testing.T) {
+	cest := time.FixedZone("CEST", 2*60*60)
+	givenStart := time.Date(2026, 11, 1, 0, 0, 0, 0, cest)
+	givenExp := time.Date(2027, 11, 1, 0, 0, 0, 0, cest)
+	start, exp, err := renewalTerm(nil, nil, &givenStart, &givenExp, renewalNow)
+	require.NoError(t, err)
+	require.Equal(t, time.UTC, start.Location())
+	require.Equal(t, time.UTC, exp.Location())
+	require.True(t, start.Equal(givenStart))
 }
 
 func TestRenewalTermRejectsInconsistentDates(t *testing.T) {

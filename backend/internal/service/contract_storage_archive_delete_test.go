@@ -73,3 +73,26 @@ func TestRemoveArchivedSnapshotsHardFailsOnRemovalError(t *testing.T) {
 		t.Fatalf("expected removal to stop at the failing CID, got %v", store.deleted)
 	}
 }
+
+func TestRetainedUntilBlocksOnlyLiveEntriesWithAFutureRetention(t *testing.T) {
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	past, soon, later := now.AddDate(0, 0, -1), now.AddDate(1, 0, 0), now.AddDate(5, 0, 0)
+	deletedAt := now.AddDate(0, 0, -2)
+
+	if got := retainedUntil([]db.ContractArchiveEntry{
+		{DID: "did:web:a"},
+		{DID: "did:web:a", RetentionUntil: &past},
+		{DID: "did:web:a", RetentionUntil: &later, DeletedAt: &deletedAt},
+		{DID: "did:web:b", RetentionUntil: &later},
+	}, "did:web:a", now); got != nil {
+		t.Fatalf("deletion must be permitted, got retention until %s", got)
+	}
+
+	got := retainedUntil([]db.ContractArchiveEntry{
+		{DID: "did:web:a", RetentionUntil: &soon},
+		{DID: "did:web:a", RetentionUntil: &later},
+	}, "did:web:a", now)
+	if got == nil || !got.Equal(later) {
+		t.Fatalf("expected retention until %s, got %v", later, got)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,10 +135,16 @@ func (outboxOnlyConn) Begin() (driver.Tx, error)           { return outboxOnlyTx
 
 type outboxOnlyStmt struct{}
 
-func (outboxOnlyStmt) Close() error                               { return nil }
-func (outboxOnlyStmt) NumInput() int                              { return -1 }
-func (outboxOnlyStmt) Exec([]driver.Value) (driver.Result, error) { return driver.RowsAffected(1), nil }
-func (outboxOnlyStmt) Query([]driver.Value) (driver.Rows, error)  { return nil, io.EOF }
+func (outboxOnlyStmt) Close() error  { return nil }
+func (outboxOnlyStmt) NumInput() int { return -1 }
+func (outboxOnlyStmt) Exec([]driver.Value) (driver.Result, error) {
+	outboxExecs.Add(1)
+	return driver.RowsAffected(1), nil
+}
+
+var outboxExecs atomic.Int64
+
+func (outboxOnlyStmt) Query([]driver.Value) (driver.Rows, error) { return nil, io.EOF }
 
 type outboxOnlyTx struct{}
 
@@ -149,11 +156,16 @@ func init() { sql.Register("cron-outbox-only", outboxOnlyDriver{}) }
 type expiryRepoFake struct {
 	database.ContractRepo
 	states map[string]string
+	// alreadyExpired makes ExpireContract report that another writer won.
+	alreadyExpired bool
 }
 
-func (r *expiryRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, did string, state string) error {
-	r.states[did] = state
-	return nil
+func (r *expiryRepoFake) ExpireContract(_ context.Context, _ *sqlx.Tx, did string) (bool, error) {
+	if r.alreadyExpired {
+		return false, nil
+	}
+	r.states[did] = contractstate.Expired.String()
+	return true, nil
 }
 
 // The cron job persists EXPIRED for a contract without a policy too.
@@ -169,4 +181,18 @@ func TestExpiryTaskExpiresAContractWithoutPolicy(t *testing.T) {
 	c.ExpPolicy = nil
 	require.NoError(t, expiryTask{repo}.handle(context.Background(), tx, c))
 	require.Equal(t, contractstate.Expired.String(), repo.states[c.DID])
+}
+
+// A second replica that loses the conditional update emits no event.
+func TestExpiryTaskEmitsNothingWhenAnotherWriterExpiredTheContract(t *testing.T) {
+	raw, err := sql.Open("cron-outbox-only", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	tx, err := sqlx.NewDb(raw, "postgres").Beginx()
+	require.NoError(t, err)
+
+	before := outboxExecs.Load()
+	repo := &expiryRepoFake{states: map[string]string{}, alreadyExpired: true}
+	require.NoError(t, expiryTask{repo}.handle(context.Background(), tx, renewalDueContract()))
+	require.Equal(t, before, outboxExecs.Load(), "no outbox event")
 }

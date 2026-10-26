@@ -395,31 +395,32 @@ func attachRenewsContractReference(raw *datatype.JSON, originalDID string, origi
 	return &encoded, nil
 }
 
-// renewalTerm returns the renewal's start and expiry. Given dates win. Without
-// a given expiry, an original whose expiry has passed moves forward by whole
-// terms of its own length until the expiry lies ahead: a copied past expiry
-// makes the new DRAFT read EXPIRED at once (contracts_effective view). Without
-// both original dates the length is unknown, so the expiry stays empty.
+// renewalTerm returns the renewal's start and expiry. The renewal follows the
+// original: it starts at the original's expiry, or today if that has passed,
+// and runs for the original's term length. A copied expiry would end the
+// renewal together with the original, and a past one makes the new DRAFT read
+// EXPIRED at once (contracts_effective view). Given dates win; a given start
+// without a given expiry still gets the original's term length. Without both
+// original dates the length is unknown, so the expiry stays empty.
 func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time) (*time.Time, *time.Time, error) {
-	start, exp := origStart, origExp
+	var start, exp *time.Time
+	if origExp != nil {
+		s := origExp.UTC()
+		if today := now.UTC().Truncate(24 * time.Hour); today.After(s) {
+			s = today
+		}
+		start = &s
+	}
 	if newStart != nil {
-		start = newStart
+		s := newStart.UTC()
+		start = &s
 	}
 	if newExp != nil {
-		exp = newExp
-	} else if origExp != nil && !origExp.After(now) {
-		exp = nil
-		if origStart != nil && origExp.After(*origStart) {
-			length := origExp.Sub(*origStart)
-			if newStart == nil {
-				s := origExp.Add(now.Sub(*origExp) / length * length)
-				start = &s
-			}
-			e := start.Add(length)
-			exp = &e
-		} else if newStart == nil {
-			start = nil
-		}
+		e := newExp.UTC()
+		exp = &e
+	} else if start != nil && origStart != nil && origExp != nil && origExp.After(*origStart) {
+		e := addTerm(*start, origStart.UTC(), origExp.UTC())
+		exp = &e
 	}
 	if exp != nil && !exp.After(now) {
 		return nil, nil, fmt.Errorf("%w: expiration date must be in the future", ErrInvalidRenewalTerm)
@@ -428,6 +429,17 @@ func renewalTerm(origStart, origExp, newStart, newExp *time.Time, now time.Time)
 		return nil, nil, fmt.Errorf("%w: expiration date must be after start date", ErrInvalidRenewalTerm)
 	}
 	return start, exp, nil
+}
+
+// addTerm adds the term from origStart to origExp to from. A term of whole
+// calendar months is added as months, so a yearly term keeps its anniversary
+// across leap years.
+func addTerm(from, origStart, origExp time.Time) time.Time {
+	months := (origExp.Year()-origStart.Year())*12 + int(origExp.Month()) - int(origStart.Month())
+	if months > 0 && origStart.AddDate(0, months, 0).Equal(origExp) {
+		return from.AddDate(0, months, 0)
+	}
+	return from.Add(origExp.Sub(origStart))
 }
 
 // stampRenewalTerm writes the renewal's term into dcs:metadata. The copy

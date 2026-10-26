@@ -12,9 +12,9 @@ function notice(state: ContractState, exp_policy?: ExpirationPolicy) {
 // DCS-FR-CWE-10: an expired contract names the workflow its policy configures.
 describe('expired policy notice', () => {
   it.each<[ExpirationPolicy, string]>([
-    ['RENEWAL', 'renew it'],
-    ['TERMINATION', 'terminate it'],
-    ['ARCHIVING', 'stays in the archive'],
+    ['RENEWAL', 'renews it'],
+    ['TERMINATION', 'terminates it'],
+    ['ARCHIVING', 'not renewed'],
   ])('names the next step for %s', (policy, step) => {
     const found = notice('EXPIRED', policy)
     expect(found.exists()).toBe(true)

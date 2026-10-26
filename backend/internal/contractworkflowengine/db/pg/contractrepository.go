@@ -265,19 +265,20 @@ func (r *PostgresContractRepo) ReadProcessDataByDIDOrNil(ctx context.Context, tx
 	return &processData, nil
 }
 
+// nonExpiringStates are the states the expiry cron never flips to EXPIRED:
+// DRAFT, EXPIRED itself, and the terminal states. WITHDRAWN and REVOKED are
+// already-final/frozen states (see contracts_effective's matching exclusion
+// list).
+const nonExpiringStates = `('DRAFT', 'TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')`
+
 func (r *PostgresContractRepo) ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
-	// WITHDRAWN and REVOKED are excluded alongside the other terminal
-	// states: both are already-final/frozen states, so the
-	// expiry cron must not force-flip them to EXPIRED (see
-	// contracts_effective's matching exclusion list).
 	query := `
     SELECT did, origin, state, name, description, created_by, created_at, updated_at, contract_version, start_date,
            exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
     FROM contracts
     WHERE exp_date IS NOT NULL
     AND exp_date < NOW()
-    AND state NOT IN ('DRAFT', 'TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')
-`
+    AND state NOT IN ` + nonExpiringStates
 	var cts []db.ContractMetadata
 	err := tx.SelectContext(ctx, &cts, query)
 	if err != nil {
@@ -460,6 +461,21 @@ func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did
     `
 	_, err := tx.ExecContext(ctx, statement, did, state)
 	return err
+}
+
+func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
+	statement := `
+        UPDATE contracts SET state = 'EXPIRED'
+        WHERE did = $1
+        AND exp_date IS NOT NULL
+        AND exp_date < NOW()
+        AND state NOT IN ` + nonExpiringStates
+	res, err := tx.ExecContext(ctx, statement, did)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractPDFState, error) {

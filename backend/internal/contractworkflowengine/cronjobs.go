@@ -114,8 +114,14 @@ func (t expiryTask) handle(ctx context.Context, tx *sqlx.Tx, expiredContract dat
 	// Readers already see EXPIRED instantly via the contracts_effective view once
 	// exp_date has passed; this persists that state physically and emits the
 	// ContractExpired event, so it necessarily lags the view by up to the poll interval.
-	if err := t.repo.UpdateState(ctx, tx, expiredContract.DID, contractstate.Expired.String()); err != nil {
+	// Several replicas run this task: only the one whose update changes the row
+	// emits the event.
+	expired, err := t.repo.ExpireContract(ctx, tx, expiredContract.DID)
+	if err != nil {
 		return fmt.Errorf("could not update expired contract with DID %s: %w", expiredContract.DID, err)
+	}
+	if !expired {
+		return nil
 	}
 	if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
 		return fmt.Errorf("could not create event: %w", err)

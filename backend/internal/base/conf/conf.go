@@ -130,15 +130,18 @@ func ArchiveExpiringWindow() time.Duration {
 // contracts (DCS-FR-CSA-14, DCS-FR-CSA-17), read from
 // DCS_ARCHIVE_RETENTION_YEARS. 0 means no retention policy: archive entries get
 // no retention_until and deletion stays permitted. Any non-positive or
-// unparsable value counts as 0.
+// unparsable value counts as 0. Values above maxArchiveRetentionYears count as
+// that maximum: a larger one overflows the timestamp column and fails archival.
 func ArchiveRetentionYears() int {
 	if v := strings.TrimSpace(os.Getenv("DCS_ARCHIVE_RETENTION_YEARS")); v != "" {
 		if years, err := strconv.Atoi(v); err == nil && years > 0 {
-			return years
+			return min(years, maxArchiveRetentionYears)
 		}
 	}
 	return 0
 }
+
+const maxArchiveRetentionYears = 100
 
 // APIRateLimitPerMinute is the per-credential request budget for
 // authenticated API interactions (DCS-FR-CWE-28). DCS_API_RATE_LIMIT_PER_MINUTE

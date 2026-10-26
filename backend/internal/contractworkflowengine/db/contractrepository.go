@@ -269,6 +269,11 @@ type ContractRepo interface {
 	ReadProcessDataByDIDOrNil(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractMetadata, error)
+	// ExpireContract persists EXPIRED for did if its expiry has passed and it
+	// is in a state that expires (the ReadExpiredContracts condition). It
+	// returns false when another writer expired or ended the contract first,
+	// so the caller emits ContractExpired at most once.
+	ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
 	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
