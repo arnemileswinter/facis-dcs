@@ -574,3 +574,70 @@ for (const width of [390, 1280, 3440]) {
     })
   }
 }
+
+for (const width of [390, 1440]) {
+  test(`F02 long access logs preserve audit priority and visible outcomes at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await authenticate(page, 'Auditor')
+    await page.route('**/pac/access-attempts?**', (route) =>
+      json(route, {
+        attempts: Array.from({ length: 25 }, (_, index) => ({
+          ...denied,
+          id: index + 1,
+          attempt_by: 'did:web:long-actor-'.repeat(30),
+          roles: Array.from({ length: 25 }, (_, role) => `LONG_DEVELOPMENT_ROLE_${role}`),
+          did: 'did:web:long-contract-'.repeat(30),
+          justification: 'Investigate access attempts '.repeat(30),
+        })),
+      }),
+    )
+    await page.goto('/ui/audit')
+    const execute = page.getByRole('button', { name: 'Execute Audit', exact: true })
+    const executeTop = () =>
+      execute.evaluate((element) => {
+        const main = element.closest('main')!
+        return element.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop
+      })
+    const originalTop = await executeTop()
+    const summary = page.locator('summary').filter({ hasText: /^Access attempts$/ })
+    await summary.press('Enter')
+    await page.getByLabel('Access log justification').fill('Review long access log')
+    await page.getByRole('button', { name: 'Load access attempts' }).press('Enter')
+    const region = page.getByRole('region', { name: 'Access attempts table' })
+    await expect(region.locator('tbody tr')).toHaveCount(25)
+    expect(await executeTop()).toBe(originalTop)
+    expect(
+      await summary.evaluate((element) => {
+        const findings = Array.from(document.querySelectorAll('h3')).find(
+          (heading) => heading.textContent === 'Findings',
+        )!
+        return !!(findings.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
+      }),
+    ).toBe(true)
+    await region.scrollIntoViewIfNeeded()
+    const size = await region.evaluate((element) => ({
+      height: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }))
+    expect(size.height).toBeLessThanOrEqual(384)
+    expect(size.scrollHeight).toBeGreaterThan(size.height)
+    const outcome = region.locator('tbody tr').first().locator('td').first()
+    await expect(outcome).toHaveText('DENIED')
+    const regionBox = (await region.boundingBox())!
+    const outcomeBox = (await outcome.locator('.badge').boundingBox())!
+    expect(outcomeBox.x).toBeGreaterThanOrEqual(regionBox.x)
+    expect(outcomeBox.x + outcomeBox.width).toBeLessThanOrEqual(regionBox.x + regionBox.width)
+    expect(outcomeBox.y + outcomeBox.height).toBeLessThanOrEqual(regionBox.y + regionBox.height)
+    await region.focus()
+    await expect(region).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(() => region.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    expect(await region.locator('tbody tr').last().textContent()).toContain('LONG_DEVELOPMENT_ROLE_24')
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+    ).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`access-log-stress-${width}.png`), fullPage: true })
+  })
+}

@@ -104,7 +104,11 @@ describe('access attempt audit view', () => {
     }
     expect(row.find('img').exists()).toBe(false)
     expect(row.get('.badge-error').text()).toBe('DENIED')
+    expect(wrapper.findAll('th')[0]?.text()).toBe('Outcome')
+    expect(row.findAll('td')[0]?.text()).toBe('DENIED')
     expect(wrapper.get('[role="region"]').attributes('tabindex')).toBe('0')
+    expect(wrapper.get('[role="region"]').classes()).toContain('max-h-96')
+    expect(wrapper.get('[role="region"]').classes()).toContain('overflow-auto')
   })
 
   it('uses opaque cursor history and the original purpose for paging, resetting on a fresh load', async () => {

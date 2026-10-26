@@ -71,7 +71,7 @@ async function load(targetPage = 0, fresh = false) {
       </p>
       <div
         v-if="attempts.length"
-        class="max-w-full overflow-x-auto"
+        class="max-h-96 max-w-full overflow-auto"
         tabindex="0"
         role="region"
         aria-label="Access attempts table"
@@ -80,6 +80,7 @@ async function load(targetPage = 0, fresh = false) {
           <caption class="sr-only">Access attempts and authorization outcomes</caption>
           <thead>
             <tr>
+              <th scope="col">Outcome</th>
               <th scope="col">Timestamp (UTC)</th>
               <th scope="col">Actor</th>
               <th scope="col">Roles</th>
@@ -88,25 +89,14 @@ async function load(targetPage = 0, fresh = false) {
               <th scope="col">Scope</th>
               <th scope="col">DID</th>
               <th scope="col">Purpose</th>
-              <th scope="col">Outcome</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="attempt in attempts"
               :key="attempt.id"
-              class="[&>td]:max-w-64 [&>td]:break-words [&>td]:whitespace-normal"
+              class="[&>td]:max-w-64 [&>td]:align-top [&>td]:break-words [&>td]:whitespace-normal"
             >
-              <td>
-                <time :datetime="attempt.attempted_at">{{ attempt.attempted_at }}</time>
-              </td>
-              <td>{{ attempt.attempt_by || '—' }}</td>
-              <td>{{ attempt.roles.join(', ') || '—' }}</td>
-              <td>{{ attempt.service }}</td>
-              <td>{{ attempt.method }}</td>
-              <td>{{ attempt.scope || '—' }}</td>
-              <td>{{ attempt.did || '—' }}</td>
-              <td>{{ attempt.justification || '—' }}</td>
               <td>
                 <span
                   class="badge"
@@ -117,6 +107,16 @@ async function load(targetPage = 0, fresh = false) {
                   {{ attempt.outcome }}
                 </span>
               </td>
+              <td>
+                <time :datetime="attempt.attempted_at">{{ attempt.attempted_at }}</time>
+              </td>
+              <td>{{ attempt.attempt_by || '—' }}</td>
+              <td>{{ attempt.roles.join(', ') || '—' }}</td>
+              <td>{{ attempt.service }}</td>
+              <td>{{ attempt.method }}</td>
+              <td>{{ attempt.scope || '—' }}</td>
+              <td>{{ attempt.did || '—' }}</td>
+              <td>{{ attempt.justification || '—' }}</td>
             </tr>
           </tbody>
         </table>

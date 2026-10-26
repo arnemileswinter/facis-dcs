@@ -532,7 +532,6 @@ function formatDateTime(value?: string): string {
   </section>
 
   <section v-if="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
-    <AccessAttempts />
     <div class="flex min-w-0 flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
       <div
         v-if="hasExecutedAudit"
@@ -868,5 +867,6 @@ function formatDateTime(value?: string): string {
         </div>
       </aside>
     </div>
+    <AccessAttempts />
   </section>
 </template>
