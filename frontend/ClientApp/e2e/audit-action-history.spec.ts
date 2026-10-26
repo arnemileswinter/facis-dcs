@@ -81,7 +81,7 @@ test.describe('Audit Action History', () => {
     })
 
     await page.goto('/ui/audit')
-    await expect(page.getByRole('heading', { name: 'Audit' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Audit', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Execute Audit' })).toBeVisible()
 
     await page.getByRole('tab', { name: 'Action History', exact: true }).click()

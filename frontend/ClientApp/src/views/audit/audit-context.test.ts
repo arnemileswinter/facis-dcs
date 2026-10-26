@@ -37,6 +37,7 @@ function expectNoResult(wrapper: ReturnType<typeof render>) {
   expect(wrapper.findAll('.dropdown input[type="checkbox"]')).toHaveLength(0)
   expect(wrapper.findAll('.dropdown')).toHaveLength(0)
   expect(wrapper.find('aside').exists()).toBe(false)
+  expect(wrapper.get('[data-testid="audit-counters"]').text().match(/—/g)).toHaveLength(4)
   for (const format of ['JSON', 'CSV', 'PDF']) expect(button(wrapper, format).attributes('disabled')).toBeDefined()
 }
 
@@ -75,6 +76,8 @@ describe('P06 audit execution context', () => {
     await wrapper.get('#input-did').setValue('did:test:a')
     await wrapper.get('#input-justification').setValue('Review context')
     await button(wrapper, 'Execute Audit').trigger('click')
+    expect(button(wrapper, 'Execute Audit').text()).toBe('Execute Audit')
+    expect(button(wrapper, 'Execute Audit').get('.loading').attributes('aria-hidden')).toBe('true')
     expect(wrapper.get('#input-did').attributes('disabled')).toBeDefined()
     expect(wrapper.get('#select-scope').attributes('disabled')).toBeDefined()
     // Simulate an external context change while the disabled form awaits its response.
@@ -145,6 +148,9 @@ describe('P06 audit execution context', () => {
     await button(wrapper, 'Execute Audit').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Audit completed. No matching entries were found.')
+    const counters = wrapper.get('[data-testid="audit-counters"]')
+    expect(counters.text()).not.toContain('—')
+    expect(counters.findAll('.font-semibold').map((counter) => counter.text())).toEqual(['0', '0', '0', '0'])
     expect(wrapper.text()).not.toContain('Select a scope and execute an audit.')
     expect(wrapper.text()).not.toContain('No findings match the selected filters.')
     expect(wrapper.findAll('.dropdown')).toHaveLength(0)

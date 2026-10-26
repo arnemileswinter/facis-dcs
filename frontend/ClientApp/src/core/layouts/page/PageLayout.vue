@@ -30,7 +30,7 @@ onMounted(() => {
     <input :id="pageSidebarId" type="checkbox" class="drawer-toggle" />
     <div :class="[drawerClasses.header, 'flex h-screen min-w-0 flex-col overflow-hidden bg-base-100']">
       <!-- Navbar -->
-      <header class="navbar sticky top-0 z-30 w-full border-b border-base-content/10 bg-base-100">
+      <header class="navbar sticky top-0 z-30 w-full shrink-0 border-b border-base-content/10 bg-base-100">
         <slot name="navbar">
           <PageNavBar />
         </slot>
