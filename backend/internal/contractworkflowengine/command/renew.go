@@ -441,7 +441,7 @@ func renewalTerm(origStart, origExp, newStart, newExp *time.Time, terminated boo
 
 // addTerm adds the term from origStart to origExp to from. A term of whole
 // calendar months is added as months, so a yearly term keeps its anniversary
-// across leap years and a monthly term keeps the month end.
+// across leap years; a day past the target month's end is clamped to it.
 func addTerm(from, origStart, origExp time.Time) time.Time {
 	months := (origExp.Year()-origStart.Year())*12 + int(origExp.Month()) - int(origStart.Month())
 	if months > 0 && addMonths(origStart, months).Equal(origExp) {

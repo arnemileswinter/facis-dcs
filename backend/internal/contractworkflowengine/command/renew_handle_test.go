@@ -79,6 +79,34 @@ func TestRenewerMovesAnExpiredTermForward(t *testing.T) {
 	require.Equal(t, repo.updates[0].ExpDate.Format(time.RFC3339), meta[metaExpirationDate].(map[string]any)["@value"])
 }
 
+// A terminated original never reached its expiry: the renewal starts tomorrow,
+// not at the original's future expiry.
+func TestRenewerStartsATerminatedOriginalsRenewalTomorrow(t *testing.T) {
+	now := time.Now().UTC()
+	origStart := now.AddDate(-1, 0, 0)
+	origExp := now.AddDate(0, 3, 0)
+	repo := &renewRepoFake{taskContractRepoFake: &taskContractRepoFake{stored: &db.Contract{
+		DID:             "did:web:facis.example:contract:1",
+		State:           "TERMINATED",
+		ContractVersion: 2,
+		UpdatedAt:       now.Add(-time.Hour),
+		ContractData:    renewableDocument(t),
+		StartDate:       &origStart,
+		ExpDate:         &origExp,
+	}}}
+	renewer := Renewer{DB: taskTestDB(t), CRepo: repo, DIDDocument: *taskTestDIDDocument(t)}
+
+	_, err := renewer.Handle(context.Background(), RenewCmd{
+		DID:         "did:web:facis.example:contract:2",
+		OriginalDID: "did:web:facis.example:contract:1",
+		RenewedBy:   "did:web:facis.example:manager",
+		UpdatedAt:   now,
+	})
+	require.NoError(t, err)
+	require.Len(t, repo.updates, 1)
+	require.Equal(t, now.Truncate(24*time.Hour).Add(24*time.Hour), *repo.updates[0].StartDate)
+}
+
 func TestRenewerRejectsAPastExpiry(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &renewRepoFake{taskContractRepoFake: &taskContractRepoFake{stored: &db.Contract{
