@@ -33,6 +33,42 @@ describe('P05 exact immutable snapshot lifecycle', () => {
     detail.mockReset()
     route.query = { did: 'did:test:archive', contract_version: '2' }
   })
+  it.each(['array', '@list'])(
+    'renders the real preview with %s layout without changing the snapshot',
+    async (format) => {
+      const archived = snapshot()
+      const layout = [
+        {
+          '@id': 'root',
+          '@type': 'dcs:LayoutNode',
+          'dcs:isRoot': true,
+          'dcs:children': { '@list': [{ '@id': 'second' }, { '@id': 'first' }] },
+        },
+      ]
+      Object.assign(archived.contract_data!['dcs:documentStructure'], {
+        'dcs:layout': format === 'array' ? layout : { '@list': layout },
+        'dcs:blocks': {
+          '@list': [
+            { '@id': 'first', '@type': 'dcs:TextBlock', 'dcs:text': 'First stored block' },
+            { '@id': 'second', '@type': 'dcs:TextBlock', 'dcs:text': 'Second stored block' },
+          ],
+        },
+      })
+      const original = JSON.stringify(archived.contract_data)
+      detail.mockResolvedValueOnce(archived)
+      const wrapper = mount(ArchiveDetailView)
+      await flushPromises()
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      expect(wrapper.get('section[aria-label="Archived contract content"]').text()).toBe(
+        'Second stored blockFirst stored block',
+      )
+      expect(wrapper.text()).toContain('did:test:archive')
+      expect(wrapper.text()).toContain('Version 2')
+      expect(JSON.parse(wrapper.get('[data-testid="machine-readable-payload"]').text())).toEqual(JSON.parse(original))
+      expect(JSON.stringify(archived.contract_data)).toBe(original)
+      wrapper.unmount()
+    },
+  )
   it('removes the previous snapshot while another version loads and ignores stale replies', async () => {
     detail.mockResolvedValueOnce(snapshot())
     const wrapper = render()
