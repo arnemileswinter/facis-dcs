@@ -105,6 +105,36 @@ async function audit(page: Page) {
   await page.getByRole('button', { name: 'Execute Audit' }).click()
   await expect(page.getByRole('button', { name: 'JSON', exact: true })).toBeEnabled()
 }
+test('P06 DID changes hide prior findings, filters and opened details', async ({ page }) => {
+  await authenticate(page, 'Auditor')
+  await page.route('**/pac/audit', (route) =>
+    json(route, {
+      audit_id: 'context-audit',
+      correlation_id: 'context-correlation',
+      executed_at: '2026-10-26T10:00:00Z',
+      scope: 'contracts',
+      resource: { did },
+      executor: { id: 'policy-engine', version: '1' },
+      findings: [{ rule_id: 'Context A check', result: 'PASSED', reason: 'Only contract A was checked.' }],
+    }),
+  )
+  await page.goto('/ui/audit')
+  await page.getByLabel('DID (optional)').fill(did)
+  await page.getByLabel('Audit justification').fill('Check audit context')
+  await page.getByRole('button', { name: 'Execute Audit' }).click()
+  await expect(page.getByText('Audit passed.', { exact: false })).toBeVisible()
+  const row = page.getByRole('row').filter({ hasText: 'Context A check' })
+  await row.press('Enter')
+  await expect(page.locator('main aside')).toContainText('Only contract A was checked.')
+  await page.getByLabel('DID (optional)').fill('did:test:different-contract')
+  await expect(page.getByText('Context A check', { exact: true })).toHaveCount(0)
+  await expect(page.locator('main aside')).not.toContainText('Only contract A was checked.')
+  await expect(page.getByText('Select a scope and execute an audit.', { exact: true })).toBeVisible()
+  await expect(page.locator('.dropdown input[type="checkbox"]')).toHaveCount(0)
+  await expect(page.locator('.dropdown .badge')).toHaveText(['0/0', '0/0', '0/0', '0/0'])
+  for (const format of ['JSON', 'CSV', 'PDF'])
+    await expect(page.getByRole('button', { name: format, exact: true })).toBeDisabled()
+})
 for (const [format, contentType, bytes] of [
   ['json', 'application/json', '{"reportId":"qa-audit","events":[{"eventType":"ARCHIVED"}]}'],
   ['csv', 'text/csv', 'eventType,occurredAt\r\nARCHIVED,2026-10-15T10:00:00Z\r\n'],

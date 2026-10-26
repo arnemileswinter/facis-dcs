@@ -101,10 +101,10 @@ watch(
   { immediate: true },
 )
 
-const findings = computed(() => auditFindingsByScope.value[selectedScope.value] ?? [])
 const error = computed(() => auditErrorsByScope.value[selectedScope.value] ?? null)
 const currentAuditQuery = computed(() => `${selectedScope.value}:${didFilter.value.trim()}`)
 const hasExecutedAudit = computed(() => successfulAuditQueries.value[selectedScope.value] === currentAuditQuery.value)
+const findings = computed(() => (hasExecutedAudit.value ? (auditFindingsByScope.value[selectedScope.value] ?? []) : []))
 const auditLoading = computed(() => auditLoadingScope.value !== null)
 const reportLoading = computed(() => reportLoadingScope.value !== null)
 const selectedAuditLoading = computed(() => auditLoadingScope.value === selectedScope.value)
