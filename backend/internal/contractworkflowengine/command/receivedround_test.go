@@ -24,7 +24,7 @@ type receivedContractRepoFake struct {
 	historyEntries int
 }
 
-func (r *receivedContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
+func (r *receivedContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string, string) error {
 	r.historyEntries++
 	return nil
 }

@@ -247,7 +247,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 				// merge the changes, and bump contract_version. The contract stays in
 				// NEGOTIATION (nextState is left unset) rather than advancing to
 				// SUBMITTED, since the merged result itself starts a new round.
-				err = h.CRepo.CreateHistoryEntryForDID(ctx, tx, processData.DID)
+				err = h.CRepo.CreateHistoryEntryForDID(ctx, tx, processData.DID, cmd.SubmittedBy)
 				if err != nil {
 					return fmt.Errorf("could not create history entry for did %s: %w", cmd.DID, err)
 				}

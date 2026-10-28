@@ -178,6 +178,9 @@ export interface ContractHistoryItem {
   exp_notice_period?: number
   responsible?: unknown
   contract_data?: ContractData
+  /** Actor of the save that replaced this version. Absent on versions recorded before the actor was stored. */
+  modified_by?: string
+  modified_at?: string
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]

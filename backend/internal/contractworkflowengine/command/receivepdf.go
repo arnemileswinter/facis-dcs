@@ -137,7 +137,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		data.ContractVersion = existing.ContractVersion + 1
 		// Snapshot the current row to contract_history before the re-ship
 		// replaces it and bumps contract_version (ADR-0006).
-		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI); err != nil {
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI, cmd.Counterparty); err != nil {
 			return fmt.Errorf("could not create history entry for did %s: %w", cmd.ContractIRI, err)
 		}
 		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {

@@ -1041,6 +1041,12 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			expPolicy = &s
 		}
 
+		var modifiedAt *string
+		if item.ModifiedAt != nil {
+			s := item.ModifiedAt.Format(time.RFC3339)
+			modifiedAt = &s
+		}
+
 		contracts = append(contracts, &contractworkflowengine.ContractHistoryRetrieveByIDResponse{
 			Did:             item.DID,
 			ContractVersion: item.ContractVersion,
@@ -1058,6 +1064,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			ExpNoticePeriod: item.ExpNoticePeriod,
 			Responsible:     item.Responsible,
 			ContractData:    item.ContractData,
+			ModifiedBy:      item.ModifiedBy,
+			ModifiedAt:      modifiedAt,
 		})
 	}
 
