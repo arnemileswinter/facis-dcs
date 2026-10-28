@@ -1,5 +1,18 @@
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
+const odrlProfileFixture = `
+  @prefix dcs: <https://w3id.org/facis/dcs/ontology/v1#> .
+  @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+  @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+  <https://w3id.org/facis/dcs/ontology/v1/odrl-profile>
+    a odrl:Profile ;
+    dcs:defaultConstraintAction dcs:provideCompliantValue .
+  odrl:eq
+    a odrl:Operator ;
+    rdfs:label "Must equal" ;
+    dcs:appliesToParameterType "string" .
+`
+
 async function authenticate(page: Page) {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url')
   const token = `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
@@ -10,6 +23,9 @@ async function authenticate(page: Page) {
   })}.unsigned`
   await page.route('**/auth/refresh', (route) => route.fulfill({ json: { token_type: 'Bearer', access_token: token } }))
   await page.route('**/semantic/schema/list', (route) => route.fulfill({ json: [] }))
+  await page.route('**/semantic/ontology/dcs-odrl-profile', (route) =>
+    route.fulfill({ json: { content: odrlProfileFixture } }),
+  )
   await page.addInitScript((token) => {
     localStorage.setItem('token_type', 'Bearer')
     localStorage.setItem('access_token', token)
