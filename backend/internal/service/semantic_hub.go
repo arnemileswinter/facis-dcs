@@ -133,7 +133,7 @@ func (s *semanticHubsrvc) Register(ctx context.Context, p *semantichubgen.Regist
 		content = fetched
 	}
 
-	if err := semantichub.ValidateSchemaContent(p.Kind, content); err != nil {
+	if err := semantichub.ValidateSchemaContent(p.Name, p.Kind, content); err != nil {
 		return nil, semantichubgen.MakeBadRequest(err)
 	}
 
@@ -191,7 +191,7 @@ func (s *semanticHubsrvc) Rollback(ctx context.Context, p *semantichubgen.Rollba
 		}
 		return nil, semantichubgen.MakeInternalError(err)
 	}
-	if err := semantichub.ValidateSchemaContent(schema.Kind, schema.Content); err != nil {
+	if err := semantichub.ValidateSchemaContent(schema.Name, schema.Kind, schema.Content); err != nil {
 		return nil, semantichubgen.MakeBadRequest(err)
 	}
 
