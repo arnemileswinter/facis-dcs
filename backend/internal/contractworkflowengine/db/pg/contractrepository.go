@@ -54,20 +54,22 @@ func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, da
 	return err
 }
 
-func (r *PostgresContractRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error {
+func (r *PostgresContractRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string, modifiedBy string) error {
 	statement := `
         INSERT INTO contract_history
             (did, origin, state, name, description, created_by, created_at, updated_at,
              contract_version, contract_data, start_date, exp_date, exp_policy,
-             exp_notice_period, responsible, template_did, template_version)
+             exp_notice_period, responsible, template_did, template_version,
+             modified_by, modified_at)
         SELECT
             did, origin, state, name, description, created_by, created_at, updated_at,
             contract_version, contract_data, start_date, exp_date, exp_policy,
-            exp_notice_period, responsible, template_did, template_version
+            exp_notice_period, responsible, template_did, template_version,
+            $2, CURRENT_TIMESTAMP
         FROM contracts_effective
         WHERE did = $1
     `
-	_, err := tx.ExecContext(ctx, statement, did)
+	_, err := tx.ExecContext(ctx, statement, did, modifiedBy)
 	return err
 }
 
@@ -75,7 +77,8 @@ func (r *PostgresContractRepo) ReadLastHistoryEntryByDID(ctx context.Context, tx
 	query := `
         SELECT did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
+               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
+               modified_by, modified_at
         FROM contract_history
         WHERE did = $1
         ORDER BY contract_version DESC NULLS LAST
@@ -96,7 +99,8 @@ func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx
 	query := `
         SELECT did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
+               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
+               modified_by, modified_at
         FROM contract_history
         WHERE did = $1
     `

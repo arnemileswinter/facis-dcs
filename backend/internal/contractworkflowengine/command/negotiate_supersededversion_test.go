@@ -144,6 +144,80 @@ func TestAProposalFollowedByItsAcceptanceBumpsTheVersionOnceOnSubmit(t *testing.
 	require.Equal(t, 2, tasks.rows[0].ContractVersion)
 }
 
+// An accepted change carries fields that live on the contracts row, not in the
+// document. Propose, accept and submit must keep them all, and the snapshot of
+// the replaced version must name the submitter whose save replaced it.
+func TestAnAcceptedNoticePeriodChangeSurvivesSubmitAndTheSnapshotNamesTheActor(t *testing.T) {
+	negotiations := &negotiationRepoFake{}
+	tasks := &negotiationTaskRepoFake{}
+	proposer, contracts := negotiator(t, inboundOffer(1), tasks, negotiations)
+
+	require.NoError(t, proposer.Handle(context.Background(), negotiationCmd(t, map[string]any{
+		"contract_data":     redlinedDocument(t),
+		"exp_notice_period": 45,
+	})))
+
+	acceptor := &NegotiationAcceptor{
+		DB:          taskTestDB(t),
+		CRepo:       contracts,
+		NRepo:       negotiations,
+		NTRepo:      tasks,
+		DIDDocument: *taskTestDIDDocument(t),
+	}
+	require.NoError(t, acceptor.Handle(context.Background(), AcceptNegotiationCmd{
+		ID:         negotiations.proposed[0].id,
+		DID:        taskContractDID,
+		AcceptedBy: "Second Negotiator Org",
+		HolderDID:  "did:key:other-user",
+		UserRoles:  userrole.UserRoles{userrole.ContractNegotiator},
+		CauserDID:  localPeerDID,
+	}))
+
+	submitter := &Submitter{
+		DB:          taskTestDB(t),
+		CRepo:       contracts,
+		NRepo:       negotiations,
+		NTRepo:      tasks,
+		SRepo:       emptyStore(),
+		DIDDocument: *taskTestDIDDocument(t),
+	}
+	submit := negotiationSubmitCmd()
+	submit.SubmittedBy = "Submitting Negotiator"
+	require.NoError(t, submitter.Handle(context.Background(), submit))
+
+	require.Equal(t, []int{2}, contracts.versionBumps())
+	require.NotNil(t, contracts.stored.ExpNoticePeriod, "the accepted notice period was dropped")
+	require.Equal(t, 45, *contracts.stored.ExpNoticePeriod)
+	require.Equal(t, []string{"Submitting Negotiator"}, contracts.historyActors)
+}
+
+// A Draft save keeps its row fields and snapshots the replaced version under
+// the editor who saved, not under the contract's creator.
+func TestADraftSaveSnapshotsTheReplacedVersionUnderTheEditor(t *testing.T) {
+	contracts := &taskContractRepoFake{process: inboundOffer(1), stored: taskStoredContract()}
+	contracts.stored.Origin = localPeerDID
+	contracts.stored.CreatedBy = "Contract Creator"
+	contracts.stored.State = contractstate.Draft.String()
+	updater := &Updater{
+		DB:          taskTestDB(t),
+		CRepo:       contracts,
+		DIDDocument: *taskTestDIDDocument(t),
+	}
+	notice := 30
+
+	require.NoError(t, updater.Handle(context.Background(), UpdateCmd{
+		DID:             taskContractDID,
+		UpdatedAt:       time.Now().UTC(),
+		UpdatedBy:       "Editing User",
+		ExpNoticePeriod: &notice,
+		CauserDID:       localPeerDID,
+	}))
+
+	require.Equal(t, []string{"Editing User"}, contracts.historyActors)
+	require.NotNil(t, contracts.stored.ExpNoticePeriod)
+	require.Equal(t, 30, *contracts.stored.ExpNoticePeriod)
+}
+
 // Every handler that replaces the contract document with a locally authored one
 // and bumps contract_version must snapshot the version it replaces first, or
 // that document is unrecoverable: GET /contract/history is the only way back to

@@ -141,6 +141,8 @@ type taskContractRepoFake struct {
 	states         []string
 	updates        []db.ContractUpdateData
 	historyEntries int
+	// historyActors holds the modifiedBy of each snapshot, in order.
+	historyActors []string
 	// writes logs the version-bearing writes in order: a snapshot only
 	// preserves the superseded document if it precedes the write replacing it.
 	writes []string
@@ -166,6 +168,9 @@ func (r *taskContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.Con
 	if data.ContractData != nil {
 		r.stored.ContractData = data.ContractData
 	}
+	if data.ExpNoticePeriod != nil {
+		r.stored.ExpNoticePeriod = data.ExpNoticePeriod
+	}
 	if data.ContractVersion != 0 {
 		r.process.ContractVersion = data.ContractVersion
 		r.writes = append(r.writes, "update")
@@ -189,8 +194,9 @@ func (r *taskContractRepoFake) versionBumps() []int {
 	return out
 }
 
-func (r *taskContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
+func (r *taskContractRepoFake) CreateHistoryEntryForDID(_ context.Context, _ *sqlx.Tx, _ string, modifiedBy string) error {
 	r.historyEntries++
+	r.historyActors = append(r.historyActors, modifiedBy)
 	r.writes = append(r.writes, "history")
 	return nil
 }

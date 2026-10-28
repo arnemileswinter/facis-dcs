@@ -117,7 +117,12 @@ function formatDateTime(iso?: string): string {
 
 function formatHistoryOptionLabel(item: ContractHistoryItem): string {
   const when = formatDateTime(item.updated_at)
-  return when ? `${when} (version ${item.contract_version})` : `(version ${item.contract_version})`
+  const label = when ? `${when} (version ${item.contract_version})` : `(version ${item.contract_version})`
+  if (!item.modified_by) return label
+  const modifiedAt = formatDateTime(item.modified_at)
+  return modifiedAt
+    ? `${label}, replaced by ${item.modified_by} at ${modifiedAt}`
+    : `${label}, replaced by ${item.modified_by}`
 }
 
 function resolveData(id: string): ContractData | undefined {

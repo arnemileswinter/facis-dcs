@@ -156,6 +156,8 @@ var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDRespo
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("contract_data", Any, "The data of that contract")
+	Attribute("modified_by", String, "Identifier of the actor whose save replaced this version. Absent on versions recorded before the actor was stored")
+	Attribute("modified_at", String, "The timestamp of the save that replaced this version")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_version", "template_did", "template_version")
 })
