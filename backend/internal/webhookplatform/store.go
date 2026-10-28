@@ -1,10 +1,13 @@
 package webhookplatform
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 // KnownEvents is the list of subscribable DCS contract lifecycle events.
@@ -61,12 +64,105 @@ type EventInfo struct {
 }
 
 // Subscription represents a registered webhook.
+//
+// Secret is the plaintext signing secret. It exists only in memory: Postgres
+// holds it encrypted, and only the POST /webhooks response carries it.
 type Subscription struct {
-	ID          string    `json:"id"`
-	Event       string    `json:"event"`
-	CallbackURL string    `json:"callback_url"`
-	Secret      string    `json:"secret,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string    `db:"id"`
+	Event       string    `db:"event"`
+	CallbackURL string    `db:"callback_url"`
+	Secret      string    `db:"-"`
+	OwnerDID    string    `db:"owner_did"`
+	CreatedBy   string    `db:"created_by"`
+	CreatedAt   time.Time `db:"created_at"`
+}
+
+// Subscriptions stores webhook subscriptions. Every caller-facing operation is
+// scoped to the owning organization; ByEvent serves delivery only.
+type Subscriptions interface {
+	Add(ctx context.Context, sub Subscription) (Subscription, error)
+	ListByOwner(ctx context.Context, ownerDID string) ([]Subscription, error)
+	// DeleteOwned returns false when no subscription with that id belongs to ownerDID.
+	DeleteOwned(ctx context.Context, id, ownerDID string) (bool, error)
+	ByEvent(ctx context.Context, event string) ([]Subscription, error)
+}
+
+// PostgresSubscriptions stores subscriptions in webhook_subscriptions, with
+// the secret encrypted by Secrets.
+type PostgresSubscriptions struct {
+	DB      *sqlx.DB
+	Secrets SecretBox
+}
+
+const subscriptionColumns = `id, event, callback_url, owner_did, created_by, created_at`
+
+func (s PostgresSubscriptions) Add(ctx context.Context, sub Subscription) (Subscription, error) {
+	// The id is drawn here because the ciphertext is bound to it.
+	id := uuid.New().String()
+	ciphertext, wrappedCEK, err := s.Secrets.Seal(id, sub.Secret)
+	if err != nil {
+		return Subscription{}, err
+	}
+	var created Subscription
+	err = s.DB.GetContext(ctx, &created, `
+        INSERT INTO webhook_subscriptions (id, event, callback_url, secret_ciphertext, secret_wrapped_cek, owner_did, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING `+subscriptionColumns,
+		id, sub.Event, sub.CallbackURL, ciphertext, wrappedCEK, sub.OwnerDID, sub.CreatedBy)
+	if err != nil {
+		return Subscription{}, fmt.Errorf("create webhook subscription: %w", err)
+	}
+	created.Secret = sub.Secret
+	return created, nil
+}
+
+func (s PostgresSubscriptions) ListByOwner(ctx context.Context, ownerDID string) ([]Subscription, error) {
+	subs := []Subscription{}
+	if err := s.DB.SelectContext(ctx, &subs, `
+        SELECT `+subscriptionColumns+` FROM webhook_subscriptions
+        WHERE owner_did = $1 ORDER BY created_at, id`, ownerDID); err != nil {
+		return nil, fmt.Errorf("list webhook subscriptions: %w", err)
+	}
+	return subs, nil
+}
+
+func (s PostgresSubscriptions) DeleteOwned(ctx context.Context, id, ownerDID string) (bool, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return false, nil
+	}
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM webhook_subscriptions WHERE id = $1 AND owner_did = $2`, id, ownerDID)
+	if err != nil {
+		return false, fmt.Errorf("delete webhook subscription %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete webhook subscription %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// ByEvent returns the subscriptions with their decrypted secrets.
+func (s PostgresSubscriptions) ByEvent(ctx context.Context, event string) ([]Subscription, error) {
+	var rows []struct {
+		Subscription
+		Ciphertext []byte `db:"secret_ciphertext"`
+		WrappedCEK []byte `db:"secret_wrapped_cek"`
+	}
+	if err := s.DB.SelectContext(ctx, &rows, `
+        SELECT `+subscriptionColumns+`, secret_ciphertext, secret_wrapped_cek
+        FROM webhook_subscriptions WHERE event = $1`, event); err != nil {
+		return nil, fmt.Errorf("list webhook subscriptions for %s: %w", event, err)
+	}
+	subs := make([]Subscription, 0, len(rows))
+	for _, row := range rows {
+		secret, err := s.Secrets.Open(row.ID, row.Ciphertext, row.WrappedCEK)
+		if err != nil {
+			return nil, fmt.Errorf("webhook subscription %s: %w", row.ID, err)
+		}
+		row.Secret = secret
+		subs = append(subs, row.Subscription)
+	}
+	return subs, nil
 }
 
 // PendingCallback tracks an in-flight webhook dispatch awaiting a callback.
@@ -95,73 +191,21 @@ type Delivery struct {
 // maxDeliveries bounds the in-memory delivery log (newest kept).
 const maxDeliveries = 512
 
-// SubscriptionStore is a thread-safe in-memory store for subscriptions,
-// pending callbacks, and the recent-delivery log.
-type SubscriptionStore struct {
+// DeliveryLog is a thread-safe in-memory store for pending callbacks and the
+// recent-delivery log.
+type DeliveryLog struct {
 	mu         sync.RWMutex
-	subs       map[string][]Subscription  // event name → subscriptions
 	pending    map[string]PendingCallback // event_id → pending
 	deliveries []Delivery                 // newest last, capped at maxDeliveries
 }
 
-// NewSubscriptionStore returns an empty store.
-func NewSubscriptionStore() *SubscriptionStore {
-	return &SubscriptionStore{
-		subs:    make(map[string][]Subscription),
-		pending: make(map[string]PendingCallback),
-	}
-}
-
-// Add registers a new webhook subscription and returns it with a generated ID.
-func (s *SubscriptionStore) Add(event, callbackURL, secret string) Subscription {
-	sub := Subscription{
-		ID:          uuid.New().String(),
-		Event:       event,
-		CallbackURL: callbackURL,
-		Secret:      secret,
-		CreatedAt:   time.Now().UTC(),
-	}
-	s.mu.Lock()
-	s.subs[event] = append(s.subs[event], sub)
-	s.mu.Unlock()
-	return sub
-}
-
-// Delete removes a subscription by ID. Returns false when not found.
-func (s *SubscriptionStore) Delete(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for event, subs := range s.subs {
-		for i, sub := range subs {
-			if sub.ID == id {
-				s.subs[event] = append(subs[:i], subs[i+1:]...)
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// GetByEvent returns a snapshot of all subscriptions for the given event.
-func (s *SubscriptionStore) GetByEvent(event string) []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return append([]Subscription(nil), s.subs[event]...)
-}
-
-// ListAll returns all registered subscriptions.
-func (s *SubscriptionStore) ListAll() []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var all []Subscription
-	for _, subs := range s.subs {
-		all = append(all, subs...)
-	}
-	return all
+// NewDeliveryLog returns an empty log.
+func NewDeliveryLog() *DeliveryLog {
+	return &DeliveryLog{pending: make(map[string]PendingCallback)}
 }
 
 // TrackPending records an in-flight dispatch so its callback can be correlated.
-func (s *SubscriptionStore) TrackPending(p PendingCallback) {
+func (s *DeliveryLog) TrackPending(p PendingCallback) {
 	s.mu.Lock()
 	s.pending[p.EventID] = p
 	s.mu.Unlock()
@@ -169,7 +213,7 @@ func (s *SubscriptionStore) TrackPending(p PendingCallback) {
 
 // ResolvePending looks up and removes a pending callback by event_id, and
 // flips the matching delivery-log entries to acknowledged.
-func (s *SubscriptionStore) ResolvePending(eventID string) (PendingCallback, bool) {
+func (s *DeliveryLog) ResolvePending(eventID string) (PendingCallback, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[eventID]
@@ -185,7 +229,7 @@ func (s *SubscriptionStore) ResolvePending(eventID string) (PendingCallback, boo
 }
 
 // AddDelivery appends a notification outcome to the delivery log.
-func (s *SubscriptionStore) AddDelivery(d Delivery) {
+func (s *DeliveryLog) AddDelivery(d Delivery) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deliveries = append(s.deliveries, d)
@@ -195,7 +239,7 @@ func (s *SubscriptionStore) AddDelivery(d Delivery) {
 }
 
 // ListDeliveries returns a snapshot of the delivery log, newest last.
-func (s *SubscriptionStore) ListDeliveries() []Delivery {
+func (s *DeliveryLog) ListDeliveries() []Delivery {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]Delivery(nil), s.deliveries...)

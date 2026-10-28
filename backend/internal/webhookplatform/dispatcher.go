@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,13 +25,16 @@ type WebhookPayload struct {
 
 // Dispatcher fans out events to all registered subscribers asynchronously.
 type Dispatcher struct {
-	store      *SubscriptionStore
+	subs       Subscriptions
+	store      *DeliveryLog
 	httpClient *http.Client
 }
 
-// NewDispatcher creates a Dispatcher backed by the given store.
-func NewDispatcher(store *SubscriptionStore) *Dispatcher {
+// NewDispatcher creates a Dispatcher that reads subscribers from subs and
+// records outcomes in store.
+func NewDispatcher(subs Subscriptions, store *DeliveryLog) *Dispatcher {
 	return &Dispatcher{
+		subs:  subs,
 		store: store,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -40,7 +44,11 @@ func NewDispatcher(store *SubscriptionStore) *Dispatcher {
 
 // Dispatch sends event to every subscriber registered for that event.
 func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
-	subs := d.store.GetByEvent(event)
+	subs, err := d.subs.ByEvent(ctx, event)
+	if err != nil {
+		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
+		return
+	}
 	if len(subs) == 0 {
 		return
 	}
@@ -95,6 +103,15 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 		return
 	}
 
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	signature, err := Signature(sub.Secret, payload.EventID, timestamp, body)
+	if err != nil {
+		log.Printf("webhookplatform: sign payload for %s: %v", sub.CallbackURL, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
+		return
+	}
+
 	req, err := http.NewRequest(http.MethodPost, sub.CallbackURL, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("webhookplatform: build request for %s: %v", sub.CallbackURL, err)
@@ -105,9 +122,10 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Correlation-ID", payload.CorrelationID)
 	req.Header.Set("X-Event-ID", payload.EventID)
-	if sub.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+sub.Secret)
-	}
+	// Standard Webhooks v1 (https://www.standardwebhooks.com/).
+	req.Header.Set("webhook-id", payload.EventID)
+	req.Header.Set("webhook-timestamp", timestamp)
+	req.Header.Set("webhook-signature", signature)
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {

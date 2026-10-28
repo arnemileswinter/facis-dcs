@@ -607,17 +607,22 @@ func main() {
 	}
 
 	// Initialize the webhook platform (ORCE integration).
-	webhookStore := webhookplatform.NewSubscriptionStore()
-	webhookDispatcher := webhookplatform.NewDispatcher(webhookStore)
+	webhookSubs := webhookplatform.PostgresSubscriptions{
+		DB:      db,
+		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
+	}
+	webhookStore := webhookplatform.NewDeliveryLog()
+	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore)
 	webhookPlatform := webhookplatform.New(
+		webhookSubs,
 		webhookStore,
 		webhookDispatcher,
-		func(ctx context.Context, token string) (string, error) {
+		func(ctx context.Context, token string) (webhookplatform.Caller, error) {
 			info, err := hydraJWTValidator.ValidateToken(ctx, token)
 			if err != nil {
-				return "", err
+				return webhookplatform.Caller{}, err
 			}
-			return info.ParticipantDID, nil
+			return webhookplatform.Caller{HolderDID: info.HolderDID, ParticipantDID: info.ParticipantDID, Roles: info.Roles}, nil
 		},
 		nil,
 	)
