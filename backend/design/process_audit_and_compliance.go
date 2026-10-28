@@ -434,11 +434,13 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 		Result(PACWorkflowGateRun)
 		Error("not_found", ErrorResult)
+		Error("forbidden", ErrorResult)
 		Error("internal_error", ErrorResult)
 		HTTP(func() {
 			GET("/pac/workflow-gates/{run_id}")
 			Response(StatusOK)
 			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

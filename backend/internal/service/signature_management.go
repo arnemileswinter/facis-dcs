@@ -782,6 +782,10 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 // conservative mapping to dcs:Clause @ids and shape-coverage–aware status.
 // Absence of findings is not treated as compliance success.
 func (s *signatureManagementsrvc) ClauseReport(ctx context.Context, req *signaturemanagement.SMClauseReportRequest) (*signaturemanagement.SMClauseReportResponse, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 

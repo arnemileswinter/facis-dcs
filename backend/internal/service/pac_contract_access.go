@@ -21,6 +21,15 @@ func (s *processAuditAndCompliancesrvc) contractAuditContext(ctx context.Context
 	return contractreadpolicy.WithScope(ctx, scope), nil
 }
 
+func (s *processAuditAndCompliancesrvc) authorizeContract(ctx context.Context, did string) error {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return err
+	}
+	scope, _ := contractreadpolicy.FromContext(scoped)
+	return authorizeContractRead(ctx, s.DB, scope.LocalPeer, did)
+}
+
 func filterContractAuditEvidence(evidence []*auditEvidenceResource, allowed map[string]bool) []*auditEvidenceResource {
 	if allowed == nil {
 		return evidence

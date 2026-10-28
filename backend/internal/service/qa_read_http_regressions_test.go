@@ -102,9 +102,9 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	}
 	var before, after int
 	require.NoError(t, database.Get(&before, "SELECT count(*) FROM outbox_events"))
-	for _, path := range []string{"/signature/request/" + ids["foreign"], "/signature/audit?did=foreign"} {
+	for _, path := range []string{"/signature/request/" + ids["foreign"], "/signature/audit?did=foreign", "/signature/clause-report?did=foreign"} {
 		role := userrole.ContractObserver
-		if path == "/signature/audit?did=foreign" {
+		if path != "/signature/request/"+ids["foreign"] {
 			role = userrole.ComplianceOfficer
 		}
 		body := get(path, role, 403)
