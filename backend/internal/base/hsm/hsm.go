@@ -106,21 +106,24 @@ func (h *HSM) PublicJWK(label string) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("hsm key %q is not an ECDSA public key", label)
 	}
-	return ECPublicKeyJWK(pub), nil
+	return ECPublicKeyJWK(pub)
 }
 
 // ECPublicKeyJWK renders an ECDSA P-256 public key as a JWK map.
-func ECPublicKeyJWK(pub *ecdsa.PublicKey) map[string]any {
+func ECPublicKeyJWK(pub *ecdsa.PublicKey) (map[string]any, error) {
+	if pub == nil || pub.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("encode EC public key: not a P-256 key")
+	}
 	x, y, err := ecutil.UncompressedXY(pub)
 	if err != nil {
-		return map[string]any{"kty": "EC", "crv": "P-256", "x": "", "y": ""}
+		return nil, fmt.Errorf("encode EC public key: %w", err)
 	}
 	return map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   base64.RawURLEncoding.EncodeToString(x),
 		"y":   base64.RawURLEncoding.EncodeToString(y),
-	}
+	}, nil
 }
 
 // SignES256 hashes message with SHA-256, signs it with the given ECDSA signer,

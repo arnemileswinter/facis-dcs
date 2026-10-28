@@ -139,9 +139,13 @@ jobs:
         run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Run govulncheck (pdf-core)
+        working-directory: pdf-core
         run: govulncheck ./...
 
   go-tests:
