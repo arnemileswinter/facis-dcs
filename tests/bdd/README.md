@@ -170,6 +170,7 @@ with `--tags=~@...` or a feature path rather than letting them fail.
 | `features/19_c2pa_conformance`, tamper scenarios elsewhere | `BDD_IPFS_EXEC`. These add corrupted bytes to IPFS and repoint `contracts.pdf_ipfs_cid` at them, restoring the original CID on cleanup. |
 | `features/08_audit_compliance` | ORCE endpoints, plus permission to `kubectl rollout restart` the ORCE deployment mid-scenario |
 | `features/27_external_checkpoint_and_workflow_gates` | The machine running behave serves an HTTPS sink in-process, and **your cluster must be able to reach it**. Set `BDD_CHECKPOINT_SINK_BIND_HOST` and `BDD_CHECKPOINT_SINK_PORT` to an address routable from the cluster. If your cluster cannot route back to your workstation, these scenarios cannot pass. |
+| `features/02_template_management/template_update_notifications` | The machine running behave serves a plain-HTTP webhook receiver in-process, and the cluster must reach it. `BDD_WEBHOOK_RECEIVER_HOST` (default: the checkpoint sink host) and `BDD_WEBHOOK_RECEIVER_PORT` (default `18444`) give the address that DCS posts to. |
 | `@isolated_stack` (`features/25_federated_catalogue_deployment_lifecycle`) | Creates and deletes **Kubernetes namespaces** and runs `helm install` against your cluster, including a chart from this repository's git history. It therefore needs a full clone (`fetch-depth: 0`), not a shallow one. Skip these unless you intend to grant that. |
 
 ## 6. Troubleshooting

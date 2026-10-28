@@ -163,16 +163,19 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   (Unix-Sekunden) und `webhook-signature: v1,<Base64 HMAC-SHA256>` über
   `webhook-id.webhook-timestamp.Body` mit dem Base64-dekodierten Teil
   nach `whsec_` als Schlüssel; `X-Event-ID` und `X-Correlation-ID`
-  bleiben. Der Body ist kompaktes JSON ohne HTML-Escaping, damit ein
-  Empfänger hinter einem JSON-parsenden Endpunkt die signierten Bytes mit
-  `JSON.stringify` wiederherstellt. Der ORCE-Empfänger `/dcs-dispatch`
-  prüft die Signatur mit `WEBHOOK_SECRET` (`timingSafeEqual`, höchstens
-  300 s Zeitabweichung) und antwortet sonst 401; ohne `WEBHOOK_SECRET`
-  lehnt er jede Zustellung ab, außer `WEBHOOK_ACCEPT_UNVERIFIED=true`
-  (nur BDD). Der Betreiber kopiert das Secret aus der 201-Antwort in ein
-  Kubernetes-Secret und gibt es ORCE über `orce.extraEnv` mit
-  `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`. Pending-Callbacks und
-  das Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
+  bleiben. Der ORCE-Empfänger `/dcs-dispatch` prüft die Signatur über die
+  empfangenen Bytes (`msg.req.rawBody`) mit `WEBHOOK_SECRET`
+  (`timingSafeEqual`, höchstens 300 s Zeitabweichung) und antwortet sonst
+  401, auch ohne `WEBHOOK_SECRET` oder ohne Raw-Body. Den Raw-Body liefert
+  die vom Chart gemountete `settings.js` (Image-Standard plus ein
+  JSON-Parser mit `verify` als `httpAdminMiddleware` und
+  `httpNodeMiddleware`); der Editor-Parser unter `httpAdminRoot` `/` liest
+  sonst jeden Body vor den http-in-Routen. Die BDD-Szenarien stellen an
+  einen Empfänger im behave-Prozess zu, der die Signatur mit dem Secret
+  aus der 201-Antwort prüft. Der Betreiber kopiert das Secret aus der
+  201-Antwort in ein Kubernetes-Secret und gibt es ORCE über
+  `orce.extraEnv` mit `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`.
+  Pending-Callbacks und das Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
   Speicher.
   **Warum:** Ein Abonnement verbindet ein Drittsystem mit DCS-Events,
   das ist nach ADR-29 eine Integrationsaufgabe. Die HMAC-Signatur
