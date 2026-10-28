@@ -65,7 +65,8 @@ export const auditingService: AuditingService = {
   async report(request: AuditReportRequest) {
     return http.get<ArrayBuffer>('/pac/report', { params: request, responseType: 'arraybuffer' }).then((res) => ({
       bytes: res.data,
-      contentType: res.headers['content-type'] ?? 'application/octet-stream',
+      contentType:
+        typeof res.headers['content-type'] === 'string' ? res.headers['content-type'] : 'application/octet-stream',
       filename: `audit-report-${request.scope}.${request.format ?? 'json'}`,
     }))
   },

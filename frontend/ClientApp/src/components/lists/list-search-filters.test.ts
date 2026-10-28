@@ -83,6 +83,8 @@ it.each(['Enter', ' '])('selects a named filter with %s and focuses the first po
   const popover = wrapper.get('#list-popover-search')
   const hidePopover = vi.fn()
   Object.assign(popover.element, { hidePopover })
+  // jsdom has no popover API and refuses focus inside a closed popover; emulate the open state.
+  ;(popover.element as HTMLElement).style.display = 'block'
   await popover.trigger('toggle', { newState: 'open' })
   const options = popover.findAll('a')
   expect(popover.attributes('aria-label')).toBe('Select search filter')
