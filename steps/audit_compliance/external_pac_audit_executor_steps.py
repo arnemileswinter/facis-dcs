@@ -695,7 +695,7 @@ def step_report_lifecycle(context, fmt):
             actor = (entry.get("event_data") or {}).get("stored_by")
             marker = "".join((entry["event_type"] + (entry.get("did") or "")).split())
             if actor:
-                marker = "actor=" + actor + marker
+                marker = "".join(("actor=" + actor).split()) + marker
             position = timeline.find(marker, offset)
             assert position >= offset, f"Missing or out-of-order lifecycle event {entry!r}"
             segment = timeline[offset:position]
