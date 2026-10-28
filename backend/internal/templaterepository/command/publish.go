@@ -161,6 +161,7 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 			name,
 			description,
 			fullTemplate.TemplateType,
+			fullTemplate.PartyType,
 		),
 		TemplateDataString: templateDataString,
 	})

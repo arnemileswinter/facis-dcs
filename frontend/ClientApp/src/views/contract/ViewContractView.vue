@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, type Ref, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -21,11 +21,11 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
-import { reportActionError } from '@/utils/report-action-error'
+import { claimReportedHttpError, reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
-import type { UserRole } from '@/types/user-role'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
 const route = useRoute()
@@ -43,6 +43,9 @@ const { preprocessContractData } = useContractDataPreprocess()
 const { activeTab } = storeToRefs(contractEditorUiStore)
 
 const contract: Ref<Contract | null> = ref(null)
+const loading = ref(false)
+const loadError = ref(false)
+let loadRequest = 0
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 const isReopening = ref(false)
 
@@ -72,8 +75,7 @@ const reopenNegotiation = async () => {
 const shownContract = computed(() => (contract.value ? contractWithAcceptedProposals(contract.value) : null))
 
 const isAuditingAuthorized = computed(
-  () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
+  () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 // Proposals belong on Negotiate — View is read-only and must not expose them.
@@ -101,19 +103,33 @@ watch(
 // store refresh leaves contract.value untouched and the page showing stale data.
 const loadContract = async () => {
   const id = route.params.did
+  const request = ++loadRequest
   if (!id || Array.isArray(id)) return
+  loading.value = true
+  contract.value = null
+  applyContractDataToDraft(undefined)
   try {
-    contract.value = await contractWorkflowService.retrieveById({ did: id })
+    const loaded = await contractWorkflowService.retrieveById({ did: id })
+    if (route.params.did !== id || request !== loadRequest) return
+    if (!loaded) throw new Error('Contract unavailable')
+    contract.value = loaded
+    loadError.value = false
     const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
     applyContractDataToDraft(baseline?.contract_data)
   } catch (err: unknown) {
+    claimReportedHttpError(err)
+    if (route.params.did !== id || request !== loadRequest) return
+    loadError.value = true
     console.error('Failed to load contract', err)
+  } finally {
+    if (request === loadRequest) loading.value = false
   }
 }
 
 watch(
-  () => !!route.params.did,
+  () => route.params.did,
   async (value) => {
+    loadError.value = false
     if (value) await loadContract()
   },
   { immediate: true },
@@ -158,6 +174,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  loadRequest++
   dcsDraftStore.reset({ workflow: 'contract' })
   contractContentValuesStore.reset()
   contractEditorUiStore.reset()
@@ -212,6 +229,14 @@ const exportBundle = async () => {
 
 <template>
   <div class="flex h-full flex-col">
+    <p v-if="loading" class="p-6" role="status">Loading contract…</p>
+    <div v-if="loadError" class="m-6 alert block alert-error" role="alert">
+      <p>The contract could not be loaded. You may not have access.</p>
+      <div class="mt-3 flex flex-wrap items-center gap-4">
+        <button type="button" class="btn btn-sm" :disabled="loading" @click="loadContract">Retry</button>
+        <RouterLink :to="{ name: ROUTES.CONTRACTS.LIST }" class="link">Back to contracts</RouterLink>
+      </div>
+    </div>
     <div v-if="!!contract" class="flex flex-1 flex-col">
       <div class="flex flex-1 flex-col">
         <!-- Tabs -->
@@ -219,16 +244,18 @@ const exportBundle = async () => {
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">View Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
-              <a
+              <button
                 v-for="tab in tabs"
                 :key="tab.id"
+                type="button"
                 role="tab"
+                :aria-selected="activeTab === tab.id"
                 class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -347,7 +374,12 @@ const exportBundle = async () => {
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView />
+                      <AuditView
+                        v-if="contract"
+                        :contract="contract"
+                        :blocks="dcsDraftStore.blocks"
+                        :layout="dcsDraftStore.layout"
+                      />
                     </div>
                   </div>
                 </div>
@@ -406,21 +438,14 @@ const exportBundle = async () => {
         </div>
       </div>
     </div>
-    <div class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
-      <div v-if="contract" class="mx-auto max-w-4xl px-6 pt-3 empty:hidden">
+    <div v-if="contract" class="sticky bottom-0 shrink-0 border-t border-base-300 bg-base-100">
+      <div class="mx-auto max-w-4xl px-6 pt-3 empty:hidden">
         <ExpiredPolicyNotice :contract="contract" />
       </div>
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
-        <!-- Both exports need the loaded contract's DID; until it arrives the
-             handlers can only return silently, so the click looks like it did
-             nothing. Disable them while the contract is still loading. -->
-        <button class="btn btn-outline md:w-32" :disabled="exporting || !contract" @click="exportPDF">
-          Export PDF
-        </button>
-        <button class="btn btn-outline md:w-36" :disabled="exporting || !contract" @click="exportBundle">
-          Export bundle
-        </button>
+        <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <button class="btn btn-outline md:w-36" :disabled="exporting" @click="exportBundle">Export bundle</button>
         <button
           v-if="canReopenNegotiation"
           class="btn flex-1 btn-primary"
@@ -430,7 +455,7 @@ const exportBundle = async () => {
           <span v-if="isReopening" class="loading loading-sm loading-spinner"></span>
           Reopen negotiation
         </button>
-        <ContractManagerActions v-if="contract" :contract="contract" class="btn flex-1 btn-primary" />
+        <ContractManagerActions :contract="contract" class="btn flex-1 btn-primary" />
       </div>
     </div>
   </div>

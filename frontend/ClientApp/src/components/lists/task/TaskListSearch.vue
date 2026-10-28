@@ -40,6 +40,7 @@ const emptyItem: Searchable = {
   updated_at: '',
   name: '',
   template_type: 'CONTRACT_TEMPLATE',
+  party_type: 'SINGLE_PARTY',
   state: 'DRAFT',
   created_by: '',
   version: 1,
@@ -91,6 +92,7 @@ function mapTemplateHits(response: ContractTemplateSearchResponse): Searchable[]
     updated_at: item.updated_at,
     created_at: item.created_at,
     template_type: item.template_type,
+    party_type: item.party_type,
     created_by: item.created_by,
   }))
 }

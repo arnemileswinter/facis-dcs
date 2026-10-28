@@ -21,6 +21,7 @@ type ContractTemplateMetadata struct {
 	Version      int       `db:"version"`
 	State        string    `db:"state"`
 	TemplateType string    `db:"template_type"`
+	PartyType    string    `db:"party_type"`
 	Name         *string   `db:"name"`
 	Description  *string   `db:"description"`
 	CreatedBy    string    `db:"created_by"`

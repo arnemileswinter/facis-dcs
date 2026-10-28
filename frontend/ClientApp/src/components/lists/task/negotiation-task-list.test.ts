@@ -10,7 +10,7 @@ import type { ContractNegotiationTask } from '@/models/contract/contract-negotia
 const RouterLinkStub = defineComponent({
   name: 'RouterLink',
   props: { to: { type: [String, Object], required: true } },
-  setup(props, { slots }) {
+  setup(_props, { slots }) {
     return () => h('a', { 'data-testid': 'task-view-link' }, slots.default?.())
   },
 })

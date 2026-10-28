@@ -1,4 +1,5 @@
 import type { Contract } from '@/models/contract/contract'
+import type { ContractEvidence, StoreContractEvidence } from '@/models/contract/contract-evidence'
 import type {
   ContractApproveRequest,
   ContractAuditRequest,
@@ -53,6 +54,10 @@ import type {
 } from '@/models/responses/contract-response'
 
 export interface ContractWorkflowService {
+  storeEvidence: (request: StoreContractEvidence) => Promise<{ did: string; evidence_id: string }>
+  listEvidence: (did: string) => Promise<ContractEvidence[]>
+  retrieveEvidence: (did: string, evidenceId: string) => Promise<ContractEvidence>
+
   create: (request: ContractCreateRequest) => Promise<ContractCreateResponse>
   update: (request: ContractUpdateRequest) => Promise<ContractUpdateResponse>
   offer: (request: ContractOfferRequest) => Promise<ContractOfferResponse>

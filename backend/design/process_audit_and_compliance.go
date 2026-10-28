@@ -1,6 +1,8 @@
 package design
 
 import (
+	"digital-contracting-service/internal/auth/db"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	. "goa.design/goa/v3/dsl"
 )
 
@@ -173,9 +175,58 @@ var PACWorkflowGateReviewDecision = Type("PACWorkflowGateReviewDecision", func()
 	Required("run_id", "decision", "justification", "decided_by", "decided_at")
 })
 
+var PACAccessAttempt = Type("PACAccessAttempt", func() {
+	Attribute("id", Int64)
+	Attribute("attempted_at", String, "UTC timestamp (RFC3339Nano)")
+	Attribute("attempt_by", String)
+	Attribute("roles", ArrayOf(String))
+	Attribute("service", String)
+	Attribute("method", String)
+	Attribute("scope", String)
+	Attribute("did", String)
+	Attribute("justification", String)
+	Attribute("outcome", String, func() { Enum(db.AccessOutcomeSuccess, db.AccessOutcomeDenied, db.AccessOutcomeFailed) })
+	Required("id", "attempted_at", "roles", "service", "method", "justification", "outcome")
+})
+
+var PACAccessAttempts = Type("PACAccessAttempts", func() {
+	Attribute("attempts", ArrayOf(PACAccessAttempt))
+	Attribute("next_cursor", String)
+	Required("attempts")
+})
+
 // Process Audit & Compliance Management Service  (/pac/...)
 var _ = Service("ProcessAuditAndCompliance", func() {
 	Description("Process Audit & Compliance Management APIs (/pac/...)")
+
+	Method("access_attempts", func() {
+		Description("Read access decisions, newest first. Restricted to human Auditors.")
+		Meta("dcs:requirements", "DCS-FR-CSA-02", "DCS-FR-PACM-04")
+		Security(JWTAuth, func() { Scope(string(userrole.Auditor)) })
+		Payload(func() {
+			Token("token", String)
+			Attribute("justification", String, func() { MinLength(1) })
+			Attribute("limit", Int, func() { Default(25); Minimum(1); Maximum(100) })
+			Attribute("cursor", String, func() { MaxLength(256) })
+			Required("justification")
+		})
+		Result(PACAccessAttempts)
+		Error("bad_request", ErrorResult)
+		Error("unauthorized", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/pac/access-attempts")
+			Param("justification")
+			Param("limit")
+			Param("cursor")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("unauthorized", StatusUnauthorized)
+			Response("forbidden", StatusForbidden)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
 
 	Method("audit", func() {
 		Description("trigger an audit on selected scope.")
@@ -193,6 +244,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		Error("forbidden", ErrorResult, "Forbidden")
 		Error("internal_error", ErrorResult, "Internal server error")
 		Error("executor_error", ErrorResult, "External audit executor infrastructure error")
+		Error("not_found", ErrorResult, "Audit evidence has been cryptographically erased")
 
 		HTTP(func() {
 			POST("/pac/audit")
@@ -201,11 +253,12 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)
 			Response("executor_error", StatusBadGateway)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
 	Method("audit_report", func() {
-		Description("generate and retrieve audit reports.")
+		Description("Export the latest persisted audit run, including its frozen lifecycle timeline, as JSON, CSV, or PDF. No checks are executed again. Reports containing erased resource content are unavailable.")
 		Meta("dcs:requirements", "DCS-IR-PACM-02")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
@@ -221,7 +274,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 		Error("forbidden", ErrorResult, "Forbidden")
 		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "No matching persisted audit run")
+		Error("not_found", ErrorResult, "No matching persisted audit run or report content erased")
 		Error("internal_error", ErrorResult, "Internal server error")
 		Result(Bytes)
 		HTTP(func() {
@@ -230,11 +283,13 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Param("format")
 			Param("did")
 			Param("justification")
-			Response(StatusOK)
-			Response("forbidden", StatusForbidden)
-			Response("bad_request", StatusBadRequest)
-			Response("not_found", StatusNotFound)
-			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK, func() {
+				Meta("openapi:extension:"+responseContentExtension, `{"application/json":{"type":"object"},"text/csv":{"type":"string","format":"binary"},"application/pdf":{"type":"string","format":"binary"}}`)
+			})
+			Response("forbidden", StatusForbidden, func() { ContentType("application/json") })
+			Response("bad_request", StatusBadRequest, func() { ContentType("application/json") })
+			Response("not_found", StatusNotFound, func() { ContentType("application/json") })
+			Response("internal_error", StatusInternalServerError, func() { ContentType("application/json") })
 		})
 	})
 

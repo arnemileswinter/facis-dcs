@@ -1,0 +1,95 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+
+	pac "digital-contracting-service/gen/process_audit_and_compliance"
+	"digital-contracting-service/internal/base/contractreadpolicy"
+	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
+)
+
+func (s *processAuditAndCompliancesrvc) contractAuditContext(ctx context.Context) (context.Context, error) {
+	scope := contractreadpolicy.Scope{Organization: middleware.GetParticipantID(ctx), Roles: middleware.GetUserRoles(ctx)}
+	if s.ATrailReader.Artifacts != nil {
+		scope.LocalPeer = s.ATrailReader.Artifacts.InstanceScope().ID
+	}
+	if !scope.Privileged() && scope.LocalPeer == "" {
+		return ctx, pac.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	return contractreadpolicy.WithScope(ctx, scope), nil
+}
+
+func filterContractAuditEvidence(evidence []*auditEvidenceResource, allowed map[string]bool) []*auditEvidenceResource {
+	if allowed == nil {
+		return evidence
+	}
+	filtered := make([]*auditEvidenceResource, 0, len(evidence))
+	for _, resource := range evidence {
+		if !allowed[resource.Did] {
+			continue
+		}
+		entries := make([]*pac.PACResourceAuditTrailEntry, 0, len(resource.AuditTrail))
+		for _, entry := range resource.AuditTrail {
+			if entry.Did != nil && !allowed[*entry.Did] {
+				continue
+			}
+			entries = append(entries, entry)
+		}
+		copy := *resource
+		copy.AuditTrail = entries
+		filtered = append(filtered, &copy)
+	}
+	return filtered
+}
+
+// Frozen reports are indivisible: authorize every resource, including erased placeholders.
+func (s *processAuditAndCompliancesrvc) authorizeAuditReport(ctx context.Context, run persistedAuditRun) error {
+	ctx, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return err
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil || allowed == nil {
+		return err
+	}
+	var request struct {
+		Scope    string                     `json:"scope"`
+		Resource *auditexecutor.Resource    `json:"resource"`
+		Evidence map[string]json.RawMessage `json:"evidence"`
+	}
+	if json.Unmarshal(run.RequestBytes, &request) != nil || (request.Scope != "archive" && request.Scope != "contracts") {
+		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	if request.Resource != nil && !allowed[request.Resource.DID] {
+		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	for scope, raw := range request.Evidence {
+		if scope != "archive" && scope != "contracts" {
+			return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+		var resources []persistedAuditEvidenceResource
+		if json.Unmarshal(raw, &resources) != nil {
+			return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+		}
+		for _, resource := range resources {
+			if !allowed[resource.DID] {
+				return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+			}
+			for _, event := range resource.AuditTrail {
+				if event.DID != "" && !allowed[event.DID] {
+					return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+				}
+			}
+		}
+	}
+	var response auditexecutor.Response
+	if json.Unmarshal(run.ResponseBytes, &response) != nil {
+		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	if response.Resource != nil && !allowed[response.Resource.DID] {
+		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+	}
+	return nil
+}

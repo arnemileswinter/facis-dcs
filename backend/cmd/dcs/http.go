@@ -80,6 +80,10 @@ func (e rawBytesEncoder) Encode(value any) error {
 }
 
 func responseEncoder(ctx context.Context, w http.ResponseWriter) goahttp.Encoder {
+	if ctx.Value(goa.ServiceKey) == processauditandcompliance.ServiceName && ctx.Value(goa.MethodKey) == "audit_report" {
+		// The format query selects report bytes; errors always use JSON.
+		return rawBytesEncoder{fallback: json.NewEncoder(w), w: w}
+	}
 	return rawBytesEncoder{fallback: goahttp.ResponseEncoder(ctx, w), w: w}
 }
 
@@ -237,6 +241,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	var handler http.Handler = outerMux
 	handler = middleware.RateLimitAuthenticated(conf.APIRateLimitPerMinute(), handler)
 	handler = reportContentTypeMiddleware(handler)
+	handler = evidenceBodyLimit(handler)
 	handler = service.RequestContextMiddleware(handler)
 	handler = middleware.InjectIP(handler)
 	handler = metricsMiddleware(handler)
@@ -369,18 +374,46 @@ func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
 func reportContentTypeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/pac/report") && r.Method == http.MethodGet {
-			switch strings.ToLower(r.URL.Query().Get("format")) {
+			contentType := "application/json"
+			switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
 			case "csv":
-				w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+				contentType = "text/csv; charset=utf-8"
 			case "pdf":
-				w.Header().Set("Content-Type", "application/pdf")
-			default:
-				w.Header().Set("Content-Type", "application/json")
+				contentType = "application/pdf"
 			}
+			w = &reportResponseWriter{ResponseWriter: w, contentType: contentType}
 		}
 		next.ServeHTTP(w, r)
 	})
 }
+
+type reportResponseWriter struct {
+	http.ResponseWriter
+	contentType string
+	written     bool
+}
+
+func (w *reportResponseWriter) WriteHeader(status int) {
+	if w.written {
+		return
+	}
+	contentType := "application/json"
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		contentType = w.contentType
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.ResponseWriter.WriteHeader(status)
+	w.written = status >= http.StatusOK
+}
+
+func (w *reportResponseWriter) Write(data []byte) (int, error) {
+	if !w.written {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *reportResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // errorHandler returns a function that writes and logs the given error.
 // The function also writes and logs the error unique ID so that it's possible

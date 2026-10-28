@@ -11,3 +11,9 @@ export interface AuditReportRequest extends AuditRequest {
   format?: AuditReportFormat
   did?: string
 }
+
+export interface AccessAttemptsRequest {
+  justification: string
+  limit?: number
+  cursor?: string
+}

@@ -532,6 +532,10 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contractworkflowengine.ContractRetrieveRequest) (res *contractworkflowengine.ContractRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -905,6 +909,10 @@ func (s *contractWorkflowEnginesrvc) signatureEvidence(ctx context.Context, did,
 // context, each naming the observed metric, value, time, violation
 // verdict, and the contract it observes (DCS-FR-CWE-09/-31).
 func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (any, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -989,6 +997,9 @@ func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did strin
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, req *contractworkflowengine.ContractHistoryRetrieveByIDRequest) (res []*contractworkflowengine.ContractHistoryRetrieveByIDResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1188,6 +1199,9 @@ func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, r
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftRetrieveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1336,6 +1350,9 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractworkflowengine.ContractReviewRequest) (res *contractworkflowengine.ContractReviewResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1361,6 +1378,10 @@ func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1545,43 +1566,6 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 	}
 
 	return &contractworkflowengine.ContractRejectResponse{
-		Did: req.Did,
-	}, nil
-}
-
-func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	cmd := command.RecordEvidenceCmd{
-		DID:        req.Did,
-		RecordedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		UpdatedAt:  updatedAt,
-		CauserDID:  localPeer,
-	}
-	handler := command.EvidenceRecorder{
-		DB:    s.DB,
-		CRepo: s.CRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	return &contractworkflowengine.ContractStoreResponse{
 		Did: req.Did,
 	}, nil
 }
@@ -1803,6 +1787,10 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	qry := qry2.GetAuditLogByDIDQry{
 		DID:       req.Did,
 		Scope:     componenttype.ContractWorkflowEngine,
@@ -1865,6 +1853,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,

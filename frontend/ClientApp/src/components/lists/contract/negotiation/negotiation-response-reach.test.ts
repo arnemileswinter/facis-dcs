@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/stores/auth-store'
@@ -13,8 +13,10 @@ import type { UserRole } from '@/types/user-role'
  * rows carry that, never the logged-in user's credential issuer.
  */
 
+const retrieveHistoryByDid = vi.hoisted(() => vi.fn())
+
 vi.mock('@/services/contract-workflow-service', () => ({
-  contractWorkflowService: { respond: vi.fn(() => Promise.resolve({ id: 'n1' })) },
+  contractWorkflowService: { retrieveHistoryByDid, respond: vi.fn(() => Promise.resolve({ id: 'n1' })) },
 }))
 
 const LOCAL_INSTANCE = 'did:web:local.example'
@@ -180,4 +182,47 @@ describe('responding to a change proposal', () => {
         ?.attributes('disabled'),
     ).toBeUndefined()
   })
+})
+
+it('compares an older proposal against its historical version rather than the live contract', async () => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useAuthStore().user = { issuer: USER_ISSUER, holder: 'user', roles: ['CONTRACT_NEGOTIATOR'] }
+  const historicalData = { '@id': 'historical' }
+  const proposedData = { '@id': 'proposal' }
+  retrieveHistoryByDid.mockResolvedValue([
+    { contract_version: 1, name: 'Historical name', contract_data: historicalData },
+  ])
+  const original = contract({})
+  const wrapper = shallowMount(NegotiationList, {
+    props: {
+      contract: {
+        ...original,
+        contract_version: 2,
+        name: 'Live name',
+        negotiations: [
+          {
+            ...original.negotiations![0]!,
+            contract_version: 1,
+            change_request: { name: 'Proposed name', contract_data: proposedData as Contract['contract_data'] },
+          },
+        ],
+      },
+      localInstanceDid: LOCAL_INSTANCE,
+    },
+    global: { plugins: [pinia] },
+  })
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text().includes('Show'))!
+    .trigger('click')
+  await flushPromises()
+  expect(retrieveHistoryByDid).toHaveBeenCalledWith({ did: original.did })
+  const details = wrapper.findComponent({ name: 'ContractDetailsDiffView' })
+  expect(details.props('left')).toMatchObject({ name: 'Historical name', contract_version: 1 })
+  expect(details.props('right')).toMatchObject({ name: 'Proposed name', contract_version: 1 })
+  const content = wrapper.findComponent({ name: 'DiffView' })
+  expect(content.props('leftContractData')).toEqual(historicalData)
+  expect(content.props('rightContractData')).toEqual(proposedData)
+  wrapper.unmount()
 })

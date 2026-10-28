@@ -148,6 +148,7 @@ export async function authorPaymentComponent(
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')
@@ -210,6 +211,7 @@ async function authorContractTemplateFrom(
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')

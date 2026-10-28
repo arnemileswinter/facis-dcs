@@ -81,7 +81,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
 
 <template>
   <!-- Root-level blocks -->
-  <template v-if="!hasBlockId">
+  <div v-if="!hasBlockId" class="space-y-4">
     <template v-for="id in rootChildren" :key="id">
       <TemplatePreview
         :block-id="id"
@@ -95,7 +95,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
         :disabled="disabled"
       />
     </template>
-  </template>
+  </div>
   <!-- Nested blocks -->
   <template v-else>
     <!-- Section block -->
@@ -103,7 +103,7 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
       v-if="block && block['@type'] === 'dcs:Section'"
       :enabled="true"
       tag="section"
-      wrapper-class="w-full mb-4"
+      wrapper-class="w-full"
     >
       <PreviewSectionBlock :title="sectionTitle" :has-children="childrenIds.length > 0" :level="sectionLevel">
         <template v-for="childId in childrenIds" :key="childId">
@@ -122,17 +122,20 @@ const clauseSemanticConditions = computed(() => props.semanticConditions)
       </PreviewSectionBlock>
     </ConditionalWrapper>
     <!-- Text block -->
-    <PreviewTextBlock v-else-if="block && block['@type'] === 'dcs:TextBlock'" :text="textBlockText" />
+    <div v-else-if="block && block['@type'] === 'dcs:TextBlock'" class="w-full">
+      <PreviewTextBlock :text="textBlockText" />
+    </div>
     <!-- Clause block -->
-    <PreviewClauseBlock
-      v-else-if="block && block['@type'] === 'dcs:Clause'"
-      :block-id="block['@id']"
-      :content="clauseContent"
-      :semantic-conditions="clauseSemanticConditions"
-      :semantic-condition-values="semanticConditionValues"
-      :verification-result="verificationResult"
-      :set-semantic-condition-value="setSemanticConditionValue"
-      :disabled="disabled"
-    />
+    <div v-else-if="block && block['@type'] === 'dcs:Clause'" class="w-full">
+      <PreviewClauseBlock
+        :block-id="block['@id']"
+        :content="clauseContent"
+        :semantic-conditions="clauseSemanticConditions"
+        :semantic-condition-values="semanticConditionValues"
+        :verification-result="verificationResult"
+        :set-semantic-condition-value="setSemanticConditionValue"
+        :disabled="disabled"
+      />
+    </div>
   </template>
 </template>

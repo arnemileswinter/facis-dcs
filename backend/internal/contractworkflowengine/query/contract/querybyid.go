@@ -3,11 +3,12 @@ package contract
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"time"
+
+	"digital-contracting-service/internal/base/contractreadpolicy"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
 
@@ -26,20 +27,7 @@ import (
 // ErrContractAccessDenied is returned when the caller is not an authorized
 // party of the contract (DCS: created contracts are accessible only to
 // authorized parties). Mapped to HTTP 403 by the service layer.
-var ErrContractAccessDenied = errors.New("not authorized to access this contract")
-
-// privilegedReadRoles may read any contract regardless of party membership:
-// the Sys.* machine roles (cross-org automation), the system administrator,
-// and the Auditor (whose function is org-independent audit access).
-var privilegedReadRoles = map[userrole.UserRole]bool{
-	userrole.SystemContractCreator:  true,
-	userrole.SystemContractReviewer: true,
-	userrole.SystemContractApprover: true,
-	userrole.SystemContractManager:  true,
-	userrole.SystemContractSigner:   true,
-	userrole.SystemAdministrator:    true,
-	userrole.Auditor:                true,
-}
+var ErrContractAccessDenied = contractreadpolicy.ErrDenied
 
 type GetByIDQry struct {
 	DID         string
@@ -225,55 +213,5 @@ func callerMayReadContract(query GetByIDQry, data *db.Contract) bool {
 // this instance's. Privileged org-independent roles bypass the organization
 // half only.
 func CallerMayReadContract(retrievedBy string, userRoles userrole.UserRoles, localPeer string, data *db.Contract) bool {
-	if localPeer != "" && data.Origin != "" && data.Origin != localPeer {
-		return true
-	}
-	for _, role := range userRoles {
-		if privilegedReadRoles[role] {
-			return true
-		}
-	}
-	if retrievedBy != "" && retrievedBy == data.CreatedBy {
-		return true
-	}
-	for _, party := range contractParties(data.ContractData) {
-		if retrievedBy != "" && retrievedBy == party {
-			return true
-		}
-	}
-	return false
-}
-
-// contractParties reads the organizations named by the typed dcs:CompanyParty
-// nodes under the contract document's top-level "dcs:parties". Absence simply
-// means no additional parties beyond the creating organization.
-//
-// A node contributes only if it carries dcs:legalName. Nodes keyed by did:web
-// carry it too since bindOriginatorParty stamps both keys, so the originator
-// is visible here; a node with a role but no name is an attribution node for
-// a party this instance cannot resolve to a local organization, and it grants
-// nobody read access.
-func contractParties(raw *datatype.JSON) []string {
-	if raw == nil {
-		return nil
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(*raw, &doc); err != nil {
-		return nil
-	}
-	entries, ok := doc["dcs:parties"].([]any)
-	if !ok {
-		return nil
-	}
-	parties := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		node, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		if name, ok := node["dcs:legalName"].(string); ok && name != "" {
-			parties = append(parties, name)
-		}
-	}
-	return parties
+	return (contractreadpolicy.Scope{Organization: retrievedBy, Roles: userRoles, LocalPeer: localPeer}).MayRead(data.Origin, data.CreatedBy, data.ContractData)
 }

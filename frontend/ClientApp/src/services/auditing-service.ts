@@ -1,6 +1,11 @@
 import http from '@/api/http'
-import type { AuditReportRequest, AuditRequest } from '@/models/requests/auditing-request'
-import type { AuditFinding, AuditResponse, PACAuditExecutorResponse } from '@/models/responses/auditing-response'
+import type { AccessAttemptsRequest, AuditReportRequest, AuditRequest } from '@/models/requests/auditing-request'
+import type {
+  AccessAttemptsResponse,
+  AuditFinding,
+  AuditResponse,
+  PACAuditExecutorResponse,
+} from '@/models/responses/auditing-response'
 import type { AuditingService } from '@/models/services/auditing-service'
 
 const normalizeAuditResponse = (data: PACAuditExecutorResponse): AuditResponse => {
@@ -49,6 +54,10 @@ function categoryFromResult(result: PACAuditExecutorResponse['findings'][number]
 }
 
 export const auditingService: AuditingService = {
+  async accessAttempts(request: AccessAttemptsRequest) {
+    return http.get<AccessAttemptsResponse>('/pac/access-attempts', { params: request }).then((res) => res.data)
+  },
+
   async audit(request: AuditRequest) {
     return http.post<PACAuditExecutorResponse>('/pac/audit', request).then((res) => normalizeAuditResponse(res.data))
   },

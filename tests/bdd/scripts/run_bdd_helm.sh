@@ -85,10 +85,8 @@ wait_for_running_pod() {
 # verify-shaped endpoints always re-fetch the SERVER'S OWN stored PDF from
 # IPFS by CID, so tampered-artifact scenarios inject bytes as a NEW CID via
 # `ipfs add` exec'd inside the shared IPFS pod, then repoint the owning row's
-# CID column at it (via the existing context.db test-DB connection). IPFS is
-# a SINGLE instance shared across both BDD releases (values.bdd2.yml's
-# ipfsClient.mfsBaseURL points at "dcs-ipfs" regardless of caller instance),
-# so this is not release-scoped the way BDD_HSMSIGN_EXEC is.
+# CID column at it (via the existing context.db test-DB connection). The
+# exec prefix must select the pod serving the tested contract's IPFS endpoint.
 mkdir -p .tmp .reports/junit
 REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 # A previous local run must not satisfy the fail-closed scenario-count gate

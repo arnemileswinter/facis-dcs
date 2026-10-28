@@ -707,6 +707,7 @@ export async function publishShapeOnInstance(inst: Instance, name: string): Prom
 export async function authorSemanticComponent(inst: Instance, name: string): Promise<string> {
   await inst.gotoAs('Template Creator', '/ui/templates/new')
   await inst.page.getByRole('button', { name: /Component/ }).click()
+  await inst.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await inst.page
     .getByRole('group')
@@ -840,6 +841,7 @@ export async function submitReviewApproveTemplateOn(inst: Instance, did: string,
 export async function authorContractTemplate(inst: Instance, name: string, componentName: string): Promise<string> {
   await inst.gotoAs('Template Creator', '/ui/templates/new')
   await inst.page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await inst.page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await inst.page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await inst.page
     .getByRole('group')

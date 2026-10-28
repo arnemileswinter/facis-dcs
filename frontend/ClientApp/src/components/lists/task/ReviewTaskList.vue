@@ -118,21 +118,23 @@ onUnmounted(() => stateFilterStore.reset())
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <ul class="list flex-1 overflow-y-auto">
-      <li class="flex w-full flex-col justify-end px-4 tracking-wide sm:flex-row">
+      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
         <TaskListSearch
-          class="flex-1"
+          class="w-full min-w-0 lg:w-auto lg:flex-1"
           :tasks="tasks"
           placeholder="Search contracts"
           :contract-search-defaults="{ state: ContractState.submitted }"
           @search-result="applySearchResult"
         />
-        <ListStateFilter
-          label="Review Task"
-          :filters="reviewTaskStates"
-          store-type="reviewTasks"
-          :disabled="!hasTasks"
-        />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+          <ListStateFilter
+            label="Review Task"
+            :filters="reviewTaskStates"
+            store-type="reviewTasks"
+            :disabled="!hasTasks"
+          />
+          <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasTasks" />
+        </div>
       </li>
       <template v-if="filteredTasks.length > 0">
         <li v-for="task in filteredTasks" :key="task.did" class="list-row">

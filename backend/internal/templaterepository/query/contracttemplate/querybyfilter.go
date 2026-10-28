@@ -26,6 +26,7 @@ type GetAllMetadataByFilterQry struct {
 	Version      int
 	State        *contracttemplatestate.ContractTemplateState
 	TemplateType *contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         string
 	Description  string
 	TemplateData string
@@ -39,6 +40,7 @@ type GetAllMetadataByFilterResult struct {
 	Version      int
 	State        contracttemplatestate.ContractTemplateState
 	TemplateType contracttemplatetype.ContractTemplateType
+	PartyType    string
 	Name         *string
 	Description  *string
 	CreatedAt    time.Time
@@ -78,6 +80,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		Version:      query.Version,
 		State:        state,
 		TemplateType: templateType,
+		PartyType:    query.PartyType,
 		Name:         query.Name,
 		Description:  query.Description,
 		TemplateData: query.TemplateData,
@@ -122,6 +125,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			Version:      data.Version,
 			State:        ctState,
 			TemplateType: ctType,
+			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
 			CreatedAt:    data.CreatedAt,

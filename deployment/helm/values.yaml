@@ -613,6 +613,7 @@ pdfCore:
 
 ipfs:
   enabled: false
+  # Kubo RPC endpoint priority: Secret reference, explicit URL, enabled sub-chart.
   mfsBaseURL: ""
   mfsBaseURLSecretRef:
     name: ""
@@ -624,10 +625,6 @@ ipfs:
     # environment (DCS-NFR-SEC-14) — the Kubo repo holds all pinned artifact
     # ciphertext; deploy.sh asserts the bound class when one is set.
     storageClassName: ""
-
-# Kubo RPC client – auto-wired when the ipfs sub-chart is enabled (ADR-36)
-ipfsClient:
-  mfsBaseURL: ""               # IPFS_MFS_BASE_URL explicit override (Kubo RPC API)
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
 monitoring:

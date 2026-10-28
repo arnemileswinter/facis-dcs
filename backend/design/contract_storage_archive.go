@@ -136,6 +136,30 @@ var _ = Service("ContractStorageArchive", func() {
 		})
 	})
 
+	Method("detail", func() {
+		Description("Read an exact immutable archive snapshot after contract party authorization")
+		Security(JWTAuth, func() { Scope("Archive Manager"); Scope("Contract Observer") })
+		Payload(func() {
+			Token("token", String)
+			Attribute("did", String)
+			Attribute("contract_version", Int, func() { Minimum(1) })
+			Required("did", "contract_version")
+		})
+		Result(Any)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		Error("internal_error", ErrorResult)
+		HTTP(func() {
+			GET("/archive/detail")
+			Param("did")
+			Param("contract_version")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("search", func() {
 		Description("search archived records. search records by criteria.")
 		Meta("dcs:requirements", "DCS-IR-CSA-01", "DCS-IR-CSA-05", "DCS-FR-CSA-10", "DCS-FR-CSA-13")
@@ -253,7 +277,11 @@ var _ = Service("ContractStorageArchive", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/erasure-status")
 			Param("did")
 			Response(StatusOK)
@@ -275,7 +303,11 @@ var _ = Service("ContractStorageArchive", func() {
 
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/statistics")
 			Response(StatusOK)
 			Response("internal_error", StatusInternalServerError)
@@ -300,7 +332,11 @@ var _ = Service("ContractStorageArchive", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/archive/audit")
 			Param("did")
 			Param("justification")

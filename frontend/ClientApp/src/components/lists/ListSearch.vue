@@ -1,21 +1,30 @@
 <script setup lang="ts" generic="T extends { did: string }">
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/vue'
-import { computed, nextTick, type Ref, ref, type ShallowRef, shallowRef, useSlots, useTemplateRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  type Ref,
+  ref,
+  type ShallowRef,
+  shallowRef,
+  useSlots,
+  useTemplateRef,
+  watch,
+} from 'vue'
 
 type FilterLabelConfig<T> = Partial<Record<keyof T, string>>
 type SearchFunction<T> = (request: Record<string, unknown>) => Promise<T[]>
 
-const props = withDefaults(
-  defineProps<{
-    items: T[]
-    filterLabels: FilterLabelConfig<T>
-    searchFn: SearchFunction<T>
-    emptyItem: T
-    placeholder?: string
-    extraRequest?: Record<string, unknown>
-  }>(),
-  { extraRequest: () => ({}) },
-)
+const props = defineProps<{
+  items: T[]
+  filterLabels: FilterLabelConfig<T>
+  searchFn: SearchFunction<T>
+  emptyItem: T
+  placeholder?: string
+  filters?: Record<string, unknown>
+  extraRequest?: Record<string, unknown>
+}>()
 
 const emit = defineEmits<{
   searchResult: [value: T[] | null]
@@ -36,7 +45,25 @@ const filterPopover = useTemplateRef('filter-popover')
 const searchResults: ShallowRef<T[]> = shallowRef([])
 // The search currently in flight, so a caller that has to publish a result can
 // wait for it rather than read searchResults mid-request.
-let pendingSearch: Promise<void> | null = null
+let pendingSearch: Promise<boolean> | null = null
+let requestVersion = 0
+onBeforeUnmount(() => requestVersion++)
+const requestFilters = computed(() => ({
+  ...Object.fromEntries(
+    Object.entries({ ...props.extraRequest, ...props.filters }).filter(
+      ([, value]) => value !== undefined && value !== null && value !== '',
+    ),
+  ),
+  ...(searchQuery.value.trim() && searchKey.value ? { [searchKey.value]: searchQuery.value } : {}),
+}))
+const hasQuery = computed(() => Object.keys(requestFilters.value).length > 0)
+watch(
+  () => props.filters,
+  () => {
+    void publishSearch(searchRequest())
+  },
+  { deep: true, flush: 'sync' },
+)
 
 const selectedOption: Ref<T | null> = ref(null)
 
@@ -48,18 +75,20 @@ const searchKey = computed(() => {
 
 const hasTextQuery = computed(() => searchQuery.value.trim().length > 0)
 
-const hasExtraCriteria = computed(() =>
-  Object.values(props.extraRequest ?? {}).some((value) => {
-    if (value == null) return false
-    if (typeof value === 'string') return value.trim() !== ''
-    return true
-  }),
+watch(
+  () => props.extraRequest,
+  () => {
+    requestVersion++
+    pendingSearch = null
+    searchResults.value = []
+    searchError.value = null
+    isSearching.value = false
+  },
+  { deep: true, flush: 'sync' },
 )
 
-const hasSearchCriteria = computed(() => hasTextQuery.value || hasExtraCriteria.value)
-
 const searchedItems = computed(() => {
-  if (!hasSearchCriteria.value) return props.items
+  if (!hasQuery.value) return props.items
 
   if (searchResults.value.length === 0) return []
 
@@ -74,58 +103,47 @@ const inputValue: Ref<T> = computed(() => {
 
 const isFilterSelectionDisabled = computed(() => Object.entries(props.filterLabels).length === 1)
 
-function buildRequest(): Record<string, unknown> {
-  const request: Record<string, unknown> = { ...(props.extraRequest ?? {}) }
-  if (searchKey.value && hasTextQuery.value) {
-    request[searchKey.value as string] = searchQuery.value
-  }
-  return request
-}
-
-async function searchRequest() {
-  if (!hasSearchCriteria.value) {
-    searchResults.value = []
-    pendingSearch = null
-    return
-  }
-
-  isSearching.value = true
+function searchRequest(): Promise<boolean> {
+  const version = ++requestVersion
+  searchResults.value = []
   searchError.value = null
+  isSearching.value = false
+  if (!hasQuery.value) {
+    pendingSearch = null
+    return Promise.resolve(true)
+  }
+  isSearching.value = true
+  const request = { ...requestFilters.value }
   const run = (async () => {
     try {
-      searchResults.value = await props.searchFn(buildRequest())
-    } catch (e: unknown) {
-      // A search that could not run has NOT established that nothing matches;
-      // reporting it as an empty result is how a 403 reads as "no results".
-      searchResults.value = []
-      searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
+      const result = await props.searchFn(request)
+      if (version !== requestVersion) return false
+      searchResults.value = result
+      return true
+    } catch (error: unknown) {
+      if (version !== requestVersion) return false
+      searchError.value = error instanceof Error && error.message ? error.message : 'Search failed'
+      return false
     } finally {
-      isSearching.value = false
+      if (version === requestVersion) isSearching.value = false
     }
   })()
   pendingSearch = run
-  try {
-    await run
-  } finally {
-    // Clear only if this call is still the tracked in-flight search.
-    if (pendingSearch === run) pendingSearch = null
-  }
+  return run
 }
 
-async function searchList() {
-  if (!hasSearchCriteria.value) {
-    pendingSearch = null
-    searchResults.value = []
-    emit('searchResult', null)
+async function publishSearch(run: Promise<boolean>) {
+  const version = requestVersion
+  if ((await run) && version === requestVersion) emit('searchResult', hasQuery.value ? searchResults.value : null)
+}
+
+async function searchList(event?: Event) {
+  if (event?.target instanceof HTMLInputElement && event.target.value !== searchQuery.value) {
+    searchQuery.value = event.target.value
+    await publishSearch(searchRequest())
     return
   }
-
-  // Typing already started a search, and clicking Search is not an input
-  // event, so nothing above awaits it. Emitting now publishes the empty
-  // searchResults the arriving response never gets to correct.
-  await (pendingSearch ?? searchRequest())
-  if (searchError.value) return
-  emit('searchResult', searchResults.value)
+  await publishSearch(searchError.value ? searchRequest() : (pendingSearch ?? searchRequest()))
 }
 
 function getDisplayValue(template: T | null): string {
@@ -146,25 +164,22 @@ async function onComboboxFocus() {
 
 async function onSearchChange(event: Event) {
   searchQuery.value = (event.target as HTMLInputElement).value
-  if (!hasSearchCriteria.value) {
-    emit('searchResult', null)
-    return
-  }
-  // Text cleared but extra criteria (e.g. deadline) remain: wait for Search.
-  if (hasTextQuery.value) {
-    await searchRequest()
-  }
+  const run = searchRequest()
+  if (!searchQuery.value.trim()) await publishSearch(run)
+  else await run
 }
 
 function onComboboxUpdate(item: T) {
   selectedOption.value = item
   if (selectedOption.value) {
     searchQuery.value = searchKey.value ? String(selectedOption.value[searchKey.value]) : ''
+    void searchRequest()
   }
 }
 
 function onFilterSelect(label: FilterLabelValue) {
   selectedFilter.value = label
+  void publishSearch(searchRequest())
   filterPopover.value?.hidePopover()
 }
 

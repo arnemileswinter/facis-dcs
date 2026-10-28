@@ -748,6 +748,7 @@ func (e RenewEvent) GetDID() string {
 
 // RecordEvidenceEvent is emitted when an evidence is recorded
 type RecordEvidenceEvent struct {
+	EvidenceID      string             `json:"evidence_id"`
 	DID             string             `json:"did"`
 	HolderDID       string             `json:"holder_did"`
 	ContractVersion int                `json:"contract_version"`

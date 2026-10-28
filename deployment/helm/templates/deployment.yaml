@@ -311,7 +311,14 @@ spec:
             {{- end }}
             # ---- IPFS storage (Kubo RPC API, direct -- ADR-36) -----------------------
             - name: IPFS_MFS_BASE_URL
+              {{- if .Values.ipfs.mfsBaseURLSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ipfs.mfsBaseURLSecretRef.name | quote }}
+                  key: {{ required "ipfs.mfsBaseURLSecretRef.key is required when its name is set" .Values.ipfs.mfsBaseURLSecretRef.key | quote }}
+              {{- else }}
               value: {{ include "digital-contracting-service.ipfsMfsBaseURL" . | quote }}
+              {{- end }}
             # ---- Archive notary / ORCE ---------------------------------------------
             {{- $archiveNotaryBaseURL := .Values.archiveNotary.baseURL | default "" }}
             {{- if and (not $archiveNotaryBaseURL) .Values.orce.enabled }}

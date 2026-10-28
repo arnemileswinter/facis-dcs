@@ -151,6 +151,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Contract Source Template",
                 "description": "BDD template for contract workflows",
                 "template_data": template_data
@@ -351,6 +352,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Signature-Field Source Template",
                 "description": "BDD template for real-signing-vertical scenarios",
                 "template_data": {

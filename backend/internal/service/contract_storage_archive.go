@@ -65,6 +65,10 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 }
 
 func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractstoragearchive.ArchiveRetrieveRequest) (res *contractstoragearchive.ArchiveRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -94,6 +98,10 @@ func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractst
 }
 
 func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstoragearchive.ArchiveSearchRequest) (res []*contractstoragearchive.ContractItem, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -233,6 +241,9 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 // pending while a contract_erasures row awaits the peer's confirmation,
 // confirmed once the peer acknowledged shredding its own CEKs.
 func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contractstoragearchive.ErasureStatusPayload) (res *contractstoragearchive.ArchiveErasureStatusResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -241,8 +252,17 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
+	requests, err := s.ERepo.ListByDID(ctx, p.Did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	return erasureStatusResponse(p.Did, records, requests), nil
+}
+
+func erasureStatusResponse(did string, records []artifactstore.CEKRecord, requests []dcstodcsdb.EraseRequest) *contractstoragearchive.ArchiveErasureStatusResponse {
+
 	response := &contractstoragearchive.ArchiveErasureStatusResponse{
-		Did:         p.Did,
+		Did:         did,
 		LocalStatus: "live",
 		Peers:       []*contractstoragearchive.ArchiveErasurePeerStatus{},
 	}
@@ -261,10 +281,6 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 		response.ShredReason = record.ShredReason
 	}
 
-	requests, err := s.ERepo.ListByDID(ctx, p.Did)
-	if err != nil {
-		return nil, contractstoragearchive.MakeInternalError(err)
-	}
 	for _, request := range requests {
 		peer := &contractstoragearchive.ArchiveErasurePeerStatus{
 			PeerDid:     request.PeerDID,
@@ -284,7 +300,7 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 		response.Peers = append(response.Peers, peer)
 	}
 
-	return response, nil
+	return response
 }
 
 // archiveSnapshotStore is the slice of the IPFS client the delete path needs
@@ -429,6 +445,15 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 // reusing the same cross-component reader process_audit_and_compliance's
 // own audit method is built on (qry.Auditor / ReadAuditLogEntriesByComponent).
 func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstoragearchive.AuditPayload) (res []*contractstoragearchive.PACAuditResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
+	if p.Did != nil && strings.TrimSpace(*p.Did) != "" {
+		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, strings.TrimSpace(*p.Did)); err != nil {
+			return nil, err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()

@@ -2,6 +2,8 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var ContractTemplateCreateRequest = Type("ContractTemplateCreateRequest", func() {
@@ -10,12 +12,13 @@ var ContractTemplateCreateRequest = Type("ContractTemplateCreateRequest", func()
 	Token("token", String, "JWT token")
 
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
 
-	Required("template_type")
+	Required("template_type", "party_type")
 })
 
 var ContractTemplateCreateResponse = Type("ContractTemplateCreateResponse", func() {
@@ -76,6 +79,7 @@ var ContractTemplateUpdateRequest = Type("ContractTemplateUpdateRequest", func()
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
@@ -101,6 +105,7 @@ var ContractTemplateUpdateManageRequest = Type("ContractTemplateUpdateManageRequ
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
@@ -127,6 +132,7 @@ var ContractTemplateSearchRequest = Type("ContractTemplateSearchRequest", func()
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 	Attribute("version", Int, "The version of the contract template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("state", String, "The state of the contract template")
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -141,6 +147,7 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("version", Int, "The version number of the contract template")
 	Attribute("state", String, "The state of the contract template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 
@@ -148,7 +155,7 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Required("did", "state", "template_type", "created_at", "updated_at", "version")
+	Required("did", "state", "template_type", "created_at", "updated_at", "version", "party_type")
 })
 
 var ContractTemplateRetrieveRequest = Type("ContractTemplateRetrieveRequest", func() {
@@ -165,6 +172,7 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("version", Int, "Version")
 	Attribute("state", String, "State")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
 	Attribute("created_by", String, "Created by")
@@ -172,7 +180,7 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("updated_at", String, "Updated at")
 	Attribute("latest_did", String, "The DID of the newest contract template")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version", "party_type")
 })
 
 var ReviewTaskItem = Type("ReviewTaskItem", func() {
@@ -247,6 +255,7 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 
 	Attribute("state", String, "The state of the contract template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -258,7 +267,7 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 
 	Attribute("template_data", Any, "The template data of the contract template")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })
 
 var ContractTemplateRetrieveByIDRequest = Type("ContractTemplateRetrieveByIDRequest", func() {
@@ -280,6 +289,7 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 
 	Attribute("state", String, "The state of the contract template")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
@@ -291,7 +301,7 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 
 	Attribute("template_data", Any, "The template data of the contract template")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })
 
 var ContractTemplateApproveRequest = Type("ContractTemplateApproveRequest", func() {
@@ -595,6 +605,7 @@ var _ = Service("TemplateRepository", func() {
 			Param("did")
 			Param("version")
 			Param("template_type")
+			Param("party_type")
 			Param("state")
 			Param("name")
 			Param("description")
