@@ -73,7 +73,7 @@ vi.mock('@/services/contract-workflow-service', () => ({
       Promise.resolve({
         did: 'did:web:example.com:contract',
         name: 'SLA',
-        description: '',
+        description: 'Service level agreement',
         state: 'NEGOTIATION',
         updated_at: '2026-07-29T00:00:00Z',
         contract_data: contractDocument,
