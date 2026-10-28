@@ -1,7 +1,6 @@
 package webhookplatform
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -33,7 +32,7 @@ func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
 		Event:         "template.updated",
 		DID:           "did:web:org-a.example:template:1",
 		OccurredAt:    time.Now().UTC(),
-		Data:          json.RawMessage(`{"name":"a<b&c"}`),
+		Data:          json.RawMessage(`{"name":"a<b&c","version":1.0}`),
 	}
 	d.notify(Subscription{CallbackURL: receiver.URL, Secret: secret}, payload)
 
@@ -51,10 +50,5 @@ func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
 	want, err := Signature(secret, payload.EventID, timestamp, got.body)
 	if err != nil || got.header.Get("webhook-signature") != want {
 		t.Fatalf("webhook-signature = %q, want %q over the received body", got.header.Get("webhook-signature"), want)
-	}
-	// Unescaped HTML characters keep the body equal to JSON.stringify of the
-	// parsed body, which a Node-RED receiver verifies against.
-	if !bytes.Contains(got.body, []byte(`"a<b&c"`)) {
-		t.Fatalf("body escapes HTML characters: %s", got.body)
 	}
 }

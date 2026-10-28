@@ -29,12 +29,14 @@ spec:
         # in a running pod, so an upgrade that only changes a flow left the pod
         # serving the previous one and the change looked like it had no effect.
         checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
+        checksum/settings: {{ include (print $.Template.BasePath "/configmap-settings.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: orce
         app.kubernetes.io/instance: {{ .Release.Name }}
       {{- if .Values.flowsFile.enabled }}
       annotations:
         checksum/flows: {{ include (print $.Template.BasePath "/configmap-flows.yaml") . | sha256sum }}
+        checksum/settings: {{ include (print $.Template.BasePath "/configmap-settings.yaml") . | sha256sum }}
       {{- end }}
     spec:
       {{- if or .Values.localTSA.enabled .Values.persistence.enabled }}
@@ -142,12 +144,17 @@ spec:
               {{- end }}
             {{- end }}
           {{- end }}
-          {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled .Values.pkiRootCA.devFixture }}
           volumeMounts:
             {{- if .Values.persistence.enabled }}
             - name: orce-data
               mountPath: /data
             {{- end }}
+            # Also over a persistent volume, so a volume seeded with an older
+            # settings.js still runs this one.
+            - name: settings
+              mountPath: /data/settings.js
+              subPath: settings.js
+              readOnly: true
             {{- if .Values.pkiRootCA.devFixture }}
             - name: pki-root
               mountPath: /etc/orce/pki-root
@@ -169,7 +176,6 @@ spec:
             - name: tsa-state
               mountPath: /data/tsa-state
             {{- end }}
-          {{- end }}
           livenessProbe:
             httpGet:
               path: /
@@ -186,8 +192,10 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
-      {{- if or .Values.persistence.enabled .Values.localTSA.enabled .Values.flowsFile.enabled .Values.pkiRootCA.devFixture }}
       volumes:
+        - name: settings
+          configMap:
+            name: {{ .Release.Name }}-orce-settings
         {{- if .Values.persistence.enabled }}
         - name: orce-data
           persistentVolumeClaim:
@@ -213,4 +221,3 @@ spec:
         - name: tsa-state
           emptyDir: {}
         {{- end }}
-      {{- end }}

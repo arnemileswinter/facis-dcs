@@ -95,18 +95,13 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 		DeliveredAt:   time.Now().UTC(),
 	}
 
-	// No HTML escaping: a receiver behind a JSON-parsing endpoint (the Node-RED
-	// http in node) can then rebuild the signed bytes with JSON.stringify.
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(payload); err != nil {
+	body, err := json.Marshal(payload)
+	if err != nil {
 		log.Printf("webhookplatform: marshal payload for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
 		d.store.AddDelivery(delivery)
 		return
 	}
-	body := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	signature, err := Signature(sub.Secret, payload.EventID, timestamp, body)
