@@ -2,18 +2,19 @@ import type { Contract } from '@/models/contract/contract'
 import type { ContractNegotiation } from '@/models/contract/contract-negotiation'
 
 /**
- * Proposals for the current formal version (and any older row that still has an
- * open decision). Used for the Proposals list so Accept/Reject history stays
- * visible after the counterparty has decided — Submit merges on version bump.
+ * Proposals shown in the Proposals list: current formal version, any older row
+ * that still has an open decision, and any rejected proposal (Reject + CLOSED
+ * must not hide history after a version bump or A/B decision sync gap).
  */
 export function activeNegotiations(contract: Contract | null | undefined): ContractNegotiation[] {
   if (!contract) return []
   return (
-    contract.negotiations?.filter(
-      (negotiation) =>
-        negotiation.contract_version === contract.contract_version ||
-        negotiation.negotiation_decisions.some((decision) => !decision.decision),
-    ) ?? []
+    contract.negotiations?.filter((negotiation) => {
+      if (negotiation.contract_version === contract.contract_version) return true
+      return negotiation.negotiation_decisions.some(
+        (decision) => !decision.decision || decision.decision === 'REJECTED',
+      )
+    }) ?? []
   )
 }
 
@@ -31,6 +32,32 @@ export function locallyActionableNegotiations(
   if (!contract || !localInstanceDid) return []
   return activeNegotiations(contract).filter((negotiation) => {
     if (participantId && negotiation.created_by === participantId) return false
+    return negotiation.negotiation_decisions.some(
+      (decision) => decision.negotiator === localInstanceDid && !decision.decision,
+    )
+  })
+}
+
+/** States past local settle where a late peer proposal should surface as a warning. */
+const postNegotiationStates = new Set(['SUBMITTED', 'REVIEWED', 'APPROVED'])
+
+/**
+ * True when this instance already left negotiation (Submit/Review/Approve) but
+ * still owes Accept/Reject on a **peer-authored** proposal for the **current**
+ * formal version — typically shipped after local Submit.
+ *
+ * Does not use locallyActionableNegotiations: that helper also surfaces older
+ * rounds (open author "Not required" nulls) and treats `participantId` as the
+ * human issuer, so Review/Approve (which only know the instance DID) false-positive.
+ */
+export function hasPendingPeerProposalAfterSettle(
+  contract: Contract | null | undefined,
+  localInstanceDid: string,
+): boolean {
+  if (!contract || !localInstanceDid || !postNegotiationStates.has(contract.state)) return false
+  return (contract.negotiations ?? []).some((negotiation) => {
+    if (negotiation.contract_version !== contract.contract_version) return false
+    if (negotiation.created_by === localInstanceDid) return false
     return negotiation.negotiation_decisions.some(
       (decision) => decision.negotiator === localInstanceDid && !decision.decision,
     )

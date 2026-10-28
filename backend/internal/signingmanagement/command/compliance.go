@@ -24,8 +24,10 @@ import (
 // poaComplianceFindings walks the sealed agreement's party nodes and reports any
 // signed party (dcs:hasSignatory present) that signed with no Power of Attorney,
 // or under one authorizing a different organization than the party it signed as
-// (UC-14, FR-SM-03/-04). The organization rides the party node so this holds for
-// a counterparty's signature synced from another instance.
+// (UC-14, FR-SM-03/-04). The organization rides the party node, so this holds
+// for a counterparty's signature made before this instance signed: the shipped
+// document carries it. A countersignature does not reach the document; see
+// peerSignatureFindings.
 //
 // It returns the parties it judged, so the caller knows which of this instance's
 // own signatures the document accounts for and which it must judge from the
@@ -115,6 +117,34 @@ func appliedSignatureFindings(
 	return findings, nil
 }
 
+// peerSignatureFindings judges the peer signatures recorded when the signed PDF
+// arrived (dcstodcs.PeerSignatures) that the contract document does not
+// attribute. A peer's countersignature is applied to an already signed PDF, so
+// it never reaches this instance's document, and its ceremony ran on the peer.
+func peerSignatureFindings(raw json.RawMessage, attributed map[string]bool) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var signatures []struct {
+		Party           string `json:"party"`
+		Signatory       string `json:"signatory"`
+		PoAOrganization string `json:"poa_organization"`
+	}
+	if err := json.Unmarshal(raw, &signatures); err != nil {
+		return nil, fmt.Errorf("decode peer signature evidence: %w", err)
+	}
+	var findings []string
+	for _, signature := range signatures {
+		party := strings.TrimSpace(signature.Party)
+		if party == "" || attributed[party] {
+			continue
+		}
+		attributed[party] = true
+		findings = append(findings, poaFinding(party, signature.Signatory, strings.TrimSpace(signature.PoAOrganization))...)
+	}
+	return findings, nil
+}
+
 // nodeIRI reads an IRI from a JSON-LD value that is either {"@id": iri} or a
 // bare string.
 func nodeIRI(v any) string {
@@ -178,9 +208,10 @@ func (h *ComplianceValidator) Handle(ctx context.Context, cmd ComplianceCmd) ([]
 	// sync — must have signed under a PoA authorizing the very party it signed as.
 	// The organization travels on the party node (dcs:hasPowerOfAttorney) for
 	// every signature the document could still carry, so a counterparty running a
-	// misconfigured or malicious DCS is caught here; a signature applied to an
-	// already-signed artifact is judged from the ceremony it was made under,
-	// which is where its authority is retained instead.
+	// misconfigured or malicious DCS is caught here. A signature applied to an
+	// already-signed artifact is judged from the ceremony it was made under when
+	// this instance applied it, or from the peer signatures recorded at receipt
+	// when a peer did.
 	contract, err := h.CRepo.ReadDataByDID(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not read contract data: %w", err)
@@ -191,6 +222,15 @@ func (h *ComplianceValidator) Handle(ctx context.Context, cmd ComplianceCmd) ([]
 		documentFindings, attributed = poaComplianceFindings(*contract.ContractData)
 		findings = append(findings, documentFindings...)
 	}
+	peerEvidence, err := h.CRepo.ReadPeerSignatureEvidence(ctx, tx, cmd.DID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read peer signature evidence: %w", err)
+	}
+	peerFindings, err := peerSignatureFindings(peerEvidence, attributed)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, peerFindings...)
 	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
 	if err != nil {
 		return nil, fmt.Errorf("could not load signatures: %w", err)

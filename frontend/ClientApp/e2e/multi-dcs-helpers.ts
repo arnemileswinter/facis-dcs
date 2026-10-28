@@ -1510,11 +1510,16 @@ async function localContractState(inst: Instance, contractDid: string): Promise<
 }
 
 /**
- * Accept open decisions, then Submit / Submit review until SUBMITTED, then
- * review → approve to APPROVED. A Submit with accepted proposals merges and
- * stays NEGOTIATION; Submit review advances to SUBMITTED.
+ * Accept open decisions, then Submit until SUBMITTED. That transition records
+ * and ships this instance's settlement. A Submit with accepted proposals may
+ * merge and stay NEGOTIATION; Submit review advances to SUBMITTED.
  */
-export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+export async function advanceToSubmittedOn(inst: Instance, contractDid: string): Promise<void> {
+  const before = await localContractState(inst, contractDid)
+  if (before === 'SUBMITTED' || before === 'REVIEWED' || before === 'APPROVED' || before === 'SIGNED') {
+    return
+  }
+
   for (let round = 0; round < 5; round++) {
     await acceptOpenDecisionsOn(inst, contractDid)
 
@@ -1555,6 +1560,15 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
       expect(after, `${inst.origin} never reached SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
     }
   }
+}
+
+/** Reviewer Approve: SUBMITTED → REVIEWED. */
+export async function forwardReviewOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'REVIEWED' || state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} forwardReview expected SUBMITTED for ${contractDid}`).toBe('SUBMITTED')
 
   await openContractFromTaskTab(inst, 'Contract Reviewer', 'reviews', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/review\//)
@@ -1568,17 +1582,38 @@ export async function settleToApprovedOn(inst: Instance, contractDid: string): P
     .getByRole('button', { name: 'Confirm approval', exact: true })
     .click()
   await forwarded
+}
 
-  // Approve: REVIEWED -> APPROVED, found the same way in the Approval Tasks tab.
+/** Approver Approve: REVIEWED → APPROVED (peer settlement is a Sign gate, not Approve). */
+export async function approveWhenSettlementReadyOn(inst: Instance, contractDid: string): Promise<void> {
+  const state = await localContractState(inst, contractDid)
+  if (state === 'APPROVED' || state === 'SIGNED') {
+    return
+  }
+  expect(state, `${inst.origin} approve expected REVIEWED for ${contractDid}`).toBe('REVIEWED')
+
   await openContractFromTaskTab(inst, 'Contract Approver', 'approvals', contractDid)
   await expect(inst.page).toHaveURL(/\/ui\/contracts\/approve\//)
+  const approveBtn = inst.page.getByRole('button', { name: 'Approve', exact: true })
+  await expect(approveBtn).toBeEnabled({ timeout: 30_000 })
   const approved = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/approve') && r.request().method() === 'POST' && r.ok(),
     { timeout: 30_000 },
   )
-  await inst.page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await approveBtn.click()
   await confirmModalOn(inst, 'Confirm')
   await approved
+}
+
+/**
+ * Accept open decisions, then Submit / Submit review until SUBMITTED, then
+ * review → approve to APPROVED. A Submit with accepted proposals merges and
+ * stays NEGOTIATION; Submit review advances to SUBMITTED.
+ */
+export async function settleToApprovedOn(inst: Instance, contractDid: string): Promise<void> {
+  await advanceToSubmittedOn(inst, contractDid)
+  await forwardReviewOn(inst, contractDid)
+  await approveWhenSettlementReadyOn(inst, contractDid)
 }
 
 /**

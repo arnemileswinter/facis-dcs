@@ -9,6 +9,7 @@ import {
   authorContractTemplate,
   authorSemanticComponent,
   awaitPeerRedlineOn,
+  contractDocumentOn,
   counterOffer,
   createContractViaUi,
   deployContract,
@@ -16,6 +17,7 @@ import {
   instanceA,
   manifestChainLength,
   offerToCounterparty,
+  openContractFromList,
   openInstanceB,
   publishShapeOnInstance,
   registerTemplateOn,
@@ -239,14 +241,6 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     await saveArtifact(b, contractDid, '07-settle-B')
   })
 
-  // ---- Stage 8 [DCS-IR-SM-02/-03/-04 viewer verify/apply/validate signature;
-  // DCS-IR-SI-04 Wallet & TSP Signing Integration; SRS §1 AES + PAdES/JAdES;
-  // ADR-12 wallet-driven signing; ADR-3 signing semantics; DCS-OR-C2PA-003
-  // lifecycle → active]: both sign via the Secure Contract Viewer wallet ceremony
-  // (not a /signature/apply route). A signs A's field → ships to B → B signs ON
-  // TOP (incremental PAdES) → B ships the double-signed PDF back to A. The
-  // double-signed artifact CONVERGES on both: two AcroForm sigs, banner active,
-  // veraPDF PDF/A-3a PASS, c2patool valid, DSS validates both as AES + PAdES-B-T.
   await test.step('Stage 8 [DCS-IR-SM-03, DCS-IR-SI-04, ADR-12]: both sign; double-signed artifact verifies', async () => {
     // DCS-FR-CWE-01
     await signOnInstance(a, contractDid, 'Instance A Signatory')
@@ -300,5 +294,49 @@ test('full two-instance negotiation vertical (A <-> B)', async ({ page, context,
     const ipfsTrailMiss = body.includes('ipfs could not find') || body.includes('DataIdentifier not found')
     expect(ipfsTrailMiss, `audit ${auditResp.status()}: ${body}`).toBeTruthy()
     test.info().annotations.push({ type: 'known-flake', description: `audit tolerated an IPFS trail miss: ${body}` })
+  })
+
+  // ---- Stage 11 [DCS-FR-CWE-11 Contract Renewal, DCS-FR-CSA-15 Renewal and
+  // Extension]: A's Contract Manager renews the double-signed contract. The
+  // renewal is a new DRAFT that needs fresh signatures. Its dcs:renewsContract
+  // references the original's DID, version, the signed PDF (which holds both
+  // PAdES signatures) and the signatory attribution A's document records. B
+  // countersigned an already signed PDF, which stamps no party node, so A's
+  // document attributes A's signature only. The draft's PDF renders on the
+  // renew event: the export waits at most 60 s server-side, the retry sweep
+  // runs every 5 min.
+  await test.step('Stage 11 [DCS-FR-CWE-11, DCS-FR-CSA-15]: renew; draft references the signed original and exports', async () => {
+    await openContractFromList(a, 'Contract Manager', contractDid)
+    await a.page.getByTestId('renew-contract').click()
+    const renewed = a.page.waitForResponse(
+      (r) => r.url().includes('/contract/renew') && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    )
+    await a.page.getByRole('dialog').getByTestId('confirmation-confirm').click()
+    const renewResponse = await renewed
+    expect(renewResponse.ok(), `renew on ${a.origin}: HTTP ${renewResponse.status()}`).toBeTruthy()
+    const renewal = (await renewResponse.json()) as { did: string; renews_contract_version: number }
+    await expect(a.page).toHaveURL(new RegExp(`/ui/contracts/view/${renewal.did}`))
+
+    const signedParties = ((await contractDocumentOn(a, contractDid))['dcs:parties'] as Record<string, unknown>[])
+      .filter((node) => node['dcs:hasSignatory'])
+      .map((node) => ({
+        'dcs:party': { '@id': node['@id'] },
+        'dcs:hasSignatory': node['dcs:hasSignatory'],
+        ...(node['dcs:hasPowerOfAttorney'] ? { 'dcs:hasPowerOfAttorney': node['dcs:hasPowerOfAttorney'] } : {}),
+      }))
+    expect(signedParties, "A's document attributes A's signature").toHaveLength(1)
+
+    const renewalDoc = await contractDocumentOn(a, renewal.did)
+    const reference = renewalDoc['dcs:renewsContract'] as Record<string, unknown>
+    expect(String(reference['@id'])).toMatch(new RegExp(`${contractDid}$`))
+    expect(reference['dcs:version']).toBe(renewal.renews_contract_version)
+    expect(String((reference['dcs:signedDocument'] as Record<string, unknown>)?.['@id'])).toMatch(/^ipfs:\/\/\S+$/)
+    expect(reference['dcs:signatures']).toEqual(signedParties)
+    for (const node of renewalDoc['dcs:parties'] as Record<string, unknown>[]) {
+      expect(node['dcs:hasSignatory'], 'the renewal draft claims no signatory').toBeUndefined()
+    }
+
+    await verifyArtifact(a, renewal.did, { lifecycle: 'draft', save: '11-renewal-A' })
   })
 })

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isAxiosError } from 'axios'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -77,18 +78,10 @@ const draftContracts = computed(() => contractStore.contracts.filter((c) => c.st
 
 const canSubmit = computed(() => isEditMode.value || (hasApprovedTemplates.value && selectedTemplate.value !== null))
 const canSubmitContract = computed(
-  () =>
-    isEditMode.value &&
-    contract.value !== null &&
-    (contract.value.state === ContractState.draft || contract.value.state === ContractState.rejected),
+  () => isEditMode.value && contract.value !== null && contract.value.state === ContractState.draft,
 )
 
-const isContractMutable = computed(
-  () =>
-    !isEditMode.value ||
-    contract.value?.state === ContractState.draft ||
-    contract.value?.state === ContractState.rejected,
-)
+const isContractMutable = computed(() => !isEditMode.value || contract.value?.state === ContractState.draft)
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   if (!isEditMode.value || !isContractMutable.value) return null
@@ -135,20 +128,39 @@ function currentExpNoticePeriod(): number | undefined {
   return Number.isFinite(numericValue) ? numericValue : undefined
 }
 
+function isUpdatedElsewhereConflict(error: unknown): boolean {
+  if (!isAxiosError(error)) return false
+  if (error.response?.status === 409) return true
+  const message = error.response?.data?.message
+  return typeof message === 'string' && message.toLowerCase().includes('updated elsewhere')
+}
+
 async function saveContractDraftForSubmit(): Promise<Contract> {
   if (!contract.value) throw new Error('No contract selected')
 
-  await contractWorkflowService.update({
-    did: contract.value.did,
-    updated_at: contract.value.updated_at,
-    start_date: contract.value.start_date,
-    exp_date: contract.value.exp_date,
-    exp_notice_period: currentExpNoticePeriod(),
-    exp_policy: contract.value.exp_policy,
-    name: contract.value.name,
-    description: contract.value.description,
-    contract_data: buildCurrentContractData(),
-  })
+  // Create / parent-link / async PDF can advance updated_at before Submit's
+  // save-Update; one reload+retry matches the server 409 temporary conflict.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await contractWorkflowService.update({
+        did: contract.value.did,
+        updated_at: contract.value.updated_at,
+        start_date: contract.value.start_date,
+        exp_date: contract.value.exp_date,
+        exp_notice_period: currentExpNoticePeriod(),
+        exp_policy: contract.value.exp_policy,
+        name: contract.value.name,
+        description: contract.value.description,
+        contract_data: buildCurrentContractData(),
+      })
+      break
+    } catch (error) {
+      if (!isUpdatedElsewhereConflict(error) || attempt === 1) throw error
+      const refreshed = await contractWorkflowService.retrieveById({ did: contract.value.did })
+      if (!refreshed) throw error
+      contract.value = refreshed
+    }
+  }
 
   const updatedContract = await contractWorkflowService.retrieveById({ did: contract.value.did })
   if (!updatedContract) throw new Error('Could not reload contract after update')
@@ -272,25 +284,6 @@ const submitContract = async () => {
   }
 }
 
-const submitRejectedContract = async () => {
-  if (!contract.value || !(await verifyContractDetails()) || !verifySemanticValues()) return
-  isSubmitting.value = true
-  try {
-    const updatedContract = await saveContractDraftForSubmit()
-    const response = await contractWorkflowService.submit({
-      did: updatedContract.did,
-      updated_at: updatedContract.updated_at,
-    })
-    if (response.did) {
-      await router.push({ name: ROUTES.CONTRACTS.LIST })
-    }
-  } catch (error) {
-    reportActionError(error, 'Resubmit contract')
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
 watch(
   isEditMode,
   async (value) => {
@@ -301,9 +294,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          templateEditorUiStore.setTemplateEditable(
-            contract.value?.state === ContractState.draft || contract.value?.state === ContractState.rejected,
-          )
+          templateEditorUiStore.setTemplateEditable(contract.value?.state === ContractState.draft)
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract')
@@ -597,15 +588,6 @@ onBeforeRouteLeave(() => {
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
           @click="submitContract"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Submit
-        </button>
-        <button
-          v-else-if="contract?.state === ContractState.rejected && canSubmitContract"
-          class="btn flex-1 btn-primary"
-          :disabled="isSubmitting"
-          @click="submitRejectedContract"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Submit

@@ -19,12 +19,15 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import PeerProposalPendingAlert from '@/components/contract/PeerProposalPendingAlert.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNavStore } from '@/stores/nav-store'
 import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
+import { hasPendingPeerProposalAfterSettle } from '@/utils/contract-negotiations'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
@@ -47,10 +50,8 @@ const confirmationDialog = useTemplateRef<InstanceType<typeof ConfirmationModal>
 
 const isSubmitting = ref(false)
 
-const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
-  return (blockId: string, conditionId: string, parameterName: string, parameterValue: string | number | boolean) =>
-    contractContentValuesStore.setSemanticConditionValue({ blockId, conditionId, parameterName, parameterValue })
-})
+// Approve is read-only for content; proposals carry metadata changes.
+const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => null)
 
 const isAuditingAuthorized = computed(
   () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
@@ -68,6 +69,15 @@ const verificationResult: Ref<VerificationResult | null> = ref(null)
 
 const contract: Ref<Contract | null> = ref(null)
 const compareChangesData: Ref<Contract | null> = ref(null)
+const localInstanceDid = ref('')
+
+const showPeerProposalAlert = computed(() => hasPendingPeerProposalAfterSettle(contract.value, localInstanceDid.value))
+
+const settlementReady = computed(() => contract.value?.settlement_ready !== false)
+
+const showSettlementNotReadyAlert = computed(
+  () => contract.value?.state === ContractState.reviewed && !settlementReady.value,
+)
 
 watch(
   () => route.params.did,
@@ -77,6 +87,9 @@ watch(
         const id = route.params.did
         if (id && !Array.isArray(id)) {
           contract.value = null
+          if (!localInstanceDid.value) {
+            localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
+          }
           const loaded = await contractWorkflowService.retrieveById({ did: id })
           if (route.params.did !== id) return
           contract.value = loaded
@@ -124,31 +137,6 @@ const approve = async () => {
     }
   } catch (err) {
     reportActionError(err, 'Approve contract')
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
-const resubmit = async () => {
-  if (!contract.value) return
-  try {
-    const confirmationResult = await confirmationDialog.value?.reveal({
-      message: 'Add decision note',
-      editor: { requiredText: false, placeholder: 'Decision note' },
-    })
-    if (confirmationResult?.isCanceled) return
-    const comment = confirmationResult?.data
-    isSubmitting.value = true
-    const response = await contractWorkflowService.submit({
-      did: contract.value.did,
-      updated_at: contract.value.updated_at,
-      comments: comment ? [comment] : [],
-    })
-    if (response.did) {
-      await navStore.goToPreviousRoute()
-    }
-  } catch (err) {
-    reportActionError(err, 'Resubmit contract')
   } finally {
     isSubmitting.value = false
   }
@@ -266,6 +254,16 @@ const exportPDF = async () => {
                 :narrative="story.narrative"
                 :actions="toBannerActions(story.actionHints)"
               />
+              <PeerProposalPendingAlert
+                :show="showPeerProposalAlert"
+                message="Peer sent a change proposal. Suggest rejecting and continuing negotiation."
+              />
+              <PeerProposalPendingAlert
+                :show="showSettlementNotReadyAlert"
+                :message="
+                  contract?.settlement_ready_detail || 'Waiting for matching counterparty settlement before approval.'
+                "
+              />
               <div v-show="activeTab === 'details'">
                 <ContractDetailsEditor
                   :contract="contract"
@@ -285,6 +283,7 @@ const exportPDF = async () => {
                         :semantic-condition-values="contractContentValuesStore.semanticConditionValues"
                         :verification-result="verificationResult"
                         :set-semantic-condition-value="setSemanticConditionValue"
+                        disabled
                       />
                     </div>
                   </div>
@@ -323,15 +322,6 @@ const exportPDF = async () => {
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
-        </button>
-        <button
-          v-if="contract?.state === ContractState.reviewed"
-          class="btn flex-1 btn-primary"
-          :disabled="!isApprover || isSubmitting"
-          @click="resubmit"
-        >
-          <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
-          Resubmit
         </button>
         <button
           v-if="contract?.state === ContractState.reviewed"

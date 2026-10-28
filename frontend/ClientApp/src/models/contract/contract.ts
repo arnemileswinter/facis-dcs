@@ -52,6 +52,10 @@ export interface Contract {
   negotiations?: ContractNegotiation[]
   /** True when outbound Proposals/Decisions still await peer ACK. */
   pending_negotiation_sync?: boolean
+  /** True when own + matching peer settlements are held (Approve/Sign gate). */
+  settlement_ready?: boolean
+  /** When settlement_ready is false, short reason for a UI warning. */
+  settlement_ready_detail?: string
   outdated?: boolean
   latest_template_did?: string
   template_did?: string

@@ -147,14 +147,16 @@ func TestAProposalFollowedByItsAcceptanceBumpsTheVersionOnceOnSubmit(t *testing.
 // Every handler that replaces the contract document with a locally authored one
 // and bumps contract_version must snapshot the version it replaces first, or
 // that document is unrecoverable: GET /contract/history is the only way back to
-// it. receivepdf.go is not one of these — it adopts the counterparty's document
-// rather than authoring one, and the versions it supersedes are the peer's own
-// ships, retained in the stored PDF's C2PA provenance chain (ADR-13).
+// it. receivepdf.go is one of these too — it adopts the counterparty's document
+// and bumps contract_version, so the held version must be snapshotted first
+// (peer ships also remain in the stored PDF's C2PA provenance chain (ADR-13)).
 // negotiate.go is not one of these either — it records proposals without
 // replacing the document.
 func TestEveryLocallyAuthoredContractVersionBumpSnapshotsWhatItSupersedes(t *testing.T) {
 	require.Contains(t, callsIn(t, "submit.go", "Handle"), "CreateHistoryEntryForDID",
 		"submit.go replaces the contract document without snapshotting the superseded version")
+	require.Contains(t, callsIn(t, "receivepdf.go", "Handle"), "CreateHistoryEntryForDID",
+		"receivepdf.go replaces the held document without snapshotting the superseded version")
 	require.NotContains(t, callsIn(t, "negotiate.go", "Handle"), "CreateHistoryEntryForDID",
 		"negotiate.go does not replace the contract document at propose time")
 }

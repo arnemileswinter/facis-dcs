@@ -182,4 +182,8 @@ type ContractRepo interface {
 	CollectValidationFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
 	LoadSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]SignatureRecord, error)
 	CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadPeerSignatureEvidence returns the peer signatures recorded when the
+	// contract's signed PDF arrived from a peer (contract_sync_signatures
+	// poa_evidence), or nil when none were recorded.
+	ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error)
 }

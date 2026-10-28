@@ -309,6 +309,9 @@ var ContractRetrieveByIDResponse = Type("ContractRetrieveByIDResponse", func() {
 
 	Attribute("pending_negotiation_sync", Boolean, "True when this instance still has outbound Proposals or Decisions for the contract that the peer has not acknowledged")
 
+	Attribute("settlement_ready", Boolean, "True when this instance holds its own settlement and matching peer settlements for every remote party signature slot (Approve/Sign precondition); true for contracts with no remote party slots")
+	Attribute("settlement_ready_detail", String, "When settlement_ready is false, a short reason suitable for a UI warning")
+
 	Attribute("kpis", ArrayOf(ContractDeploymentKPIItem), "KPI values reported via deployment callback for this contract, each carrying the verdict the target system reached (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33)")
 
 	Attribute("target_id", String, "Registered target system this contract deploys to (ADR-25); absent when none is designated yet")
@@ -583,7 +586,7 @@ var ContractTerminateResponse = Type("ContractTerminateResponse", func() {
 })
 
 var ContractRenewRequest = Type("ContractRenewRequest", func() {
-	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID and version.")
+	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID, version and signatures: the signed PDF, which holds every signature, and the signatory and Power of Attorney the original's document records. The new instance carries no signature and needs fresh signatures.")
 
 	Token("token", String, "JWT token")
 
