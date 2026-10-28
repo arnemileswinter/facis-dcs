@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ROUTES } from '@/router/router'
-import { infoService } from '@/services/info-service'
 import { useAuthStore } from '@/stores/auth-store'
-import { logDcsVersion } from '@/utils/log-dcs-version'
 
 interface Stage {
   name: string
@@ -76,17 +74,6 @@ const canAccess = (routeName: string): boolean => {
 }
 
 const visibleStages = computed(() => stages.filter((stage) => canAccess(stage.routeName)))
-
-onMounted(async () => {
-  try {
-    const backend = await infoService.get()
-    window.__DCS_VERSION__ ??= { frontend: { git_sha: 'unknown' } }
-    window.__DCS_VERSION__.backend = backend
-  } catch {}
-  if (window.__DCS_VERSION__) {
-    logDcsVersion(window.__DCS_VERSION__)
-  }
-})
 </script>
 
 <template>
