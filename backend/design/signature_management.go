@@ -322,8 +322,12 @@ var SMSignatureViewItem = Type("SMSignatureViewItem", func() {
 	Attribute("poa_organization", String, "Organization the signatory was authorized to act for, from the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
 	Attribute("poa_roles", ArrayOf(String), "Roles asserted by the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
 	Attribute("summary_issuer", String, "Issuer DID of the verified ContractSigningSummaryCredential that binds this signature (DCS-FR-SM-26 credential chain)")
+	Attribute("credential_status", String, "Live status-list state of the Power of Attorney credential the signer presented, read at view time (DCS-FR-SM-18)", func() {
+		Enum("VALID", "REVOKED", "SUSPENDED", "UNKNOWN")
+	})
+	Attribute("credential_status_reason", String, "Why credential_status is UNKNOWN")
 
-	Required("signer_did", "credential_type", "status", "format")
+	Required("signer_did", "credential_type", "status", "format", "credential_status")
 })
 
 var SMSignatureViewResponse = Type("SMSignatureViewResponse", func() {

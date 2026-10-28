@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/auth/oid4vp"
+	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
@@ -61,6 +62,24 @@ type SigningEvidence struct {
 	KBSDHash             string
 	ValidationReportHash string
 	Issuer               string
+	// CredentialStatus is the live status-list state of the Power of Attorney
+	// the signatory presented at the ceremony behind this signature.
+	CredentialStatus CredentialStatus
+}
+
+// Credential states the compliance viewer shows per signature (DCS-FR-SM-18).
+const (
+	CredentialValid     = "VALID"
+	CredentialRevoked   = "REVOKED"
+	CredentialSuspended = "SUSPENDED"
+	CredentialUnknown   = "UNKNOWN"
+)
+
+// CredentialStatus is one signature's credential state. Reason says why the
+// state is UNKNOWN and is empty otherwise.
+type CredentialStatus struct {
+	State  string
+	Reason string
 }
 
 type Validator struct {
@@ -149,7 +168,7 @@ func (h *Validator) validate(ctx context.Context, cmd ValidateQry) (*ValidationR
 	}
 	findings = append(findings, dssFindings...)
 
-	signingEvidence := collectSigningEvidence(evidence.Documents)
+	signingEvidence := collectSigningEvidence(evidence)
 
 	signatures, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
 	if err != nil {
@@ -238,7 +257,10 @@ const ValidAESFinding = "EU DSS reports no integrity or cryptographic failure"
 // assertion key, and the findings raised for the ones that did not.
 type verifiedSigningEvidence struct {
 	Documents []json.RawMessage
-	Findings  []string
+	// Statuses holds the credential status of each entry in Documents, at the
+	// same index.
+	Statuses []CredentialStatus
+	Findings []string
 }
 
 // readSigningEvidence extracts every signing evidence attachment embedded in the
@@ -282,6 +304,7 @@ func (h *Validator) readSigningEvidence(ctx context.Context, tx *sqlx.Tx, did st
 		switch {
 		case err == nil:
 			out.Documents = append(out.Documents, attachment.Summary)
+			out.Statuses = append(out.Statuses, h.presentedCredentialStatus(ctx, attachment, subject))
 			out.Findings = append(out.Findings, h.verifyEmbeddedPoA(attachment, subject)...)
 		case errors.Is(err, provenance.ErrIssuerUnresolved):
 			out.Findings = append(out.Findings,
@@ -322,14 +345,50 @@ func (h *Validator) verifyEmbeddedPoA(attachment provenance.SigningEvidenceAttac
 	return nil
 }
 
+// presentedCredentialStatus reads, live, the status list of the Power of
+// Attorney embedded for this signature (DCS-FR-SM-18). Our own ceremony
+// verified it as a `login` credential, a peer's as a `peer` one (ADR-35).
+// Every state that is not read from a verified list is UNKNOWN with a reason.
+func (h *Validator) presentedCredentialStatus(ctx context.Context, attachment provenance.SigningEvidenceAttachment, subject provenance.SigningEvidenceSubject) CredentialStatus {
+	if attachment.PoAPresentation == "" {
+		return CredentialStatus{State: CredentialUnknown, Reason: "no Power of Attorney presentation is embedded for this signature"}
+	}
+	if h.Trust == nil {
+		return CredentialStatus{State: CredentialUnknown, Reason: "no issuer trust is configured on this instance"}
+	}
+	purpose := oid4vp.PurposePeer
+	if identity.SameDIDWeb(subject.FieldName, strings.TrimSpace(h.LocalPeer)) {
+		purpose = oid4vp.PurposeLogin
+	}
+	state, err := oid4vp.PresentedCredentialState(ctx, attachment.PoAPresentation, h.Trust, purpose)
+	return credentialStatusFromState(state, err)
+}
+
+func credentialStatusFromState(state status.State, err error) CredentialStatus {
+	if err != nil {
+		return CredentialStatus{State: CredentialUnknown, Reason: err.Error()}
+	}
+	switch state {
+	case status.StateValid:
+		return CredentialStatus{State: CredentialValid}
+	case status.StateInvalid:
+		return CredentialStatus{State: CredentialRevoked}
+	case status.StateSuspended:
+		return CredentialStatus{State: CredentialSuspended}
+	default:
+		return CredentialStatus{State: CredentialUnknown, Reason: fmt.Sprintf("the status list entry reads %q", state)}
+	}
+}
+
 // collectSigningEvidence distills each verified summary credential to the
 // compliance fields the Signature Compliance Viewer surfaces (DCS-FR-SM-26):
-// signer DID, ceremony, content/PDF hashes, credential type, and the KB-JWT
-// binding.
-func collectSigningEvidence(documents []json.RawMessage) []SigningEvidence {
-	out := make([]SigningEvidence, 0, len(documents))
-	for _, doc := range documents {
+// signer DID, ceremony, content/PDF hashes, credential type, the KB-JWT
+// binding, and the credential status.
+func collectSigningEvidence(evidence verifiedSigningEvidence) []SigningEvidence {
+	out := make([]SigningEvidence, 0, len(evidence.Documents))
+	for i, doc := range evidence.Documents {
 		if ev, ok := parseSigningEvidence(doc); ok {
+			ev.CredentialStatus = evidence.Statuses[i]
 			out = append(out, ev)
 		}
 	}

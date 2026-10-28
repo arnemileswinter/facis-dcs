@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/auth/oid4vp/status/handler"
 )
@@ -60,32 +61,67 @@ func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 }
 
 func checkStatusList(rawClaims json.RawMessage) error {
+	result, err := resolveStatusList(context.Background(), rawClaims)
+	if err != nil {
+		return err
+	}
+	if !result.Accepted {
+		return mapStatusListRejection(result)
+	}
+	return nil
+}
+
+func resolveStatusList(ctx context.Context, rawClaims json.RawMessage) (status.CredentialVerificationResult, error) {
 	if statusListVerifier == nil {
-		return fmt.Errorf("status list verifier is not configured")
+		return status.CredentialVerificationResult{}, fmt.Errorf("status list verifier is not configured")
 	}
 
 	if len(rawClaims) == 0 {
-		return fmt.Errorf("credential claims are empty")
+		return status.CredentialVerificationResult{}, fmt.Errorf("credential claims are empty")
 	}
 
 	dec := json.NewDecoder(strings.NewReader(string(rawClaims)))
 	dec.UseNumber()
 	var claims map[string]any
 	if err := dec.Decode(&claims); err != nil {
-		return fmt.Errorf("parse credential claims for status list check: %w", err)
+		return status.CredentialVerificationResult{}, fmt.Errorf("parse credential claims for status list check: %w", err)
 	}
 
-	result, err := statusListVerifier.VerifyStatus(context.Background(), status.VerifiedCredential{
+	result, err := statusListVerifier.VerifyStatus(ctx, status.VerifiedCredential{
 		Format: "sd-jwt",
 		Claims: claims,
 	})
 	if err != nil {
-		return fmt.Errorf("status list check: %w", err)
+		return status.CredentialVerificationResult{}, fmt.Errorf("status list check: %w", err)
 	}
-	if !result.Accepted {
-		return mapStatusListRejection(result)
+	return result, nil
+}
+
+// PresentedCredentialState reads, live, the status-list entry of the credential
+// in a presentation that a signing ceremony received and kept. The issuer
+// signature and the issuer trust for the purpose are verified again first,
+// because the entry points wherever the credential author chose. The KB-JWT is
+// not verified: its nonce belongs to a ceremony that is complete.
+func PresentedCredentialState(ctx context.Context, presentation string, trust *TrustConfig, purpose Purpose) (status.State, error) {
+	if trust == nil {
+		return "", fmt.Errorf("trust config is not configured")
 	}
-	return nil
+	parsed, err := sdjwt.ParsePresentation(strings.TrimSpace(presentation))
+	if err != nil {
+		return "", err
+	}
+	document, err := verifyCredentialDocument(parsed.IssuerJWT, parsed.Disclosures, trust, purpose)
+	if err != nil {
+		return "", err
+	}
+	result, err := resolveStatusList(ctx, document.RawClaims)
+	if err != nil {
+		return "", err
+	}
+	if len(result.StatusResults) == 0 {
+		return "", fmt.Errorf("status list check: %s", result.Reason)
+	}
+	return result.StatusResults[0].State, nil
 }
 
 func mapStatusListRejection(result status.CredentialVerificationResult) error {
