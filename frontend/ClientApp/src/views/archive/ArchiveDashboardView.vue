@@ -14,6 +14,7 @@ import { type ArchiveStatistics, archiveStatisticsService } from '@/services/arc
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { contractStates } from '@/types/contract-state'
+import { claimReportedHttpError } from '@/utils/report-action-error'
 
 /**
  * Contract Archive Dashboard (DCS-FR-CSA-21): an overview of archived
@@ -114,48 +115,46 @@ const expandedStatus = computed(() =>
 )
 
 const annotating = ref(false)
+const annotationDialog = useTemplateRef('annotation-dialog')
+const annotationEntry = ref<ArchivedContract | null>(null)
+const annotationSummary = ref('')
+const annotationTags = ref('')
+const annotationError = ref('')
 
 // DCS-FR-CSA-11: summary and tags are the only mutable part of an archive entry.
-async function annotateEntry(entry: ArchivedContract) {
-  const dialog = confirmationModal.value
-  if (!dialog) return
-  const { isCanceled, data: summary } = await dialog.reveal({
-    title: 'Edit summary – 1 of 2',
-    confirmLabel: 'Next',
-    message: `Summary for "${entry.name?.trim() ?? entry.did}". Leave empty to keep the existing summary. If none exists, one is generated from the contract metadata.`,
-    editor: { requiredText: false, label: 'Summary', placeholder: 'Summary', initialValue: entry.archive_summary },
-  })
-  if (isCanceled) return
-  const { isCanceled: tagsCanceled, data: tags } = await dialog.reveal({
-    title: 'Tags – 2 of 2',
-    confirmLabel: 'Save annotation',
-    message: 'Tags for this entry, comma-separated. Leave empty to keep the current set.',
-    editor: {
-      requiredText: false,
-      label: 'Tags',
-      placeholder: 'e.g. supply, 2026, renewed',
-      initialValue: entry.archive_tags?.join(', '),
-    },
-  })
-  if (tagsCanceled) return
-  const tagList = (tags ?? '')
+function annotateEntry(entry: ArchivedContract) {
+  annotationEntry.value = entry
+  annotationSummary.value = entry.archive_summary ?? ''
+  annotationTags.value = entry.archive_tags?.join(', ') ?? ''
+  annotationError.value = ''
+  annotationDialog.value?.showModal()
+}
+
+async function saveAnnotation() {
+  const entry = annotationEntry.value
+  if (!entry || annotating.value) return
+  const summary = annotationSummary.value.trim()
+  const tags = annotationTags.value
     .split(',')
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0)
   annotating.value = true
+  annotationError.value = ''
   try {
-    const trimmedSummary = summary?.trim()
-    await archiveService.annotate(
-      entry.did,
-      trimmedSummary === '' ? undefined : trimmedSummary,
-      tagList.length > 0 ? tagList : undefined,
-    )
-    await loadEntries()
-  } catch {
-    // the shared http interceptor already surfaced the server's error
+    await archiveService.annotate(entry.did, summary || undefined, tags.length > 0 ? tags : undefined)
+  } catch (err) {
+    // The dialog stays open to keep the input. If the user closed it during the request, the toast stays.
+    if (annotationDialog.value?.open) {
+      claimReportedHttpError(err)
+      annotationError.value = err instanceof Error ? err.message : String(err)
+    }
+    return
   } finally {
     annotating.value = false
   }
+  annotationDialog.value?.close()
+  errorStore.add('Annotation saved.', 'info')
+  await loadEntries()
 }
 
 async function deleteEntry(entry: ArchivedContract) {
@@ -584,6 +583,46 @@ function shortDid(did: string): string {
     </template>
 
     <ConfirmationModal ref="confirmation-modal" />
+    <dialog
+      ref="annotation-dialog"
+      class="modal modal-bottom transition-none sm:modal-middle"
+      aria-labelledby="archive-annotation-title"
+      aria-describedby="archive-annotation-description"
+      data-testid="archive-annotation-dialog"
+    >
+      <form class="modal-box" @submit.prevent="saveAnnotation">
+        <h3 id="archive-annotation-title" class="text-lg font-bold">Edit annotation</h3>
+        <p id="archive-annotation-description" class="py-4">
+          Annotation for "{{ annotationEntry?.name?.trim() || annotationEntry?.did }}". Leave the summary empty to keep
+          the existing summary. If none exists, one is generated from the contract metadata. Leave the tags empty to
+          keep the current set.
+        </p>
+        <div class="flex flex-col gap-3">
+          <label for="archive-annotation-summary" class="text-sm font-medium">Summary</label>
+          <textarea
+            id="archive-annotation-summary"
+            v-model="annotationSummary"
+            class="textarea w-full"
+            placeholder="Summary"
+            rows="4"
+          />
+          <label for="archive-annotation-tags" class="text-sm font-medium">Tags</label>
+          <input
+            id="archive-annotation-tags"
+            v-model="annotationTags"
+            class="input w-full"
+            placeholder="e.g. supply, 2026, renewed"
+          />
+        </div>
+        <div v-if="annotationError" role="alert" class="mt-3 alert alert-error">
+          {{ annotationError }}
+        </div>
+        <div class="modal-action">
+          <button type="button" class="btn btn-outline btn-sm" @click="annotationDialog?.close()">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary" :disabled="annotating">Save annotation</button>
+        </div>
+      </form>
+    </dialog>
   </div>
 </template>
 
