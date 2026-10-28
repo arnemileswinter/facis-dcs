@@ -181,3 +181,17 @@ describe('responding to a change proposal', () => {
     ).toBeUndefined()
   })
 })
+
+describe('decision order', () => {
+  it('renders decisions sorted by negotiator without reordering the prop array', () => {
+    const decisions = [
+      { negotiator: 'did:web:z.example', decision: null },
+      { negotiator: 'did:web:a.example', decision: null },
+    ]
+    const wrapper = mountList(['CONTRACT_NEGOTIATOR'], { decisions })
+
+    const html = wrapper.html()
+    expect(html.indexOf('did:web:a.example')).toBeLessThan(html.indexOf('did:web:z.example'))
+    expect(decisions.map((decision) => decision.negotiator)).toEqual(['did:web:z.example', 'did:web:a.example'])
+  })
+})

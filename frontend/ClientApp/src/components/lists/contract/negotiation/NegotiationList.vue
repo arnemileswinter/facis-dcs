@@ -72,7 +72,7 @@ const sortedNegotiations = computed(() =>
 )
 
 const sortedDecisions = (decisions: ContractNegotiationDecision[]) => {
-  return decisions.sort((a, b) => a.negotiator.localeCompare(b.negotiator))
+  return [...decisions].sort((a, b) => a.negotiator.localeCompare(b.negotiator))
 }
 
 const isSubmitting = ref(false)
