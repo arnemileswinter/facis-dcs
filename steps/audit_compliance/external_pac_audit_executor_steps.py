@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 import hashlib
 import io
 import os
+import time
 import uuid
 
 import requests
@@ -188,6 +189,32 @@ def step_reference_contract(context):
 def step_reference_executor_identity(context, executor_id):
     body = _json(context.requests_response)
     assert (body.get("executor") or {}).get("id") == executor_id, body
+
+
+@given('the archive storage of contract "{name}" is anchored in the audit trail')
+def step_archive_storage_anchored(context, name):
+    """Audit evidence reads only anchored entries, and the outbox anchors
+    STORE_ARCHIVED_CONTRACT asynchronously after signing. The executor may
+    observe exactly one request, so the scenario waits before it audits."""
+    did = _contract_did(context, name)
+    deadline = time.monotonic() + 90
+    while True:
+        cursor = context.db.cursor()
+        cursor.execute(
+            """
+            SELECT bool_and(processed)
+            FROM outbox_events
+            WHERE event_type = 'STORE_ARCHIVED_CONTRACT' AND did = %s
+            """,
+            (did,),
+        )
+        anchored = cursor.fetchone()[0]
+        cursor.close()
+        context.db.rollback()
+        if anchored:
+            return
+        assert time.monotonic() < deadline, f"STORE_ARCHIVED_CONTRACT of {did} was not anchored"
+        time.sleep(1)
 
 
 @when('the Auditor requests an executor-backed "{scope}" audit without a resource DID')
@@ -668,7 +695,7 @@ def step_report_lifecycle(context, fmt):
             actor = (entry.get("event_data") or {}).get("stored_by")
             marker = "".join((entry["event_type"] + (entry.get("did") or "")).split())
             if actor:
-                marker = "actor=" + actor + marker
+                marker = "".join(("actor=" + actor).split()) + marker
             position = timeline.find(marker, offset)
             assert position >= offset, f"Missing or out-of-order lifecycle event {entry!r}"
             segment = timeline[offset:position]

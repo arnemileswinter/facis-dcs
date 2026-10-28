@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/envelope"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
+	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
 
 type snapshotTestCipher struct{ shredded map[artifactstore.Scope]bool }
@@ -124,6 +126,53 @@ func TestPACSnapshotErasureRecordRemainsInstanceScoped(t *testing.T) {
 	scopes, err := pacEvidenceScopes(request, snapshotTestCipher{}.InstanceScope())
 	if err != nil || len(scopes) != 0 {
 		t.Fatalf("erasure record scopes=%v err=%v", scopes, err)
+	}
+}
+
+func TestPACAuditOverShreddedResourceSealsWithoutItsContent(t *testing.T) {
+	ctx := context.Background()
+	erasedDID, liveDID := "did:example:erased", "did:example:live"
+	archive := componenttype.ContractStorageArchive.String()
+	checkKind, checkReason := "CHECK", "private integrity evidence"
+	evidence := []*auditEvidenceResource{
+		{Did: erasedDID, Component: archive, AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 1, Component: archive, EventType: "ARCHIVE_ENTRY_AUDIT_SUMMARY", Did: &erasedDID, EventData: map[string]any{"storedBy": "did:example:private-actor"}},
+			{ID: 2, Component: archive, EventType: "ARCHIVE_INTEGRITY_CHECK", Did: &erasedDID, Kind: &checkKind, Reason: &checkReason},
+			{ID: 3, Component: archive, EventType: cweeventtype.DeleteArchived.String(), Did: &erasedDID, EventData: map[string]any{"deleted_by": "did:example:archive-manager"}},
+		}},
+		{Did: liveDID, Component: archive, AuditTrail: []*processauditandcompliance.PACResourceAuditTrailEntry{
+			{ID: 4, Component: archive, EventType: "STORE_ARCHIVED_CONTRACT", Did: &liveDID, EventData: map[string]any{"stored_by": "did:example:storer"}},
+		}},
+	}
+	cipher := snapshotTestCipher{shredded: map[artifactstore.Scope]bool{artifactstore.ContractScope(erasedDID): true}}
+
+	redactErasedEvidence(ctx, cipher, evidence)
+	request, err := json.Marshal(auditexecutor.Request{AuditID: "audit-1", Scope: "archive", Evidence: map[string]any{"archive": evidence}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := pacEvidenceScopes(request, cipher.InstanceScope())
+	if err != nil || !equalPACScopes(scopes, []artifactstore.Scope{artifactstore.ContractScope(liveDID)}) {
+		t.Fatalf("scopes=%v err=%v", scopes, err)
+	}
+	sealed, err := sealPACSnapshot(ctx, cipher, "audit-1", scopes, request)
+	if err != nil {
+		t.Fatalf("audit over an erased resource cannot be sealed: %v", err)
+	}
+	if bytes.Contains(request, []byte("did:example:private-actor")) || bytes.Contains(request, []byte(checkReason)) {
+		t.Fatalf("erased resource content reached the snapshot: %s", request)
+	}
+	erased := evidence[0].AuditTrail
+	if len(erased) != 3 || erased[0].EventData.(map[string]any)["erased"] != true || erased[1].Reason != nil {
+		t.Fatalf("erasure is not visible as such: %+v", erased)
+	}
+	if erased[2].EventData.(map[string]any)["deleted_by"] != "did:example:archive-manager" || evidence[1].AuditTrail[0].EventData.(map[string]any)["stored_by"] != "did:example:storer" {
+		t.Fatal("redaction removed content that the shred does not cover")
+	}
+
+	cipher.shredded[artifactstore.ContractScope(liveDID)] = true
+	if _, _, err := unsealPACSnapshot(ctx, cipher, "audit-1", sealed); !artifactstore.IsShredded(err) {
+		t.Fatalf("run stayed readable after the shred of a resource it captured: %v", err)
 	}
 }
 
