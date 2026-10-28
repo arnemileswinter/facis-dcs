@@ -1,9 +1,10 @@
 package design
 
 import (
+	. "goa.design/goa/v3/dsl"
+
 	"digital-contracting-service/internal/auth/db"
 	"digital-contracting-service/internal/base/datatype/userrole"
-	. "goa.design/goa/v3/dsl"
 )
 
 var PACAuditRequest = Type("PACAuditRequest", func() {
