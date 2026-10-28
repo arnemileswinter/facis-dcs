@@ -151,13 +151,36 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   Auflisten und Löschen verlangen `Integration Manager` oder
   `Sys. Administrator` (sonst 403); GET /webhooks zeigt nur die
   Abonnements der eigenen Organisation, DELETE auf ein fremdes Abonnement
-  antwortet 404. Das Secret gibt der Abonnent selbst vor; DCS sendet es
-  als Bearer-Token an die Callback-URL, speichert es daher im Klartext
-  und gibt es in keiner Antwort zurück. Pending-Callbacks und das
-  Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
+  antwortet 404. DCS erzeugt pro Abonnement ein Signatur-Secret nach
+  Standard Webhooks (`whsec_` + Base64 von 32 Zufallsbytes) und gibt es
+  genau einmal zurück, in der 201-Antwort von POST /webhooks; ein vom
+  Client mitgesendetes `secret` lehnt DCS mit 400 ab. Postgres hält das
+  Secret nur verschlüsselt: AES-256-GCM unter einem eigenen CEK pro
+  Abonnement, gebunden an die Abonnement-ID, und der CEK ist per
+  ECDH-ES+A256KW auf den keyAgreement-Schlüssel der Instanz gewrappt.
+  Nur das HSM entschlüsselt ihn, bei jeder Zustellung. Jede Zustellung
+  trägt die Header `webhook-id` (Event-ID), `webhook-timestamp`
+  (Unix-Sekunden) und `webhook-signature: v1,<Base64 HMAC-SHA256>` über
+  `webhook-id.webhook-timestamp.Body` mit dem Base64-dekodierten Teil
+  nach `whsec_` als Schlüssel; `X-Event-ID` und `X-Correlation-ID`
+  bleiben. Der Body ist kompaktes JSON ohne HTML-Escaping, damit ein
+  Empfänger hinter einem JSON-parsenden Endpunkt die signierten Bytes mit
+  `JSON.stringify` wiederherstellt. Der ORCE-Empfänger `/dcs-dispatch`
+  prüft die Signatur mit `WEBHOOK_SECRET` (`timingSafeEqual`, höchstens
+  300 s Zeitabweichung) und antwortet sonst 401; ohne `WEBHOOK_SECRET`
+  lehnt er jede Zustellung ab, außer `WEBHOOK_ACCEPT_UNVERIFIED=true`
+  (nur BDD). Der Betreiber kopiert das Secret aus der 201-Antwort in ein
+  Kubernetes-Secret und gibt es ORCE über `orce.extraEnv` mit
+  `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`. Pending-Callbacks und
+  das Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
   Speicher.
   **Warum:** Ein Abonnement verbindet ein Drittsystem mit DCS-Events,
-  das ist nach ADR-29 eine Integrationsaufgabe.
+  das ist nach ADR-29 eine Integrationsaufgabe. Die HMAC-Signatur
+  beweist dem Empfänger Herkunft und Unversehrtheit jeder Zustellung,
+  ohne das Secret zu übertragen; der Zeitstempel in der Signatur begrenzt
+  Replays. Das verschlüsselte Speichern mit HSM-gewrapptem CEK erfüllt
+  DCS-NFR-SEC-06 und DCS-NFR-SEC-14. Standard Webhooks ist ein
+  verbreitetes Format, für das Empfänger fertige Bibliotheken haben.
 
 - **Was gilt:** Vertragszustände sind ein Postgres-Enum, das nur additiv
   erweitert wird (`ALTER TYPE … ADD VALUE`); Views, die neue Werte

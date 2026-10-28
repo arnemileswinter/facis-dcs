@@ -65,13 +65,13 @@ type EventInfo struct {
 
 // Subscription represents a registered webhook.
 //
-// Secret is the bearer value sent to CallbackURL. The subscriber supplies it and
-// already knows it, so no response carries it (see subscriptionView).
+// Secret is the plaintext signing secret. It exists only in memory: Postgres
+// holds it encrypted, and only the POST /webhooks response carries it.
 type Subscription struct {
 	ID          string    `db:"id"`
 	Event       string    `db:"event"`
 	CallbackURL string    `db:"callback_url"`
-	Secret      string    `db:"secret"`
+	Secret      string    `db:"-"`
 	OwnerDID    string    `db:"owner_did"`
 	CreatedBy   string    `db:"created_by"`
 	CreatedAt   time.Time `db:"created_at"`
@@ -87,23 +87,32 @@ type Subscriptions interface {
 	ByEvent(ctx context.Context, event string) ([]Subscription, error)
 }
 
-// PostgresSubscriptions stores subscriptions in webhook_subscriptions.
+// PostgresSubscriptions stores subscriptions in webhook_subscriptions, with
+// the secret encrypted by Secrets.
 type PostgresSubscriptions struct {
-	DB *sqlx.DB
+	DB      *sqlx.DB
+	Secrets SecretBox
 }
 
-const subscriptionColumns = `id, event, callback_url, secret, owner_did, created_by, created_at`
+const subscriptionColumns = `id, event, callback_url, owner_did, created_by, created_at`
 
 func (s PostgresSubscriptions) Add(ctx context.Context, sub Subscription) (Subscription, error) {
+	// The id is drawn here because the ciphertext is bound to it.
+	id := uuid.New().String()
+	ciphertext, wrappedCEK, err := s.Secrets.Seal(id, sub.Secret)
+	if err != nil {
+		return Subscription{}, err
+	}
 	var created Subscription
-	err := s.DB.GetContext(ctx, &created, `
-        INSERT INTO webhook_subscriptions (event, callback_url, secret, owner_did, created_by)
-        VALUES ($1, $2, $3, $4, $5)
+	err = s.DB.GetContext(ctx, &created, `
+        INSERT INTO webhook_subscriptions (id, event, callback_url, secret_ciphertext, secret_wrapped_cek, owner_did, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING `+subscriptionColumns,
-		sub.Event, sub.CallbackURL, sub.Secret, sub.OwnerDID, sub.CreatedBy)
+		id, sub.Event, sub.CallbackURL, ciphertext, wrappedCEK, sub.OwnerDID, sub.CreatedBy)
 	if err != nil {
 		return Subscription{}, fmt.Errorf("create webhook subscription: %w", err)
 	}
+	created.Secret = sub.Secret
 	return created, nil
 }
 
@@ -132,11 +141,26 @@ func (s PostgresSubscriptions) DeleteOwned(ctx context.Context, id, ownerDID str
 	return n > 0, nil
 }
 
+// ByEvent returns the subscriptions with their decrypted secrets.
 func (s PostgresSubscriptions) ByEvent(ctx context.Context, event string) ([]Subscription, error) {
-	subs := []Subscription{}
-	if err := s.DB.SelectContext(ctx, &subs, `
-        SELECT `+subscriptionColumns+` FROM webhook_subscriptions WHERE event = $1`, event); err != nil {
+	var rows []struct {
+		Subscription
+		Ciphertext []byte `db:"secret_ciphertext"`
+		WrappedCEK []byte `db:"secret_wrapped_cek"`
+	}
+	if err := s.DB.SelectContext(ctx, &rows, `
+        SELECT `+subscriptionColumns+`, secret_ciphertext, secret_wrapped_cek
+        FROM webhook_subscriptions WHERE event = $1`, event); err != nil {
 		return nil, fmt.Errorf("list webhook subscriptions for %s: %w", event, err)
+	}
+	subs := make([]Subscription, 0, len(rows))
+	for _, row := range rows {
+		secret, err := s.Secrets.Open(row.ID, row.Ciphertext, row.WrappedCEK)
+		if err != nil {
+			return nil, fmt.Errorf("webhook subscription %s: %w", row.ID, err)
+		}
+		row.Secret = secret
+		subs = append(subs, row.Subscription)
 	}
 	return subs, nil
 }

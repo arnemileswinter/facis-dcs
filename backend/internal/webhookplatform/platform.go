@@ -130,7 +130,8 @@ func holderDIDFromCtx(ctx context.Context) string {
 	return callerFromCtx(ctx).HolderDID
 }
 
-// subscriptionView is the response shape of a subscription. It has no secret.
+// subscriptionView is the response shape of a subscription. It has no secret;
+// only POST /webhooks adds it, once.
 type subscriptionView struct {
 	ID          string    `json:"id"`
 	Event       string    `json:"event"`
@@ -177,9 +178,9 @@ func (p *Platform) listDeliveries(w http.ResponseWriter, r *http.Request) {
 // POST /webhooks
 func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Event       string `json:"event"`
-		CallbackURL string `json:"callback_url"`
-		Secret      string `json:"secret,omitempty"`
+		Event       string          `json:"event"`
+		CallbackURL string          `json:"callback_url"`
+		Secret      json.RawMessage `json:"secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -193,12 +194,24 @@ func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "unknown event: "+req.Event)
 		return
 	}
+	// A client that sends its own secret expects deliveries signed with it.
+	// DCS does not use it, so the request fails and the client notices.
+	if req.Secret != nil {
+		jsonError(w, http.StatusBadRequest, "do not send a secret: DCS generates it and returns it in the 201 response")
+		return
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not create subscription")
+		return
+	}
 
 	caller := callerFromCtx(r.Context())
 	sub, err := p.subs.Add(r.Context(), Subscription{
 		Event:       req.Event,
 		CallbackURL: req.CallbackURL,
-		Secret:      req.Secret,
+		Secret:      secret,
 		OwnerDID:    caller.ParticipantDID,
 		CreatedBy:   caller.HolderDID,
 	})
@@ -212,7 +225,11 @@ func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	jsonOK(w, viewOf(sub))
+	// The only response that carries the secret: DCS does not show it again.
+	jsonOK(w, struct {
+		subscriptionView
+		Secret string `json:"secret"`
+	}{viewOf(sub), secret})
 }
 
 // DELETE /webhooks/{id}

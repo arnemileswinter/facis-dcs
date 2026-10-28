@@ -2,6 +2,7 @@ package webhookplatform
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -91,21 +92,22 @@ func do(t *testing.T, p *Platform, method, path, token, body string) *httptest.R
 	return rec
 }
 
-func subscribe(t *testing.T, p *Platform, token string) string {
+func subscribe(t *testing.T, p *Platform, token string) (id, secret string) {
 	t.Helper()
 	rec := do(t, p, http.MethodPost, "/webhooks", token,
-		`{"event":"template.updated","callback_url":"https://receiver.example/hook","secret":"s3cr3t"}`)
+		`{"event":"template.updated","callback_url":"https://receiver.example/hook"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /webhooks as %s = %d %s, want 201", token, rec.Code, rec.Body)
 	}
-	if strings.Contains(rec.Body.String(), "s3cr3t") {
-		t.Fatalf("POST /webhooks response carries the secret: %s", rec.Body)
-	}
-	var sub struct{ ID string }
+	var sub struct{ ID, Secret string }
 	if err := json.Unmarshal(rec.Body.Bytes(), &sub); err != nil || sub.ID == "" {
 		t.Fatalf("POST /webhooks response has no id: %s", rec.Body)
 	}
-	return sub.ID
+	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(sub.Secret, "whsec_"))
+	if !strings.HasPrefix(sub.Secret, "whsec_") || err != nil || len(key) != 32 {
+		t.Fatalf("POST /webhooks secret = %q, want whsec_ and a base64 32-byte key", sub.Secret)
+	}
+	return sub.ID, sub.Secret
 }
 
 func list(t *testing.T, p *Platform, token string) []map[string]any {
@@ -125,14 +127,17 @@ func TestOwnerSubscribesListsAndDeletes(t *testing.T) {
 	subs := &fakeSubscriptions{}
 	p := newTestPlatform(subs)
 
-	id := subscribe(t, p, "manager-a")
-	if got := subs.subs[0]; got.OwnerDID != orgA || got.CreatedBy != "user-a" || got.Secret != "s3cr3t" {
-		t.Fatalf("stored subscription = %+v, want owner %s, creator user-a and the secret", got, orgA)
+	id, secret := subscribe(t, p, "manager-a")
+	if got := subs.subs[0]; got.OwnerDID != orgA || got.CreatedBy != "user-a" || got.Secret != secret {
+		t.Fatalf("stored subscription = %+v, want owner %s, creator user-a and the returned secret", got, orgA)
+	}
+	if _, second := subscribe(t, p, "manager-a"); second == secret {
+		t.Fatalf("two subscriptions got the same secret")
 	}
 
 	listed := list(t, p, "manager-a")
-	if len(listed) != 1 || listed[0]["id"] != id {
-		t.Fatalf("GET /webhooks = %v, want the one subscription %s", listed, id)
+	if len(listed) != 2 || listed[0]["id"] != id {
+		t.Fatalf("GET /webhooks = %v, want the two subscriptions, %s first", listed, id)
 	}
 	if _, ok := listed[0]["secret"]; ok {
 		t.Fatalf("GET /webhooks returns the secret: %v", listed[0])
@@ -141,15 +146,32 @@ func TestOwnerSubscribesListsAndDeletes(t *testing.T) {
 	if rec := do(t, p, http.MethodDelete, "/webhooks/"+id, "manager-a", ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("DELETE own subscription = %d %s, want 204", rec.Code, rec.Body)
 	}
-	if len(subs.subs) != 0 {
+	if len(subs.subs) != 1 {
 		t.Fatalf("subscription is still stored after DELETE: %+v", subs.subs)
+	}
+}
+
+// DCS generates the secret. A request that brings its own is refused, so the
+// client does not verify with a key DCS never signs with.
+func TestSubscribeWithOwnSecretIsRejected(t *testing.T) {
+	subs := &fakeSubscriptions{}
+	p := newTestPlatform(subs)
+	for _, secret := range []string{`"0123456789abcdef0123456789abcdef"`, `""`, `null`} {
+		rec := do(t, p, http.MethodPost, "/webhooks", "manager-a",
+			`{"event":"template.updated","callback_url":"https://receiver.example/hook","secret":`+secret+`}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("POST /webhooks with secret %s = %d, want 400", secret, rec.Code)
+		}
+	}
+	if len(subs.subs) != 0 {
+		t.Fatalf("a request with its own secret was stored: %+v", subs.subs)
 	}
 }
 
 func TestForeignOrganizationCannotSeeOrDeleteSubscription(t *testing.T) {
 	subs := &fakeSubscriptions{}
 	p := newTestPlatform(subs)
-	id := subscribe(t, p, "manager-a")
+	id, _ := subscribe(t, p, "manager-a")
 
 	if listed := list(t, p, "admin-b"); len(listed) != 0 {
 		t.Fatalf("GET /webhooks for org B shows org A's subscriptions: %v", listed)
@@ -165,7 +187,7 @@ func TestForeignOrganizationCannotSeeOrDeleteSubscription(t *testing.T) {
 func TestCallerWithoutManagementRoleIsForbidden(t *testing.T) {
 	subs := &fakeSubscriptions{}
 	p := newTestPlatform(subs)
-	id := subscribe(t, p, "manager-a")
+	id, _ := subscribe(t, p, "manager-a")
 
 	for _, token := range []string{"template-a", "no-org"} {
 		for _, tc := range []struct{ method, path, body string }{

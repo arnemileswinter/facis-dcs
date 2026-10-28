@@ -422,6 +422,12 @@ orce:
   extraEnv:
     - name: ORCE_AUDIT_EXECUTOR_TEST_CONTROLS_ENABLED
       value: "true"
+    # The webhook scenarios create subscriptions at run time, and DCS generates
+    # each signing secret then. ORCE cannot hold it as WEBHOOK_SECRET, so its
+    # /dcs-dispatch receiver accepts deliveries without a signature check here.
+    # The DCS unit tests and the flow's verification check cover the signature.
+    - name: WEBHOOK_ACCEPT_UNVERIFIED
+      value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
     # legs append /contract/deployment/callback to it.

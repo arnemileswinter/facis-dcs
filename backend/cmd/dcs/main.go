@@ -606,7 +606,10 @@ func main() {
 	}
 
 	// Initialize the webhook platform (ORCE integration).
-	webhookSubs := webhookplatform.PostgresSubscriptions{DB: db}
+	webhookSubs := webhookplatform.PostgresSubscriptions{
+		DB:      db,
+		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
+	}
 	webhookStore := webhookplatform.NewDeliveryLog()
 	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore)
 	webhookPlatform := webhookplatform.New(

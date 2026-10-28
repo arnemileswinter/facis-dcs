@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -94,9 +95,23 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 		DeliveredAt:   time.Now().UTC(),
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
+	// No HTML escaping: a receiver behind a JSON-parsing endpoint (the Node-RED
+	// http in node) can then rebuild the signed bytes with JSON.stringify.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
 		log.Printf("webhookplatform: marshal payload for %s: %v", sub.CallbackURL, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
+		return
+	}
+	body := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	signature, err := Signature(sub.Secret, payload.EventID, timestamp, body)
+	if err != nil {
+		log.Printf("webhookplatform: sign payload for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
 		d.store.AddDelivery(delivery)
 		return
@@ -112,9 +127,10 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Correlation-ID", payload.CorrelationID)
 	req.Header.Set("X-Event-ID", payload.EventID)
-	if sub.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+sub.Secret)
-	}
+	// Standard Webhooks v1 (https://www.standardwebhooks.com/).
+	req.Header.Set("webhook-id", payload.EventID)
+	req.Header.Set("webhook-timestamp", timestamp)
+	req.Header.Set("webhook-signature", signature)
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {

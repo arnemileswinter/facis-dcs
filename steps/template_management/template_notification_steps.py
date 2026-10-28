@@ -6,6 +6,7 @@ POST /dcs-dispatch node (charts/orce/flows/event-webhook-orce-flow.json),
 reachable in-cluster as http://dcs-orce:1880/dcs-dispatch.
 """
 
+import base64
 import os
 import time
 
@@ -39,6 +40,13 @@ def step_given_webhook_subscription(context, event):
     sub = resp.json()
     context.webhook_subscription_id = sub.get("id")
     assert context.webhook_subscription_id, f"subscription response has no id: {resp.text}"
+    # DCS generates the Standard Webhooks signing secret and returns it only
+    # here. The ORCE receiver under BDD cannot hold a secret generated after it
+    # started, so it accepts unverified deliveries (values.bdd.yml).
+    secret = sub.get("secret") or ""
+    assert secret.startswith("whsec_") and len(base64.b64decode(secret[len("whsec_") :])) == 32, (
+        f"subscription {context.webhook_subscription_id} response has no whsec_ secret with a 32-byte key"
+    )
 
     def _unsubscribe():
         _requests.delete(

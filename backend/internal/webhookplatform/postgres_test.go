@@ -1,6 +1,7 @@
 package webhookplatform
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"testing"
@@ -31,13 +32,23 @@ func TestPostgresSubscriptionsScopeToOwner(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	s := PostgresSubscriptions{DB: db}
-	a, err := s.Add(ctx, Subscription{Event: "template.updated", CallbackURL: "https://a.example", Secret: "sa", OwnerDID: orgA, CreatedBy: "user-a"})
+	s := PostgresSubscriptions{DB: db, Secrets: testSecretBox(t)}
+	secretA, _ := NewSecret()
+	a, err := s.Add(ctx, Subscription{Event: "template.updated", CallbackURL: "https://a.example", Secret: secretA, OwnerDID: orgA, CreatedBy: "user-a"})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if _, err := s.Add(ctx, Subscription{Event: "contract.created", CallbackURL: "https://b.example", OwnerDID: orgB, CreatedBy: "user-b"}); err != nil {
+	secretB, _ := NewSecret()
+	if _, err := s.Add(ctx, Subscription{Event: "contract.created", CallbackURL: "https://b.example", Secret: secretB, OwnerDID: orgB, CreatedBy: "user-b"}); err != nil {
 		t.Fatalf("add: %v", err)
+	}
+
+	var stored []byte
+	if err := db.Get(&stored, `SELECT secret_ciphertext FROM webhook_subscriptions WHERE id = $1`, a.ID); err != nil {
+		t.Fatalf("read ciphertext: %v", err)
+	}
+	if len(stored) == 0 || bytes.Contains(stored, []byte(secretA)) {
+		t.Fatalf("stored secret_ciphertext = %x, want ciphertext without the secret", stored)
 	}
 
 	owned, err := s.ListByOwner(ctx, orgA)
@@ -45,7 +56,7 @@ func TestPostgresSubscriptionsScopeToOwner(t *testing.T) {
 		t.Fatalf("ListByOwner(orgA) = %+v, %v; want only %s", owned, err, a.ID)
 	}
 	byEvent, err := s.ByEvent(ctx, "template.updated")
-	if err != nil || len(byEvent) != 1 || byEvent[0].Secret != "sa" {
+	if err != nil || len(byEvent) != 1 || byEvent[0].Secret != secretA {
 		t.Fatalf("ByEvent = %+v, %v; want org A's subscription with its secret", byEvent, err)
 	}
 
