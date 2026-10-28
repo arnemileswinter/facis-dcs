@@ -125,6 +125,20 @@ const hasChangeRequest = computed(() => {
   )
 })
 
+// Global Name and Base Description must be non-empty.
+const detailsComplete = computed(
+  () => !!editedContract.value?.name?.trim() && !!editedContract.value?.description?.trim(),
+)
+const detailsValidationAttempted = ref(false)
+const nameError = computed(() =>
+  detailsValidationAttempted.value && !editedContract.value?.name?.trim() ? 'Global Name is required.' : null,
+)
+const descriptionError = computed(() =>
+  detailsValidationAttempted.value && !editedContract.value?.description?.trim()
+    ? 'Base Description is required.'
+    : null,
+)
+
 const contractSemanticConditionValueSnapshot: Ref<SemanticConditionValue[]> = ref([])
 
 const changedName = computed(() => editedContract.value?.name !== negotiationBaseline.value?.name)
@@ -252,6 +266,11 @@ function buildChangeRequest(): ContractChangeRequest {
 
 const negotiateContractChange = async () => {
   if (!contract.value || !editedContract.value || !issuer.value) return
+  detailsValidationAttempted.value = true
+  if (!detailsComplete.value) {
+    contractEditorUiStore.setActiveTab('details')
+    return
+  }
   // Same gate the forward-to-approval path applies: a counter-offer breaking the
   // contract's machine-readable policy is refused at approval anyway, so it is
   // reported here — naming the constraint — instead of shipping to the peer.
@@ -604,7 +623,12 @@ const exportPDF = async () => {
               />
 
               <div v-show="activeTab === 'details'">
-                <ContractDetailsEditor :contract="shownData" :disabled="!formEditable" />
+                <ContractDetailsEditor
+                  :contract="shownData"
+                  :disabled="!formEditable"
+                  :name-error="nameError ?? undefined"
+                  :description-error="descriptionError ?? undefined"
+                />
               </div>
 
               <div v-show="activeTab === 'content'">
@@ -743,6 +767,7 @@ const exportPDF = async () => {
         <button
           v-if="formEditable"
           class="btn flex-1 btn-primary"
+          data-testid="change-proposal"
           :disabled="
             (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
             isSubmitting ||
