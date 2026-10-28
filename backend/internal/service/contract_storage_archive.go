@@ -16,6 +16,7 @@ import (
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
@@ -181,7 +182,8 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	// The snapshot CIDs must be captured before the soft-delete: afterwards
 	// there is no other record of which IPFS objects the entries pointed at
 	// for this deletion.
-	entries, err := s.CRepo.ReadArchiveEntries(ctx, tx)
+	// Delete is a role-authorized write; F03 party scoping applies to reads only.
+	entries, err := s.CRepo.ReadArchiveEntries(contractreadpolicy.WithSystemScope(ctx), tx)
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
@@ -354,7 +356,8 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := s.CRepo.ReadArchivedContractsByFilter(ctx, tx, db.SearchValues{DID: p.Did})
+	// Annotate is a role-authorized write; F03 party scoping applies to reads only.
+	rows, err := s.CRepo.ReadArchivedContractsByFilter(contractreadpolicy.WithSystemScope(ctx), tx, db.SearchValues{DID: p.Did})
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}

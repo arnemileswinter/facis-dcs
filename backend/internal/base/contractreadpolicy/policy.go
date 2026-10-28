@@ -17,11 +17,18 @@ type Scope struct {
 	Organization string
 	Roles        userrole.UserRoles
 	LocalPeer    string
+	system       bool
 }
 type scopeKey struct{}
 
 func WithScope(ctx context.Context, scope Scope) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope)
+}
+
+// WithSystemScope marks a read that serves no user request, such as a background job or a peer sync.
+// Scoped repository reads return no rows for a context without any scope.
+func WithSystemScope(ctx context.Context) context.Context {
+	return WithScope(ctx, Scope{system: true})
 }
 func FromContext(ctx context.Context) (Scope, bool) {
 	scope, ok := ctx.Value(scopeKey{}).(Scope)
@@ -37,7 +44,7 @@ func (s Scope) Privileged() bool {
 	return false
 }
 func (s Scope) MayRead(origin, createdBy string, raw *datatype.JSON) bool {
-	if s.Privileged() || (s.LocalPeer != "" && origin != "" && origin != s.LocalPeer) {
+	if s.system || s.Privileged() || (s.LocalPeer != "" && origin != "" && origin != s.LocalPeer) {
 		return true
 	}
 	if s.Organization == "" {
@@ -69,8 +76,11 @@ func (s Scope) MayRead(origin, createdBy string, raw *datatype.JSON) bool {
 // SQL uses the current trusted contract row, including when listing frozen archive metadata.
 // didExpression is a repository-owned SQL identifier, never request input.
 func SQL(ctx context.Context, didExpression string, params *[]any) string {
-	s, scoped := FromContext(ctx)
-	if !scoped || s.Privileged() {
+	s, rows := decide(ctx)
+	switch rows {
+	case noRows:
+		return "FALSE"
+	case allRows:
 		return "TRUE"
 	}
 	n := len(*params) + 1
@@ -80,4 +90,23 @@ func SQL(ctx context.Context, didExpression string, params *[]any) string {
  OR ($%d <> '' AND (read_contract.created_by = $%d OR EXISTS (
  SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(read_contract.contract_data->'dcs:parties') = 'array' THEN read_contract.contract_data->'dcs:parties' ELSE '[]'::jsonb END) party
  WHERE jsonb_typeof(party->'dcs:legalName') = 'string' AND party->>'dcs:legalName' = $%d)))))`, didExpression, n+1, n+1, n, n, n)
+}
+
+type rowFilter int
+
+const (
+	noRows rowFilter = iota
+	allRows
+	partyRows
+)
+
+func decide(ctx context.Context) (Scope, rowFilter) {
+	s, scoped := FromContext(ctx)
+	switch {
+	case !scoped:
+		return s, noRows
+	case s.system || s.Privileged():
+		return s, allRows
+	}
+	return s, partyRows
 }
