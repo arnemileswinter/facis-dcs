@@ -113,6 +113,7 @@ Feature: Configurable external PAC audit executor
   @REQ-audit-report-export-AC4 @REQ-audit-report-export-AC5
   Scenario Outline: Every report format uses the persisted run and never executes the checks again
     Given contract "Persisted Report Contract" is submitted, reviewed, approved, and signed via the standard workflow
+    And the archive storage of contract "Persisted Report Contract" is anchored in the audit trail
     And the reference ORCE audit executor is reachable and returns a valid result with a receipt
     When the Auditor requests an executor-backed "archive" audit for contract "Persisted Report Contract" with justification "report replay BDD"
     Then the PAC audit request is accepted with executor "customer-compatible-audit"
