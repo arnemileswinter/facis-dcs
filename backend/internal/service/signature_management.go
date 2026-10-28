@@ -940,8 +940,11 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 // from the signature's embedded ContractSigningSummaryCredential (DCS-FR-SM-26).
 // Evidence is matched to the signature record by signer DID, disambiguated by
 // the declared field on multi-signer contracts. A signature whose evidence is
-// absent (e.g. pre-evidence data) simply carries no proof fields.
+// absent (e.g. pre-evidence data) carries no proof fields, and its credential
+// status is UNKNOWN because no presented credential is available to look up.
 func enrichWithSigningEvidence(item *signaturemanagement.SMSignatureViewItem, rec db.SignatureRecord, evidence []query.SigningEvidence) {
+	item.CredentialStatus = query.CredentialUnknown
+	item.CredentialStatusReason = optString("no verified signing evidence is embedded for this signature")
 	field := ""
 	if rec.FieldName != nil {
 		field = *rec.FieldName
@@ -960,6 +963,8 @@ func enrichWithSigningEvidence(item *signaturemanagement.SMSignatureViewItem, re
 		item.KbSdHash = optString(ev.KBSDHash)
 		item.ValidationReportHash = optString(ev.ValidationReportHash)
 		item.SummaryIssuer = optString(ev.Issuer)
+		item.CredentialStatus = ev.CredentialStatus.State
+		item.CredentialStatusReason = optString(ev.CredentialStatus.Reason)
 		return
 	}
 }

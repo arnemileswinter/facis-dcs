@@ -21,6 +21,7 @@ import {
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import {
+  credentialStatusIndicator,
   dssIndicator,
   findingIndicator,
   findingsVerdict,
@@ -826,10 +827,16 @@ function exportPdf() {
                       <td class="max-w-56 truncate font-mono text-[10px]" :title="sig.signer_cert_subject ?? ''">
                         {{ sig.signer_cert_subject ?? '—' }}
                       </td>
-                      <td>
-                        <span class="badge badge-sm" :class="statusIndicator(sig.status).cls">
-                          {{ statusIndicator(sig.status).label }}
+                      <td data-testid="credential-status">
+                        <span class="badge badge-sm" :class="credentialStatusIndicator(sig.credential_status).cls">
+                          {{ credentialStatusIndicator(sig.credential_status).label }}
                         </span>
+                        <p
+                          v-if="sig.credential_status_reason"
+                          class="mt-1 max-w-56 text-xs break-words text-base-content/60"
+                        >
+                          {{ sig.credential_status_reason }}
+                        </p>
                       </td>
                       <td class="max-w-48 truncate font-mono text-[10px]" :title="sig.kb_sd_hash ?? ''">
                         {{ sig.kb_sd_hash ?? '—' }}

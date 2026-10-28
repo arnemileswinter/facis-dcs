@@ -135,6 +135,9 @@ export interface SignatureViewItem {
   poa_organization?: string
   poa_roles?: string[]
   summary_issuer?: string
+  // Live status-list state of the presented Power of Attorney credential.
+  credential_status?: 'VALID' | 'REVOKED' | 'SUSPENDED' | 'UNKNOWN'
+  credential_status_reason?: string
 }
 
 export interface SignatureViewResult {
