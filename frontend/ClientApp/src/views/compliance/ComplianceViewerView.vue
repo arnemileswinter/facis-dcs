@@ -85,7 +85,7 @@ const statuses = computed(() => {
   for (const c of contracts.value) {
     if (c.state) set.add(c.state)
   }
-  return Array.from(set).sort()
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
 })
 
 const filteredContracts = computed(() => {
