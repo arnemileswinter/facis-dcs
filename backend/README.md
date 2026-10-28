@@ -176,7 +176,7 @@ The Dockerfile and build script live in `deployment/docker/`. The script resolve
 - `TAG` – Sets the image tag (default: `latest`)
 - `REGISTRY` – Docker registry (environment variable)
 - `REPO` – Docker repository (environment variable)
-- `GIT_SHA` – Commit SHA from `git rev-parse HEAD` at the repo root.
+- `GIT_SHA` – Optional commit SHA (environment variable). Defaults to `git rev-parse HEAD` at the repo root.
 - `BUILD_TIME` – Optional RFC3339 build timestamp. Defaults to UTC now when unset.
 
 **Example:**

@@ -29,9 +29,6 @@ FROM golang:1.25 AS go-builder
 
 WORKDIR /build
 
-ARG GIT_SHA=unknown
-ARG BUILD_TIME=
-
 # Copy go mod files
 COPY backend/go.mod backend/go.sum ./
 
@@ -45,6 +42,11 @@ COPY backend/ ./
 # Generate Goa transport/types from the design package, at the goa version
 # pinned in go.mod. GOPROXY=off keeps the step hermetic.
 RUN GOPROXY=off go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
+
+# Declared here, not earlier: a changed build arg invalidates every later RUN
+# layer, and the module download and goa gen layers must stay cached.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=
 
 # Build binary (cgo enabled so the PKCS#11 signing path links).
 RUN CGO_ENABLED=1 GOOS=linux go build \
