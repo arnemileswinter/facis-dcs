@@ -103,7 +103,10 @@ report unreadable. `GET /pac/report` returns 404 for that selected run, without
 falling back to an older one. This consequence for reports covering several
 resources was explicitly accepted. Public headers, already-erased bodies and
 the existing instance-scoped deletion proofs do not create new resource-key
-dependencies, so past erasures alone do not prevent future audits.
+dependencies, so past erasures alone do not prevent future audits. Evidence
+of a shredded resource that the database still holds, such as an archive
+entry summary or a synthetic check, is replaced by the erased marker before
+the run is sent and sealed.
 
 The report hash covers the final downloaded plaintext bytes. Its CID names
 the encrypted report envelope in IPFS. Retrieving that artifact requires both

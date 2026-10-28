@@ -144,6 +144,9 @@ func (s *processAuditAndCompliancesrvc) Audit(ctx context.Context, req *processa
 		return nil, err
 	}
 	evidence = filterContractAuditEvidence(evidence, allowed)
+	if s.ATrailReader.Artifacts != nil {
+		redactErasedEvidence(ctx, s.ATrailReader.Artifacts, evidence)
+	}
 
 	id := uuid.NewString()
 	roleNames := make([]string, 0, len(roles))

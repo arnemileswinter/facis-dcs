@@ -51,8 +51,7 @@ func pacEvidenceScopes(requestBytes []byte, instance artifactstore.Scope) ([]art
 			if (len(entry.EventData) == 0 || erased) && entry.Reason == "" {
 				continue
 			}
-			did := firstNonEmpty(entry.DID, resource.DID)
-			scope := baseevent.ScopeForEvent(datatype.OutboxEvent{Component: firstNonEmpty(entry.Component, resource.Component), EventType: entry.EventType, DID: &did}, instance)
+			scope := pacEntryScope(resource.DID, resource.Component, entry, instance)
 			if scope != instance {
 				unique[scope] = true
 			}
@@ -64,6 +63,44 @@ func pacEvidenceScopes(requestBytes []byte, instance artifactstore.Scope) ([]art
 	}
 	sort.Slice(scopes, func(i, j int) bool { return scopes[i].AAD() < scopes[j].AAD() })
 	return scopes, nil
+}
+
+func pacEntryScope(resourceDID, resourceComponent string, entry persistedAuditEvidenceEntry, instance artifactstore.Scope) artifactstore.Scope {
+	did := firstNonEmpty(entry.DID, resourceDID)
+	return baseevent.ScopeForEvent(datatype.OutboxEvent{Component: firstNonEmpty(entry.Component, resourceComponent), EventType: entry.EventType, DID: &did}, instance)
+}
+
+// redactErasedEvidence replaces the content of evidence entries whose resource
+// CEK is shredded with the erased marker before the run is sent and sealed. The
+// database can still hold such content (archive entry rows, synthetic checks),
+// and a snapshot must not carry it past the erasure (DCS-NFR-SEC-13). The entry
+// stays in the evidence, so the erasure stays visible.
+func redactErasedEvidence(ctx context.Context, cipher pacSnapshotCipher, evidence []*auditEvidenceResource) {
+	instance := cipher.InstanceScope()
+	shredded := map[artifactstore.Scope]bool{}
+	for _, resource := range evidence {
+		for _, entry := range resource.AuditTrail {
+			if entry == nil {
+				continue
+			}
+			scope := pacEntryScope(resource.Did, resource.Component, persistedAuditEvidenceEntry{DID: stringValue(entry.Did), Component: entry.Component, EventType: entry.EventType}, instance)
+			if scope == instance {
+				continue
+			}
+			erased, known := shredded[scope]
+			if !known {
+				// Decrypt reads the same CEK record that sealing uses, without
+				// creating one.
+				_, err := cipher.Decrypt(ctx, scope, nil)
+				erased = artifactstore.IsShredded(err)
+				shredded[scope] = erased
+			}
+			if erased {
+				entry.EventData = map[string]any{"erased": true}
+				entry.Reason = nil
+			}
+		}
+	}
 }
 
 func validatePACScopes(scopes []artifactstore.Scope) error {
