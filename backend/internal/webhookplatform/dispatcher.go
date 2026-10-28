@@ -24,13 +24,16 @@ type WebhookPayload struct {
 
 // Dispatcher fans out events to all registered subscribers asynchronously.
 type Dispatcher struct {
-	store      *SubscriptionStore
+	subs       Subscriptions
+	store      *DeliveryLog
 	httpClient *http.Client
 }
 
-// NewDispatcher creates a Dispatcher backed by the given store.
-func NewDispatcher(store *SubscriptionStore) *Dispatcher {
+// NewDispatcher creates a Dispatcher that reads subscribers from subs and
+// records outcomes in store.
+func NewDispatcher(subs Subscriptions, store *DeliveryLog) *Dispatcher {
 	return &Dispatcher{
+		subs:  subs,
 		store: store,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -40,7 +43,11 @@ func NewDispatcher(store *SubscriptionStore) *Dispatcher {
 
 // Dispatch sends event to every subscriber registered for that event.
 func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
-	subs := d.store.GetByEvent(event)
+	subs, err := d.subs.ByEvent(ctx, event)
+	if err != nil {
+		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
+		return
+	}
 	if len(subs) == 0 {
 		return
 	}

@@ -143,12 +143,21 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   frühere „irgendein Ziel kannte das Shared Secret"). Das Ack versiegelt
   ein RFC-3161-gestempeltes Execution-Evidence-Receipt im Archiv und
   schaltet SIGNED→ACTIVE.
-- **Was gilt:** Die Webhook-Plattform ist eine In-Memory-Fan-Out-Schicht:
-  feste Liste abonnierbarer Events (`KnownEvents`), Mapping interner
+- **Was gilt:** Die Webhook-Plattform ist eine Fan-Out-Schicht: feste
+  Liste abonnierbarer Events (`KnownEvents`), Mapping interner
   NATS-Event-Typen auf Webhook-Namen (`DCSEventMap`), asynchrone
-  Zustellung, Delivery-Log begrenzt auf die letzten 512 Einträge (die
-  Beobachtungsfläche von GET /deliveries). Abonnements überleben keinen
-  Restart.
+  Zustellung. Abonnements liegen in Postgres (`webhook_subscriptions`)
+  und gehören der Organisation (Participant-DID) des Anlegers. Anlegen,
+  Auflisten und Löschen verlangen `Integration Manager` oder
+  `Sys. Administrator` (sonst 403); GET /webhooks zeigt nur die
+  Abonnements der eigenen Organisation, DELETE auf ein fremdes Abonnement
+  antwortet 404. Das Secret gibt der Abonnent selbst vor; DCS sendet es
+  als Bearer-Token an die Callback-URL, speichert es daher im Klartext
+  und gibt es in keiner Antwort zurück. Pending-Callbacks und das
+  Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
+  Speicher.
+  **Warum:** Ein Abonnement verbindet ein Drittsystem mit DCS-Events,
+  das ist nach ADR-29 eine Integrationsaufgabe.
 
 - **Was gilt:** Vertragszustände sind ein Postgres-Enum, das nur additiv
   erweitert wird (`ALTER TYPE … ADD VALUE`); Views, die neue Werte

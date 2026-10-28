@@ -1,10 +1,13 @@
 package webhookplatform
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 // KnownEvents is the list of subscribable DCS contract lifecycle events.
@@ -61,12 +64,81 @@ type EventInfo struct {
 }
 
 // Subscription represents a registered webhook.
+//
+// Secret is the bearer value sent to CallbackURL. The subscriber supplies it and
+// already knows it, so no response carries it (see subscriptionView).
 type Subscription struct {
-	ID          string    `json:"id"`
-	Event       string    `json:"event"`
-	CallbackURL string    `json:"callback_url"`
-	Secret      string    `json:"secret,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string    `db:"id"`
+	Event       string    `db:"event"`
+	CallbackURL string    `db:"callback_url"`
+	Secret      string    `db:"secret"`
+	OwnerDID    string    `db:"owner_did"`
+	CreatedBy   string    `db:"created_by"`
+	CreatedAt   time.Time `db:"created_at"`
+}
+
+// Subscriptions stores webhook subscriptions. Every caller-facing operation is
+// scoped to the owning organization; ByEvent serves delivery only.
+type Subscriptions interface {
+	Add(ctx context.Context, sub Subscription) (Subscription, error)
+	ListByOwner(ctx context.Context, ownerDID string) ([]Subscription, error)
+	// DeleteOwned returns false when no subscription with that id belongs to ownerDID.
+	DeleteOwned(ctx context.Context, id, ownerDID string) (bool, error)
+	ByEvent(ctx context.Context, event string) ([]Subscription, error)
+}
+
+// PostgresSubscriptions stores subscriptions in webhook_subscriptions.
+type PostgresSubscriptions struct {
+	DB *sqlx.DB
+}
+
+const subscriptionColumns = `id, event, callback_url, secret, owner_did, created_by, created_at`
+
+func (s PostgresSubscriptions) Add(ctx context.Context, sub Subscription) (Subscription, error) {
+	var created Subscription
+	err := s.DB.GetContext(ctx, &created, `
+        INSERT INTO webhook_subscriptions (event, callback_url, secret, owner_did, created_by)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING `+subscriptionColumns,
+		sub.Event, sub.CallbackURL, sub.Secret, sub.OwnerDID, sub.CreatedBy)
+	if err != nil {
+		return Subscription{}, fmt.Errorf("create webhook subscription: %w", err)
+	}
+	return created, nil
+}
+
+func (s PostgresSubscriptions) ListByOwner(ctx context.Context, ownerDID string) ([]Subscription, error) {
+	subs := []Subscription{}
+	if err := s.DB.SelectContext(ctx, &subs, `
+        SELECT `+subscriptionColumns+` FROM webhook_subscriptions
+        WHERE owner_did = $1 ORDER BY created_at, id`, ownerDID); err != nil {
+		return nil, fmt.Errorf("list webhook subscriptions: %w", err)
+	}
+	return subs, nil
+}
+
+func (s PostgresSubscriptions) DeleteOwned(ctx context.Context, id, ownerDID string) (bool, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return false, nil
+	}
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM webhook_subscriptions WHERE id = $1 AND owner_did = $2`, id, ownerDID)
+	if err != nil {
+		return false, fmt.Errorf("delete webhook subscription %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete webhook subscription %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+func (s PostgresSubscriptions) ByEvent(ctx context.Context, event string) ([]Subscription, error) {
+	subs := []Subscription{}
+	if err := s.DB.SelectContext(ctx, &subs, `
+        SELECT `+subscriptionColumns+` FROM webhook_subscriptions WHERE event = $1`, event); err != nil {
+		return nil, fmt.Errorf("list webhook subscriptions for %s: %w", event, err)
+	}
+	return subs, nil
 }
 
 // PendingCallback tracks an in-flight webhook dispatch awaiting a callback.
@@ -95,73 +167,21 @@ type Delivery struct {
 // maxDeliveries bounds the in-memory delivery log (newest kept).
 const maxDeliveries = 512
 
-// SubscriptionStore is a thread-safe in-memory store for subscriptions,
-// pending callbacks, and the recent-delivery log.
-type SubscriptionStore struct {
+// DeliveryLog is a thread-safe in-memory store for pending callbacks and the
+// recent-delivery log.
+type DeliveryLog struct {
 	mu         sync.RWMutex
-	subs       map[string][]Subscription  // event name → subscriptions
 	pending    map[string]PendingCallback // event_id → pending
 	deliveries []Delivery                 // newest last, capped at maxDeliveries
 }
 
-// NewSubscriptionStore returns an empty store.
-func NewSubscriptionStore() *SubscriptionStore {
-	return &SubscriptionStore{
-		subs:    make(map[string][]Subscription),
-		pending: make(map[string]PendingCallback),
-	}
-}
-
-// Add registers a new webhook subscription and returns it with a generated ID.
-func (s *SubscriptionStore) Add(event, callbackURL, secret string) Subscription {
-	sub := Subscription{
-		ID:          uuid.New().String(),
-		Event:       event,
-		CallbackURL: callbackURL,
-		Secret:      secret,
-		CreatedAt:   time.Now().UTC(),
-	}
-	s.mu.Lock()
-	s.subs[event] = append(s.subs[event], sub)
-	s.mu.Unlock()
-	return sub
-}
-
-// Delete removes a subscription by ID. Returns false when not found.
-func (s *SubscriptionStore) Delete(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for event, subs := range s.subs {
-		for i, sub := range subs {
-			if sub.ID == id {
-				s.subs[event] = append(subs[:i], subs[i+1:]...)
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// GetByEvent returns a snapshot of all subscriptions for the given event.
-func (s *SubscriptionStore) GetByEvent(event string) []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return append([]Subscription(nil), s.subs[event]...)
-}
-
-// ListAll returns all registered subscriptions.
-func (s *SubscriptionStore) ListAll() []Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var all []Subscription
-	for _, subs := range s.subs {
-		all = append(all, subs...)
-	}
-	return all
+// NewDeliveryLog returns an empty log.
+func NewDeliveryLog() *DeliveryLog {
+	return &DeliveryLog{pending: make(map[string]PendingCallback)}
 }
 
 // TrackPending records an in-flight dispatch so its callback can be correlated.
-func (s *SubscriptionStore) TrackPending(p PendingCallback) {
+func (s *DeliveryLog) TrackPending(p PendingCallback) {
 	s.mu.Lock()
 	s.pending[p.EventID] = p
 	s.mu.Unlock()
@@ -169,7 +189,7 @@ func (s *SubscriptionStore) TrackPending(p PendingCallback) {
 
 // ResolvePending looks up and removes a pending callback by event_id, and
 // flips the matching delivery-log entries to acknowledged.
-func (s *SubscriptionStore) ResolvePending(eventID string) (PendingCallback, bool) {
+func (s *DeliveryLog) ResolvePending(eventID string) (PendingCallback, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[eventID]
@@ -185,7 +205,7 @@ func (s *SubscriptionStore) ResolvePending(eventID string) (PendingCallback, boo
 }
 
 // AddDelivery appends a notification outcome to the delivery log.
-func (s *SubscriptionStore) AddDelivery(d Delivery) {
+func (s *DeliveryLog) AddDelivery(d Delivery) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deliveries = append(s.deliveries, d)
@@ -195,7 +215,7 @@ func (s *SubscriptionStore) AddDelivery(d Delivery) {
 }
 
 // ListDeliveries returns a snapshot of the delivery log, newest last.
-func (s *SubscriptionStore) ListDeliveries() []Delivery {
+func (s *DeliveryLog) ListDeliveries() []Delivery {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]Delivery(nil), s.deliveries...)

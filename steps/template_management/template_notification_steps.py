@@ -26,7 +26,7 @@ def _webhook_platform_url(context, path: str) -> str:
 
 @given('a webhook subscription for "{event}" events pointing at the ORCE monitoring flow')
 def step_given_webhook_subscription(context, event):
-    headers = AuthService.get_headers_for_roles(["Template Manager"])
+    headers = AuthService.get_headers_for_roles(["Integration Manager"])
     resp = _requests.post(
         _webhook_platform_url(context, "/webhooks"),
         json={"event": event, "callback_url": ORCE_DISPATCH_URL},
@@ -43,7 +43,7 @@ def step_given_webhook_subscription(context, event):
     def _unsubscribe():
         _requests.delete(
             _webhook_platform_url(context, f"/webhooks/{context.webhook_subscription_id}"),
-            headers=AuthService.get_headers_for_roles(["Template Manager"]),
+            headers=AuthService.get_headers_for_roles(["Integration Manager"]),
             timeout=context.http_timeout_seconds,
         )
 
@@ -92,7 +92,7 @@ def step_then_contract_notification_delivered(context, event, name):
 
 @when('a webhook subscription for the unknown event "{event}" is attempted')
 def step_when_subscribe_unknown_event(context, event):
-    headers = AuthService.get_headers_for_roles(["Template Manager"])
+    headers = AuthService.get_headers_for_roles(["Integration Manager"])
     context.requests_response = _requests.post(
         _webhook_platform_url(context, "/webhooks"),
         json={"event": event, "callback_url": ORCE_DISPATCH_URL},
