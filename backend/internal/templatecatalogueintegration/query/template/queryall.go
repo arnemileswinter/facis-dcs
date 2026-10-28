@@ -146,7 +146,7 @@ func mapCatalogueItem(ct map[string]interface{}) *templatecatalogueintegration.T
 
 	return &templatecatalogueintegration.TemplateCatalogueItem{
 		Did:          did,
-		PartyType:    ptr.Ref(ptr.StringFromMap(ct, "party_type")),
+		PartyType:    ptr.Ref(cataloguePartyType(ct)),
 		TemplateType: ptr.Ref(ptr.StringFromMap(ct, "template_type")),
 		Version:      ptr.Ref(ptr.IntFromMap(ct, "version")),
 		Name:         ptr.Ref(ptr.StringFromMap(ct, "name")),

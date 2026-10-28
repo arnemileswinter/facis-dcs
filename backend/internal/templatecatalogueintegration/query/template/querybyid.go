@@ -133,7 +133,7 @@ func mapCatalogueDetail(n map[string]interface{}) *templatecatalogueintegration.
 		Name:         ptr.Ref(ptr.StringFromMap(n, "name")),
 		Description:  ptr.Ref(ptr.StringFromMap(n, "description")),
 		TemplateType: ptr.Ref(ptr.StringFromMap(n, "template_type")),
-		PartyType:    ptr.Ref(ptr.StringFromMap(n, "party_type")),
+		PartyType:    ptr.Ref(cataloguePartyType(n)),
 	}
 }
 

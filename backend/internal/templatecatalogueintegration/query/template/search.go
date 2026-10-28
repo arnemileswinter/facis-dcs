@@ -147,7 +147,7 @@ func buildSearchFilters(qry SearchQry) string {
 	}
 
 	if qry.PartyType != "" {
-		fmt.Fprintf(&b, "  FILTER(?party_type = \"%s\")\n", sparqlEscapeString(qry.PartyType))
+		fmt.Fprintf(&b, "  FILTER(COALESCE(?party_type, \"%s\") = \"%s\")\n", unclassifiedPartyType, sparqlEscapeString(qry.PartyType))
 	}
 	if qry.TemplateType != "" {
 		fmt.Fprintf(&b, "  FILTER(?template_type = \"%s\")\n", sparqlEscapeString(qry.TemplateType))
