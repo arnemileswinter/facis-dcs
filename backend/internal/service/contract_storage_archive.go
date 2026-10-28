@@ -178,6 +178,10 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
+	if until := retainedUntil(entries, p.Did, time.Now().UTC()); until != nil {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
+			"archive entry for DID %q is retained until %s (retention policy)", p.Did, until.Format(time.RFC3339)))
+	}
 
 	deletedBy := middleware.GetParticipantID(ctx)
 	affected, err := s.CRepo.MarkArchiveEntryDeleted(ctx, tx, p.Did, deletedBy, p.Justification)
@@ -293,6 +297,23 @@ type archiveSnapshotStore interface {
 // DID's live (not yet soft-deleted) archive entries — the IPFS objects a
 // delete of that DID must dispose of. Entries without a stored snapshot CID
 // carry nothing in IPFS and are skipped.
+// retainedUntil returns the latest future retention_until of did's live
+// archive entries, or nil when the retention policy permits deletion
+// (DCS-FR-CSA-17). The archive trigger refuses the deletion as well; this
+// check turns that refusal into a client error.
+func retainedUntil(entries []db.ContractArchiveEntry, did string, now time.Time) *time.Time {
+	var latest *time.Time
+	for _, entry := range entries {
+		if entry.DID != did || entry.DeletedAt != nil || entry.RetentionUntil == nil || !entry.RetentionUntil.After(now) {
+			continue
+		}
+		if latest == nil || entry.RetentionUntil.After(*latest) {
+			latest = entry.RetentionUntil
+		}
+	}
+	return latest
+}
+
 func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []string {
 	seen := map[string]bool{}
 	cids := []string{}
