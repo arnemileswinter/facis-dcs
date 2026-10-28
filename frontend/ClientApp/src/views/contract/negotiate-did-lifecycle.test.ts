@@ -5,6 +5,7 @@ import { reactive } from 'vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import { useAuthStore } from '@/stores/auth-store'
+import ApproveContractView from './ApproveContractView.vue'
 import NegotiateContractView from './NegotiateContractView.vue'
 import ReviewContractView from './ReviewContractView.vue'
 import ViewContractView from './ViewContractView.vue'
@@ -79,24 +80,59 @@ it('keeps the accepted baseline and audit contract for the new DID when an old d
   expect(useContractEditorUiStore().activeTab).toBe('details')
   wrapper.unmount()
 })
-it('does not retrieve the old DID after identity resolution crosses navigation', async () => {
-  let resolve!: (value: string) => void
-  mocks.identity.mockReturnValueOnce(
-    new Promise((done) => {
-      resolve = done
-    }),
-  )
-  const wrapper = setup()
-  route.params.did = 'did:test:second'
-  await flushPromises()
-  resolve('local')
-  await flushPromises()
-  expect(mocks.retrieve).not.toHaveBeenCalledWith({ did: 'did:test:first' })
-  expect(wrapper.findComponent({ name: 'AuditView' }).props('contract').did).toBe('did:test:second')
-  wrapper.unmount()
-})
+it.each([NegotiateContractView, ReviewContractView, ApproveContractView])(
+  'does not retrieve the old DID after identity resolution crosses navigation',
+  async (component) => {
+    let resolve!: (value: string) => void
+    mocks.identity.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    const wrapper = setup(component)
+    route.params.did = 'did:test:second'
+    await flushPromises()
+    resolve('local')
+    await flushPromises()
+    expect(mocks.retrieve).not.toHaveBeenCalledWith({ did: 'did:test:first' })
+    expect(wrapper.findComponent({ name: 'AuditView' }).props('contract').did).toBe('did:test:second')
+    wrapper.unmount()
+  },
+)
 
-it.each([NegotiateContractView, ReviewContractView, ViewContractView])(
+it.each([ReviewContractView, ApproveContractView])(
+  'keeps the new contract and peer proposal alert when a previous-contract response arrives late',
+  async (component) => {
+    const current = contract('did:test:first')
+    current.state = 'REVIEWED'
+    current.negotiations![0]!.negotiation_decisions = [{ negotiator: 'local', decision: undefined }]
+    mocks.retrieve.mockResolvedValueOnce(current)
+    const wrapper = setup(component)
+    await flushPromises()
+    expect(mocks.identity).toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'PeerProposalPendingAlert' }).props('show')).toBe(true)
+
+    let resolve!: (value: Contract) => void
+    mocks.retrieve.mockReturnValueOnce(
+      new Promise<Contract>((done) => {
+        resolve = done
+      }),
+    )
+    route.params.did = 'did:test:second'
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AuditView' }).exists()).toBe(false)
+    mocks.retrieve.mockResolvedValueOnce({ ...current, did: 'did:test:third', negotiations: [] })
+    route.params.did = 'did:test:third'
+    await flushPromises()
+    resolve({ ...current, did: 'did:test:second' })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AuditView' }).props('contract').did).toBe('did:test:third')
+    expect(wrapper.findComponent({ name: 'PeerProposalPendingAlert' }).props('show')).toBe(false)
+    wrapper.unmount()
+  },
+)
+
+it.each([NegotiateContractView, ReviewContractView, ApproveContractView, ViewContractView])(
   'renders focusable native tab controls with selected state',
   async (component) => {
     const wrapper = setup(component)

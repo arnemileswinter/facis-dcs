@@ -108,6 +108,7 @@ watch(
           if (!localInstanceDid.value) {
             localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
           }
+          if (route.params.did !== id) return
           const loaded = await contractWorkflowService.retrieveById({ did: id })
           if (route.params.did !== id) return
           contract.value = loaded
