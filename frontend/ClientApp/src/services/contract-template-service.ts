@@ -23,6 +23,7 @@ import type {
   ContractTemplateAuditResponse,
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
+  ContractTemplateHistoryResponse,
   ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -119,6 +120,12 @@ export const contractTemplateService: ContractTemplateService = {
         console.error('Retrieve ID Error:', err)
         return null
       })
+  },
+
+  async retrieveHistory(did: string) {
+    return http
+      .get<ContractTemplateHistoryResponse>(`/template/history/${encodeURIComponent(did)}`)
+      .then((res) => res.data)
   },
 
   async approve(request: ContractTemplateApproveRequest) {

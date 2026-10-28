@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
+import { contractTemplateService } from '@/services/contract-template-service'
+import type { ContractTemplateHistoryResponse } from '@/models/responses/template-response'
 
 const store = useDcsDraftStore()
 const { did, created_by, created_at, updated_at } = storeToRefs(store)
@@ -18,6 +20,28 @@ const rows = computed(() => [
   { label: 'creation timestamp', value: formatWhen(created_at.value) },
   { label: 'last change timestamp', value: formatWhen(updated_at.value) },
 ])
+
+const history = ref<ContractTemplateHistoryResponse>([])
+const historyError = ref('')
+
+// The history endpoint returns one snapshot per state change, in no defined
+// order, so the entries are sorted oldest first.
+watch(
+  did,
+  async (value) => {
+    history.value = []
+    historyError.value = ''
+    if (!value) return
+    try {
+      const entries = await contractTemplateService.retrieveHistory(value)
+      if (value !== did.value) return
+      history.value = [...entries].sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at))
+    } catch {
+      if (value === did.value) historyError.value = 'The template history could not be loaded.'
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -30,4 +54,28 @@ const rows = computed(() => [
       <dd class="min-w-0 break-all">{{ row.value }}</dd>
     </template>
   </dl>
+
+  <div class="overflow-x-auto">
+    <h3 class="mb-2 text-sm font-medium">Version history</h3>
+    <div v-if="historyError" role="alert" class="alert text-sm alert-error">{{ historyError }}</div>
+    <p v-else-if="history.length === 0" class="text-sm text-base-content/60">No history entries recorded.</p>
+    <table v-else class="table table-sm" data-testid="template-history">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>State</th>
+          <th>Changed at</th>
+          <th>Created by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(entry, i) in history" :key="i" data-testid="template-history-entry">
+          <td>{{ entry.version }}</td>
+          <td>{{ entry.state }}</td>
+          <td>{{ formatWhen(entry.updated_at) }}</td>
+          <td class="break-all">{{ entry.created_by }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </template>
