@@ -2,6 +2,7 @@ package semantichub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,10 +13,10 @@ import (
 	"github.com/tggo/goRDFlib/shacl"
 )
 
-// ValidateSchemaContent checks whether content can be used as a hub entry of
-// the given kind. Callers that gate Register or Activate should use this so
-// admission matches what runtime loaders already accept.
-func ValidateSchemaContent(kind, content string) error {
+// ValidateSchemaContent checks whether content can be used as the hub entry
+// name of the given kind. Callers that gate Register or Activate should use
+// this so admission matches what runtime loaders already accept.
+func ValidateSchemaContent(name, kind, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("schema content must not be empty")
 	}
@@ -31,7 +32,7 @@ func ValidateSchemaContent(kind, content string) error {
 		}
 		return nil
 	case "context":
-		return validateContextJSONLD(content)
+		return validateContextJSONLD(name, content)
 	default:
 		return fmt.Errorf("unsupported schema kind %q", kind)
 	}
@@ -153,7 +154,7 @@ func loadAdmissionTurtle(content, baseIRI string) (*shacl.Graph, error) {
 	return graph, nil
 }
 
-func validateContextJSONLD(content string) error {
+func validateContextJSONLD(name, content string) error {
 	var doc struct {
 		Context any `json:"@context"`
 	}
@@ -162,6 +163,12 @@ func validateContextJSONLD(content string) error {
 	}
 	if !contextObjectNonEmpty(doc.Context) {
 		return fmt.Errorf("context schema content must be a JSON-LD document with a non-empty @context object")
+	}
+	// ActiveOntologyIRIs reads the canonical context's prefixes from a
+	// top-level @context object. An array or IRI form would activate a version
+	// that the anchor refresh and the next startup cannot load.
+	if _, isObject := doc.Context.(map[string]any); name == ContextName && !isObject {
+		return fmt.Errorf("context schema content for %q must have a JSON object as @context", ContextName)
 	}
 
 	// Same processor the audit path uses (json-gold Expand). A probe node is
@@ -172,10 +179,21 @@ func validateContextJSONLD(content string) error {
 		"@id":      "urn:dcs:hub:admission:context-probe",
 	}
 	options := ld.NewJsonLdOptions("")
+	options.DocumentLoader = refuseRemoteContexts{}
 	if _, err := ld.NewJsonLdProcessor().Expand(probe, options); err != nil {
 		return fmt.Errorf("context schema content is not a usable JSON-LD context: %w", err)
 	}
 	return nil
+}
+
+// refuseRemoteContexts keeps admission off the filesystem and the network.
+// The json-gold default loader opens any non-HTTP IRI as a local file and
+// fetches HTTP IRIs without a timeout. The error is fixed so that it cannot
+// disclose anything about the target.
+type refuseRemoteContexts struct{}
+
+func (refuseRemoteContexts) LoadDocument(string) (*ld.RemoteDocument, error) {
+	return nil, errors.New("remote JSON-LD contexts are not loaded at admission; give the context inline")
 }
 
 func contextObjectNonEmpty(ctx any) bool {

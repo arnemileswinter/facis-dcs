@@ -2,7 +2,12 @@ package semantichub
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,7 +55,7 @@ func TestValidateSchemaContentAcceptsGenesisAssets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, ValidateSchemaContent(tc.kind, tc.content))
+			require.NoError(t, ValidateSchemaContent("admission-test", tc.kind, tc.content))
 		})
 	}
 }
@@ -67,7 +72,7 @@ func TestValidateSchemaContentAcceptsMinimalValidDocuments(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
-			require.NoError(t, ValidateSchemaContent(tc.kind, tc.content))
+			require.NoError(t, ValidateSchemaContent("admission-test", tc.kind, tc.content))
 		})
 	}
 }
@@ -136,7 +141,7 @@ ex:S a sh:NodeShape ;
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateSchemaContent(tc.kind, tc.content)
+			err := ValidateSchemaContent("admission-test", tc.kind, tc.content)
 			require.Error(t, err)
 			require.ErrorContains(t, err, tc.want)
 		})
@@ -146,14 +151,14 @@ ex:S a sh:NodeShape ;
 func TestValidateSchemaContentRejectsOdrlProfileWithEnum1(t *testing.T) {
 	mutated := strings.Replace(string(genesisODRLProfile), `"enum"`, `"enum1"`, 1)
 	require.Contains(t, mutated, `"enum1"`)
-	err := ValidateSchemaContent("ontology", mutated)
+	err := ValidateSchemaContent(ODRLProfileName, "ontology", mutated)
 	require.Error(t, err)
 	require.ErrorContains(t, err, `invalid appliesToParameterType "enum1"`)
 }
 
 func TestValidateSchemaContentRejectsGenesisContextWithSet1Container(t *testing.T) {
 	mutated := mutateFirstSetContainer(t, string(genesisContext), "@set1")
-	err := ValidateSchemaContent("context", mutated)
+	err := ValidateSchemaContent(ContextName, "context", mutated)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "not a usable JSON-LD context")
 	require.ErrorContains(t, err, "invalid container mapping")
@@ -193,4 +198,57 @@ func mutateFirstSetContainer(t *testing.T, content, replacement string) string {
 	require.NoError(t, err)
 	require.True(t, strings.Contains(string(out), `"@container":"`+replacement+`"`))
 	return string(out)
+}
+
+func TestValidateSchemaContentDoesNotReadLocalFilesForContexts(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "secret.jsonld")
+	require.NoError(t, os.WriteFile(existing, []byte(`{"@context":{"leak":"https://example.org/LEAKED-CONTENT#"}}`), 0o600))
+	missing := filepath.Join(dir, "missing.jsonld")
+
+	errExisting := ValidateSchemaContent("admission-test", "context", `{"@context":"`+existing+`"}`)
+	errMissing := ValidateSchemaContent("admission-test", "context", `{"@context":"`+missing+`"}`)
+	require.Error(t, errExisting)
+	require.Error(t, errMissing)
+	require.NotContains(t, errExisting.Error(), "LEAKED-CONTENT")
+	// Apart from the echoed path the errors are identical, so file existence does not show.
+	require.Equal(t,
+		strings.ReplaceAll(errExisting.Error(), existing, "<path>"),
+		strings.ReplaceAll(errMissing.Error(), missing, "<path>"))
+}
+
+func TestValidateSchemaContentDoesNotFetchRemoteContexts(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/ld+json")
+		_, _ = w.Write([]byte(minimalContextJSON))
+	}))
+	t.Cleanup(srv.Close)
+
+	for _, content := range []string{
+		`{"@context":"` + srv.URL + `/ctx.jsonld"}`,
+		`{"@context":["` + srv.URL + `/ctx.jsonld",{"ex":"https://example.org/"}]}`,
+		`{"@context":{"@version":1.1,"@import":"` + srv.URL + `/ctx.jsonld","ex":"https://example.org/"}}`,
+	} {
+		require.Error(t, ValidateSchemaContent("admission-test", "context", content))
+	}
+	require.Zero(t, hits.Load())
+}
+
+func TestValidateSchemaContentAcceptsInlineContexts(t *testing.T) {
+	require.NoError(t, ValidateSchemaContent("admission-test", "context", minimalContextJSON))
+	require.NoError(t, ValidateSchemaContent("admission-test", "context", `{"@context":[{"ex":"https://example.org/"}]}`))
+	require.NoError(t, ValidateSchemaContent(ContextName, "context", string(genesisContext)))
+}
+
+// ActiveOntologyIRIs loads the canonical entry's prefixes only from an object @context.
+func TestValidateSchemaContentRequiresObjectContextForCanonicalEntry(t *testing.T) {
+	for _, content := range []string{
+		`{"@context":[{"ex":"https://example.org/"}]}`,
+		`{"@context":"https://example.org/context.jsonld"}`,
+	} {
+		err := ValidateSchemaContent(ContextName, "context", content)
+		require.ErrorContains(t, err, "must have a JSON object as @context")
+	}
 }

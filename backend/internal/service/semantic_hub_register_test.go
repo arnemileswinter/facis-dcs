@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	semantichubgen "digital-contracting-service/gen/semantic_hub"
+	"digital-contracting-service/internal/semantichub"
 
 	"github.com/stretchr/testify/require"
 	goa "goa.design/goa/v3/pkg"
@@ -96,6 +97,22 @@ odrl:eq a odrl:Operator ;
 			requireBadRequest(t, err, tc.want)
 		})
 	}
+}
+
+// An activated canonical context that is not an @context object would make
+// RefreshValidationAnchors fail after commit and stop the next startup.
+func TestRegisterRejectsNonObjectCanonicalContextAsBadRequest(t *testing.T) {
+	s := &semanticHubsrvc{}
+	content := `{"@context":[{"ex":"https://example.org/"}]}`
+	activate := true
+	_, err := s.Register(context.Background(), &semantichubgen.RegisterPayload{
+		Name:      semantichub.ContextName,
+		Kind:      "context",
+		MediaType: "application/ld+json",
+		Content:   &content,
+		Activate:  &activate,
+	})
+	requireBadRequest(t, err, "must have a JSON object as @context")
 }
 
 // Admission runs before any DB write, so a bad source_url body is rejected
