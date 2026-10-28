@@ -175,7 +175,7 @@ def seed_open_tasks(context, names):
             did, _ = ContractService._contract_data(context, name)
             cursor.execute("INSERT INTO contract_review_task (did,state,reviewer,created_by) VALUES (%s,'OPEN',%s,%s)", (did, peer, context.qa_contract_orgs[name]))
             cursor.execute("INSERT INTO contract_approval_task (did,state,approver,created_by) VALUES (%s,'OPEN',%s,%s)", (did, peer, context.qa_contract_orgs[name]))
-            cursor.execute("INSERT INTO contract_negotiation_task (did,state,negotiator,created_by,contract_version) SELECT did,'OPEN',%s,%s,contract_version FROM contracts WHERE did=%s", (peer, context.qa_contract_orgs[name], did))
+            cursor.execute("INSERT INTO contract_negotiation_task (did,state,negotiator,created_by,contract_version) SELECT did,'OPEN',%s,%s,contract_version FROM contracts WHERE did=%s ON CONFLICT (did,negotiator,contract_version) DO UPDATE SET state='OPEN'", (peer, context.qa_contract_orgs[name], did))
         context.db.commit()
     finally:
         cursor.close()

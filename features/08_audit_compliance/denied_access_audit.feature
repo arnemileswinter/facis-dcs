@@ -5,7 +5,7 @@ Feature: Access decisions are auditable independently of credential validation
   Scenario Outline: Role and post-authentication scope denials retain complete request metadata
     Given an access audit probe authenticated as "<role>" for scope "contracts"
     When the access audit probe requests "<action>"
-    Then get http 403:Forbidden
+    Then get http 403:401 Unauthorized
     And exactly one DENIED access attempt records the probe metadata and successful credentials
 
     Examples:
@@ -38,7 +38,7 @@ Feature: Access decisions are auditable independently of credential validation
   Scenario Outline: Other human roles cannot read access-attempt metadata
     Given I am authenticated with roles: "<role>"
     When I request access attempts with a unique justification
-    Then get http 403:Forbidden
+    Then get http 403:401 Unauthorized
     And the access-attempt response exposes no attempt list
 
     Examples:
@@ -50,7 +50,7 @@ Feature: Access decisions are auditable independently of credential validation
   Scenario: The System Auditor cannot read the human audit access log
     When the system client "dcs-orce-notary" obtains an access token
     And the System Auditor requests access attempts with a unique justification
-    Then get http 403:Forbidden
+    Then get http 403:401 Unauthorized
     And the access-attempt response exposes no attempt list
 
   @REQ-denied-access-audit-AC6
