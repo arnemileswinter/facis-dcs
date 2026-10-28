@@ -635,6 +635,18 @@ var ContractAuditResponse = Type("ContractAuditResponse", func() {
 	Required("id", "component", "event_type", "event_data", "created_at")
 })
 
+var ContractLifecycleEvent = Type("ContractLifecycleEvent", func() {
+	Description("One lifecycle transition of a contract, taken from the audit trail without the event body")
+
+	Attribute("event_type", String, "Type of the lifecycle event")
+	Attribute("actor", String, "Participant that performed the transition; absent for system transitions and erased entries")
+	Attribute("occurred_at", String, "When the transition occurred (RFC 3339)")
+	Attribute("previous_state", String, "Contract state before the transition, if the event records it")
+	Attribute("new_state", String, "Contract state after the transition, if the event records it")
+
+	Required("event_type", "occurred_at")
+})
+
 var ApprovedContractTemplateRetrieveRequest = Type("ApprovedContractTemplateRetrieveRequest", func() {
 	Description("Approved contract template retrieve request")
 
@@ -1654,6 +1666,38 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Response("forbidden", StatusForbidden)
 			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("lifecycle", func() {
+		Description("retrieve the lifecycle transitions of a contract with actor and timestamp, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-FR-CWE-27")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractLifecycleEvent))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/lifecycle/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

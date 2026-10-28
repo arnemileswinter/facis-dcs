@@ -7,6 +7,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractLifecycleHistory from '@contract-workflow-engine/components/ContractLifecycleHistory.vue'
 import ContractStructureTree from '@contract-workflow-engine/components/ContractStructureTree.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
@@ -84,6 +85,7 @@ const tabs = computed(() =>
     'details',
     'content',
     'audit',
+    'history',
     'structure',
   ]),
 )
@@ -384,6 +386,15 @@ const exportBundle = async () => {
                   </div>
                 </div>
               </template>
+
+              <div v-show="activeTab === 'history'">
+                <div class="card border border-base-300 bg-base-100 shadow-sm">
+                  <div class="card-body">
+                    <h2 class="card-title text-sm">Lifecycle History</h2>
+                    <ContractLifecycleHistory />
+                  </div>
+                </div>
+              </div>
 
               <div v-show="activeTab === 'structure'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">

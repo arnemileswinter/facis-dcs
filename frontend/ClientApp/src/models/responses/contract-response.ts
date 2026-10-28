@@ -154,6 +154,15 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
+/** One lifecycle transition from GET /contract/lifecycle/{did}, without the event body. */
+export interface ContractLifecycleEvent {
+  event_type: string
+  actor?: string
+  occurred_at: string
+  previous_state?: string
+  new_state?: string
+}
+
 export interface ContractHistoryItem {
   did: string
   contract_version: number

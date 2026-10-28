@@ -21,6 +21,8 @@ const contractEventLabels: Record<string, string> = {
   RENEW_CONTRACT: 'Contract renewed',
   RECORD_EVIDENCE: 'Evidence recorded',
   CONTRACT_EXPIRED: 'Contract expired',
+  APPLIED_SIGNATURE: 'Contract signed',
+  REVOKE_SIGNATURE: 'Signature revoked',
   RETRIEVE_ALL_CONTRACTS: 'Contracts retrieved',
   RETRIEVE_CONTRACT_BY_ID: 'Contract retrieved',
   RETRIEVE_CONTRACT_HISTORY_BY_DID: 'Contract history retrieved',
