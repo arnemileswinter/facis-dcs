@@ -29,6 +29,7 @@ import (
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	geninfo "digital-contracting-service/gen/info"
 	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
@@ -783,6 +784,7 @@ func main() {
 		c2paSvc                         c2paservice.Service
 		semanticHubSvc                  semantichubgen.Service
 		keyInventorySvc                 keyinventory.Service
+		infoSvc                         geninfo.Service
 		workflowGateCoordinator         *workflowgate.Coordinator
 	)
 	{
@@ -851,6 +853,7 @@ func main() {
 		didSrv = didService
 		semanticHubSvc = service.NewSemanticHub(db, jwtAuth)
 		keyInventorySvc = service.NewKeyInventory(db, jwtAuth)
+		infoSvc = service.NewInfo()
 	}
 
 	// Channel used by background workers and signal handler to notify main to exit.
@@ -930,6 +933,7 @@ func main() {
 		c2paEndpoints                         *c2paservice.Endpoints
 		semanticHubEndpoints                  *semantichubgen.Endpoints
 		keyInventoryEndpoints                 *keyinventory.Endpoints
+		infoEndpoints                         *geninfo.Endpoints
 	)
 	{
 		authEndpoints = genauth.NewEndpoints(authSvc)
@@ -972,6 +976,9 @@ func main() {
 		keyInventoryEndpoints = keyinventory.NewEndpoints(keyInventorySvc)
 		keyInventoryEndpoints.Use(debug.LogPayloads())
 		keyInventoryEndpoints.Use(log.Endpoint)
+		infoEndpoints = geninfo.NewEndpoints(infoSvc)
+		infoEndpoints.Use(debug.LogPayloads())
+		infoEndpoints.Use(log.Endpoint)
 	}
 
 	// SIGINT/SIGTERM stop the service gracefully.
@@ -991,7 +998,7 @@ func main() {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
 	serveMetrics(ctx, &wg)
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)
