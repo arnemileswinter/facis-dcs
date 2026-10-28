@@ -28,6 +28,8 @@ securityContext: {}
 service:
   type: ClusterIP
   port: 8991
+  # Prometheus /metrics, on its own ClusterIP Service (<fullname>-metrics).
+  metricsPort: 9464
 
 serviceMonitor:
   enabled: false
