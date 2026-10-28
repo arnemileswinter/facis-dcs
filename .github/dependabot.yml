@@ -16,3 +16,15 @@ updates:
     directory: "/frontend/ClientApp"
     schedule:
       interval: "weekly"
+  - package-ecosystem: "npm"
+    directory: "/deployment/node-red"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/deployment/docker"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/pdf-core"
+    schedule:
+      interval: "weekly"
