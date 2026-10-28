@@ -33,6 +33,7 @@ import type {
   ContractCreateResponse,
   ContractDeployResponse,
   ContractHistoryResponse,
+  ContractLifecycleEvent,
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
@@ -58,6 +59,11 @@ import type { ContractWorkflowService } from '@/models/services/contract-workflo
 export const contractWorkflowService: ContractWorkflowService = {
   async storeEvidence(request: StoreContractEvidence) {
     return http.post<{ did: string; evidence_id: string }>('/contract/store', request).then((res) => res.data)
+  },
+  async lifecycle(did: string) {
+    return http
+      .get<ContractLifecycleEvent[]>(`/contract/lifecycle/${encodeURIComponent(did)}`)
+      .then((res) => res.data ?? [])
   },
   async listEvidence(did: string) {
     return http.get<ContractEvidence[]>(`/contract/${encodeURIComponent(did)}/evidence`).then((res) => res.data)

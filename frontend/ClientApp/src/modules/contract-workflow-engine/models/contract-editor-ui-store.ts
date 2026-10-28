@@ -6,6 +6,7 @@ export type ContractEditorTabId =
   | 'diff'
   | 'proposals'
   | 'audit'
+  | 'history'
   | 'structure'
 
 interface ContractEditorUiState {
@@ -18,6 +19,7 @@ interface ContractEditorUiState {
     { id: 'diff'; label: string },
     { id: 'proposals'; label: string },
     { id: 'audit'; label: string },
+    { id: 'history'; label: string },
     { id: 'structure'; label: string },
   ]
 }

@@ -129,6 +129,8 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	engine := &contractWorkflowEnginesrvc{DB: database, DIDDocument: *document, CRepo: repo}
 	_, err = engine.RetrieveHistoryByID(userCtx, &cwe.ContractHistoryRetrieveByIDRequest{Did: "foreign"})
 	require.ErrorContains(t, err, "not authorized")
+	_, err = engine.Lifecycle(userCtx, &cwe.LifecyclePayload{Did: "foreign"})
+	require.ErrorContains(t, err, "not authorized")
 	_, err = engine.KpiObservations(userCtx, &cwe.ContractRetrieveByIDRequest{Did: "foreign"})
 	require.ErrorContains(t, err, "not authorized")
 	_, err = engine.RetrieveNegotiationDraft(userCtx, &cwe.ContractNegotiationDraftRetrieveRequest{Did: "foreign"})

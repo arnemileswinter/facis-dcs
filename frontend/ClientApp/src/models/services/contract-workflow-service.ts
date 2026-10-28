@@ -33,6 +33,7 @@ import type {
   ContractCreateResponse,
   ContractDeployResponse,
   ContractHistoryResponse,
+  ContractLifecycleEvent,
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
@@ -55,6 +56,7 @@ import type {
 
 export interface ContractWorkflowService {
   storeEvidence: (request: StoreContractEvidence) => Promise<{ did: string; evidence_id: string }>
+  lifecycle: (did: string) => Promise<ContractLifecycleEvent[]>
   listEvidence: (did: string) => Promise<ContractEvidence[]>
   retrieveEvidence: (did: string, evidenceId: string) => Promise<ContractEvidence>
 
