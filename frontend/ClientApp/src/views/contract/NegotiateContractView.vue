@@ -764,7 +764,7 @@ const exportPDF = async () => {
           v-if="canAcceptOffer"
           data-testid="accept-offer"
           class="btn flex-1 btn-primary"
-          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting || activeTab === 'proposals'"
+          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting"
           @click="acceptOffer"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
