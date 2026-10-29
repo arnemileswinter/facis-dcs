@@ -952,7 +952,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			PUT("/contract/update")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -985,7 +989,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/submit")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1008,7 +1016,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1031,7 +1043,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/withdraw")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1062,7 +1078,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/negotiate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1090,7 +1110,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/accept-offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1123,7 +1147,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			PUT("/contract/negotiation_draft")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1182,7 +1210,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			DELETE("/contract/negotiation_draft/{did}")
 			Param("did")
 			Response(StatusOK)
@@ -1213,7 +1245,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/respond")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1491,7 +1527,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/approve")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1514,7 +1554,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/reject")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1612,7 +1656,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/terminate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1635,7 +1683,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/renew")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1741,7 +1793,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/deploy")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1859,7 +1915,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/target/designate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
