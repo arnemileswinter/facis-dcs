@@ -260,7 +260,13 @@ func (r *PostgresContractTemplateRepo) UpdateStateForAllTasks(ctx context.Contex
 	return err
 }
 
+// UpdateState keeps the replaced state as a history entry, so the template
+// provenance lists every lifecycle step (F04). A refused change returns an
+// error and the caller's rollback removes the entry.
 func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
+	if err := r.CreateHistoryEntryForDID(ctx, tx, did); err != nil {
+		return fmt.Errorf("could not create history entry: %w", err)
+	}
 	statement := `
         UPDATE contract_templates ct
         SET state = $2::contract_template_state
