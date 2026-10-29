@@ -63,7 +63,9 @@ def step_given_webhook_subscription(context, event):
 
 
 def _assert_delivery(context, event, did, subject):
-    headers = AuthService.get_headers_for_roles(["Template Manager"])
+    # GET /deliveries lists the deliveries of the caller organization's
+    # subscriptions and needs a subscription management role.
+    headers = AuthService.get_headers_for_roles(["Integration Manager"])
     path = context.webhook_receiver_path
     # The outbox publisher reads unpublished events on a ~1s ticker and the
     # dispatcher fans out asynchronously, so poll the receiver and the

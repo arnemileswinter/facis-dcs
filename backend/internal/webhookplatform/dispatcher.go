@@ -7,10 +7,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // WebhookPayload is the JSON body sent to a subscriber's callback URL.
@@ -23,32 +26,42 @@ type WebhookPayload struct {
 	Data          json.RawMessage `json:"data,omitempty"`
 }
 
-// Dispatcher fans out events to all registered subscribers asynchronously.
+// Audience reports whether the organization ownerDID may receive event about
+// did. Events carry contract content, so delivery follows the contract read
+// policy (F03).
+type Audience func(ctx context.Context, event, did, ownerDID string) bool
+
+// Dispatcher fans out events to the registered subscribers asynchronously.
 type Dispatcher struct {
 	subs       Subscriptions
 	store      *DeliveryLog
+	audience   Audience
 	httpClient *http.Client
 }
 
-// NewDispatcher creates a Dispatcher that reads subscribers from subs and
-// records outcomes in store.
-func NewDispatcher(subs Subscriptions, store *DeliveryLog) *Dispatcher {
+// NewDispatcher creates a Dispatcher that reads subscribers from subs, delivers
+// to those audience admits, and records outcomes in store. Callback URLs are
+// caller-supplied, so the client refuses loopback, link-local and redirects.
+func NewDispatcher(subs Subscriptions, store *DeliveryLog, audience Audience) *Dispatcher {
 	return &Dispatcher{
-		subs:  subs,
-		store: store,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		subs:       subs,
+		store:      store,
+		audience:   audience,
+		httpClient: safehttp.Client(10*time.Second, safehttp.Policy{}),
 	}
 }
 
-// Dispatch sends event to every subscriber registered for that event.
+// Dispatch sends event to every subscriber registered for that event whose
+// organization the audience admits.
 func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
 	subs, err := d.subs.ByEvent(ctx, event)
 	if err != nil {
 		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
 		return
 	}
+	subs = slices.DeleteFunc(subs, func(sub Subscription) bool {
+		return !d.audience(ctx, event, did, sub.OwnerDID)
+	})
 	if len(subs) == 0 {
 		return
 	}
@@ -92,6 +105,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 		Event:         payload.Event,
 		DID:           payload.DID,
 		CallbackURL:   sub.CallbackURL,
+		OwnerDID:      sub.OwnerDID,
 		DeliveredAt:   time.Now().UTC(),
 	}
 

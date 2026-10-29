@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -77,7 +78,7 @@ func (p *Platform) routes() {
 	p.mux.HandleFunc("POST /webhooks", p.auth(p.manage(p.subscribe)))
 	p.mux.HandleFunc("DELETE /webhooks/{id}", p.auth(p.manage(p.unsubscribe)))
 	p.mux.HandleFunc("POST /callbacks", p.auth(p.callback))
-	p.mux.HandleFunc("GET /deliveries", p.auth(p.listDeliveries))
+	p.mux.HandleFunc("GET /deliveries", p.auth(p.manage(p.listDeliveries)))
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -170,9 +171,10 @@ func (p *Platform) listWebhooks(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /deliveries — recent notification outcomes (status code / error /
-// acknowledged), the monitoring surface for DCS-FR-TR-22 subscribers.
+// acknowledged) of the caller organization's subscriptions, the monitoring
+// surface for DCS-FR-TR-22 subscribers.
 func (p *Platform) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, p.store.ListDeliveries())
+	jsonOK(w, p.store.ListDeliveries(callerFromCtx(r.Context()).ParticipantDID))
 }
 
 // POST /webhooks
@@ -188,6 +190,10 @@ func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Event == "" || req.CallbackURL == "" {
 		jsonError(w, http.StatusBadRequest, "event and callback_url are required")
+		return
+	}
+	if u, err := url.Parse(req.CallbackURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+		jsonError(w, http.StatusBadRequest, "callback_url must be an absolute http or https URL without credentials")
 		return
 	}
 	if !isKnownEvent(req.Event) {

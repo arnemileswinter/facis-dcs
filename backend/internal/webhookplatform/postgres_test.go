@@ -60,6 +60,20 @@ func TestPostgresSubscriptionsScopeToOwner(t *testing.T) {
 		t.Fatalf("ByEvent = %+v, %v; want org A's subscription with its secret", byEvent, err)
 	}
 
+	// A subscription whose secret no longer opens is skipped, not fatal.
+	secretC, _ := NewSecret()
+	c, err := s.Add(ctx, Subscription{Event: "template.updated", CallbackURL: "https://c.example", Secret: secretC, OwnerDID: orgB, CreatedBy: "user-c"})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE webhook_subscriptions SET secret_ciphertext = '\x00' WHERE id = $1`, c.ID); err != nil {
+		t.Fatalf("corrupt: %v", err)
+	}
+	byEvent, err = s.ByEvent(ctx, "template.updated")
+	if err != nil || len(byEvent) != 1 || byEvent[0].ID != a.ID {
+		t.Fatalf("ByEvent with one unreadable row = %+v, %v; want only org A's subscription", byEvent, err)
+	}
+
 	if ok, err := s.DeleteOwned(ctx, a.ID, orgB); err != nil || ok {
 		t.Fatalf("DeleteOwned by orgB = %v, %v; want false", ok, err)
 	}

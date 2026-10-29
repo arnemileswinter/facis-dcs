@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 
@@ -41,6 +42,26 @@ func authorizeContractRead(ctx context.Context, database *sqlx.DB, localPeer, di
 		return contractworkflowengine.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
 	return nil
+}
+
+// ContractEventAudience admits a webhook subscriber organization to a contract
+// event only when it may read the contract. Template events are not
+// organization-scoped. An unknown or unreadable contract admits nobody.
+func ContractEventAudience(database *sqlx.DB, localPeer string) func(ctx context.Context, event, did, organization string) bool {
+	return func(ctx context.Context, event, did, organization string) bool {
+		if strings.HasPrefix(event, "template.") {
+			return true
+		}
+		var row struct {
+			Origin    string         `db:"origin"`
+			CreatedBy string         `db:"created_by"`
+			Data      *datatype.JSON `db:"contract_data"`
+		}
+		if err := database.GetContext(ctx, &row, `SELECT COALESCE(origin, '') AS origin, created_by, contract_data FROM contracts_effective WHERE did = $1`, did); err != nil {
+			return false
+		}
+		return contractreadpolicy.Scope{Organization: organization, LocalPeer: localPeer}.MayRead(row.Origin, row.CreatedBy, row.Data)
+	}
 }
 
 func authorizeContractReadDocument(ctx context.Context, database *sqlx.DB, document identity.DIDDocument, did string) error {

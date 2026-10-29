@@ -58,9 +58,19 @@ func (f *fakeSubscriptions) DeleteOwned(_ context.Context, id, ownerDID string) 
 	return false, nil
 }
 
-func (f *fakeSubscriptions) ByEvent(context.Context, string) ([]Subscription, error) {
-	return nil, nil
+func (f *fakeSubscriptions) ByEvent(_ context.Context, event string) ([]Subscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Subscription
+	for _, s := range f.subs {
+		if s.Event == event {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
+
+func admitAll(context.Context, string, string, string) bool { return true }
 
 // Each test token is the name of a caller in this table.
 var testCallers = map[string]Caller{
@@ -80,7 +90,7 @@ func newTestPlatform(subs Subscriptions) *Platform {
 		}
 		return c, nil
 	}
-	return New(subs, store, NewDispatcher(subs, store), validate, nil)
+	return New(subs, store, NewDispatcher(subs, store, admitAll), validate, nil)
 }
 
 func do(t *testing.T, p *Platform, method, path, token, body string) *httptest.ResponseRecorder {
@@ -194,6 +204,7 @@ func TestCallerWithoutManagementRoleIsForbidden(t *testing.T) {
 			{http.MethodGet, "/webhooks", ""},
 			{http.MethodPost, "/webhooks", `{"event":"template.updated","callback_url":"https://x.example"}`},
 			{http.MethodDelete, "/webhooks/" + id, ""},
+			{http.MethodGet, "/deliveries", ""},
 		} {
 			if rec := do(t, p, tc.method, tc.path, token, tc.body); rec.Code != http.StatusForbidden {
 				t.Errorf("%s %s as %s = %d, want 403", tc.method, tc.path, token, rec.Code)
@@ -202,5 +213,37 @@ func TestCallerWithoutManagementRoleIsForbidden(t *testing.T) {
 	}
 	if len(subs.subs) != 1 {
 		t.Fatalf("a caller without a management role changed the subscriptions: %+v", subs.subs)
+	}
+}
+
+func TestSubscribeRejectsCallbackURLsThatAreNotPlainHTTP(t *testing.T) {
+	subs := &fakeSubscriptions{}
+	p := newTestPlatform(subs)
+	for _, u := range []string{"ftp://receiver.example/hook", "/relative", "https://user:pw@receiver.example/hook", "http://"} {
+		rec := do(t, p, http.MethodPost, "/webhooks", "manager-a",
+			`{"event":"template.updated","callback_url":"`+u+`"}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("POST /webhooks with callback_url %q = %d, want 400", u, rec.Code)
+		}
+	}
+	if len(subs.subs) != 0 {
+		t.Fatalf("an invalid callback URL was stored: %+v", subs.subs)
+	}
+}
+
+func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
+	store := NewDeliveryLog()
+	store.AddDelivery(Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA})
+	store.AddDelivery(Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB})
+	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
+	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll), validate, nil)
+
+	rec := do(t, p, http.MethodGet, "/deliveries", "manager-a", "")
+	var got []map[string]any
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+		t.Fatalf("GET /deliveries = %d %s, want 200", rec.Code, rec.Body)
+	}
+	if len(got) != 1 || got[0]["event_id"] != "a" {
+		t.Fatalf("GET /deliveries for org A = %v, want only org A's delivery", got)
 	}
 }

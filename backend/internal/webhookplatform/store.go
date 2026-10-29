@@ -3,6 +3,7 @@ package webhookplatform
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -155,9 +156,11 @@ func (s PostgresSubscriptions) ByEvent(ctx context.Context, event string) ([]Sub
 	}
 	subs := make([]Subscription, 0, len(rows))
 	for _, row := range rows {
+		// One unreadable secret must not stop delivery to the other subscribers.
 		secret, err := s.Secrets.Open(row.ID, row.Ciphertext, row.WrappedCEK)
 		if err != nil {
-			return nil, fmt.Errorf("webhook subscription %s: %w", row.ID, err)
+			log.Printf("webhookplatform: skip subscription %s: %v", row.ID, err)
+			continue
 		}
 		row.Secret = secret
 		subs = append(subs, row.Subscription)
@@ -182,6 +185,7 @@ type Delivery struct {
 	Event         string    `json:"event"`
 	DID           string    `json:"did"`
 	CallbackURL   string    `json:"callback_url"`
+	OwnerDID      string    `json:"-"`
 	StatusCode    int       `json:"status_code,omitempty"`
 	Error         string    `json:"error,omitempty"`
 	DeliveredAt   time.Time `json:"delivered_at"`
@@ -238,9 +242,15 @@ func (s *DeliveryLog) AddDelivery(d Delivery) {
 	}
 }
 
-// ListDeliveries returns a snapshot of the delivery log, newest last.
-func (s *DeliveryLog) ListDeliveries() []Delivery {
+// ListDeliveries returns the deliveries to ownerDID's subscriptions, newest last.
+func (s *DeliveryLog) ListDeliveries(ownerDID string) []Delivery {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]Delivery(nil), s.deliveries...)
+	out := []Delivery{}
+	for _, d := range s.deliveries {
+		if d.OwnerDID == ownerDID {
+			out = append(out, d)
+		}
+	}
+	return out
 }
