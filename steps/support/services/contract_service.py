@@ -223,12 +223,21 @@ class ContractService:
 
 
     @staticmethod
+    def _reading_parties(context) -> dict:
+        """Create-payload `parties` for a scenario with a dedicated organization
+        (steps/encryption_at_rest). Reads are scoped to the creating organization
+        and the declared parties, so the dedicated organization must be named."""
+        org = getattr(context, "encryption_org", None)
+        return {"parties": [AuthService.DEFAULT_ORGANIZATION, org]} if org else {}
+
+    @staticmethod
     def _create_contract_in_draft(context, contract_name: str, template_data=None):
         t_did = ContractService._create_approved_template_for_contract(context, template_data=template_data)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {
             "template_did": t_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
