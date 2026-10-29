@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { expect, test } from './dcs-test'
-import { buildApprovedContract, FIXTURE_CLAUSE_PROSE, gotoAs, signApprovedContractViaViewer } from './lifecycle-helpers'
+import { E2E_ORG_B, expect, mintSession, test } from './dcs-test'
+import {
+  buildApprovedContract,
+  buildDraftContract,
+  FIXTURE_CLAUSE_PROSE,
+  gotoAs,
+  signApprovedContractViaViewer,
+  submitDraftIntoNegotiation,
+} from './lifecycle-helpers'
+import { E2E_API_BASE } from '../playwright.config'
 
 test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and complete reports through real services', async ({
   page,
@@ -141,5 +149,56 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
         expect(bytes.length).toBeGreaterThan(1000)
       }
     }
+  })
+})
+
+test('U3 P03 F04 show lifecycle history, version actors and template history through real services', async ({
+  page,
+  loginAs,
+  request,
+}) => {
+  test.setTimeout(600_000)
+  page.setDefaultTimeout(30_000)
+  const { contractDid: did } = await buildDraftContract(page, loginAs)
+  await submitDraftIntoNegotiation(page, loginAs, did)
+  const lifecycleURL = `${E2E_API_BASE}/contract/lifecycle/${encodeURIComponent(did)}`
+  const bearer = (organization?: string) => ({
+    Authorization: `Bearer ${mintSession('Contract Manager', E2E_API_BASE, organization).token}`,
+  })
+
+  await test.step('P03 version picker names who replaced each version and when', async () => {
+    await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${did}`)
+    await page.getByRole('tab', { name: 'Diff View' }).click()
+    await expect(
+      page.locator('#diff-left-pick option').filter({ hasText: /replaced by \S+.* at \d{4}-\d{2}-\d{2} / }),
+    ).not.toHaveCount(0)
+  })
+
+  await test.step('U3 party sees the lifecycle history with actor', async () => {
+    await gotoAs(page, loginAs, 'Contract Manager', `/ui/contracts/view/${did}`)
+    await page.getByRole('tab', { name: 'Lifecycle History' }).click()
+    const history = page.getByTestId('lifecycle-history')
+    await expect(history.getByRole('listitem').first()).toBeVisible()
+    await expect(history.getByText(/^By: \S/).first()).toBeVisible()
+  })
+
+  await test.step('U3 lifecycle is refused to a foreign organization', async () => {
+    const own = await request.get(lifecycleURL, { headers: bearer() })
+    expect(own.status(), await own.text()).toBe(200)
+    const foreign = await request.get(lifecycleURL, { headers: bearer(E2E_ORG_B) })
+    expect(foreign.status(), await foreign.text()).toBe(403)
+  })
+
+  await test.step('F04 Meta Data lists the template version history', async () => {
+    const contract = await request.get(`${E2E_API_BASE}/contract/retrieve/${encodeURIComponent(did)}`, {
+      headers: bearer(),
+    })
+    expect(contract.ok(), await contract.text()).toBeTruthy()
+    const templateDid = String((await contract.json()).template_did)
+    await gotoAs(page, loginAs, 'Template Manager', `/ui/templates/view/${encodeURIComponent(templateDid)}`)
+    await page.getByRole('tab', { name: 'Meta Data' }).click()
+    const entries = page.getByTestId('template-history-entry')
+    await expect.poll(() => entries.count()).toBeGreaterThan(1)
+    await expect(page.getByTestId('template-history')).toContainText('APPROVED')
   })
 })

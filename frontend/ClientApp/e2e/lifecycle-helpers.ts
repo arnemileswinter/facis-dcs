@@ -332,30 +332,8 @@ export async function buildDraftContractFixture(browser: Browser): Promise<Draft
   }
 }
 
-/**
- * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
- * a component template with a semantic clause → a contract template composing
- * it → registration → contract derivation → negotiation, review, approval.
- * Returns the approved contract's DID.
- */
-export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
-  const unique = Date.now()
-  const componentName = `SCV Component ${unique}`
-  const contractTemplateName = `SCV Contract ${unique}`
-
-  const componentDid = await test.step('create component template with a semantic clause', () =>
-    authorPaymentComponent(page, loginAs, componentName, true))
-  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
-
-  const contractTemplateDid = await test.step('create contract template from approved component', () =>
-    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
-  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
-  await test.step('register approved contract template', () =>
-    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
-
-  const contractDid = await test.step('create contract from registered template', () =>
-    deriveLocalContract(page, loginAs, contractTemplateName))
-
+/** Fills the required Payment Amount of a DRAFT contract and submits it into negotiation. */
+export async function submitDraftIntoNegotiation(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
   await test.step('fill the required Payment Amount and submit into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
@@ -384,6 +362,33 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })
+}
+
+/**
+ * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
+ * a component template with a semantic clause → a contract template composing
+ * it → registration → contract derivation → negotiation, review, approval.
+ * Returns the approved contract's DID.
+ */
+export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
+  const unique = Date.now()
+  const componentName = `SCV Component ${unique}`
+  const contractTemplateName = `SCV Contract ${unique}`
+
+  const componentDid = await test.step('create component template with a semantic clause', () =>
+    authorPaymentComponent(page, loginAs, componentName, true))
+  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
+
+  const contractTemplateDid = await test.step('create contract template from approved component', () =>
+    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
+  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
+  await test.step('register approved contract template', () =>
+    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
+
+  const contractDid = await test.step('create contract from registered template', () =>
+    deriveLocalContract(page, loginAs, contractTemplateName))
+
+  await submitDraftIntoNegotiation(page, loginAs, contractDid)
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
