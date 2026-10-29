@@ -164,9 +164,11 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   `webhook-id.webhook-timestamp.Body` mit dem Base64-dekodierten Teil
   nach `whsec_` als Schlüssel; `X-Event-ID` und `X-Correlation-ID`
   bleiben. Der ORCE-Empfänger `/dcs-dispatch` prüft die Signatur über die
-  empfangenen Bytes (`msg.req.rawBody`) mit `WEBHOOK_SECRET`
-  (`timingSafeEqual`, höchstens 300 s Zeitabweichung) und antwortet sonst
-  401, auch ohne `WEBHOOK_SECRET` oder ohne Raw-Body. Den Raw-Body liefert
+  empfangenen Bytes (`msg.req.rawBody`) mit den Secrets aus
+  `WEBHOOK_SECRET` (eines pro Abonnement, durch Leerzeichen oder Komma
+  getrennt; `timingSafeEqual`, höchstens 300 s Zeitabweichung, jede
+  `webhook-id` nur einmal) und antwortet sonst 401, auch ohne
+  `WEBHOOK_SECRET` oder ohne Raw-Body. Den Raw-Body liefert
   die vom Chart gemountete `settings.js` (Image-Standard plus ein
   JSON-Parser mit `verify` als `httpAdminMiddleware` und
   `httpNodeMiddleware`); der Editor-Parser unter `httpAdminRoot` `/` liest
@@ -174,9 +176,16 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   einen Empfänger im behave-Prozess zu, der die Signatur mit dem Secret
   aus der 201-Antwort prüft. Der Betreiber kopiert das Secret aus der
   201-Antwort in ein Kubernetes-Secret und gibt es ORCE über
-  `orce.extraEnv` mit `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`.
-  Pending-Callbacks und das Delivery-Log (letzte 512 Einträge, GET /deliveries) bleiben im
-  Speicher.
+  `orce.extraEnv` mit `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`. Der
+  ORCE-Subflow „DCS Subscribe“ abonniert mit dem Bearer-Token aus
+  `DCS_TOKEN` (Integration Manager der abonnierenden Organisation).
+  DCS stellt ein Vertrags-Event nur Abonnements von Organisationen zu,
+  die den Vertrag lesen dürfen (F03); Template-Events gehen an alle.
+  Callback-URLs sind absolute http- oder https-URLs ohne Zugangsdaten;
+  der Dispatcher erreicht weder Loopback noch Link-Local-Adressen und
+  folgt keinen Redirects.
+  Pending-Callbacks und das Delivery-Log (letzte 512 Einträge, GET /deliveries
+  mit Verwaltungsrolle, nur die eigene Organisation) bleiben im Speicher.
   **Warum:** Ein Abonnement verbindet ein Drittsystem mit DCS-Events,
   das ist nach ADR-29 eine Integrationsaufgabe. Die HMAC-Signatur
   beweist dem Empfänger Herkunft und Unversehrtheit jeder Zustellung,
