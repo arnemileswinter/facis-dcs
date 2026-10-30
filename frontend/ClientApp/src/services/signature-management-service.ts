@@ -207,6 +207,15 @@ export interface CeremonyStatusResult {
   status: CeremonyStatus
   signer_did?: string
   expires_at?: string
+  // Set once a signature submitted for this ceremony was accepted.
+  signed_at?: string
+}
+
+export interface SignatureRequestPublishResult {
+  ceremony_id: string
+  wallet_uri: string
+  request_uri: string
+  expires_at: string
 }
 
 export const signatureManagementService = {
@@ -231,6 +240,16 @@ export const signatureManagementService = {
 
   async getCeremonyStatus(ceremonyId: string): Promise<CeremonyStatusResult> {
     return http.get<CeremonyStatusResult>(`/signature/request/${ceremonyId}`).then((res) => res.data)
+  },
+
+  // Wallet signing (ADR-12, DCS-FR-SM-06/-23): prepares the to-be-signed
+  // document for a verified ceremony and returns the OID4VP Document-Retrieval
+  // deep link. The wallet signs the document and posts it back to the DCS; the
+  // level defaults to the contract's own requirement for the field.
+  async publishSignatureRequest(ceremonyId: string): Promise<SignatureRequestPublishResult> {
+    return http
+      .post<SignatureRequestPublishResult>(`/signature/request/${encodeURIComponent(ceremonyId)}/publish`, {})
+      .then((res) => res.data)
   },
 
   // The DCS holds no signing key (ADR-12). Signing is two steps: prepare the

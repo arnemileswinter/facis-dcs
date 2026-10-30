@@ -426,6 +426,7 @@ var SMSignatureRequestStatusResponse = Type("SMSignatureRequestStatusResponse", 
 	Attribute("status", String, "Ceremony lifecycle status: pending, verified, expired, failed")
 	Attribute("signer_did", String, "DID of the signer resolved from the presented PID, once verified")
 	Attribute("expires_at", String, "ISO-8601 timestamp when the ceremony expires")
+	Attribute("signed_at", String, "ISO-8601 timestamp when a signature submitted for this ceremony was accepted; absent until then")
 
 	Required("ceremony_id", "status")
 })

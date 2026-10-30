@@ -7,6 +7,9 @@ import { type CeremonyStatus, signatureManagementService } from '@/services/sign
 interface CeremonyRequest {
   contractDid: string
   fieldName: string
+  // A published signing request of a verified ceremony: the dialog shows its
+  // deep link and waits until the wallet's signature is accepted.
+  signingRequest?: { ceremonyId: string; walletUri: string }
 }
 
 export interface CeremonyResult {
@@ -41,9 +44,15 @@ const { isRevealed, reveal, confirm, cancel, onReveal } = useConfirmDialog<
   CeremonyResult | undefined
 >()
 
+const signing = computed(() => !!request.value.signingRequest)
+
 onReveal((data) => {
   if (data) request.value = data
-  void startCeremony()
+  if (data?.signingRequest) {
+    showSigningRequest(data.signingRequest)
+  } else {
+    void startCeremony()
+  }
 })
 
 watch(isRevealed, (value) => {
@@ -87,10 +96,27 @@ async function startCeremony() {
   }
 }
 
+function showSigningRequest(signingRequest: { ceremonyId: string; walletUri: string }) {
+  stopPolling()
+  errorMessage.value = ''
+  copyHint.value = ''
+  ceremonyId = signingRequest.ceremonyId
+  walletUri.value = signingRequest.walletUri
+  phase.value = 'pending'
+  pollTimer = setInterval(() => void pollStatus(), POLL_INTERVAL_MS)
+}
+
 async function pollStatus() {
   if (!ceremonyId) return
   try {
     const status = await signatureManagementService.getCeremonyStatus(ceremonyId)
+    if (signing.value) {
+      if (status.signed_at) {
+        stopPolling()
+        confirm({ signerDid: status.signer_did ?? '', ceremonyId })
+      }
+      return
+    }
     phase.value = status.status
     if (status.status === 'verified') {
       stopPolling()
@@ -110,7 +136,11 @@ async function copyWalletUri() {
 }
 
 function retry() {
-  void startCeremony()
+  if (request.value.signingRequest) {
+    showSigningRequest(request.value.signingRequest)
+  } else {
+    void startCeremony()
+  }
 }
 
 function onCancel() {
@@ -145,7 +175,10 @@ defineExpose<DialogExpose>({ reveal })
         </div>
 
         <div v-else-if="phase === 'pending'" class="flex flex-col items-center gap-3">
-          <p :id="dialogDescriptionId" class="text-sm opacity-80">
+          <p v-if="signing" :id="dialogDescriptionId" class="text-sm opacity-80">
+            Scan the QR code with your wallet to sign the document. The wallet sends the signed document back.
+          </p>
+          <p v-else :id="dialogDescriptionId" class="text-sm opacity-80">
             Scan the QR code with your wallet to present your PID and Power of Attorney, then sign.
           </p>
           <figure class="rounded-box bg-white p-3">
@@ -153,7 +186,9 @@ defineExpose<DialogExpose>({ reveal })
           </figure>
           <button type="button" class="btn btn-sm btn-primary" @click="copyWalletUri">Copy link</button>
           <p v-if="copyHint" class="text-sm text-warning" role="status" aria-live="polite">{{ copyHint }}</p>
-          <p class="text-xs opacity-70" role="status" aria-live="polite">Waiting for the wallet presentation…</p>
+          <p class="text-xs opacity-70" role="status" aria-live="polite">
+            {{ signing ? 'Waiting for the wallet signature…' : 'Waiting for the wallet presentation…' }}
+          </p>
         </div>
 
         <div

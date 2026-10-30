@@ -1088,6 +1088,10 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 	res.SignerDid = ceremony.SignerDID
 	expiresAt := ceremony.ExpiresAt.Format(time.RFC3339)
 	res.ExpiresAt = &expiresAt
+	if ceremony.ConsumedAt != nil {
+		signedAt := ceremony.ConsumedAt.UTC().Format(time.RFC3339)
+		res.SignedAt = &signedAt
+	}
 	return res, nil
 }
 
