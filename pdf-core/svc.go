@@ -176,7 +176,7 @@ func checkMediaType(contentType string, allowed ...string) error {
 
 // limitRead reads up to limit bytes and errors if the body is empty.
 func limitRead(r io.ReadCloser, limit int64) ([]byte, error) {
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(io.LimitReader(r, limit))
 	if err != nil {
 		return nil, err
@@ -632,7 +632,7 @@ func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	_, params, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -678,7 +678,7 @@ func (s *service) renderAmendment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	_, params, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -798,7 +798,7 @@ func (s *service) embedEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	_, params, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -881,7 +881,7 @@ func (s *service) claim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	_, params, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -1035,7 +1035,7 @@ func readMultipartParts(body io.Reader, boundary string) (map[string][]byte, err
 			limit = 32 << 20
 		}
 		data, err := io.ReadAll(io.LimitReader(part, limit))
-		part.Close()
+		_ = part.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read part %q: %w", name, err)
 		}

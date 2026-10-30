@@ -538,7 +538,7 @@ func TestUpdateResponseCarriesVersionHeader(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	payloadPart, _ := mw.CreateFormField("payload")
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -570,7 +570,7 @@ func TestUpdateWithVCEmbedsAttachment(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayloadAmended))
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -602,7 +602,7 @@ func TestUpdateWithVCUnchangedPayloadProceeds(t *testing.T) {
 	_, _ = payloadPart.Write([]byte(minimalPayload)) // same payload as base
 	vcPart, _ := mw.CreateFormField("vc")
 	_, _ = vcPart.Write(vcBytes)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/render/amendment", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -1012,7 +1012,7 @@ func TestEmbedEvidenceAttachesAndRoundTrips(t *testing.T) {
 	_, _ = pdfPart.Write(basePDF)
 	evPart, _ := mw.CreateFormField("evidence")
 	_, _ = evPart.Write(evidence)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {
@@ -1068,7 +1068,7 @@ func embedEvidenceHTTP(t *testing.T, pdf, evidence []byte) []byte {
 	_, _ = pdfPart.Write(pdf)
 	evPart, _ := mw.CreateFormField("evidence")
 	_, _ = evPart.Write(evidence)
-	mw.Close()
+	_ = mw.Close()
 
 	rec := doRequest(http.MethodPost, "/evidence/embed", &buf, mw.FormDataContentType())
 	if rec.Code != http.StatusOK {

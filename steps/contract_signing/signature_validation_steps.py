@@ -141,6 +141,23 @@ def step_then_validation_no_findings(context, name):
     )
 
 
+@then("the signature validation findings include an EU DSS validation report indication")
+def step_then_validation_has_dss_indication(context):
+    assert context.requests_response.status_code == 200, (
+        f"Expected 200, got {context.requests_response.status_code}: {context.requests_response.text}"
+    )
+    body = context.requests_response.json()
+    indication = (body.get("dss") or {}).get("indication")
+    # ETSI EN 319 102-1 main indications.
+    assert indication in {"TOTAL-PASSED", "TOTAL-FAILED", "INDETERMINATE", "PASSED", "FAILED"}, (
+        f"Expected an EU DSS report with an ETSI indication, got: {body}"
+    )
+    findings = body.get("findings") or []
+    assert any(f"indication={indication}" in f for f in findings), (
+        f"Expected a finding naming the DSS indication {indication}, got: {findings}"
+    )
+
+
 @then('the compliance check for contract "{name}" reports that all checks passed')
 def step_then_compliance_all_passed(context, name):
     assert context.requests_response.status_code == 200, (

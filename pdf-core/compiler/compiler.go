@@ -205,7 +205,7 @@ func buildVerificationAppendixBytes(baseLen int, previousStartXref int, witnessH
 	appendix.WriteString("\nendobj\n")
 
 	witnessObjOffset := baseLen + appendix.Len()
-	appendix.WriteString(fmt.Sprintf("9000 0 obj\n<< /Type /Sig /Name (verification-witness) /Reason (symmetric-rerender-match) /M (D:19700101000000Z) /Contents <%s> >>\nendobj\n", witnessHashHex))
+	fmt.Fprintf(&appendix, "9000 0 obj\n<< /Type /Sig /Name (verification-witness) /Reason (symmetric-rerender-match) /M (D:19700101000000Z) /Contents <%s> >>\nendobj\n", witnessHashHex)
 
 	// Pre-record the offset of the XRef stream object so we can include it in
 	// the stream data (self-referential cross-reference entry for obj 9001).
@@ -234,7 +234,7 @@ func buildVerificationAppendixBytes(baseLen int, previousStartXref int, witnessH
 	appendix.Write(streamObject(xrefBytes, xrefStreamDict))
 	appendix.WriteString("\nendobj\n")
 
-	appendix.WriteString(fmt.Sprintf("startxref\n%d\n%%%%EOF\n", xrefObjOffset))
+	fmt.Fprintf(&appendix, "startxref\n%d\n%%%%EOF\n", xrefObjOffset)
 	return appendix.Bytes()
 }
 

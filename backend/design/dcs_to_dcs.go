@@ -185,6 +185,30 @@ var DCSToDCSSyncProvenanceResponse = Type("DCSToDCSSyncProvenanceResponse", func
 	Required("did", "contract_version", "from_peer_did", "jades_signature", "received_at")
 })
 
+var DCSToDCSContractInfoRequest = Type("DCSToDCSContractInfoRequest", func() {
+	Description("A counterparty DCS asking for the current information of a contract it is a party of (DCS-IR-SI-06). Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
+
+	Attribute("secret_value", String, "Secret value")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the requesting peer")
+	Attribute("contract_iri", String, "IRI of the contract")
+
+	Required("from_peer_did", "contract_iri", "secret_value", "secret_hash")
+})
+
+var DCSToDCSContractInfoResponse = Type("DCSToDCSContractInfoResponse", func() {
+	Description("Read-only information about a contract as this instance holds it")
+
+	Attribute("did", String, "IRI of the contract")
+	Attribute("state", String, "The contract state on this instance")
+	Attribute("contract_version", Int, "The contract version on this instance")
+	Attribute("contract_document_digest", String, "Digest of the contract document this instance holds, the same digest a settlement artifact names")
+	Attribute("updated_at", String, "When this instance last changed the contract (RFC 3339)")
+
+	Required("did", "state", "contract_version", "contract_document_digest", "updated_at")
+})
+
 var _ = Service("DcsToDcs", func() {
 	Description("DCS-to-DCS federation: two DCS instances exchange the contract PDF per lifecycle step and the JAdES after signing (ADR-13). Each instance runs its own workflow/RBAC; no contract state or task ledger crosses the boundary.")
 
@@ -269,6 +293,26 @@ var _ = Service("DcsToDcs", func() {
 			POST("/peer/contracts/erase")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("get_contract_info", func() {
+		Description("Return read-only information about a contract to an authenticated counterparty DCS (DCS-IR-SI-06). The requester passes the same did:web challenge-response and ADR-19 federation trust gate (agreement credential and local policy endpoint) as post_pdf, and must be a party of the contract. A contract that does not exist and one the requester is not a party of give the same not_found answer. Nothing is written.")
+		Meta("dcs:requirements", "DCS-IR-SI-06")
+
+		Payload(DCSToDCSContractInfoRequest)
+		Result(DCSToDCSContractInfoResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "No contract with this IRI is shared with the requesting peer")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/info")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
