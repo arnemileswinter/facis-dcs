@@ -6,7 +6,9 @@ creation/evidence content is covered by
 exercises the archive endpoints themselves.
 """
 
+import base64
 import time
+from urllib.parse import quote
 
 from behave import given, then, when
 
@@ -114,16 +116,38 @@ def _archive_store_url(context) -> str:
     return f"{context.base_url}/archive/store"
 
 
-@when("the Archive Manager stores a contract in the archive")
-def step_when_archive_manager_stores(context):
+def _evidence_payload(did: str, name: str) -> dict:
+    return {
+        "kind": "evidence",
+        "did": did,
+        "name": name,
+        "media_type": "text/plain",
+        "content": base64.b64encode(b"BDD archive evidence").decode(),
+    }
+
+
+@when('the Archive Manager stores evidence "{evidence}" for the archived contract "{name}"')
+def step_when_archive_manager_stores_evidence(context, evidence, name):
+    did, _ = ContractService._contract_data(context, name)
     headers = AuthService.get_headers_for_roles(["Archive Manager"])
-    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+    context.requests_response = post_json(context, _archive_store_url(context), _evidence_payload(did, evidence), headers=headers)
 
 
-@when("I attempt to store a contract in the archive with my current role")
-def step_when_attempt_store_archive(context):
+@when('I attempt to store evidence for the archived contract "{name}" with my current role')
+def step_when_attempt_store_archive(context, name):
+    did, _ = ContractService._contract_data(context, name)
     headers = getattr(context, "headers", {})
-    context.requests_response = post_json(context, _archive_store_url(context), {}, headers=headers)
+    context.requests_response = post_json(context, _archive_store_url(context), _evidence_payload(did, "refused.txt"), headers=headers)
+
+
+@then('the archive evidence of contract "{name}" includes "{evidence}"')
+def step_then_archive_evidence_includes(context, name, evidence):
+    did, _ = ContractService._contract_data(context, name)
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    response = get_with_headers(context, f"{context.base_url}/archive/evidence?did={quote(did, safe='')}", headers=headers)
+    assert response.status_code == 200, f"/archive/evidence failed: {response.status_code} {response.text}"
+    names = [item.get("name") for item in response.json()]
+    assert evidence in names, f"Expected evidence {evidence!r} for {did}, got {names}"
 
 
 @when('the Archive Manager deletes the archived contract "{name}" with justification "{justification}"')

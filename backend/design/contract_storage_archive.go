@@ -109,6 +109,59 @@ var ArchiveErasureStatusResponse = Type("ArchiveErasureStatusResponse", func() {
 	Required("did", "local_status", "peers")
 })
 
+var ArchiveStoreResponse = Type("ArchiveStoreResponse", func() {
+	Description("The stored archive record (DCS-IR-CSA-02)")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("kind", String, "What was stored: contract or evidence")
+	Attribute("contract_version", Int, "The archived contract version (kind=contract)")
+	Attribute("evidence_id", String, "Identifier of the stored evidence document (kind=evidence)")
+	Attribute("content_hash", String, "SHA-256 hash of the stored snapshot or evidence content")
+
+	Required("did", "kind", "content_hash")
+})
+
+var ArchiveEvidenceItem = Type("ArchiveEvidenceItem", func() {
+	Description("An evidence document stored for an archived contract")
+
+	Attribute("id", String, "Evidence identifier")
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("name", String, "Document name")
+	Attribute("media_type", String, "Media type")
+	Attribute("description", String, "Description")
+	Attribute("content_hash", String, "SHA-256 hash of the content")
+	Attribute("size_bytes", Int64, "Content size in bytes")
+	Attribute("stored_by", String, "Who stored the document")
+	Attribute("stored_at", String, "When the document was stored (RFC3339)")
+	Attribute("content", Bytes, "The document content; absent when the contract's keys are shredded")
+
+	Required("id", "did", "name", "media_type", "content_hash", "size_bytes", "stored_by", "stored_at")
+})
+
+var ArchiveComplianceCheck = Type("ArchiveComplianceCheck", func() {
+	Description("The result of one archive compliance rule for one entry")
+
+	Attribute("rule", String, "The rule", func() {
+		Enum("retention", "signature_policy", "metadata_completeness", "evidence_completeness")
+	})
+	Attribute("passed", Boolean, "Whether the entry meets the rule")
+	Attribute("reason", String, "Why the entry fails the rule; absent when it passes")
+
+	Required("rule", "passed")
+})
+
+var ArchiveComplianceItem = Type("ArchiveComplianceItem", func() {
+	Description("The compliance verdict for one live archive entry (DCS-FR-CSA-19)")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("contract_version", Int, "The archived contract version")
+	Attribute("name", String, "The contract's name")
+	Attribute("flagged", Boolean, "True when the entry fails at least one rule")
+	Attribute("checks", ArrayOfRequired(ArchiveComplianceCheck), "One result per rule")
+
+	Required("did", "contract_version", "flagged", "checks")
+})
+
 // Contract Storage & Archive Service  (/archive/...)
 var _ = Service("ContractStorageArchive", func() {
 	Description("Contract Storage & Archive APIs (/archive/...)")
@@ -168,19 +221,83 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("store", func() {
-		Description("store new contract or evidence.")
-		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06")
+		Description("Store a contract or an evidence document in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25). kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
+		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06", "DCS-FR-CSA-25")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
+			Attribute("kind", String, "What to store", func() {
+				Enum("contract", "evidence")
+			})
+			Attribute("did", String, "Decentralized Identifier of the contract to archive, or of the archived contract the evidence belongs to")
+			Attribute("name", String, "Evidence document name (kind=evidence)")
+			Attribute("media_type", String, "Evidence media type, for example application/pdf (kind=evidence)")
+			Attribute("description", String, "Optional description of the evidence (kind=evidence)")
+			Attribute("content", Bytes, "Evidence document content (kind=evidence)", func() {
+				MaxLength(10 << 20)
+			})
+			Required("kind", "did")
 		})
+		Result(ArchiveStoreResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
 		HTTP(func() {
 			POST("/archive/store")
 			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
 		})
-		Result(String)
+	})
+
+	Method("evidence", func() {
+		Description("List the evidence documents stored for an archived contract, with their decrypted content (DCS-IR-CSA-02). The read is recorded in the archive audit log.")
+		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-FR-CSA-24")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Decentralized Identifier of the archived contract")
+			Required("did")
+		})
+		Result(ArrayOfRequired(ArchiveEvidenceItem))
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/evidence")
+			Param("did")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("compliance", func() {
+		Description("Verify every live archive entry against the archive compliance rules (DCS-FR-CSA-19): retention time, signature policy, metadata completeness and evidence completeness. Entries that fail a rule are flagged.")
+		Meta("dcs:requirements", "DCS-FR-CSA-19")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+		})
+		Result(ArrayOfRequired(ArchiveComplianceItem))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/compliance")
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
 	})
 
 	Method("delete", func() {

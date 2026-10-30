@@ -1309,9 +1309,10 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve/{did}
 	Method("retrieve_by_id", func() {
 		Description("fetch submitted contract. fetch reviewed contract. fetch contract(s).")
-		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13")
+		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24")
 
 		Security(JWTAuth, func() {
+			Scope("Auditor")
 			Scope("Contract Creator")
 			Scope("Sys. Contract Creator")
 			Scope("Contract Negotiator")
@@ -1488,12 +1489,13 @@ var _ = Service("ContractWorkflowEngine", func() {
 	})
 
 	Method("terminate", func() {
-		Description("terminate a contract.")
-		Meta("dcs:requirements", "DCS-IR-CWE-12")
+		Description("terminate a contract. The Archive Manager terminates archived contracts from the archive dashboard (DCS-IR-CSA-03); the contract state machine is the policy that permits it.")
+		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CSA-03")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Archive Manager")
 		})
 
 		Payload(ContractTerminateRequest)
