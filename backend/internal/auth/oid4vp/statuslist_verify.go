@@ -121,10 +121,8 @@ func PresentedCredentialState(ctx context.Context, presentation string, trust *T
 	if len(result.StatusResults) == 0 {
 		return "", fmt.Errorf("status list check: %s", result.Reason)
 	}
-	for _, reference := range result.StatusResults {
-		if reference.State != status.StateValid {
-			return reference.State, nil
-		}
+	if reference := mostSevereStatus(result.StatusResults); reference.State != status.StateValid {
+		return reference.State, nil
 	}
 	if !result.Accepted {
 		return "", mapStatusListRejection(result)
@@ -132,9 +130,33 @@ func PresentedCredentialState(ctx context.Context, presentation string, trust *T
 	return status.StateValid, nil
 }
 
+// mostSevereStatus picks a revoked entry over a suspended one, a suspended one
+// over any other non-valid one, and that over a valid one. On a tie the earlier
+// entry wins. results must not be empty.
+func mostSevereStatus(results []status.Result) status.Result {
+	rank := func(state status.State) int {
+		switch state {
+		case status.StateInvalid:
+			return 3
+		case status.StateSuspended:
+			return 2
+		case status.StateValid:
+			return 0
+		}
+		return 1
+	}
+	worst := results[0]
+	for _, result := range results[1:] {
+		if rank(result.State) > rank(worst.State) {
+			worst = result
+		}
+	}
+	return worst
+}
+
 func mapStatusListRejection(result status.CredentialVerificationResult) error {
 	if len(result.StatusResults) > 0 {
-		ref := result.StatusResults[0]
+		ref := mostSevereStatus(result.StatusResults)
 		switch ref.State {
 		case status.StateInvalid:
 			return fmt.Errorf("credential status list index %d is revoked", ref.Index)

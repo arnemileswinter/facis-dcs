@@ -127,3 +127,23 @@ type presentedStatePolicy struct {
 func (p presentedStatePolicy) Evaluate(status.VerifiedCredential, []status.Result) (status.CredentialVerificationResult, error) {
 	return p.CredentialVerificationResult, nil
 }
+
+func TestMostSevereStatus_RevokedOverSuspendedOverOthers(t *testing.T) {
+	for _, tc := range []struct {
+		states []status.State
+		want   status.State
+	}{
+		{[]status.State{status.StateSuspended, status.StateInvalid}, status.StateInvalid},
+		{[]status.State{status.StateUnknown, status.StateSuspended, status.StateValid}, status.StateSuspended},
+		{[]status.State{status.StateValid, status.StateUnknown}, status.StateUnknown},
+		{[]status.State{status.StateValid, status.StateValid}, status.StateValid},
+	} {
+		results := make([]status.Result, len(tc.states))
+		for i, state := range tc.states {
+			results[i] = status.Result{State: state, Index: uint64(i)}
+		}
+		assert.Equal(t, tc.want, mostSevereStatus(results).State, "%v", tc.states)
+	}
+	err := mapStatusListRejection(status.CredentialVerificationResult{StatusResults: []status.Result{{State: status.StateValid, Index: 4}, {State: status.StateInvalid, Index: 7}}})
+	assert.EqualError(t, err, "credential status list index 7 is revoked")
+}
