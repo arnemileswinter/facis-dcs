@@ -64,3 +64,25 @@ func TestBuildArchiveEntryStoresEverySignatureWithHashedCredentials(t *testing.T
 		t.Fatalf("credential evidence is not hash-only: %s", *entry.CredentialHashes)
 	}
 }
+
+// DCS-FR-SM-10: the notarized and timestamped content hash is a proof of
+// execution over the signer identities, so another signer gives another hash.
+func TestArchiveContentHashCoversTheSignerIdentities(t *testing.T) {
+	now := time.Now().UTC()
+	contract := &db.Contract{DID: "did:web:contract", ContractVersion: 1, State: contractstate.Signed.String(), CreatedAt: now, UpdatedAt: now}
+	entry := func(signer string) db.ContractArchiveEntry {
+		t.Helper()
+		built, err := BuildArchiveEntry(contract, "did:web:operator", []ArchiveSigningEvidence{{Signer: signer, CredentialType: "AES", SignedAt: now, PDFHash: strings.Repeat("a", 64)}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return built
+	}
+	first, second := entry("did:jwk:alice"), entry("did:jwk:bob")
+	if !strings.Contains(string(first.ContractSnapshot), "did:jwk:alice") {
+		t.Fatalf("the snapshot does not name the signer: %s", first.ContractSnapshot)
+	}
+	if first.ContentHash == second.ContentHash {
+		t.Fatal("the content hash does not cover the signer identity")
+	}
+}

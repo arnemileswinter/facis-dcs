@@ -42,15 +42,6 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s has no signature to archive", contract.DID)
 	}
 
-	snapshotJSON, err := buildContractSnapshot(contract)
-	if err != nil {
-		return db.ContractArchiveEntry{}, err
-	}
-	contentHash, err := HashArchiveSnapshot(snapshotJSON)
-	if err != nil {
-		return db.ContractArchiveEntry{}, err
-	}
-
 	entries := make([]map[string]any, 0, len(signatures))
 	hashes := make(map[string]map[string]string, len(signatures))
 	for _, signing := range signatures {
@@ -62,6 +53,17 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 		if len(signing.CredentialHashes) > 0 {
 			hashes[signing.CeremonyID] = signing.CredentialHashes
 		}
+	}
+	// The snapshot carries the signatures, so the content hash that is
+	// notarized and timestamped is a proof of execution over the signer
+	// identities, the signing times and the signed PDF hashes (DCS-FR-SM-10).
+	snapshotJSON, err := buildContractSnapshot(contract, entries, peerSignatures)
+	if err != nil {
+		return db.ContractArchiveEntry{}, err
+	}
+	contentHash, err := HashArchiveSnapshot(snapshotJSON)
+	if err != nil {
+		return db.ContractArchiveEntry{}, err
 	}
 	final := signatures[len(signatures)-1]
 	metadata := map[string]any{
@@ -107,7 +109,7 @@ func archivePDFHash(hash string) string {
 	return "sha256:" + strings.TrimPrefix(hash, "sha256:")
 }
 
-func buildContractSnapshot(contract *db.Contract) (datatype.JSON, error) {
+func buildContractSnapshot(contract *db.Contract, signatures []map[string]any, peerSignatures json.RawMessage) (datatype.JSON, error) {
 	contractData := json.RawMessage(`{}`)
 	if contract.ContractData != nil && contract.ContractData.IsNotNullValue() {
 		contractData = json.RawMessage(*contract.ContractData)
@@ -128,6 +130,10 @@ func buildContractSnapshot(contract *db.Contract) (datatype.JSON, error) {
 		"exp_notice_period": intPtrValue(contract.ExpNoticePeriod),
 		"responsible":       contract.Responsible,
 		"contract_data":     contractData,
+		"signatures":        signatures,
+	}
+	if len(peerSignatures) > 0 {
+		snapshot["peer_signatures"] = peerSignatures
 	}
 
 	return datatype.NewJSON(snapshot)
