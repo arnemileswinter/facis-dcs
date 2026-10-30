@@ -25,16 +25,21 @@ func IPFromContext(ctx context.Context) string {
 	return ip
 }
 
+// extractIP returns the address the ingress saw the request come from: the
+// right-most X-Forwarded-For entry, which the ingress appends. Entries to its
+// left are sent by the client and can name any address, so they must not
+// select whose failed attempts count toward a lockout (FR-UC-01-4).
+// ponytail: one proxy hop (the ingress) is assumed; a chain of several
+// proxies needs a list of trusted proxy addresses to skip.
 func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := len(xff); i > 0 {
-			for j := 0; j < i; j++ {
-				if xff[j] == ',' {
-					return strings.TrimSpace(xff[:j])
-				}
-			}
+	if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+		last := xff[len(xff)-1]
+		if i := strings.LastIndex(last, ","); i >= 0 {
+			last = last[i+1:]
 		}
-		return strings.TrimSpace(xff)
+		if ip := strings.TrimSpace(last); ip != "" {
+			return ip
+		}
 	}
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		return xri
