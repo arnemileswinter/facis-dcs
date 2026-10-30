@@ -104,6 +104,8 @@ type ContractMetadata struct {
 	LatestTemplateDID    *string      `db:"latest_template_did"`
 	TemplateIsDeprecated *bool        `db:"template_is_deprecated"`
 	ParentContractDID    *string      `db:"parent_contract_did"`
+	// RenewsContractDID is the contract this one renews (dcs:renewsContract).
+	RenewsContractDID *string `db:"renews_contract_did"`
 	// The registered target system this contract deploys to (ADR-25), resolved
 	// to its name so the destination is readable without a second lookup.
 	TargetID   *string `db:"target_id"`

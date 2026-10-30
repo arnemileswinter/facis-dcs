@@ -62,6 +62,7 @@ export interface Contract {
   template_version?: number
   template_is_deprecated?: boolean
   parent_contract_did?: string
+  renews_contract_did?: string
   /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
   /** Registered target system this contract deploys to (ADR-25); absent until designated */

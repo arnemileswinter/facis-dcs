@@ -156,6 +156,14 @@ const ancestors = computed(() => {
 
 const childContracts = computed(() => contracts.value.filter((c) => c.parent_contract_did === contract.value?.did))
 
+// Renewal links (DCS-FR-CWE-29): the contract this one renews and the contracts
+// that renew it.
+const renewedContract = computed(() => {
+  const did = contracts.value.find((c) => c.did === contract.value?.did)?.renews_contract_did
+  return did ? (contracts.value.find((c) => c.did === did) ?? ({ did, name: did } as Contract)) : null
+})
+const renewals = computed(() => contracts.value.filter((c) => c.renews_contract_did === contract.value?.did))
+
 const contractTitle = computed(
   () =>
     shownContract.value?.name ??
@@ -441,6 +449,40 @@ const exportBundle = async () => {
                     <p v-else-if="ancestors.length === 0" class="text-sm text-base-content/40">
                       This contract has no parent or child contracts.
                     </p>
+
+                    <div v-if="renewedContract || renewals.length > 0" class="space-y-1 border-t border-base-300 pt-3">
+                      <div
+                        v-if="renewedContract"
+                        class="flex items-center gap-2 text-sm"
+                        data-testid="structure-renews"
+                      >
+                        <span class="text-base-content/60">Renews</span>
+                        <RouterLink
+                          :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: renewedContract.did } }"
+                          class="link font-medium link-hover"
+                        >
+                          {{ renewedContract.name ?? renewedContract.did }}
+                        </RouterLink>
+                        <span v-if="renewedContract.state" class="badge badge-ghost badge-xs">
+                          {{ renewedContract.state }}
+                        </span>
+                      </div>
+                      <div
+                        v-for="renewal in renewals"
+                        :key="renewal.did"
+                        class="flex items-center gap-2 text-sm"
+                        data-testid="structure-renewed-by"
+                      >
+                        <span class="text-base-content/60">Renewed by</span>
+                        <RouterLink
+                          :to="{ name: ROUTES.CONTRACTS.VIEW, params: { did: renewal.did } }"
+                          class="link font-medium link-hover"
+                        >
+                          {{ renewal.name ?? renewal.did }}
+                        </RouterLink>
+                        <span class="badge badge-ghost badge-xs">{{ renewal.state }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

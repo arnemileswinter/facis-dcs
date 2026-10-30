@@ -621,6 +621,7 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			LatestTemplateDid:    item.LatestTemplateDID,
 			TemplateIsDeprecated: item.TemplateIsDeprecated,
 			ParentContractDid:    item.ParentContractDID,
+			RenewsContractDid:    item.RenewsContractDID,
 			TargetID:             item.TargetID,
 			TargetName:           item.TargetName,
 		})
