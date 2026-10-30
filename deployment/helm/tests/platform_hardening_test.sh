@@ -23,4 +23,10 @@ grep -rq 'YourStrongPassword' "$CHART_DIR/values.yaml" "$CHART_DIR/prom-values.y
 render -f "$CHART_DIR/values.bdd.yml" --show-only templates/hsm-pin-secret.yaml | grep -q 'PKCS11_PIN: "1234"' \
   || fail "explicit pkcs11.pin is not used"
 
+# Signing needs a DSS to validate against (ADR-12): prod and acceptance get DSS_URL.
+for profile in prod acceptance; do
+  render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only templates/deployment.yaml | grep -q 'name: DSS_URL' \
+    || fail "values.$profile.yml gives the backend no DSS_URL"
+done
+
 echo 'platform hardening render tests passed'
