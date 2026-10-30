@@ -165,18 +165,24 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 		}
 	}
 
-	evt := contractevents.ApproveEvent{
-		DID:             cmd.DID,
-		ContractVersion: processData.ContractVersion,
-		ApprovedBy:      cmd.ApprovedBy,
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
-		OccurredAt:      time.Now().UTC(),
-	}
-	err = event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine)
+	err = event.Create(ctx, tx, cmd.event(processData.ContractVersion), componenttype.ContractWorkflowEngine)
 	if err != nil {
 		return fmt.Errorf("could not create event: %w", err)
 	}
 
 	return tx.Commit()
+}
+
+// event is the audit record of one approval decision, with the approver's
+// comments (DCS-FR-CWE-15).
+func (cmd ApproveCmd) event(contractVersion int) contractevents.ApproveEvent {
+	return contractevents.ApproveEvent{
+		DID:             cmd.DID,
+		ContractVersion: contractVersion,
+		ApprovedBy:      cmd.ApprovedBy,
+		DecisionNotes:   cmd.DecisionNotes,
+		HolderDID:       cmd.HolderDID,
+		UserRoles:       cmd.UserRoles,
+		OccurredAt:      time.Now().UTC(),
+	}
 }

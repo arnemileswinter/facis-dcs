@@ -663,6 +663,7 @@ type ApproveEvent struct {
 	HolderDID       string             `json:"holder_did"`
 	ContractVersion int                `json:"contract_version"`
 	ApprovedBy      string             `json:"approved_by"`
+	DecisionNotes   []string           `json:"decision_notes,omitempty"`
 	OccurredAt      time.Time          `json:"occurred_at"`
 	UserRoles       userrole.UserRoles `json:"user_roles"`
 }

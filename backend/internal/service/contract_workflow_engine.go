@@ -1532,12 +1532,13 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	}
 
 	cmd := command.ApproveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ApprovedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		CauserDID:  localPeer,
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		ApprovedBy:    middleware.GetParticipantID(ctx),
+		DecisionNotes: req.DecisionNotes,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		CauserDID:     localPeer,
 	}
 	handler := command.Approver{
 		DB:          s.DB,

@@ -505,6 +505,8 @@ var ContractApproveRequest = Type("ContractApproveRequest", func() {
 
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
+	Attribute("decision_notes", ArrayOf(String), "Approver comments recorded with the decision (DCS-FR-CWE-15)")
+
 	Required("did", "updated_at")
 })
 
