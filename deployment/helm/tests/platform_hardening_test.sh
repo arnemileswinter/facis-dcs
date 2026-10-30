@@ -29,4 +29,17 @@ for profile in prod acceptance; do
     || fail "values.$profile.yml gives the backend no DSS_URL"
 done
 
+# DCS-IR-CI-01 / DCS-NFR-SEC-01: TLS 1.3 minimum by default where Traefik terminates TLS.
+traefik_prod="$(render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" --api-versions traefik.io/v1alpha1/TLSOption)"
+grep -q 'kind: TLSOption' <<<"$traefik_prod" || fail "no TLSOption for a TLS ingress on Traefik"
+grep -q 'minVersion: "VersionTLS13"' <<<"$traefik_prod" || fail "TLSOption minimum is not TLS 1.3"
+grep -q 'router.tls.options: "dcs-dcs-digital-contracting-service-tls13@kubernetescrd"' <<<"$traefik_prod" \
+  || fail "the ingress does not name the TLSOption"
+# No TLSOption where Traefik is absent (the CRD would not exist) or the ingress serves no TLS (BDD).
+render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" | grep -q 'kind: TLSOption' && fail "TLSOption without the Traefik CRD"
+render -f "$CHART_DIR/values.bdd.yml" | grep -q 'router.tls.options' && fail "TLS option on a plain-HTTP ingress"
+render "${ACK[@]}" --api-versions traefik.io/v1alpha1/TLSOption --set ingress.enabled=true \
+  --set 'ingress.hosts[0].host=a.example' --set 'ingress.tls[0].hosts[0]=a.example' --set 'ingress.tls[0].secretName=t' \
+  --set 'ingress.tlsOptions.cipherSuites[0]=TLS_AES_128_GCM_SHA256' >/dev/null || fail "TLSOption with cipherSuites does not render"
+
 echo 'platform hardening render tests passed'

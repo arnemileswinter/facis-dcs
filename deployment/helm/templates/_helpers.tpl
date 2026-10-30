@@ -388,3 +388,13 @@ Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
 {{- printf "%s/ontology/dcs-pdf-core" (include "digital-contracting-service.pdfCoreURL" .) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+"true" when the chart enforces the minimum TLS version itself: the ingress
+terminates TLS and Traefik serves it (DCS-IR-CI-01, DCS-NFR-SEC-01).
+*/}}
+{{- define "digital-contracting-service.tlsOptionEnforced" -}}
+{{- if and .Values.ingress.enabled .Values.ingress.tlsOptions.enabled .Values.ingress.tls (or .Values.traefik.enabled (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/TLSOption")) -}}
+true
+{{- end -}}
+{{- end }}
