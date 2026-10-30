@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	pac "digital-contracting-service/gen/process_audit_and_compliance"
 	"digital-contracting-service/internal/base/contractreadpolicy"
@@ -68,7 +69,14 @@ func (s *processAuditAndCompliancesrvc) authorizeAuditReport(ctx context.Context
 		Resource *auditexecutor.Resource    `json:"resource"`
 		Evidence map[string]json.RawMessage `json:"evidence"`
 	}
-	if json.Unmarshal(run.RequestBytes, &request) != nil || (request.Scope != "archive" && request.Scope != "contracts") {
+	if err := json.Unmarshal(run.RequestBytes, &request); err != nil {
+		return pac.MakeInternalError(fmt.Errorf("decode PAC snapshot request: %w", err))
+	}
+	var response auditexecutor.Response
+	if err := json.Unmarshal(run.ResponseBytes, &response); err != nil {
+		return pac.MakeInternalError(fmt.Errorf("decode PAC snapshot response: %w", err))
+	}
+	if request.Scope != "archive" && request.Scope != "contracts" {
 		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
 	if request.Resource != nil && !allowed[request.Resource.DID] {
@@ -79,8 +87,8 @@ func (s *processAuditAndCompliancesrvc) authorizeAuditReport(ctx context.Context
 			return pac.MakeForbidden(contractreadpolicy.ErrDenied)
 		}
 		var resources []persistedAuditEvidenceResource
-		if json.Unmarshal(raw, &resources) != nil {
-			return pac.MakeForbidden(contractreadpolicy.ErrDenied)
+		if err := json.Unmarshal(raw, &resources); err != nil {
+			return pac.MakeInternalError(fmt.Errorf("decode PAC snapshot evidence: %w", err))
 		}
 		for _, resource := range resources {
 			if !allowed[resource.DID] {
@@ -92,10 +100,6 @@ func (s *processAuditAndCompliancesrvc) authorizeAuditReport(ctx context.Context
 				}
 			}
 		}
-	}
-	var response auditexecutor.Response
-	if json.Unmarshal(run.ResponseBytes, &response) != nil {
-		return pac.MakeForbidden(contractreadpolicy.ErrDenied)
 	}
 	if response.Resource != nil && !allowed[response.Resource.DID] {
 		return pac.MakeForbidden(contractreadpolicy.ErrDenied)

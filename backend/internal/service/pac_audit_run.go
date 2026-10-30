@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	goa "goa.design/goa/v3/pkg"
+
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
 	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
@@ -106,53 +108,71 @@ func (s *processAuditAndCompliancesrvc) latestAuditRun(ctx context.Context, scop
 	if s.DB == nil || s.ATrailReader.Artifacts == nil {
 		return run, fmt.Errorf("PAC audit run persistence or encryption is not configured")
 	}
-	var snapshot []byte
-	var auditID string
-	err := s.DB.QueryRowxContext(ctx, `
-		SELECT audit_id, request_hash, response_hash, snapshot_bytes
+	var before, beforeID any
+	var denied error
+	for {
+		var snapshot []byte
+		var auditID string
+		var createdAt time.Time
+		err := s.DB.QueryRowxContext(ctx, `
+		SELECT audit_id, request_hash, response_hash, snapshot_bytes, created_at
 		FROM pac_audit_runs
 		WHERE scope = $1
 		  AND (($2 = '' AND resource_did IS NULL) OR resource_did = $2)
-		ORDER BY created_at DESC
-		LIMIT 1`, scope, did).Scan(&auditID, &run.RequestHash, &run.ResponseHash, &snapshot)
-	if errors.Is(err, sql.ErrNoRows) {
-		return run, errPACAuditRunNotFound
+		  AND ($3::timestamptz IS NULL OR (created_at, audit_id) < ($3, $4::uuid))
+		ORDER BY created_at DESC, audit_id DESC
+		LIMIT 1`, scope, did, before, beforeID).Scan(&auditID, &run.RequestHash, &run.ResponseHash, &snapshot, &createdAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			if denied != nil {
+				return persistedAuditRun{}, denied
+			}
+			return run, errPACAuditRunNotFound
+		}
+		if err != nil {
+			return run, fmt.Errorf("read latest PAC audit run: %w", err)
+		}
+		store := s.ATrailReader.Artifacts
+		envelope, err := store.Decrypt(ctx, store.InstanceScope(), snapshot)
+		if err != nil {
+			return run, fmt.Errorf("decrypt PAC snapshot envelope: %w", err)
+		}
+		payloadBytes, scopes, err := unsealPACSnapshot(ctx, store, auditID, envelope)
+		if err != nil {
+			return run, err
+		}
+		var payload pacSnapshotPayload
+		if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+			return run, fmt.Errorf("decode PAC snapshot payload: %w", err)
+		}
+		run.RequestBytes, run.ResponseBytes, run.Scopes = payload.RequestBytes, payload.ResponseBytes, scopes
+		if sha256String(run.RequestBytes) != run.RequestHash || sha256String(run.ResponseBytes) != run.ResponseHash {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot hash mismatch")
+		}
+		var request auditexecutor.Request
+		if err := json.Unmarshal(run.RequestBytes, &request); err != nil {
+			return persistedAuditRun{}, err
+		}
+		if request.AuditID != auditID || request.Scope != scope || (request.Resource == nil && did != "") || (request.Resource != nil && request.Resource.DID != did) {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot does not match selected run")
+		}
+		expectedScopes, err := pacEvidenceScopes(run.RequestBytes, store.InstanceScope())
+		if err != nil {
+			return persistedAuditRun{}, err
+		}
+		if !equalPACScopes(scopes, expectedScopes) {
+			return persistedAuditRun{}, fmt.Errorf("PAC snapshot scopes do not match evidence")
+		}
+		if err := s.authorizeAuditReport(ctx, run); err != nil {
+			var serviceError *goa.ServiceError
+			if !errors.As(err, &serviceError) || serviceError.Name != "forbidden" {
+				return persistedAuditRun{}, err
+			}
+			denied = err
+			before, beforeID = createdAt, auditID
+			continue
+		}
+		return run, nil
 	}
-	if err != nil {
-		return run, fmt.Errorf("read latest PAC audit run: %w", err)
-	}
-	store := s.ATrailReader.Artifacts
-	envelope, err := store.Decrypt(ctx, store.InstanceScope(), snapshot)
-	if err != nil {
-		return run, fmt.Errorf("decrypt PAC snapshot envelope: %w", err)
-	}
-	payloadBytes, scopes, err := unsealPACSnapshot(ctx, store, auditID, envelope)
-	if err != nil {
-		return run, err
-	}
-	var payload pacSnapshotPayload
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return run, fmt.Errorf("decode PAC snapshot payload: %w", err)
-	}
-	run.RequestBytes, run.ResponseBytes, run.Scopes = payload.RequestBytes, payload.ResponseBytes, scopes
-	if sha256String(run.RequestBytes) != run.RequestHash || sha256String(run.ResponseBytes) != run.ResponseHash {
-		return persistedAuditRun{}, fmt.Errorf("PAC snapshot hash mismatch")
-	}
-	var request auditexecutor.Request
-	if err := json.Unmarshal(run.RequestBytes, &request); err != nil {
-		return persistedAuditRun{}, err
-	}
-	if request.AuditID != auditID || request.Scope != scope || (request.Resource == nil && did != "") || (request.Resource != nil && request.Resource.DID != did) {
-		return persistedAuditRun{}, fmt.Errorf("PAC snapshot does not match selected run")
-	}
-	expectedScopes, err := pacEvidenceScopes(run.RequestBytes, store.InstanceScope())
-	if err != nil {
-		return persistedAuditRun{}, err
-	}
-	if !equalPACScopes(scopes, expectedScopes) {
-		return persistedAuditRun{}, fmt.Errorf("PAC snapshot scopes do not match evidence")
-	}
-	return run, nil
 }
 
 // toPACExternalAuditResponse renders the executor verdict plus the timeline the

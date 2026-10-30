@@ -57,3 +57,73 @@ func TestPresentedCredentialState_UntrustedIssuerIsNotFollowed(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not trusted")
 }
+
+func TestPresentedCredentialState_ChecksEveryReference(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
+	issuerKey, holderKey := newECKey(t), newECKey(t)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
+	entry := func(index string) map[string]any {
+		return map[string]any{"type": "TokenStatusList", "statusListCredential": list.URL, "statusListIndex": index, "statusPurpose": "revocation"}
+	}
+	list.Revoke(2)
+	for _, indices := range [][]string{{"1", "2"}, {"2", "1"}} {
+		t.Run(indices[0]+"_"+indices[1], func(t *testing.T) {
+			poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, map[string]any{
+				"status": nil, "credentialStatus": []any{entry(indices[0]), entry(indices[1])},
+			})
+			state, err := PresentedCredentialState(context.Background(), poa.Presentation, trust, PurposePeer)
+			require.NoError(t, err)
+			assert.Equal(t, status.StateInvalid, state)
+		})
+	}
+}
+
+func TestPresentedCredentialState_RequiresEveryResultAndPolicyToAccept(t *testing.T) {
+	list := newXFSCStatusList(t, 16, testPoAIssuer)
+	issuerKey, holderKey := newECKey(t), newECKey(t)
+	poa := mintPoA(t, issuerKey, holderKey, testPoAIssuer, testPoAParty, list, nil)
+	trust := peerTrust(t, issuerKey, []Purpose{PurposePeer}, []string{testPoAParty}, list)
+
+	for _, state := range []status.State{status.StateInvalid, status.StateSuspended, status.StateUnknown, status.StateApplicationSpecific, status.StateRefreshRequired} {
+		for position := range 3 {
+			results := []status.Result{{State: status.StateValid}, {State: status.StateValid}, {State: status.StateValid}}
+			results[position].State = state
+			statusListVerifier.Policy = presentedStatePolicy{CredentialVerificationResult: status.CredentialVerificationResult{Accepted: state == status.StateRefreshRequired, StatusResults: results}}
+			actual, err := PresentedCredentialState(context.Background(), poa.Presentation, trust, PurposePeer)
+			require.NoError(t, err)
+			assert.Equal(t, state, actual, "non-valid result at position %d", position)
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		accepted  bool
+		results   []status.Result
+		wantError bool
+	}{
+		{"all valid", true, []status.Result{{State: status.StateValid}, {State: status.StateValid}}, false},
+		{"policy rejected", false, []status.Result{{State: status.StateValid}}, true},
+		{"no results", false, nil, true},
+		{"empty accepted result", true, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statusListVerifier.Policy = presentedStatePolicy{CredentialVerificationResult: status.CredentialVerificationResult{Accepted: tc.accepted, StatusResults: tc.results, Reason: "test policy verdict"}}
+			actual, err := PresentedCredentialState(context.Background(), poa.Presentation, trust, PurposePeer)
+			if tc.wantError {
+				require.Error(t, err)
+				assert.Empty(t, actual)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, status.StateValid, actual)
+		})
+	}
+}
+
+type presentedStatePolicy struct {
+	status.StrictPolicy
+	status.CredentialVerificationResult
+}
+
+func (p presentedStatePolicy) Evaluate(status.VerifiedCredential, []status.Result) (status.CredentialVerificationResult, error) {
+	return p.CredentialVerificationResult, nil
+}
