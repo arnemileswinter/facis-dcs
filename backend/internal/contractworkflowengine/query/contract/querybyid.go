@@ -192,26 +192,12 @@ func callerMayReadContract(query GetByIDQry, data *db.Contract) bool {
 // CallerMayReadContract is the party read-scoping rule shared by direct
 // retrieval and the bundle exporter's related/ member filter.
 //
-// A party has two identity keys and the rule uses both, because neither
-// implies the other:
-//
-//   - WHICH INSTANCE — the did:web. localPeer is this deployment's own peer
-//     DID; a contract whose Origin is a different peer was adopted from that
-//     peer and is readable here by construction, so the organization check
-//     never applies to it. This is the only key that crosses instances.
-//   - WHICH ORGANIZATION WITHIN IT — retrievedBy, the caller's OID4VP
-//     organization claim, matched against the creating organization and the
-//     dcs:legalName of the contract's party nodes. Several organizations
-//     share one instance and must not read each other's contracts, which is
-//     what the party read-scoping scenarios in features/03_contract_creation
-//     exercise: two callers of this same instance, same roles, differing only
-//     in that claim.
-//
-// Collapsing to did:web alone would make every organization on an instance a
-// reader of every contract on it. Collapsing to organization alone would
-// leave adopted contracts unreadable, since a peer's organizations are not
-// this instance's. Privileged org-independent roles bypass the organization
-// half only.
+// The caller's OID4VP organization claim must be the creating organization or
+// the dcs:legalName of one of the contract's dcs:parties. Several organizations
+// share one instance and must not read each other's contracts. A copy received
+// from a peer has the peer's DID as creator, so only the organizations its
+// sender named in dcs:parties may read it. Privileged org-independent roles
+// bypass the check.
 func CallerMayReadContract(retrievedBy string, userRoles userrole.UserRoles, localPeer string, data *db.Contract) bool {
 	return (contractreadpolicy.Scope{Organization: retrievedBy, Roles: userRoles, LocalPeer: localPeer}).MayRead(data.Origin, data.CreatedBy, data.ContractData)
 }

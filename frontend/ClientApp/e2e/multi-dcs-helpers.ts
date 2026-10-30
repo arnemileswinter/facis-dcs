@@ -37,6 +37,8 @@ export interface Instance {
   readonly context: BrowserContext
   readonly origin: string
   readonly apiBase: string
+  /** The organization claim of this instance's users. */
+  readonly organization: string
   gotoAs(role: DcsRole, url: string): Promise<void>
 }
 
@@ -52,6 +54,7 @@ function makeInstance(
     context,
     origin,
     apiBase,
+    organization,
     async gotoAs(role, url) {
       await applySession(context, page, origin, mintSession(role, apiBase, organization))
       await page.goto(url)
@@ -1076,6 +1079,9 @@ export async function createContractViaUi(inst: Instance, templateName: string, 
   const dialog = inst.page.getByRole('dialog').filter({ hasText: 'Contract Counterparty' })
   await expect(dialog).toBeVisible()
   await dialog.getByPlaceholder('did:web:...').fill(counterparty)
+  // The counterparty's users read their received copy only when named here.
+  const counterpartyOrganization = inst.organization === E2E_ORG_A ? E2E_ORG_B : E2E_ORG_A
+  await dialog.getByPlaceholder('Acme GmbH, Beispiel AG').fill(counterpartyOrganization)
   await selectOriginatorRole(dialog)
   const created = inst.page.waitForResponse(
     (r) => r.url().includes('/contract/create') && r.request().method() === 'POST',

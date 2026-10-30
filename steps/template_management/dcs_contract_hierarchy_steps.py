@@ -349,6 +349,7 @@ def step_when_ac5_setup(context):
             {
                 "template_did": t_did,
                 "counterparty": context.peer_did_b,
+                **ContractService._reading_parties(context),
             },
             headers=creator_h,
         )

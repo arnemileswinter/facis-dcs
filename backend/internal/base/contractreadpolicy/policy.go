@@ -43,8 +43,13 @@ func (s Scope) Privileged() bool {
 	}
 	return false
 }
+
+// MayRead admits the creating organization and the organizations named in
+// dcs:parties. A copy received from a peer has the peer's DID as creator, so on
+// this instance only the organizations its sender named may read it; a copy
+// that names none is readable by privileged roles only.
 func (s Scope) MayRead(origin, createdBy string, raw *datatype.JSON) bool {
-	if s.system || s.Privileged() || (s.LocalPeer != "" && origin != "" && origin != s.LocalPeer) {
+	if s.system || s.Privileged() {
 		return true
 	}
 	if s.Organization == "" {
@@ -84,12 +89,11 @@ func SQL(ctx context.Context, didExpression string, params *[]any) string {
 		return "TRUE"
 	}
 	n := len(*params) + 1
-	*params = append(*params, s.Organization, s.LocalPeer)
+	*params = append(*params, s.Organization)
 	return fmt.Sprintf(`EXISTS (SELECT 1 FROM contracts_effective read_contract WHERE read_contract.did = %s AND (
- ($%d <> '' AND read_contract.origin <> '' AND read_contract.origin <> $%d)
- OR ($%d <> '' AND (read_contract.created_by = $%d OR EXISTS (
+ $%d <> '' AND (read_contract.created_by = $%d OR EXISTS (
  SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(read_contract.contract_data->'dcs:parties') = 'array' THEN read_contract.contract_data->'dcs:parties' ELSE '[]'::jsonb END) party
- WHERE jsonb_typeof(party->'dcs:legalName') = 'string' AND party->>'dcs:legalName' = $%d)))))`, didExpression, n+1, n+1, n, n, n)
+ WHERE jsonb_typeof(party->'dcs:legalName') = 'string' AND party->>'dcs:legalName' = $%d))))`, didExpression, n, n, n)
 }
 
 type rowFilter int

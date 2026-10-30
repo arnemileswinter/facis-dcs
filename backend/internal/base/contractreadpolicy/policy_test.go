@@ -25,7 +25,9 @@ func TestMayRead(t *testing.T) {
 		{"named party", user, localPeer, "Org B", &party, true},
 		{"foreign organization", user, localPeer, "Org B", &none, false},
 		{"foreign without data", user, localPeer, "Org B", nil, false},
-		{"adopted from peer", user, "did:web:peer", "Org B", &none, true},
+		{"received copy without parties", user, "did:web:peer", "did:web:peer", &none, false},
+		{"received copy naming the organization", user, "did:web:peer", "did:web:peer", &party, true},
+		{"received copy naming another organization", Scope{Organization: "Org C", Roles: user.Roles, LocalPeer: localPeer}, "did:web:peer", "did:web:peer", &party, false},
 		{"no organization", Scope{Roles: user.Roles, LocalPeer: localPeer}, localPeer, "", &party, false},
 		{"system scope", Scope{system: true}, localPeer, "Org B", &none, true},
 	} {

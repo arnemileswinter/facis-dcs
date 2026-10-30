@@ -433,7 +433,7 @@ def step_given_local_contract_offered_to_peer(context, name):
     create_resp = post_json(
         context,
         contract_create_url(context),
-        {"template_did": t_did, "counterparty": context.outbound_peer_did},
+        {"template_did": t_did, "counterparty": context.outbound_peer_did, **ContractService._reading_parties(context)},
         headers=creator_h,
     )
     assert create_resp.status_code == 200, create_resp.text

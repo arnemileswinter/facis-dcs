@@ -361,7 +361,7 @@ BDD and external deployment acceptance remain unexecuted.
 |---|---|---|---|
 | DCS-NFR-SEC-01 | Transport Layer Security | 📋 Not BDD-verifiable | TLS 1.3-only is deployment/ingress config; not asserted from the plaintext BDD env. |
 | DCS-NFR-SEC-02 | State-of-the-art Cryptography | ✅ Covered | 21: P-256/ES256 across DID/JAR/VC/C2PA/PAdES, no legacy RSA (tagged @DCS-NFR-SEC-02). |
-| DCS-NFR-SEC-03 | Authentication and Authorization | ✅ Covered | 01 pack + role negatives suite-wide; party read-scoping on retrieve_by_id (03: dcs:parties gate, 403 forbidden, CONTRACT_ACCESS_DENIED audit event; Sys.*/Auditor org-independent; peer-adopted contracts readable by the adopting instance). |
+| DCS-NFR-SEC-03 | Authentication and Authorization | ✅ Covered | 01 pack + role negatives suite-wide; party read-scoping on retrieve_by_id (03: dcs:parties gate, 403 forbidden, CONTRACT_ACCESS_DENIED audit event; Sys.*/Auditor org-independent; a copy received from a peer readable only by the organizations its sender named in dcs:parties). |
 | DCS-NFR-SEC-04 | Integrity Protection for Configuration | 📋 Not BDD-verifiable | Config integrity (signed/authenticated config) is platform concern; Helm-managed config — review-verified. |
 | DCS-NFR-SEC-05 | Integrity Protection for Service | 📋 Not BDD-verifiable | Service integrity/attestation — platform concern (image digests, admission control). |
 | DCS-NFR-SEC-06 | Storage of Secrets | ✅ Covered | Private keys live in PKCS#11 token only (21 DID-key scenarios; provisioning scripts). |

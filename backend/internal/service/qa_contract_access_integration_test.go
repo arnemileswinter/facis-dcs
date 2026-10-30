@@ -49,7 +49,8 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 		{"owner", "Org A", peer, `{}`, true},
 		{"party", "Org B", peer, `{"dcs:parties":[{"dcs:legalName":"Org A"}]}`, true},
 		{"foreign", "Org B", peer, `{}`, false},
-		{"remote", "Org B", "did:web:remote", `{}`, true},
+		{"remote", "did:web:remote", "did:web:remote", `{}`, false},
+		{"remote-party", "did:web:remote", "did:web:remote", `{"dcs:parties":[{"dcs:legalName":"Org A"}]}`, true},
 		{"null", "Org B", peer, `{"dcs:parties":null}`, false},
 		{"object", "Org B", peer, `{"dcs:parties":{"dcs:legalName":"Org A"}}`, false},
 		{"malformed", "Org B", peer, `{"dcs:parties":[null,123,"Org A",{"dcs:legalName":123}]}`, false},
@@ -86,7 +87,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	rows, err := repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 1})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Equal(t, "remote", rows[0].DID)
+	require.Equal(t, "remote-party", rows[0].DID)
 	rows, err = repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 2})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -116,7 +117,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	signingRows, err := (&smpg.PostgresContractRepo{}).ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 1})
 	require.NoError(t, err)
 	require.Len(t, signingRows, 1)
-	require.Equal(t, "remote", signingRows[0].DID)
+	require.Equal(t, "remote-party", signingRows[0].DID)
 	for _, role := range []userrole.UserRole{userrole.Auditor, userrole.SystemAdministrator, userrole.SystemContractManager} {
 		privileged := contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Roles: userrole.UserRoles{role}, LocalPeer: peer})
 		rows, err = repo.ReadAllMetaData(privileged, tx, datatype.Pagination{})
