@@ -203,6 +203,7 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.
 		_, err := (&command.Deployer{
 			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
 			TargetRepo: s.TargetRepo, Target: s.TargetClient, PeerSigs: s.SRepo,
+			Artifacts: s.ATrailReader.Artifacts,
 		}).Handle(ctx, command.DeployCmd{
 			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
 			RequestedBy: stringValue("requested_by"), LocalPeer: stringValue("causer_did"),
@@ -1940,6 +1941,7 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		TargetRepo:     s.TargetRepo,
 		Target:         s.TargetClient,
 		PeerSigs:       s.SRepo,
+		Artifacts:      s.ATrailReader.Artifacts,
 	}
 	// A contract that may not deploy (not SIGNED, or a signature field still
 	// unsigned) is refused before the deployment workflow gate is dispatched.

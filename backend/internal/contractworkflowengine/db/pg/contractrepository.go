@@ -430,6 +430,21 @@ func (r *PostgresContractRepo) ReadSignedSignatureFieldNames(ctx context.Context
 	return fields, nil
 }
 
+func (r *PostgresContractRepo) ReadSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]db.SignedSignature, error) {
+	var signatures []db.SignedSignature
+	err := tx.SelectContext(ctx, &signatures, `
+        SELECT signer_did, credential_type, COALESCE(field_name, '') AS field_name, signed_at,
+               COALESCE(pdf_hash, '') AS pdf_hash, COALESCE(jades_signature, '') AS jades_signature
+        FROM contract_signatures
+        WHERE contract_did = $1 AND status = 'SIGNED'
+        ORDER BY created_at
+    `, did)
+	if err != nil {
+		return nil, err
+	}
+	return signatures, nil
+}
+
 func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
 	query := `
 	    SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags

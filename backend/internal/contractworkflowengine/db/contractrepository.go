@@ -221,6 +221,16 @@ type SearchValues struct {
 	ParentDID string
 }
 
+// SignedSignature is one SIGNED signature of a contract.
+type SignedSignature struct {
+	SignerDID      string    `db:"signer_did"`
+	CredentialType string    `db:"credential_type"`
+	FieldName      string    `db:"field_name"`
+	SignedAt       time.Time `db:"signed_at"`
+	PDFHash        string    `db:"pdf_hash"`
+	JAdESSignature string    `db:"jades_signature"`
+}
+
 type ContractPDFState struct {
 	IPFSCID         string `db:"pdf_ipfs_cid"`
 	RendererVersion string `db:"pdf_renderer_version"`
@@ -269,6 +279,9 @@ type ContractRepo interface {
 	// them against the contract document's declared signatureFields
 	// (DCS-FR-SM-07/-17, DCS-NFR-BR-03).
 	ReadSignedSignatureFieldNames(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadSignedSignatures returns the SIGNED signatures of the contract in the
+	// order they were applied.
+	ReadSignedSignatures(ctx context.Context, tx *sqlx.Tx, did string) ([]SignedSignature, error)
 	ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
 	ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
