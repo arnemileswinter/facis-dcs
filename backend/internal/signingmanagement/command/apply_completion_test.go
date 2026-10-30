@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"testing"
 
 	"digital-contracting-service/internal/signingmanagement/db"
@@ -47,5 +48,28 @@ func TestLocalSignatureFieldsLeaveOutTheCounterpartySlot(t *testing.T) {
 	}
 	if !signingCompletes(local, []db.SignatureRecord{signedRecord(instanceA)}, instanceA) {
 		t.Error("the own signature completes this instance's signing of a federated contract")
+	}
+}
+
+// DCS-FR-SM-07, DCS-FR-SM-17: signatures are applied one at a time against the
+// latest revision. A document prepared before another signature was applied
+// does not extend the current signed revision and is refused.
+func TestAssertLatestRevisionRefusesAStaleRevision(t *testing.T) {
+	unsigned := []byte("%PDF-1.7\n1 0 obj\n<< >>\nendobj\n%%EOF\n")
+	preparedFromUnsigned := append(append([]byte(nil), unsigned...), []byte("2 0 obj\n<< /evidence 1 >>\nendobj\n%%EOF\n")...)
+	firstSigned := append(append([]byte(nil), unsigned...), []byte("3 0 obj\n<< /Type /Sig /ByteRange [0 1 2 3] >>\nendobj\n%%EOF\n")...)
+	preparedFromSigned := append(append([]byte(nil), firstSigned...), []byte("4 0 obj\n<< /evidence 2 >>\nendobj\n%%EOF\n")...)
+
+	if err := assertLatestRevision(firstSigned, preparedFromUnsigned); !errors.Is(err, ErrStaleRevision) || !errors.Is(err, ErrDocumentMismatch) {
+		t.Errorf("a document prepared before the first signature must be refused, got %v", err)
+	}
+	if err := assertLatestRevision(firstSigned, preparedFromSigned); err != nil {
+		t.Errorf("a document prepared from the latest signed revision must pass, got %v", err)
+	}
+	if err := assertLatestRevision(unsigned, preparedFromUnsigned); err != nil {
+		t.Errorf("an unsigned current revision holds no signature to lose, got %v", err)
+	}
+	if err := assertLatestRevision(nil, preparedFromUnsigned); err != nil {
+		t.Errorf("a contract without a stored PDF must pass, got %v", err)
 	}
 }

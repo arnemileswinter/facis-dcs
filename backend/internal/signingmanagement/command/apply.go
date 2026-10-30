@@ -96,6 +96,24 @@ var ErrCeremonyConsumed = errors.New("ceremony signing request has already been 
 // the document pinned at prepare (ADR-20 TBS byte pinning).
 var ErrDocumentMismatch = errors.New("submitted document does not match the document prepared for signing")
 
+// ErrStaleRevision rejects a signature over a revision that a later signature
+// has superseded. PAdES signatures are sequential: each one covers every
+// earlier revision, so a signature over an older revision cannot be merged
+// with a signature applied since (DCS-FR-SM-07, DCS-FR-SM-17).
+var ErrStaleRevision = fmt.Errorf("%w: it was prepared from a revision that a later signature has superseded; prepare again", ErrDocumentMismatch)
+
+// assertLatestRevision refuses a prepared document that does not extend the
+// contract's current signed revision. Prepare only appends to the revision it
+// reads, so a prepared document that does not start with the current signed
+// revision was prepared before a later signature was applied. An unsigned
+// current revision holds no signature that the submission could drop.
+func assertLatestRevision(current, prepared []byte) error {
+	if provenance.CarriesPAdESSignature(current) && !bytes.HasPrefix(prepared, current) {
+		return ErrStaleRevision
+	}
+	return nil
+}
+
 // ErrContentMismatch rejects a submitted PDF whose visible page content is no
 // longer the page content of the document pinned at prepare. Append-only
 // (ErrDocumentMismatch) and content-preserving are different properties: a PDF
@@ -786,6 +804,13 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		return fmt.Errorf("could not re-load existing signatures: %w", err)
 	}
 	if err := assertFieldUnsigned(serialisedRecords, ceremony.FieldName); err != nil {
+		return err
+	}
+	currentPDF, err := h.CRepo.FetchContractPDFBytes(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("fetch contract PDF: %w", err)
+	}
+	if err := assertLatestRevision(currentPDF, ceremony.PreparedPDF); err != nil {
 		return err
 	}
 
