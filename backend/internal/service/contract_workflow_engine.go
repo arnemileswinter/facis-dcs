@@ -1449,6 +1449,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		ContractData:    base.DerefString(req.ContractData),
 		ParentDID:       base.DerefString(req.ParentDid),
 		ValidUntil:      validUntil,
+		Party:           base.DerefString(req.Party),
+		TemplateDID:     base.DerefString(req.TemplateDid),
+		Jurisdiction:    base.DerefString(req.Jurisdiction),
 		Pagination:      pagination,
 	}
 	qryHandler := contract.GetAllMetaDataByFilterHandler{

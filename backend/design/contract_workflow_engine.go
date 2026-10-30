@@ -371,6 +371,9 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
 	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
+	Attribute("party", String, "Return only contracts naming this party DID as creator or counterparty (DCS-IR-CWE-07)")
+	Attribute("template_did", String, "Return only contracts created from this template (DCS-IR-CWE-07)")
+	Attribute("jurisdiction", String, "Return only contracts whose jurisdiction field contains this text (DCS-FR-CWE-13)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -1472,7 +1475,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("search", func() {
 		Description("locate contracts by data or state. filter/search across lifecycle states.")
-		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
+		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11", "DCS-FR-CWE-13")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1508,6 +1511,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("contract_data")
 			Param("parent_did")
 			Param("valid_until")
+			Param("party")
+			Param("template_did")
+			Param("jurisdiction")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

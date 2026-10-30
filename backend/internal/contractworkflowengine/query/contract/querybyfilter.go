@@ -32,6 +32,9 @@ type GetAllMetadataByFilterQry struct {
 	ContractData    string
 	ParentDID       string
 	ValidUntil      *time.Time
+	Party           string
+	TemplateDID     string
+	Jurisdiction    string
 	HolderDID       string
 	Pagination      datatype.Pagination
 	UserRoles       userrole.UserRoles
@@ -84,6 +87,9 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		ContractData:    query.ContractData,
 		ParentDID:       query.ParentDID,
 		ValidUntil:      query.ValidUntil,
+		Party:           query.Party,
+		TemplateDID:     query.TemplateDID,
+		Jurisdiction:    query.Jurisdiction,
 	}
 
 	contracts, err := h.CRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)

@@ -74,6 +74,9 @@ export interface ContractSearchRequest {
   contract_data?: string
   parent_did?: string
   valid_until?: string
+  party?: string
+  template_did?: string
+  jurisdiction?: string
   filter?: string
 }
 

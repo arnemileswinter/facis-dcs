@@ -13,12 +13,15 @@ const emit = defineEmits<{
   searchResult: [value: Contract[] | null]
 }>()
 
-const filterLabels: Partial<Record<keyof Contract, string>> = {
+const filterLabels: Partial<Record<keyof Contract | 'party' | 'jurisdiction', string>> = {
   did: 'DID',
   name: 'Name',
   description: 'Description',
   contract_version: 'Version',
   contract_data: 'Contract Data',
+  party: 'Party',
+  template_did: 'Template',
+  jurisdiction: 'Jurisdiction',
 }
 
 const deadlineUntil = ref('')
