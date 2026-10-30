@@ -121,7 +121,15 @@ func PresentedCredentialState(ctx context.Context, presentation string, trust *T
 	if len(result.StatusResults) == 0 {
 		return "", fmt.Errorf("status list check: %s", result.Reason)
 	}
-	return result.StatusResults[0].State, nil
+	for _, reference := range result.StatusResults {
+		if reference.State != status.StateValid {
+			return reference.State, nil
+		}
+	}
+	if !result.Accepted {
+		return "", mapStatusListRejection(result)
+	}
+	return status.StateValid, nil
 }
 
 func mapStatusListRejection(result status.CredentialVerificationResult) error {
