@@ -31,7 +31,7 @@ var PACResourceAuditTrailEntry = Type("PACResourceAuditTrailEntry", func() {
 	Attribute("created_at", String, "The creation date of the event")
 	Attribute("res_log_pred_cid", String, "Resource audit trail predecessor on the IPFS chain")
 	Attribute("kind", String, "Entry kind: TIMELINE or CHECK")
-	Attribute("result", String, "Check result: PASSED or FAILED")
+	Attribute("result", String, "Check result: PASSED, FAILED, or ERASED when the check needs content erased with the contract key")
 	Attribute("rule_id", String, "Stable integrity rule identifier")
 	Attribute("reason", String, "Human-readable check reason")
 
