@@ -85,6 +85,10 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(fmt.Errorf("store archive snapshot: %w", err))
 	}
+	notaryReceipt, tsaReceipt, err := cwecommand.NotarizeArchiveEntry(ctx, s.ArchiveNotary, s.ArchiveTSA, &entry)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
 	if err := s.CRepo.StoreArchiveEntry(ctx, tx, entry); err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
@@ -95,6 +99,8 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 		ContentHash:     entry.ContentHash,
 		SnapshotCID:     entry.SnapshotCID,
 		ArchiveStatus:   "STORED",
+		NotaryReceipt:   notaryReceipt,
+		TSAReceipt:      tsaReceipt,
 		EvidenceSummary: contractevents.ArchiveEvidenceSummary{
 			SnapshotHashAlgorithm: "SHA-256",
 			SignatureStatus:       "NOT_RECORDED",

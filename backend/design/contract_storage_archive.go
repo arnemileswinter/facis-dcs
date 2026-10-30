@@ -245,7 +245,7 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("store", func() {
-		Description("Store a contract or an evidence document in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25). kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
+		Description("Store a contract or an evidence document in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25). kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. The entry gets the archive notary receipt and the RFC 3161 TSA receipt that the signing workflow gives its archive entry. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
 		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06", "DCS-FR-CSA-25")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")

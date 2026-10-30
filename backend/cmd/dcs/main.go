@@ -842,7 +842,7 @@ func main() {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
 
-		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
+		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)

@@ -20,6 +20,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
+	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -47,12 +48,15 @@ type contractStorageArchivesrvc struct {
 	Keys          artifactstore.CEKRepository
 	ERepo         dcstodcsdb.EraseRepository
 	Artifacts     archiveArtifacts
+	ArchiveNotary cwecommand.ArchiveNotary
+	ArchiveTSA    cwecommand.ArchiveTimestampIssuer
 	auth.JWTAuthenticator
 }
 
 // NewContractStorageArchive returns the ContractStorageArchive service implementation.
 func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore,
-	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository) contractstoragearchive.Service {
+	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository,
+	archiveNotary cwecommand.ArchiveNotary, archiveTSA cwecommand.ArchiveTimestampIssuer) contractstoragearchive.Service {
 	svc := &contractStorageArchivesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
@@ -63,6 +67,8 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 		Eraser:           eraser,
 		Keys:             keys,
 		ERepo:            eraseRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
 	}
 	if auditTrailReader.Artifacts != nil {
 		svc.Artifacts = auditTrailReader.Artifacts

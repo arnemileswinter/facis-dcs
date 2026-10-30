@@ -1482,70 +1482,14 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 	}
 	archiveEntry.SnapshotCID = snapshotCID
 
-	archiveEntryID := fmt.Sprintf("%s#%d", did, signedContract.ContractVersion)
-	notaryPayload := cwecommand.ArchiveNotaryPayload{
-		EventType:       "ARCHIVE_STORED",
-		ArchiveEntryID:  archiveEntryID,
-		DID:             did,
-		ContractVersion: signedContract.ContractVersion,
-		ContentHash:     archiveEntry.ContentHash,
-		SnapshotCID:     archiveEntry.SnapshotCID,
-		StoredBy:        appliedBy,
-		StoredAt:        archiveEntry.StoredAt,
+	notaryEventReceipt, tsaReceipt, err := cwecommand.NotarizeArchiveEntry(ctx, h.ArchiveNotary, h.ArchiveTSA, &archiveEntry)
+	if err != nil {
+		return err
 	}
-	var notaryReceipt *cwecommand.ArchiveNotaryReceipt
-	if h.ArchiveNotary != nil {
-		notaryReceipt, err = h.ArchiveNotary.NotarizeArchiveEntry(ctx, notaryPayload)
-		if err != nil {
-			return fmt.Errorf("could not notarize archive entry: %w", err)
-		}
-	}
-
-	var tsaReceipt *cweevent.ArchiveTSAReceipt
-	if h.ArchiveTSA != nil && h.ArchiveTSA.Enabled() && notaryReceipt != nil {
-		evidence, err := cwecommand.BuildArchiveTimestampEvidence(notaryPayload, notaryReceipt)
-		if err != nil {
-			return fmt.Errorf("could not build archive TSA evidence: %w", err)
-		}
-		evidenceBytes, err := cwecommand.CanonicalArchiveTimestampEvidence(evidence)
-		if err != nil {
-			return err
-		}
-		rawReceipt, err := h.ArchiveTSA.TimestampBytes(ctx, evidenceBytes)
-		if err != nil {
-			return fmt.Errorf("could not timestamp archive entry: %w", err)
-		}
-		tsaReceipt = &cweevent.ArchiveTSAReceipt{
-			ReceiptType:    "ARCHIVE_TSA_RECEIPT",
-			Token:          rawReceipt.Token,
-			TokenEncoding:  rawReceipt.TokenEncoding,
-			HashAlgorithm:  rawReceipt.HashAlgorithm,
-			MessageImprint: rawReceipt.MessageImprint,
-			GeneratedAt:    rawReceipt.GeneratedAt,
-			Policy:         rawReceipt.Policy,
-			SerialNumber:   rawReceipt.SerialNumber,
-		}
-		tsaReceiptJSON, err := datatype.NewJSON(tsaReceipt)
-		if err != nil {
-			return fmt.Errorf("could not encode archive TSA receipt: %w", err)
-		}
-		archiveEntry.TSAReceipt = &tsaReceiptJSON
-	}
-
 	if err := h.ArchiveRepo.StoreArchiveEntry(ctx, tx, archiveEntry); err != nil {
 		return fmt.Errorf("could not store contract in archive: %w", err)
 	}
 
-	var notaryEventReceipt *cweevent.ArchiveNotaryReceipt
-	if notaryReceipt != nil {
-		notaryEventReceipt = &cweevent.ArchiveNotaryReceipt{
-			ReceiptType:    notaryReceipt.ReceiptType,
-			ArchiveEntryID: notaryReceipt.ArchiveEntryID,
-			EventHash:      notaryReceipt.EventHash,
-			PreviousHash:   notaryReceipt.PreviousHash,
-			ReceivedAt:     notaryReceipt.ReceivedAt,
-		}
-	}
 	archiveEvt := cweevent.StoreArchivedEvent{
 		DID:             did,
 		ContractVersion: signedContract.ContractVersion,

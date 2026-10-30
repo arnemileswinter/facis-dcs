@@ -12,6 +12,8 @@ import (
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/tsa"
+	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 )
@@ -194,6 +196,58 @@ func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
 
 	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "contract", Did: did})
 	require.ErrorContains(t, err, "already archived")
+}
+
+type stubArchiveNotary struct {
+	payload cwecommand.ArchiveNotaryPayload
+}
+
+func (n *stubArchiveNotary) NotarizeArchiveEntry(_ context.Context, payload cwecommand.ArchiveNotaryPayload) (*cwecommand.ArchiveNotaryReceipt, error) {
+	n.payload = payload
+	return &cwecommand.ArchiveNotaryReceipt{ReceiptType: "ARCHIVE_NOTARY_RECEIPT", ArchiveEntryID: payload.ArchiveEntryID, EventHash: "sha256:" + zeroHash}, nil
+}
+
+type stubArchiveTSA struct{}
+
+func (stubArchiveTSA) Enabled() bool { return true }
+func (stubArchiveTSA) TimestampBytes(context.Context, []byte) (*tsa.Receipt, error) {
+	return &tsa.Receipt{Token: "tsa-token", TokenEncoding: "base64", HashAlgorithm: "SHA-256", MessageImprint: "imprint"}, nil
+}
+
+// A contract the Archive Manager stores gets the notary receipt and the TSA
+// receipt the signing workflow gives its archive entry, so the evidence
+// compliance check passes.
+func TestArchiveManagerStoreNotarizesAndTimestampsTheEntry(t *testing.T) {
+	db := pgtest.Open(t)
+	did := "did:web:dcs.example:contract:notarized"
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
+		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
+	require.NoError(t, err)
+	svc := archiveTestService(t, db)
+	svc.Artifacts = newMemoryArtifacts()
+	notary := &stubArchiveNotary{}
+	svc.ArchiveNotary, svc.ArchiveTSA = notary, stubArchiveTSA{}
+
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "contract", Did: did})
+	require.NoError(t, err)
+	require.Equal(t, did+"#1", notary.payload.ArchiveEntryID)
+
+	var token string
+	require.NoError(t, db.Get(&token, `SELECT tsa_receipt->>'token' FROM contract_archive_entries WHERE did = $1`, did))
+	require.Equal(t, "tsa-token", token)
+	stored := archiveEvents(t, db, "STORE_ARCHIVED_CONTRACT")
+	require.Len(t, stored, 1)
+	require.Equal(t, "sha256:"+zeroHash, stored[0]["notary_receipt"].(map[string]any)["eventHash"])
+	require.Equal(t, "tsa-token", stored[0]["tsa_receipt"].(map[string]any)["token"])
+
+	items, err := svc.Compliance(archiveManagerContext(), &contractstoragearchive.CompliancePayload{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	for _, check := range items[0].Checks {
+		if check.Rule == "evidence_completeness" {
+			require.True(t, check.Passed, "evidence check: %v", check.Reason)
+		}
+	}
 }
 
 func TestArchiveManagerCannotArchiveAContractInWork(t *testing.T) {
