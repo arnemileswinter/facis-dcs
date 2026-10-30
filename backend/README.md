@@ -31,7 +31,7 @@
 ## Development
 
 ### Dependencies
-- Go **1.25+** – Installation: Follow the instructions on [Install Go](https://go.dev/learn/)
+- Go **1.26.10+** – Installation: Follow the instructions on [Install Go](https://go.dev/learn/)
 - Goa **v3** – Installation: Follow the instructions on [Goa Quickstart](https://goa.design/docs/1-goa/quickstart/)
 
 ### Setup the Backend
@@ -176,6 +176,8 @@ The Dockerfile and build script live in `deployment/docker/`. The script resolve
 - `TAG` – Sets the image tag (default: `latest`)
 - `REGISTRY` – Docker registry (environment variable)
 - `REPO` – Docker repository (environment variable)
+- `GIT_SHA` – Optional commit SHA (environment variable). Defaults to `git rev-parse HEAD` at the repo root.
+- `BUILD_TIME` – Optional RFC3339 build timestamp. Defaults to UTC now when unset.
 
 **Example:**
 ```bash

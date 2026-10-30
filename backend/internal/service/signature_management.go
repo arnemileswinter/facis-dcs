@@ -253,6 +253,10 @@ func (s *signatureManagementsrvc) resumeReviewedSignatureGate(ctx context.Contex
 }
 
 func (s *signatureManagementsrvc) Retrieve(ctx context.Context, req *signaturemanagement.SMContractRetrieveRequest) (res *signaturemanagement.SMContractRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -333,6 +337,9 @@ func (s *signatureManagementsrvc) Retrieve(ctx context.Context, req *signaturema
 }
 
 func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signaturemanagement.SMContractRetrieveByIDRequest) (res *signaturemanagement.SMContractRetrieveByIDResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -384,6 +391,9 @@ func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signatu
 }
 
 func (s *signatureManagementsrvc) Verify(ctx context.Context, req *signaturemanagement.SMContractVerifyRequest) (res *signaturemanagement.SMContractVerifyResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -426,6 +436,10 @@ func verifyResponseFrom(did string, result *query.SignatureVerifyResult) *signat
 }
 
 func (s *signatureManagementsrvc) Provenance(ctx context.Context, req *signaturemanagement.SMProvenanceRequest) (res *signaturemanagement.SMProvenanceResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -612,6 +626,9 @@ func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *sign
 }
 
 func (s *signatureManagementsrvc) Validate(ctx context.Context, req *signaturemanagement.SMContractValidateRequest) (res *signaturemanagement.SMContractValidateResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -690,6 +707,9 @@ func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemana
 }
 
 func (s *signatureManagementsrvc) Audit(ctx context.Context, req *signaturemanagement.SMContractAuditRequest) (res []*signaturemanagement.SMContractAuditResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -726,6 +746,9 @@ func (s *signatureManagementsrvc) Audit(ctx context.Context, req *signaturemanag
 }
 
 func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signaturemanagement.SMContractComplianceRequest) (res *signaturemanagement.SMContractComplianceResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -759,6 +782,10 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 // conservative mapping to dcs:Clause @ids and shape-coverage–aware status.
 // Absence of findings is not treated as compliance success.
 func (s *signatureManagementsrvc) ClauseReport(ctx context.Context, req *signaturemanagement.SMClauseReportRequest) (*signaturemanagement.SMClauseReportResponse, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -834,6 +861,9 @@ func mapClauseReportFindings(in []query.ClauseReportFinding) []*signaturemanagem
 // and timestamps, plus the contract's cryptographic integrity findings from
 // the same validation machinery /signature/validate uses.
 func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanagement.SMSignatureViewRequest) (res *signaturemanagement.SMSignatureViewResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -940,8 +970,11 @@ func (s *signatureManagementsrvc) View(ctx context.Context, req *signaturemanage
 // from the signature's embedded ContractSigningSummaryCredential (DCS-FR-SM-26).
 // Evidence is matched to the signature record by signer DID, disambiguated by
 // the declared field on multi-signer contracts. A signature whose evidence is
-// absent (e.g. pre-evidence data) simply carries no proof fields.
+// absent (e.g. pre-evidence data) carries no proof fields, and its credential
+// status is UNKNOWN because no presented credential is available to look up.
 func enrichWithSigningEvidence(item *signaturemanagement.SMSignatureViewItem, rec db.SignatureRecord, evidence []query.SigningEvidence) {
+	item.CredentialStatus = query.CredentialUnknown
+	item.CredentialStatusReason = optString("no verified signing evidence is embedded for this signature")
 	field := ""
 	if rec.FieldName != nil {
 		field = *rec.FieldName
@@ -960,6 +993,8 @@ func enrichWithSigningEvidence(item *signaturemanagement.SMSignatureViewItem, re
 		item.KbSdHash = optString(ev.KBSDHash)
 		item.ValidationReportHash = optString(ev.ValidationReportHash)
 		item.SummaryIssuer = optString(ev.Issuer)
+		item.CredentialStatus = ev.CredentialStatus.State
+		item.CredentialStatusReason = optString(ev.CredentialStatus.Reason)
 		return
 	}
 }
@@ -1030,6 +1065,10 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 	}
 	if ceremony == nil {
 		return nil, signaturemanagement.MakeNotFound(fmt.Errorf("ceremony %s not found", req.CeremonyID))
+	}
+
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, ceremony.ContractDID); err != nil {
+		return nil, err
 	}
 
 	res = &signaturemanagement.SMSignatureRequestStatusResponse{

@@ -29,6 +29,7 @@ import (
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	geninfo "digital-contracting-service/gen/info"
 	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
@@ -606,17 +607,22 @@ func main() {
 	}
 
 	// Initialize the webhook platform (ORCE integration).
-	webhookStore := webhookplatform.NewSubscriptionStore()
-	webhookDispatcher := webhookplatform.NewDispatcher(webhookStore)
+	webhookSubs := webhookplatform.PostgresSubscriptions{
+		DB:      db,
+		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
+	}
+	webhookStore := webhookplatform.NewDeliveryLog()
+	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did))
 	webhookPlatform := webhookplatform.New(
+		webhookSubs,
 		webhookStore,
 		webhookDispatcher,
-		func(ctx context.Context, token string) (string, error) {
+		func(ctx context.Context, token string) (webhookplatform.Caller, error) {
 			info, err := hydraJWTValidator.ValidateToken(ctx, token)
 			if err != nil {
-				return "", err
+				return webhookplatform.Caller{}, err
 			}
-			return info.ParticipantDID, nil
+			return webhookplatform.Caller{HolderDID: info.HolderDID, ParticipantDID: info.ParticipantDID, Roles: info.Roles}, nil
 		},
 		nil,
 	)
@@ -783,6 +789,7 @@ func main() {
 		c2paSvc                         c2paservice.Service
 		semanticHubSvc                  semantichubgen.Service
 		keyInventorySvc                 keyinventory.Service
+		infoSvc                         geninfo.Service
 		workflowGateCoordinator         *workflowgate.Coordinator
 	)
 	{
@@ -851,6 +858,7 @@ func main() {
 		didSrv = didService
 		semanticHubSvc = service.NewSemanticHub(db, jwtAuth)
 		keyInventorySvc = service.NewKeyInventory(db, jwtAuth)
+		infoSvc = service.NewInfo()
 	}
 
 	// Channel used by background workers and signal handler to notify main to exit.
@@ -930,21 +938,26 @@ func main() {
 		c2paEndpoints                         *c2paservice.Endpoints
 		semanticHubEndpoints                  *semantichubgen.Endpoints
 		keyInventoryEndpoints                 *keyinventory.Endpoints
+		infoEndpoints                         *geninfo.Endpoints
 	)
 	{
 		authEndpoints = genauth.NewEndpoints(authSvc)
 		authEndpoints.Use(debug.LogPayloads())
 		authEndpoints.Use(log.Endpoint)
 		contractStorageArchiveEndpoints = contractstoragearchive.NewEndpoints(contractStorageArchiveSvc)
+		contractStorageArchiveEndpoints.Use(auth.AccessMetadataMiddleware)
 		contractStorageArchiveEndpoints.Use(debug.LogPayloads())
 		contractStorageArchiveEndpoints.Use(log.Endpoint)
 		contractWorkflowEngineEndpoints = contractworkflowengine.NewEndpoints(contractWorkflowEngineSvc)
+		contractWorkflowEngineEndpoints.Use(auth.AccessMetadataMiddleware)
 		contractWorkflowEngineEndpoints.Use(debug.LogPayloads())
 		contractWorkflowEngineEndpoints.Use(log.Endpoint)
 		dcsToDcsEndpoints = dcstodcs.NewEndpoints(dcsToDcsSvc)
+		dcsToDcsEndpoints.Use(auth.AccessMetadataMiddleware)
 		dcsToDcsEndpoints.Use(debug.LogPayloads())
 		dcsToDcsEndpoints.Use(log.Endpoint)
 		pdfGenerationEndpoints = pdfgeneration.NewEndpoints(pdfGenerationSvc)
+		pdfGenerationEndpoints.Use(auth.AccessMetadataMiddleware)
 		pdfGenerationEndpoints.Use(debug.LogPayloads())
 		pdfGenerationEndpoints.Use(log.Endpoint)
 		processAuditAndComplianceEndpoints = processauditandcompliance.NewEndpoints(processAuditAndComplianceSvc)
@@ -952,12 +965,15 @@ func main() {
 		processAuditAndComplianceEndpoints.Use(debug.LogPayloads())
 		processAuditAndComplianceEndpoints.Use(log.Endpoint)
 		signatureManagementEndpoints = signaturemanagement.NewEndpoints(signatureManagementSvc)
+		signatureManagementEndpoints.Use(auth.AccessMetadataMiddleware)
 		signatureManagementEndpoints.Use(debug.LogPayloads())
 		signatureManagementEndpoints.Use(log.Endpoint)
 		templateCatalogueIntegrationEndpoints = templatecatalogueintegration.NewEndpoints(templateCatalogueIntegrationSvc)
+		templateCatalogueIntegrationEndpoints.Use(auth.AccessMetadataMiddleware)
 		templateCatalogueIntegrationEndpoints.Use(debug.LogPayloads())
 		templateCatalogueIntegrationEndpoints.Use(log.Endpoint)
 		templateRepositoryEndpoints = templaterepository.NewEndpoints(templateRepositorySvc)
+		templateRepositoryEndpoints.Use(auth.AccessMetadataMiddleware)
 		templateRepositoryEndpoints.Use(debug.LogPayloads())
 		templateRepositoryEndpoints.Use(log.Endpoint)
 		didEntpoints = didservice.NewEndpoints(didSrv)
@@ -967,11 +983,16 @@ func main() {
 		c2paEndpoints.Use(debug.LogPayloads())
 		c2paEndpoints.Use(log.Endpoint)
 		semanticHubEndpoints = semantichubgen.NewEndpoints(semanticHubSvc)
+		semanticHubEndpoints.Use(auth.AccessMetadataMiddleware)
 		semanticHubEndpoints.Use(debug.LogPayloads())
 		semanticHubEndpoints.Use(log.Endpoint)
 		keyInventoryEndpoints = keyinventory.NewEndpoints(keyInventorySvc)
+		keyInventoryEndpoints.Use(auth.AccessMetadataMiddleware)
 		keyInventoryEndpoints.Use(debug.LogPayloads())
 		keyInventoryEndpoints.Use(log.Endpoint)
+		infoEndpoints = geninfo.NewEndpoints(infoSvc)
+		infoEndpoints.Use(debug.LogPayloads())
+		infoEndpoints.Use(log.Endpoint)
 	}
 
 	// SIGINT/SIGTERM stop the service gracefully.
@@ -990,7 +1011,8 @@ func main() {
 	if err := bootstrapSrv.Shutdown(ctx); err != nil {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
+	serveMetrics(ctx, &wg)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

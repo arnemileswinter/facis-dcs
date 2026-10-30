@@ -2,6 +2,8 @@ package design
 
 import (
 	. "goa.design/goa/v3/dsl"
+
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 var ContractCreateRequest = Type("ContractCreateRequest", func() {
@@ -156,6 +158,8 @@ var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDRespo
 	Attribute("exp_notice_period", Int, "The notice period before contract expiration (in days)")
 	Attribute("responsible", Any, "Responsible for this contract, including the creator, approvers, reviewers, and negotiators")
 	Attribute("contract_data", Any, "The data of that contract")
+	Attribute("modified_by", String, "Identifier of the actor whose save replaced this version. Absent on versions recorded before the actor was stored")
+	Attribute("modified_at", String, "The timestamp of the save that replaced this version")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_version", "template_did", "template_version")
 })
@@ -535,22 +539,32 @@ var ContractRejectResponse = Type("ContractRejectResponse", func() {
 })
 
 var ContractStoreRequest = Type("ContractStoreRequest", func() {
-	Description("Contract store evidence request")
-
 	Token("token", String, "JWT token")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("updated_at", String, "Updated at")
-
-	Required("did", "updated_at")
+	Attribute("did", String)
+	Attribute("updated_at", String)
+	Attribute("content", Bytes)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Required("did", "updated_at", "content", "filename", "description")
 })
-
 var ContractStoreResponse = Type("ContractStoreResponse", func() {
-	Description("Result for store evidence")
-
-	Attribute("did", String, "Decentralized Identifier of the contract")
-
-	Required("did")
+	Attribute("did", String)
+	Attribute("evidence_id", String)
+	Required("did", "evidence_id")
+})
+var ContractEvidence = Type("ContractEvidence", func() {
+	Attribute("evidence_id", String)
+	Attribute("did", String)
+	Attribute("contract_version", Int)
+	Attribute("recorded_by", String)
+	Attribute("recorded_at", String)
+	Attribute("filename", String)
+	Attribute("description", String)
+	Attribute("media_type", String)
+	Attribute("sha256", String)
+	Attribute("content", Bytes)
+	Required("evidence_id", "did", "contract_version", "recorded_by", "recorded_at", "filename", "description", "media_type", "sha256")
 })
 
 var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
@@ -581,8 +595,8 @@ var ContractRenewRequest = Type("ContractRenewRequest", func() {
 	Attribute("did", String, "Decentralized Identifier of the contract to renew")
 	Attribute("updated_at", String, "The caller's view of the original contract's last update timestamp (optimistic concurrency guard)")
 
-	Attribute("new_start_date", String, "Optional start date for the new renewal term; defaults to the original's start date if omitted")
-	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; defaults to the original's expiry date if omitted")
+	Attribute("new_start_date", String, "Optional start date for the new renewal term; at least one day in the future. Defaults to the original's expiry date, or tomorrow if that is earlier; empty if the original has no expiry date")
+	Attribute("new_exp_date", String, "Optional expiry date for the new renewal term; at least one day in the future and after the start date. Defaults to the start date plus the original's term length; empty without either of the original's start and expiry dates.")
 	Attribute("new_exp_policy", String, "Optional expiry policy for the new renewal term; defaults to the original's expiry policy if omitted")
 	Attribute("new_exp_notice_period", Int, "Optional notice period (in days) for the new renewal term; defaults to the original's notice period if omitted")
 
@@ -623,6 +637,18 @@ var ContractAuditResponse = Type("ContractAuditResponse", func() {
 	Required("id", "component", "event_type", "event_data", "created_at")
 })
 
+var ContractLifecycleEvent = Type("ContractLifecycleEvent", func() {
+	Description("One lifecycle transition of a contract, taken from the audit trail without the event body")
+
+	Attribute("event_type", String, "Type of the lifecycle event")
+	Attribute("actor", String, "Participant that performed the transition; absent for system transitions and erased entries")
+	Attribute("occurred_at", String, "When the transition occurred (RFC 3339)")
+	Attribute("previous_state", String, "Contract state before the transition, if the event records it")
+	Attribute("new_state", String, "Contract state after the transition, if the event records it")
+
+	Required("event_type", "occurred_at")
+})
+
 var ApprovedContractTemplateRetrieveRequest = Type("ApprovedContractTemplateRetrieveRequest", func() {
 	Description("Approved contract template retrieve request")
 
@@ -634,6 +660,7 @@ var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRet
 	Attribute("version", Int, "Version")
 	Attribute("state", String, "State")
 	Attribute("template_type", String, "The type of the template")
+	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "Name")
 	Attribute("description", String, "Description")
 	Attribute("created_by", String, "Created by")
@@ -641,7 +668,7 @@ var ApprovedContractTemplateRetrieveResponse = Type("ApprovedContractTemplateRet
 	Attribute("updated_at", String, "Updated at")
 	Attribute("responsible", Any, "Responsible for this contract template, including the creator, approver and reviewers")
 
-	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version")
+	Required("did", "state", "template_type", "party_type", "created_by", "created_at", "updated_at", "version")
 })
 
 var ContractDeployRequest = Type("ContractDeployRequest", func() {
@@ -925,7 +952,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			PUT("/contract/update")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -958,7 +989,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/submit")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -981,7 +1016,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1004,7 +1043,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/withdraw")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1035,7 +1078,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/negotiate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1063,7 +1110,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/accept-offer")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1096,7 +1147,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			PUT("/contract/negotiation_draft")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1123,7 +1178,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/negotiation_draft/{did}")
 			Param("did")
 			Response(StatusOK)
@@ -1151,7 +1210,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			DELETE("/contract/negotiation_draft/{did}")
 			Param("did")
 			Response(StatusOK)
@@ -1182,7 +1245,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/respond")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1208,7 +1275,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/review")
 			Param("did")
 
@@ -1276,7 +1347,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/kpis/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1379,7 +1454,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/history/{did}")
 			Param("did")
 
@@ -1448,7 +1527,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/approve")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1471,7 +1554,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/reject")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1493,12 +1580,64 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
+		Error("conflict", ErrorResult)
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/store")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
+			Response("conflict", StatusConflict)
+		})
+	})
+
+	Method("list_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractEvidence))
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+		})
+	})
+	Method("retrieve_evidence", func() {
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() {
+			Token("token", String)
+			Attribute("did", String)
+			Attribute("evidence_id", String)
+			Required("did", "evidence_id")
+		})
+		Result(ContractEvidence)
+		Error("internal_error", ErrorResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/{did}/evidence/{evidence_id}")
+			Response("internal_error", StatusInternalServerError)
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 		})
 	})
 
@@ -1517,7 +1656,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/terminate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1540,7 +1683,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/renew")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1554,6 +1701,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
 			Scope("Compliance Officer")
 		})
 
@@ -1563,10 +1712,46 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
 			POST("/contract/audit")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("lifecycle", func() {
+		Description("retrieve the lifecycle transitions of a contract with actor and timestamp, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-FR-CWE-27")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractLifecycleEvent))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/lifecycle/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -1608,7 +1793,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/deploy")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -1726,7 +1915,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			POST("/contract/target/designate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)

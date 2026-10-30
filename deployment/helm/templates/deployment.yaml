@@ -134,6 +134,9 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
+              protocol: TCP
           env:
             {{- if .Values.dss }}{{- if or .Values.dss.enabled .Values.dss.url }}
             # EU DSS for signature VALIDATION (DCS-FR-SM-18) and the
@@ -224,6 +227,8 @@ spec:
             {{- end }}
             - name: DCS_API_PATH
               value: {{ include "digital-contracting-service.apiPath" . | quote }}
+            - name: DCS_METRICS_PORT
+              value: {{ .Values.service.metricsPort | quote }}
             - name: DCS_UI_PATH
               value: {{ include "digital-contracting-service.uiPath" . | quote }}
             {{- if .Values.route.publicBaseURL }}
@@ -306,7 +311,14 @@ spec:
             {{- end }}
             # ---- IPFS storage (Kubo RPC API, direct -- ADR-36) -----------------------
             - name: IPFS_MFS_BASE_URL
+              {{- if .Values.ipfs.mfsBaseURLSecretRef.name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ipfs.mfsBaseURLSecretRef.name | quote }}
+                  key: {{ required "ipfs.mfsBaseURLSecretRef.key is required when its name is set" .Values.ipfs.mfsBaseURLSecretRef.key | quote }}
+              {{- else }}
               value: {{ include "digital-contracting-service.ipfsMfsBaseURL" . | quote }}
+              {{- end }}
             # ---- Archive notary / ORCE ---------------------------------------------
             {{- $archiveNotaryBaseURL := .Values.archiveNotary.baseURL | default "" }}
             {{- if and (not $archiveNotaryBaseURL) .Values.orce.enabled }}

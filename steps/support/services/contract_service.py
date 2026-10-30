@@ -151,6 +151,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Contract Source Template",
                 "description": "BDD template for contract workflows",
                 "template_data": template_data
@@ -222,12 +223,23 @@ class ContractService:
 
 
     @staticmethod
+    def _reading_parties(context) -> dict:
+        """Create-payload `parties`: the organizations that may read the contract.
+        The creating organization reads its own contract; a copy received by a
+        peer is readable there only by the organizations named here. The BDD
+        users of both instances present the default organization; a scenario
+        with a dedicated organization (steps/encryption_at_rest) adds it."""
+        org = getattr(context, "encryption_org", None)
+        return {"parties": [AuthService.DEFAULT_ORGANIZATION] + ([org] if org else [])}
+
+    @staticmethod
     def _create_contract_in_draft(context, contract_name: str, template_data=None):
         t_did = ContractService._create_approved_template_for_contract(context, template_data=template_data)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
         create_payload = {
             "template_did": t_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -248,8 +260,11 @@ class ContractService:
         t_did = ContractService._create_approved_template_for_contract(context)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
+        # The negotiation steps respond as "TechVendor Inc". Reads and changes
+        # are scoped to the creating organization and the declared parties.
         create_payload = {
             "template_did": t_did,
+            "parties": [AuthService.DEFAULT_ORGANIZATION, "TechVendor Inc"],
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -290,6 +305,7 @@ class ContractService:
         create_payload = {
             "template_did": t_did,
             "counterparty": other_peer_did,
+            **ContractService._reading_parties(context),
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
@@ -351,6 +367,7 @@ class ContractService:
             template_create_url(context),
             {
                 "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+                "party_type": TemplateService.MULTI_PARTY_TYPE,
                 "name": "BDD Signature-Field Source Template",
                 "description": "BDD template for real-signing-vertical scenarios",
                 "template_data": {

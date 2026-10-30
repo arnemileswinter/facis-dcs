@@ -243,9 +243,9 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		cmd.ContractData = stamped
 	}
 
-	// Snapshot the pre-save formal row: every successful
-	// formal save gets a read-only history entry with the row's actor timestamps.
-	err = h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID)
+	// Snapshot the pre-save formal row: every successful formal save gets a
+	// read-only history entry that records the saving actor and the save time.
+	err = h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID, cmd.UpdatedBy)
 	if err != nil {
 		return fmt.Errorf("could not create history entry: %w", err)
 	}

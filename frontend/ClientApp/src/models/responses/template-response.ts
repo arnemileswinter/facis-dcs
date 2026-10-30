@@ -7,6 +7,7 @@ import type { DcsTemplateData } from '../dcs-jsonld'
 import type { ComponentType } from '@/types/component-type'
 import type { ContractTemplateEventType } from '@/types/contract-template-event-type'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { TemplateType } from '@/types/template-type'
 
 export interface ContractTemplateCreateResponse {
@@ -33,6 +34,7 @@ interface ContractTemplateSearchResponseItem {
   did: string
   version: string
   state: ContractTemplateState
+  party_type: PartyType
   template_type: TemplateType
   name?: string
   description?: string
@@ -42,6 +44,21 @@ interface ContractTemplateSearchResponseItem {
 }
 
 export type ContractTemplateSearchResponse = ContractTemplateSearchResponseItem[]
+
+// One snapshot from GET /template/history/{did}, recorded at a state change.
+export interface ContractTemplateHistoryEntry {
+  did: string
+  version: number
+  state: ContractTemplateState
+  template_type: TemplateType
+  name?: string
+  description?: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type ContractTemplateHistoryResponse = ContractTemplateHistoryEntry[]
 
 export interface ContractTemplateRetrieveResponse {
   contract_templates: PartialContractTemplate[]
@@ -53,6 +70,7 @@ export interface ContractTemplateRetrieveByIdResponse {
   did: string
   version: number
   state: ContractTemplateState
+  party_type: PartyType
   template_type: TemplateType
   name?: string
   description?: string

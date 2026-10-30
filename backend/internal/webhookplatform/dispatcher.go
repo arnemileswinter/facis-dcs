@@ -7,9 +7,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // WebhookPayload is the JSON body sent to a subscriber's callback URL.
@@ -22,25 +26,42 @@ type WebhookPayload struct {
 	Data          json.RawMessage `json:"data,omitempty"`
 }
 
-// Dispatcher fans out events to all registered subscribers asynchronously.
+// Audience reports whether the organization ownerDID may receive event about
+// did. Events carry contract content, so delivery follows the contract read
+// policy (F03).
+type Audience func(ctx context.Context, event, did, ownerDID string) bool
+
+// Dispatcher fans out events to the registered subscribers asynchronously.
 type Dispatcher struct {
-	store      *SubscriptionStore
+	subs       Subscriptions
+	store      *DeliveryLog
+	audience   Audience
 	httpClient *http.Client
 }
 
-// NewDispatcher creates a Dispatcher backed by the given store.
-func NewDispatcher(store *SubscriptionStore) *Dispatcher {
+// NewDispatcher creates a Dispatcher that reads subscribers from subs, delivers
+// to those audience admits, and records outcomes in store. Callback URLs are
+// caller-supplied, so the client refuses loopback, link-local and redirects.
+func NewDispatcher(subs Subscriptions, store *DeliveryLog, audience Audience) *Dispatcher {
 	return &Dispatcher{
-		store: store,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		subs:       subs,
+		store:      store,
+		audience:   audience,
+		httpClient: safehttp.Client(10*time.Second, safehttp.Policy{}),
 	}
 }
 
-// Dispatch sends event to every subscriber registered for that event.
+// Dispatch sends event to every subscriber registered for that event whose
+// organization the audience admits.
 func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
-	subs := d.store.GetByEvent(event)
+	subs, err := d.subs.ByEvent(ctx, event)
+	if err != nil {
+		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
+		return
+	}
+	subs = slices.DeleteFunc(subs, func(sub Subscription) bool {
+		return !d.audience(ctx, event, did, sub.OwnerDID)
+	})
 	if len(subs) == 0 {
 		return
 	}
@@ -84,12 +105,22 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 		Event:         payload.Event,
 		DID:           payload.DID,
 		CallbackURL:   sub.CallbackURL,
+		OwnerDID:      sub.OwnerDID,
 		DeliveredAt:   time.Now().UTC(),
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("webhookplatform: marshal payload for %s: %v", sub.CallbackURL, err)
+		delivery.Error = err.Error()
+		d.store.AddDelivery(delivery)
+		return
+	}
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	signature, err := Signature(sub.Secret, payload.EventID, timestamp, body)
+	if err != nil {
+		log.Printf("webhookplatform: sign payload for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
 		d.store.AddDelivery(delivery)
 		return
@@ -105,9 +136,10 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Correlation-ID", payload.CorrelationID)
 	req.Header.Set("X-Event-ID", payload.EventID)
-	if sub.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+sub.Secret)
-	}
+	// Standard Webhooks v1 (https://www.standardwebhooks.com/).
+	req.Header.Set("webhook-id", payload.EventID)
+	req.Header.Set("webhook-timestamp", timestamp)
+	req.Header.Set("webhook-signature", signature)
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {

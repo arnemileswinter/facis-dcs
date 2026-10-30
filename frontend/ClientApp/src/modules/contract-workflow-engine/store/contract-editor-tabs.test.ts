@@ -71,6 +71,27 @@ describe('contract editor tabs', () => {
     expect(tabIds(ContractState.draft, ['details', 'content', 'audit'])).toContain('audit')
   })
 
+  // U3: every party that can open the contract sees who moved it through its lifecycle.
+  it.each<UserRole>(['CONTRACT_OBSERVER', 'CONTRACT_REVIEWER', 'AUDITOR'])(
+    'offers the lifecycle history to %s',
+    (role) => {
+      signIn([role])
+
+      expect(tabIds(ContractState.signed, ['details', 'content', 'audit', 'history', 'structure'])).toContain('history')
+    },
+  )
+
+  it('keeps the audit tab from a party role without audit scope', () => {
+    signIn(['CONTRACT_OBSERVER'])
+
+    expect(tabIds(ContractState.signed, ['details', 'content', 'audit', 'history', 'structure'])).toEqual([
+      'details',
+      'content',
+      'history',
+      'structure',
+    ])
+  })
+
   // Sys. Administrator is in no contract route's roles and in no /contract/audit
   // scope, so the branch could never produce a working tab.
   it('does not offer the audit tab to a system administrator', () => {

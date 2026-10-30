@@ -73,7 +73,7 @@ func setupTestSigning() error {
 		return err
 	}
 	chainPath := filepath.Join(dir, "x5chain.pem")
-	if err := os.WriteFile(chainPath, append(certPEM(der), certPEM(caDER)...), 0o644); err != nil {
+	if err := os.WriteFile(chainPath, append(certPEM(der), certPEM(caDER)...), 0o600); err != nil {
 		return err
 	}
 	// pdf-core reads no chain from its environment: the suite sends this one on

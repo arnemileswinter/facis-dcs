@@ -154,6 +154,15 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
+/** One lifecycle transition from GET /contract/lifecycle/{did}, without the event body. */
+export interface ContractLifecycleEvent {
+  event_type: string
+  actor?: string
+  occurred_at: string
+  previous_state?: string
+  new_state?: string
+}
+
 export interface ContractHistoryItem {
   did: string
   contract_version: number
@@ -169,6 +178,9 @@ export interface ContractHistoryItem {
   exp_notice_period?: number
   responsible?: unknown
   contract_data?: ContractData
+  /** Actor of the save that replaced this version. Absent on versions recorded before the actor was stored. */
+  modified_by?: string
+  modified_at?: string
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]

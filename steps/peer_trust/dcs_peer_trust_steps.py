@@ -433,7 +433,7 @@ def step_given_local_contract_offered_to_peer(context, name):
     create_resp = post_json(
         context,
         contract_create_url(context),
-        {"template_did": t_did, "counterparty": context.outbound_peer_did},
+        {"template_did": t_did, "counterparty": context.outbound_peer_did, **ContractService._reading_parties(context)},
         headers=creator_h,
     )
     assert create_resp.status_code == 200, create_resp.text
@@ -772,6 +772,9 @@ def step_when_create_and_offer_cross_instance(context):
             {
                 "template_did": t_did,
                 "counterparty": context.peer_did_b,
+                # Instance B acts as the default organization and as its
+                # counterparty organization; both read B's copy.
+                "parties": ContractService._reading_parties(context)["parties"] + [_B_COUNTERPARTY_ORG],
             },
             headers=creator_h,
         )

@@ -779,7 +779,7 @@ def _access_log_row(context, method: str, require_auth_success: bool | None) -> 
     cursor = context.db.cursor()
     cursor.execute(
         f"""
-        SELECT attempt_by, roles, attempted_at, scope, did, justification
+        SELECT attempt_by, roles, attempted_at, scope, did, justification, outcome, success
         FROM access_attempts
         WHERE service = 'ProcessAuditAndCompliance'
           AND method = %s
@@ -802,10 +802,12 @@ def _access_log_row(context, method: str, require_auth_success: bool | None) -> 
 
 
 def _assert_access_metadata(context, method: str, require_auth_success: bool | None):
-    actor, roles, attempted_at, scope, did, justification = _access_log_row(
+    actor, roles, attempted_at, scope, did, justification, outcome, success = _access_log_row(
         context, method, require_auth_success
     )
     assert actor and roles and attempted_at and scope and justification
+    assert success is True, "A role denial must not become a credential failure"
+    assert outcome == ("SUCCESS" if require_auth_success else "DENIED"), outcome
     assert scope == context.last_access_request["scope"]
     assert justification == context.last_access_request["justification"]
     assert did == context.last_access_request.get("did")

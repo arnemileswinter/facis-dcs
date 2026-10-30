@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 
@@ -61,9 +63,10 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
     `
 
 	var params []any
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts.did", &params)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		query += fmt.Sprintf(" ORDER BY created_at DESC, did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -215,19 +218,11 @@ func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Conte
 }
 
 func (r *PostgresContractRepo) ReadAllSigningTasks(ctx context.Context, tx *sqlx.Tx) ([]db.ContractSigningTask, error) {
-
 	var tasks []db.ContractSigningTask
-	err := tx.SelectContext(ctx, &tasks,
-		`SELECT cs.contract_did, c.contract_version, cs.signer_did, cs.created_at
-		   FROM contract_signatures cs
-		   JOIN contracts c ON c.did = cs.contract_did
-		  WHERE c.state = 'APPROVED' AND cs.status = 'PENDING'
-		  ORDER BY cs.created_at DESC`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
+	var params []any
+	query := `SELECT cs.contract_did, c.contract_version, cs.status AS state, cs.signer_did, cs.created_at FROM contract_signatures cs JOIN contracts c ON c.did = cs.contract_did WHERE c.state = 'APPROVED' AND cs.status = 'PENDING' AND ` + contractreadpolicy.SQL(ctx, "c.did", &params) + " ORDER BY cs.created_at DESC"
+	err := tx.SelectContext(ctx, &tasks, query, params...)
+	return tasks, err
 }
 
 func (r *PostgresContractRepo) CountSignatureForContractDID(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {

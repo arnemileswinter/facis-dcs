@@ -113,3 +113,21 @@ export interface AuditReportDownload {
 }
 
 export type AuditReportResponse = AuditReport | AuditReportDownload
+
+export interface AccessAttempt {
+  id: number
+  attempted_at: string
+  attempt_by?: string
+  roles: string[]
+  service: string
+  method: string
+  scope?: string
+  did?: string
+  justification: string
+  outcome: 'SUCCESS' | 'DENIED' | 'FAILED'
+}
+
+export interface AccessAttemptsResponse {
+  attempts: AccessAttempt[]
+  next_cursor?: string
+}

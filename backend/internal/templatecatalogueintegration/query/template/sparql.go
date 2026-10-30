@@ -18,6 +18,7 @@ const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubj
 var (
 	dcsTemplateUUIDIRI       = fcasset.DCSContextURL + "templateUuid"
 	dcsStateIRI              = fcasset.DCSContextURL + "state"
+	dcsPartyTypeIRI          = fcasset.DCSContextURL + "partyType"
 	dcsTemplateTypeIRI       = fcasset.DCSContextURL + "templateType"
 	dcsTemplateDataStringIRI = fcasset.DCSContextURL + "templateDataString"
 	schemaNameIRI            = fcasset.SchemaContextURL + "name"
@@ -44,6 +45,8 @@ func coreFieldTriples() string {
 	b.WriteString(fieldTriple(schemaDescriptionIRI, "description"))
 	b.WriteString(fieldTriple(schemaVersionIRI, "version"))
 	b.WriteString(fieldTriple(dcsStateIRI, "state"))
+	b.WriteString(fieldTriple(dcsTemplateTypeIRI, "template_type"))
+	b.WriteString(fieldTriple(dcsPartyTypeIRI, "party_type"))
 	return b.String()
 }
 

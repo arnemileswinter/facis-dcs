@@ -16,6 +16,7 @@ import (
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 
@@ -23,6 +24,7 @@ import (
 )
 
 type UpdateManageCmd struct {
+	PartyType    string
 	DID          string
 	TemplateType *contracttemplatetype.ContractTemplateType
 	UpdatedAt    time.Time
@@ -40,6 +42,11 @@ type UpdateManager struct {
 }
 
 func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
+	if cmd.PartyType != "" {
+		if _, err := partytype.New(cmd.PartyType); err != nil {
+			return err
+		}
+	}
 	if cmd.TemplateData != nil && cmd.TemplateData.IsNotNullValue() {
 		normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 		if err != nil {
@@ -85,9 +92,13 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 	newData := db.ContractTemplateUpdateData{
 		DID:          cmd.DID,
 		TemplateType: templateType,
+		PartyType:    cmd.PartyType,
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
+	}
+	if err := h.CTRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
+		return fmt.Errorf("could not create history: %w", err)
 	}
 	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {

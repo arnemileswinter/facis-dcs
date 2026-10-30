@@ -87,6 +87,32 @@ Concretely:
   An erasure record that could erase itself would prove nothing, and a
   deletion proof must not lie under the key whose destruction it proves.
 
+### Complete audit reports (P06 decision, 2026-10-15)
+
+Complete audit runs and their exported reports may contain private evidence
+from several resources. They depend on all of those resource CEKs: the
+existing encryption operation is applied successively in sorted, deduplicated
+scope order. A versioned envelope names those scopes and the audit ID; outer
+instance encryption authenticates that envelope. No additional key hierarchy
+is introduced. Request and executor response bytes survive decryption exactly,
+including whitespace; there are no additional plaintext response or receipt
+columns in `pac_audit_runs`.
+
+Shredding any participating resource makes the entire affected saved run and
+report unreadable. `GET /pac/report` returns 404 for that selected run, without
+falling back to an older one. This consequence for reports covering several
+resources was explicitly accepted. Public headers, already-erased bodies and
+the existing instance-scoped deletion proofs do not create new resource-key
+dependencies, so past erasures alone do not prevent future audits. Evidence
+of a shredded resource that the database still holds, such as an archive
+entry summary or a synthetic check, is replaced by the erased marker before
+the run is sent and sealed.
+
+The report hash covers the final downloaded plaintext bytes. Its CID names
+the encrypted report envelope in IPFS. Retrieving that artifact requires both
+the existing instance decryption and the PAC envelope decryption. Encryption
+work grows with the number of participating resource scopes.
+
 Two deliberate exclusions:
 
 - **P-256, not X25519.** Every key in the system is EC P-256, the PKCS#11

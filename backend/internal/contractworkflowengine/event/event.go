@@ -748,6 +748,7 @@ func (e RenewEvent) GetDID() string {
 
 // RecordEvidenceEvent is emitted when an evidence is recorded
 type RecordEvidenceEvent struct {
+	EvidenceID      string             `json:"evidence_id"`
 	DID             string             `json:"did"`
 	HolderDID       string             `json:"holder_did"`
 	ContractVersion int                `json:"contract_version"`
@@ -848,7 +849,8 @@ func (e IncreaseContractVersionEvent) GetDID() string {
 	return e.DID
 }
 
-// ContractExpired is emitted when change requests for contract merged
+// ContractExpired is emitted when the expiry cron job persists EXPIRED. ExpPolicy
+// is nil for a contract without an expiration policy.
 type ContractExpired struct {
 	DID             string                             `json:"did"`
 	HolderDID       string                             `json:"holder_did"`

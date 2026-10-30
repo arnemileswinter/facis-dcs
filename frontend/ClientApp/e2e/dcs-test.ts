@@ -16,6 +16,7 @@ export type DcsRole =
   | 'Contract Approver'
   | 'Contract Manager'
   | 'Contract Signer'
+  | 'Contract Observer'
   | 'Auditor'
   | 'Archive Manager'
   | 'Sys. Administrator'

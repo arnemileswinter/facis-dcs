@@ -118,9 +118,9 @@ test('signature compliance viewer surfaces DSS + embedded-VC metadata', async ({
     await expect(reportPanel.getByText('Status').first()).toBeVisible()
     await reportPanel.getByTestId('report-tab-party').click()
 
-    // FR-SM-21: signature level (AES) and credential status (ACTIVE) per signature.
+    // FR-SM-21: signature level (AES) and the live status of the presented credential per signature.
     await expect(page.locator('.badge').filter({ hasText: 'AES' }).first()).toBeVisible()
-    await expect(page.locator('.badge').filter({ hasText: 'ACTIVE' }).first()).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'VALID', exact: true }).first()).toBeVisible()
   })
 
   await test.step('compliance table surfaces the level-aware fields ADR-20 added (SM-01/SM-26)', async () => {

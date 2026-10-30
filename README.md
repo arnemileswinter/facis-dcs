@@ -38,7 +38,7 @@ npm install
 ### Prerequisites
 
 - A local Kubernetes with `kubectl` and `helm` (Rancher Desktop with Kubernetes enabled works)
-- Go 1.25+ and [air](https://github.com/air-verse/air) (backend hot reload)
+- Go 1.26.10+ and [air](https://github.com/air-verse/air) (backend hot reload)
 - Node 22+
 - SoftHSM2 (`libsofthsm2.so`, e.g. `apt install softhsm2`) — dev private keys live in a PKCS#11 token, not in files
 - `make`, `curl`, OpenSSL

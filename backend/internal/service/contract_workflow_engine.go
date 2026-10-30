@@ -247,6 +247,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrTargetDisabled) ||
 		errors.Is(err, command.ErrSigningIncomplete) ||
 		errors.Is(err, command.ErrContractNotRenewable) ||
+		errors.Is(err, command.ErrInvalidRenewalTerm) ||
 		errors.Is(err, command.ErrNotAParty) ||
 		errors.Is(err, command.ErrConflictOfInterest) ||
 		errors.Is(err, command.ErrNotProposalAuthor) ||
@@ -326,6 +327,9 @@ func (s *contractWorkflowEnginesrvc) Create(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractworkflowengine.ContractUpdateRequest) (res *contractworkflowengine.ContractUpdateResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -413,6 +417,9 @@ func (s *contractWorkflowEnginesrvc) Update(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractworkflowengine.ContractSubmitRequest) (res *contractworkflowengine.ContractSubmitResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -531,6 +538,10 @@ func (s *contractWorkflowEnginesrvc) Submit(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contractworkflowengine.ContractRetrieveRequest) (res *contractworkflowengine.ContractRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -904,6 +915,10 @@ func (s *contractWorkflowEnginesrvc) signatureEvidence(ctx context.Context, did,
 // context, each naming the observed metric, value, time, violation
 // verdict, and the contract it observes (DCS-FR-CWE-09/-31).
 func (s *contractWorkflowEnginesrvc) KpiObservations(ctx context.Context, req *contractworkflowengine.ContractRetrieveByIDRequest) (any, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -988,6 +1003,9 @@ func (s *contractWorkflowEnginesrvc) retrieveKPIs(ctx context.Context, did strin
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, req *contractworkflowengine.ContractHistoryRetrieveByIDRequest) (res []*contractworkflowengine.ContractHistoryRetrieveByIDResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1029,6 +1047,12 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			expPolicy = &s
 		}
 
+		var modifiedAt *string
+		if item.ModifiedAt != nil {
+			s := item.ModifiedAt.Format(time.RFC3339)
+			modifiedAt = &s
+		}
+
 		contracts = append(contracts, &contractworkflowengine.ContractHistoryRetrieveByIDResponse{
 			Did:             item.DID,
 			ContractVersion: item.ContractVersion,
@@ -1046,6 +1070,8 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 			ExpNoticePeriod: item.ExpNoticePeriod,
 			Responsible:     item.Responsible,
 			ContractData:    item.ContractData,
+			ModifiedBy:      item.ModifiedBy,
+			ModifiedAt:      modifiedAt,
 		})
 	}
 
@@ -1053,6 +1079,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 }
 
 func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contractworkflowengine.ContractNegotiationRequest) (res *contractworkflowengine.ContractNegotiationResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1110,6 +1139,9 @@ func (s *contractWorkflowEnginesrvc) Negotiate(ctx context.Context, req *contrac
 // confused with Respond(action_flag=ACCEPTING), which decides one already
 // proposed change request.
 func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contractworkflowengine.ContractOfferAcceptRequest) (res *contractworkflowengine.ContractOfferAcceptResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1154,6 +1186,9 @@ func (s *contractWorkflowEnginesrvc) AcceptOffer(ctx context.Context, req *contr
 }
 
 func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftSaveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1187,6 +1222,9 @@ func (s *contractWorkflowEnginesrvc) SaveNegotiationDraft(ctx context.Context, r
 }
 
 func (s *contractWorkflowEnginesrvc) RetrieveNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftRetrieveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1220,6 +1258,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveNegotiationDraft(ctx context.Contex
 }
 
 func (s *contractWorkflowEnginesrvc) DeleteNegotiationDraft(ctx context.Context, req *contractworkflowengine.ContractNegotiationDraftRetrieveRequest) (res *contractworkflowengine.ContractNegotiationDraftResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1243,6 +1284,9 @@ func (s *contractWorkflowEnginesrvc) DeleteNegotiationDraft(ctx context.Context,
 }
 
 func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractworkflowengine.ContractNegotiationRespondRequest) (res *contractworkflowengine.ContractNegotiationRespondResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1335,6 +1379,9 @@ func (s *contractWorkflowEnginesrvc) Respond(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractworkflowengine.ContractReviewRequest) (res *contractworkflowengine.ContractReviewResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1360,6 +1407,10 @@ func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1448,6 +1499,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 }
 
 func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractworkflowengine.ContractApproveRequest) (res *contractworkflowengine.ContractApproveResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1502,6 +1556,9 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 }
 
 func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractworkflowengine.ContractRejectRequest) (res *contractworkflowengine.ContractRejectResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1548,44 +1605,10 @@ func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractwo
 	}, nil
 }
 
-func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *contractworkflowengine.ContractStoreRequest) (res *contractworkflowengine.ContractStoreResponse, err error) {
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
-
-	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	cmd := command.RecordEvidenceCmd{
-		DID:        req.Did,
-		RecordedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		UpdatedAt:  updatedAt,
-		CauserDID:  localPeer,
-	}
-	handler := command.EvidenceRecorder{
-		DB:    s.DB,
-		CRepo: s.CRepo,
-	}
-	err = handler.Handle(ctx, cmd)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-
-	return &contractworkflowengine.ContractStoreResponse{
-		Did: req.Did,
-	}, nil
-}
-
 func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contractworkflowengine.ContractTerminateRequest) (res *contractworkflowengine.ContractTerminateResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1635,6 +1658,9 @@ func (s *contractWorkflowEnginesrvc) Terminate(ctx context.Context, req *contrac
 }
 
 func (s *contractWorkflowEnginesrvc) Renew(ctx context.Context, req *contractworkflowengine.ContractRenewRequest) (res *contractworkflowengine.ContractRenewResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1703,6 +1729,9 @@ func (s *contractWorkflowEnginesrvc) Renew(ctx context.Context, req *contractwor
 }
 
 func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractworkflowengine.ContractOfferRequest) (res *contractworkflowengine.ContractOfferResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1755,6 +1784,9 @@ func (s *contractWorkflowEnginesrvc) Offer(ctx context.Context, req *contractwor
 }
 
 func (s *contractWorkflowEnginesrvc) Withdraw(ctx context.Context, req *contractworkflowengine.ContractWithdrawRequest) (res *contractworkflowengine.ContractWithdrawResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	err = s.DIDDocument.VerifyEIDASCertificate(s.TrustPool)
 	if err != nil {
@@ -1801,6 +1833,10 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
+
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	qry := qry2.GetAuditLogByDIDQry{
 		DID:       req.Did,
@@ -1864,6 +1900,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 			Version:      item.Version,
 			State:        item.State.String(),
 			TemplateType: item.TemplateType.String(),
+			PartyType:    item.PartyType,
 			Name:         item.Name,
 			Description:  item.Description,
 			CreatedBy:    item.CreatedBy,
@@ -1877,6 +1914,9 @@ func (s *contractWorkflowEnginesrvc) RetrieveTemplates(ctx context.Context, req 
 }
 
 func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractworkflowengine.ContractDeployRequest) (res *contractworkflowengine.ContractDeployResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -1893,6 +1933,19 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	handler := command.Deployer{
+		DB:             s.DB,
+		CRepo:          s.CRepo,
+		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
+		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
+	}
+	// A contract that may not deploy (not SIGNED, or a signature field still
+	// unsigned) is refused before the deployment workflow gate is dispatched.
+	if err := handler.Deployable(ctx, req.Did, localPeer); err != nil {
+		return nil, mapContractCommandError(err)
+	}
 	updatedAt, _, err = s.runWorkflowGate(ctx, "deployment", req.Did, updatedAt, map[string]any{
 		"requested_by": middleware.GetParticipantID(ctx),
 		"causer_did":   localPeer,
@@ -1902,14 +1955,6 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		return nil, err
 	}
 
-	handler := command.Deployer{
-		DB:             s.DB,
-		CRepo:          s.CRepo,
-		DeploymentRepo: s.DeploymentRepo,
-		TargetRepo:     s.TargetRepo,
-		Target:         s.TargetClient,
-		PeerSigs:       s.SRepo,
-	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
 		UpdatedAt:        updatedAt,
@@ -2184,6 +2229,9 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 }
 
 func (s *contractWorkflowEnginesrvc) DesignateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetDesignateRequest) (res *contractworkflowengine.ContractRetrieveByIDResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 

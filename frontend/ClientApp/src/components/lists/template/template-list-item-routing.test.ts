@@ -14,19 +14,20 @@ import type { UserRole } from '@/types/user-role'
  * role landed on the Review or Approve page with the actions greyed out.
  */
 
-function viewTarget(roles: UserRole[], state: string) {
+function viewTarget(roles: UserRole[], state: PartialContractTemplate['state']) {
   setActivePinia(createPinia())
   useAuthStore().user = { issuer: 'did:web:example.com:org', holder: 'user', roles }
-  const template = {
+  const template: PartialContractTemplate = {
     did: 'did:web:example.com:template',
     name: 'Supply template',
     state,
     template_type: 'CONTRACT_TEMPLATE',
+    party_type: 'SINGLE_PARTY',
     version: 1,
-    created_by: 'did:web:example.com:org',
+    created_by: 'did:web:example.com:creator',
     created_at: '2026-07-31T00:00:00Z',
     updated_at: '2026-07-31T00:00:00Z',
-  } as PartialContractTemplate
+  }
   const wrapper = mount(TemplateListItem, {
     props: { template },
     global: { stubs: { RouterLink: RouterLinkStub } },

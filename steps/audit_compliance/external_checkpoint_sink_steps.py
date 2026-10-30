@@ -149,10 +149,13 @@ def step_worker_restarts(context):
 def step_sequences_in_order(context):
     observations = _observations(context)
     sequences = [int(item["payload"]["seq"]) for item in observations]
-    expected = list(
-        range(context.expected_checkpoint_sequences[0], context.expected_checkpoint_sequences[-1] + 1)
+    # Other audit events in the stack can close further checkpoints before the
+    # worker runs; the worker posts them too. The sink must still see every
+    # sequence from the first created one, in order and without a gap.
+    first, last_created = context.expected_checkpoint_sequences[0], context.expected_checkpoint_sequences[-1]
+    assert sequences and sequences == list(range(first, first + len(sequences))) and sequences[-1] >= last_created, (
+        f"Expected checkpoint sequences {first}..{last_created} or later without a gap, got {sequences}"
     )
-    assert sequences == expected, f"Expected checkpoint sequences {expected}, got {sequences}"
 
 
 @then(

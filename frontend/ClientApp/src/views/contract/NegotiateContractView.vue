@@ -29,6 +29,7 @@ import { resolveLocalInstanceDid } from '@/services/did-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { useNavStore } from '@/stores/nav-store'
+import { contractAuditRoles } from '@/types/contract-audit-roles'
 import { ContractState } from '@/types/contract-state'
 import {
   acceptedNegotiations,
@@ -40,7 +41,6 @@ import {
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract, ContractChangeRequest } from '@/models/contract/contract'
 import type { ContractData, SemanticConditionValue } from '@/models/contract/contract-data'
-import type { UserRole } from '@/types/user-role'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -69,8 +69,7 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const isAuditingAuthorized = computed(
-  () =>
-    (['AUDITOR', 'COMPLIANCE_OFFICER'] as UserRole[]).some((role) => authStore.user?.roles?.includes(role)) ?? false,
+  () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
 const tabs = computed(() =>
@@ -125,6 +124,20 @@ const hasChangeRequest = computed(() => {
   )
 })
 
+// Global Name and Base Description must be non-empty.
+const detailsComplete = computed(
+  () => !!editedContract.value?.name?.trim() && !!editedContract.value?.description?.trim(),
+)
+const detailsValidationAttempted = ref(false)
+const nameError = computed(() =>
+  detailsValidationAttempted.value && !editedContract.value?.name?.trim() ? 'Global Name is required.' : null,
+)
+const descriptionError = computed(() =>
+  detailsValidationAttempted.value && !editedContract.value?.description?.trim()
+    ? 'Base Description is required.'
+    : null,
+)
+
 const contractSemanticConditionValueSnapshot: Ref<SemanticConditionValue[]> = ref([])
 
 const changedName = computed(() => editedContract.value?.name !== negotiationBaseline.value?.name)
@@ -172,19 +185,23 @@ function buildCurrentContractData(): ContractData | undefined {
 }
 
 const loadContract = async () => {
+  const id = route.params.did
   try {
-    const id = route.params.did
     if (id && !Array.isArray(id)) {
-      // Party DID must land before proposal badges/Submit gates evaluate —
-      // an empty localInstanceDid hides Accept forever (ownDecision never matches).
+      contract.value = null
+      editedContract.value = null
       if (!localInstanceDid.value) {
         localInstanceDid.value = await resolveLocalInstanceDid().catch(() => '')
       }
-      contract.value = await contractWorkflowService.retrieveById({ did: id })
+      if (route.params.did !== id) return
+      const loaded = await contractWorkflowService.retrieveById({ did: id })
+      if (route.params.did !== id) return
+      contract.value = loaded
       const baseline = contract.value ? contractWithAcceptedProposals(contract.value) : null
       editedContract.value = baseline ? { ...baseline } : null
       applyContractDataToDraft(baseline?.contract_data)
       await restoreNegotiationDraft()
+      if (route.params.did !== id) return
       // Only jump to Proposals when this instance still owes Accept/Reject.
       // Same-version history stays listed there after handling; forcing the tab
       // for every resolved proposal left Submit disabled (gated off this tab).
@@ -193,12 +210,12 @@ const loadContract = async () => {
       }
     }
   } catch (err: unknown) {
-    reportActionError(err, 'Load negotiation')
+    if (route.params.did === id) reportActionError(err, 'Load negotiation')
   }
 }
 
 watch(
-  () => !!route.params.did,
+  () => route.params.did,
   async (value) => {
     if (!value) return
     await loadContract()
@@ -252,6 +269,11 @@ function buildChangeRequest(): ContractChangeRequest {
 
 const negotiateContractChange = async () => {
   if (!contract.value || !editedContract.value || !issuer.value) return
+  detailsValidationAttempted.value = true
+  if (!detailsComplete.value) {
+    contractEditorUiStore.setActiveTab('details')
+    return
+  }
   // Same gate the forward-to-approval path applies: a counter-offer breaking the
   // contract's machine-readable policy is refused at approval anyway, so it is
   // reported here — naming the constraint — instead of shipping to the peer.
@@ -342,8 +364,10 @@ const discardNegotiationDraft = async () => {
 
 async function restoreNegotiationDraft() {
   if (!contract.value || !editedContract.value) return
+  const currentContract = contract.value
   try {
-    const response = await contractWorkflowService.retrieveNegotiationDraft({ did: contract.value.did })
+    const response = await contractWorkflowService.retrieveNegotiationDraft({ did: currentContract.did })
+    if (contract.value !== currentContract || route.params.did !== currentContract.did || !editedContract.value) return
     const changeRequest = response?.change_request
     if (!changeRequest) {
       draftSaved.value = false
@@ -364,7 +388,8 @@ async function restoreNegotiationDraft() {
       draftValues.forEach((value) => contractContentValuesStore.setSemanticConditionValue(value))
     }
   } catch (err) {
-    reportActionError(err, 'Restore negotiation draft')
+    if (contract.value === currentContract && route.params.did === currentContract.did)
+      reportActionError(err, 'Restore negotiation draft')
   }
 }
 
@@ -391,13 +416,6 @@ const submitContract = async () => {
     isSubmitting.value = false
   }
 }
-
-// Only THIS party's undecided decisions may block Submit. A negotiation
-// replicates to both instances carrying a decision row per negotiator, but each
-// instance resolves its own row in its own database — the counterparty's
-// acceptance never lands here. Counting every row therefore deadlocked the
-// federated round: the peer's pending decision disabled our Submit forever, and
-// responding to it matched no row (the respond updates WHERE negotiator = us).
 
 // Submit waits until every proposal is handled (peer Accept/Reject on ours,
 // or our Accept/Reject on theirs). Author "Not required" nulls do not count.
@@ -460,7 +478,7 @@ async function refreshNegotiationSyncStatus() {
   if (!id || Array.isArray(id) || !contract.value) return
   try {
     const latest = await contractWorkflowService.retrieveById({ did: id })
-    if (!latest || !contract.value) return
+    if (!latest || route.params.did !== id || contract.value?.did !== id) return
     // Only sync gate + negotiation rows — do not reset the editor mid-edit.
     contract.value = {
       ...contract.value,
@@ -572,10 +590,12 @@ const exportPDF = async () => {
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Negotiate Contract</p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
-              <a
+              <button
                 v-for="tab in tabs"
                 :key="tab.id"
+                type="button"
                 role="tab"
+                :aria-selected="activeTab === tab.id"
                 class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
@@ -587,7 +607,7 @@ const exportPDF = async () => {
                 >
                   {{ activeProposalCount }}
                 </span>
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -604,7 +624,12 @@ const exportPDF = async () => {
               />
 
               <div v-show="activeTab === 'details'">
-                <ContractDetailsEditor :contract="shownData" :disabled="!formEditable" />
+                <ContractDetailsEditor
+                  :contract="shownData"
+                  :disabled="!formEditable"
+                  :name-error="nameError ?? undefined"
+                  :description-error="descriptionError ?? undefined"
+                />
               </div>
 
               <div v-show="activeTab === 'content'">
@@ -689,7 +714,12 @@ const exportPDF = async () => {
                   <div class="card border border-base-300 bg-base-100 shadow-sm">
                     <div class="card-body">
                       <h2 class="card-title text-sm">Audit History</h2>
-                      <AuditView :blocks="dcsDraftStore.blocks" :layout="dcsDraftStore.layout" />
+                      <AuditView
+                        v-if="contract"
+                        :contract="contract"
+                        :blocks="dcsDraftStore.blocks"
+                        :layout="dcsDraftStore.layout"
+                      />
                     </div>
                   </div>
                 </div>
@@ -734,7 +764,7 @@ const exportPDF = async () => {
           v-if="canAcceptOffer"
           data-testid="accept-offer"
           class="btn flex-1 btn-primary"
-          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting || activeTab === 'proposals'"
+          :disabled="(!isCreator && !isNegotiator && !isManager) || isSubmitting"
           @click="acceptOffer"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -743,6 +773,7 @@ const exportPDF = async () => {
         <button
           v-if="formEditable"
           class="btn flex-1 btn-primary"
+          data-testid="change-proposal"
           :disabled="
             (!isCreator && !isNegotiator && !isReviewer && !isManager) ||
             isSubmitting ||

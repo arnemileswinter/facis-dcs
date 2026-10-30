@@ -294,6 +294,7 @@ def step_when_creator_creates_realistic_template(context):
         template_create_url(context),
         {
             "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": "Realistischer Plattform-Servicevertrag",
             "description": "BDD ContractField Lifecycle",
             "template_data": context.realistic_template_fixture,

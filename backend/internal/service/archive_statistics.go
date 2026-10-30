@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
@@ -22,6 +23,15 @@ const archiveRecentActionLimit = 10
 // is complete — snapshot, content hash, signature metadata, and TSA receipt
 // (DCS-FR-CSA-19's completeness dimension); everything else is flagged.
 func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
+	ctx, err := contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -91,7 +101,7 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		return res.ExpiringContracts[i].ExpDate < res.ExpiringContracts[j].ExpDate
 	})
 
-	res.RecentActions = recentArchiveActions(auditChains, archiveRecentActionLimit)
+	res.RecentActions = recentArchiveActions(filterContractAuditChains(auditChains, allowed), archiveRecentActionLimit)
 	return res, nil
 }
 
@@ -169,5 +179,20 @@ func auditEntryActor(raw json.RawMessage) string {
 			return actor
 		}
 	}
-	return ""
+	// Synthetic evidence may contain several identities; only accept an unambiguous actor.
+	actor := ""
+	for key, value := range data {
+		if !strings.HasSuffix(key, "_by") {
+			continue
+		}
+		identity, ok := value.(string)
+		if !ok || identity == "" {
+			continue
+		}
+		if actor != "" && actor != identity {
+			return ""
+		}
+		actor = identity
+	}
+	return actor
 }

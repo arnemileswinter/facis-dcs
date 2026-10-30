@@ -169,6 +169,10 @@ type ContractHistory struct {
 	ContractData    *datatype.JSON `db:"contract_data"`
 	TemplateDID     string         `db:"template_did"`
 	TemplateVersion int            `db:"template_version"`
+	// ModifiedBy and ModifiedAt identify the save that replaced this version.
+	// They are NULL on rows snapshotted before the actor was recorded.
+	ModifiedBy *string    `db:"modified_by"`
+	ModifiedAt *time.Time `db:"modified_at"`
 }
 
 type ContractArchiveEntry struct {
@@ -227,7 +231,9 @@ type ContractPDFState struct {
 type ContractRepo interface {
 	Create(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	RemoteCreate(ctx context.Context, tx *sqlx.Tx, data Contract) error
-	CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error
+	// CreateHistoryEntryForDID snapshots the current version before a save
+	// replaces it, attributed to modifiedBy, the actor of that save.
+	CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string, modifiedBy string) error
 	ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]ContractHistory, error)
 	ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
 	ExistsByDID(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
@@ -269,6 +275,11 @@ type ContractRepo interface {
 	ReadProcessDataByDIDOrNil(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractMetadata, error)
+	// ExpireContract persists EXPIRED for did if its expiry has passed and it
+	// is in a state that expires (the ReadExpiredContracts condition). It
+	// returns false when another writer expired or ended the contract first,
+	// so the caller emits ContractExpired at most once.
+	ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
 	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error

@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -24,6 +23,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/ecutil"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
@@ -87,6 +87,15 @@ func (r *negotiationTaskRepoFake) RollForward(_ context.Context, _ *sqlx.Tx, did
 	return nil
 }
 
+func (r *negotiationTaskRepoFake) RollForwardKeepingState(_ context.Context, _ *sqlx.Tx, did string, fromVersion int, toVersion int) error {
+	for i := range r.rows {
+		if r.rows[i].DID == did && r.rows[i].ContractVersion == fromVersion {
+			r.rows[i].ContractVersion = toVersion
+		}
+	}
+	return nil
+}
+
 func (r *negotiationTaskRepoFake) ReadAllByNegotiator(_ context.Context, _ *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
 	var out []db.NegotiationTaskData
 	for _, row := range r.rows {
@@ -141,6 +150,8 @@ type taskContractRepoFake struct {
 	states         []string
 	updates        []db.ContractUpdateData
 	historyEntries int
+	// historyActors holds the modifiedBy of each snapshot, in order.
+	historyActors []string
 	// writes logs the version-bearing writes in order: a snapshot only
 	// preserves the superseded document if it precedes the write replacing it.
 	writes []string
@@ -166,6 +177,9 @@ func (r *taskContractRepoFake) Update(_ context.Context, _ *sqlx.Tx, data db.Con
 	if data.ContractData != nil {
 		r.stored.ContractData = data.ContractData
 	}
+	if data.ExpNoticePeriod != nil {
+		r.stored.ExpNoticePeriod = data.ExpNoticePeriod
+	}
 	if data.ContractVersion != 0 {
 		r.process.ContractVersion = data.ContractVersion
 		r.writes = append(r.writes, "update")
@@ -189,8 +203,9 @@ func (r *taskContractRepoFake) versionBumps() []int {
 	return out
 }
 
-func (r *taskContractRepoFake) CreateHistoryEntryForDID(context.Context, *sqlx.Tx, string) error {
+func (r *taskContractRepoFake) CreateHistoryEntryForDID(_ context.Context, _ *sqlx.Tx, _ string, modifiedBy string) error {
 	r.historyEntries++
+	r.historyActors = append(r.historyActors, modifiedBy)
 	r.writes = append(r.writes, "history")
 	return nil
 }
@@ -363,8 +378,8 @@ func taskTestDIDDocument(t *testing.T) *identity.DIDDocument {
 				"publicKeyJwk": map[string]any{
 					"kty": "EC",
 					"crv": "P-256",
-					"x":   base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 32))),
-					"y":   base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 32))),
+					"x":   ecutil.MustJWKX(ecutil.AsPublic(key)),
+					"y":   ecutil.MustJWKY(ecutil.AsPublic(key)),
 				},
 			},
 		},
@@ -649,6 +664,8 @@ func TestEveryContractVersionBumpCarriesTheNegotiationTasksForward(t *testing.T)
 		require.Contains(t, calls, "RollForward",
 			"%s bumps the contract version without carrying the negotiation tasks to the new round", file)
 	}
+	require.Contains(t, callsIn(t, "receivepdf.go", "Handle"), "RollForwardKeepingState",
+		"signed-artifact re-ships must carry tasks forward without reopening them")
 	require.NotContains(t, callsIn(t, "negotiate.go", "Handle"), "RollForward")
 }
 

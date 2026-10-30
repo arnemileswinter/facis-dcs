@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"digital-contracting-service/internal/base/datatype"
 
 	"github.com/jmoiron/sqlx"
@@ -54,20 +56,22 @@ func (r *PostgresContractRepo) RemoteCreate(ctx context.Context, tx *sqlx.Tx, da
 	return err
 }
 
-func (r *PostgresContractRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error {
+func (r *PostgresContractRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string, modifiedBy string) error {
 	statement := `
         INSERT INTO contract_history
             (did, origin, state, name, description, created_by, created_at, updated_at,
              contract_version, contract_data, start_date, exp_date, exp_policy,
-             exp_notice_period, responsible, template_did, template_version)
+             exp_notice_period, responsible, template_did, template_version,
+             modified_by, modified_at)
         SELECT
             did, origin, state, name, description, created_by, created_at, updated_at,
             contract_version, contract_data, start_date, exp_date, exp_policy,
-            exp_notice_period, responsible, template_did, template_version
+            exp_notice_period, responsible, template_did, template_version,
+            $2, CURRENT_TIMESTAMP
         FROM contracts_effective
         WHERE did = $1
     `
-	_, err := tx.ExecContext(ctx, statement, did)
+	_, err := tx.ExecContext(ctx, statement, did, modifiedBy)
 	return err
 }
 
@@ -75,7 +79,8 @@ func (r *PostgresContractRepo) ReadLastHistoryEntryByDID(ctx context.Context, tx
 	query := `
         SELECT did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
+               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
+               modified_by, modified_at
         FROM contract_history
         WHERE did = $1
         ORDER BY contract_version DESC NULLS LAST
@@ -96,7 +101,8 @@ func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx
 	query := `
         SELECT did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
-               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
+               exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
+               modified_by, modified_at
         FROM contract_history
         WHERE did = $1
     `
@@ -189,9 +195,10 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 		) latest ON true
 	`
 	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "cem.did", &params)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		query += fmt.Sprintf(" ORDER BY cem.created_at DESC, cem.did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -214,9 +221,11 @@ func (r *PostgresContractRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *
 	if err != nil {
 		return nil, err
 	}
+	query += " WHERE TRUE"
 	if len(params) > 0 {
-		query += " WHERE " + *conditions
+		query += " AND " + *conditions
 	}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_effective_metadata.did", &params)
 
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
@@ -265,19 +274,20 @@ func (r *PostgresContractRepo) ReadProcessDataByDIDOrNil(ctx context.Context, tx
 	return &processData, nil
 }
 
+// nonExpiringStates are the states the expiry cron never flips to EXPIRED:
+// DRAFT, EXPIRED itself, and the terminal states. WITHDRAWN and REVOKED are
+// already-final/frozen states (see contracts_effective's matching exclusion
+// list).
+const nonExpiringStates = `('DRAFT', 'TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')`
+
 func (r *PostgresContractRepo) ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
-	// WITHDRAWN and REVOKED are excluded alongside the other terminal
-	// states: both are already-final/frozen states, so the
-	// expiry cron must not force-flip them to EXPIRED (see
-	// contracts_effective's matching exclusion list).
 	query := `
     SELECT did, origin, state, name, description, created_by, created_at, updated_at, contract_version, start_date,
            exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version
     FROM contracts
     WHERE exp_date IS NOT NULL
     AND exp_date < NOW()
-    AND state NOT IN ('DRAFT', 'TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')
-`
+    AND state NOT IN ` + nonExpiringStates
 	var cts []db.ContractMetadata
 	err := tx.SelectContext(ctx, &cts, query)
 	if err != nil {
@@ -354,10 +364,12 @@ func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.
                content_hash, snapshot_cid, snapshot_cid_created_at, signature_metadata, credential_hashes, tsa_receipt, evidence, retention_until,
                deleted_at, deleted_by, deletion_reason
         FROM contract_archive_entries
-        ORDER BY stored_at, did, contract_version
+
     `
+	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "contract_archive_entries.did", &params) + " ORDER BY stored_at, did, contract_version"
 	var entries []db.ContractArchiveEntry
-	err := tx.SelectContext(ctx, &entries, query)
+	err := tx.SelectContext(ctx, &entries, query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -423,8 +435,10 @@ func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sq
 	    SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
     FROM contracts_archive_metadata
 	`
+	var params []any
+	query += " WHERE " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 	var cts []db.ContractMetadata
-	err := tx.SelectContext(ctx, &cts, query)
+	err := tx.SelectContext(ctx, &cts, query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -441,9 +455,11 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	query += " WHERE TRUE"
 	if len(params) > 0 {
-		query += " WHERE " + *conditions
+		query += " AND " + *conditions
 	}
+	query += " AND " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 
 	var cts []db.ContractMetadata
 	err = tx.SelectContext(ctx, &cts, query, params...)
@@ -460,6 +476,21 @@ func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did
     `
 	_, err := tx.ExecContext(ctx, statement, did, state)
 	return err
+}
+
+func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
+	statement := `
+        UPDATE contracts SET state = 'EXPIRED'
+        WHERE did = $1
+        AND exp_date IS NOT NULL
+        AND exp_date < NOW()
+        AND state NOT IN ` + nonExpiringStates
+	res, err := tx.ExecContext(ctx, statement, did)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractPDFState, error) {

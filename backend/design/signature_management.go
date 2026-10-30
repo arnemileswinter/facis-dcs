@@ -322,8 +322,12 @@ var SMSignatureViewItem = Type("SMSignatureViewItem", func() {
 	Attribute("poa_organization", String, "Organization the signatory was authorized to act for, from the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
 	Attribute("poa_roles", ArrayOf(String), "Roles asserted by the verified PoA presentation at signing (DCS-FR-SM-03/-26)")
 	Attribute("summary_issuer", String, "Issuer DID of the verified ContractSigningSummaryCredential that binds this signature (DCS-FR-SM-26 credential chain)")
+	Attribute("credential_status", String, "Live status-list state of the Power of Attorney credential the signer presented, read at view time (DCS-FR-SM-18)", func() {
+		Enum("VALID", "REVOKED", "SUSPENDED", "UNKNOWN")
+	})
+	Attribute("credential_status_reason", String, "Why credential_status is UNKNOWN")
 
-	Required("signer_did", "credential_type", "status", "format")
+	Required("signer_did", "credential_type", "status", "format", "credential_status")
 })
 
 var SMSignatureViewResponse = Type("SMSignatureViewResponse", func() {
@@ -512,7 +516,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/retrieve/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -540,7 +548,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/verify")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -567,7 +579,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/provenance/{did}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -679,7 +695,9 @@ var _ = Service("SignatureManagement", func() {
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
 		HTTP(func() {
+			Response("forbidden", StatusForbidden)
 			GET("/signature/request/{ceremony_id}")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -859,7 +877,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/validate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -905,7 +927,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/audit")
 			Param("did")
 			Response(StatusOK)
@@ -934,7 +960,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/view")
 			Param("did")
 			Response(StatusOK)
@@ -958,7 +988,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/compliance")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -986,7 +1020,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/signature/clause-report")
 			Param("did")
 			Response(StatusOK)
