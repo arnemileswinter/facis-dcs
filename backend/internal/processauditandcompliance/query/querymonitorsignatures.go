@@ -16,7 +16,7 @@ const RiskTypeLateSignature = "LATE_SIGNATURE"
 
 // RiskTypeInvalidCredential flags a signature that relies on a certificate
 // the CRL check found revoked (DCS-FR-PACM-05).
-const RiskTypeInvalidCredential = "INVALID_CREDENTIAL"
+const RiskTypeInvalidCredential = "INVALID_CREDENTIAL" // #nosec G101 -- risk type name, not a credential
 
 // lateSignature is a contract that waits for signatures after its start date.
 // When the last signature arrives the risk resolves; the register keeps it.
