@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 // Mock HTTP isolates browser contracts; persistence and authorization have separate backend tests.
 const did = 'did:web:example.test:contract:archived'
@@ -56,6 +57,7 @@ async function json(route: Route, body: unknown, status = 200) {
 async function auth(page: Page, role: string) {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url')
   const token = `${encode({ alg: 'none' })}.${encode({ sub: 'did:test:actor', exp: Math.floor(Date.now() / 1000) + 3600, roles: [role], ext: { iss: 'did:web:example.test', roles: [role] } })}.unsigned`
+  await withholdUnsignedToken(page)
   await page.addInitScript((token) => {
     localStorage.setItem('access_token', token)
     localStorage.setItem('token_type', 'Bearer')

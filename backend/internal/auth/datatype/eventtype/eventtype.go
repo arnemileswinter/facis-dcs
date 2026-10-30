@@ -5,6 +5,11 @@ type EventType string
 const (
 	PresentationSucceeded EventType = "OID4VP_PRESENTATION_SUCCEEDED"
 	PresentationFailed    EventType = "OID4VP_PRESENTATION_FAILED"
+
+	MachineIdentityCreated       EventType = "MACHINE_IDENTITY_CREATED"
+	MachineIdentityUpdated       EventType = "MACHINE_IDENTITY_UPDATED"
+	MachineIdentityDeleted       EventType = "MACHINE_IDENTITY_DELETED"
+	MachineIdentitySecretRotated EventType = "MACHINE_IDENTITY_SECRET_ROTATED"
 )
 
 func (t EventType) String() string {

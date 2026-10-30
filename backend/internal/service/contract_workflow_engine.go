@@ -21,6 +21,7 @@ import (
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
+	autheventtype "digital-contracting-service/internal/auth/datatype/eventtype"
 	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
@@ -2218,7 +2219,11 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 		return contractworkflowengine.MakeInternalError(err)
 	}
 	if target != nil && target.OAuthClientID != nil && strings.TrimSpace(*target.OAuthClientID) != "" {
-		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, strings.TrimSpace(*target.OAuthClientID)); err != nil {
+		clientID := strings.TrimSpace(*target.OAuthClientID)
+		if err := s.MachineIdentities.DeleteByClientIDTx(ctx, tx, clientID); err != nil {
+			return contractworkflowengine.MakeInternalError(err)
+		}
+		if err := auditMachineIdentity(ctx, tx, autheventtype.MachineIdentityDeleted, &machineidentity.Identity{OAuthClientID: clientID, Name: clientID}); err != nil {
 			return contractworkflowengine.MakeInternalError(err)
 		}
 	}

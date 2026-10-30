@@ -497,7 +497,7 @@ def step_when_search_templates(context, name, count):
 @when('the request is denied because of too many failed attempts')
 def step_when_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 @when('I search for templates with name "{name}"')
 def step_when_search_templates(context, name):

@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 // The app refuses to boot without a parsable ODRL profile from the Semantic
 // Hub, so every page under test needs one served.
@@ -27,6 +28,7 @@ function jwt(roles: string[]): string {
 
 async function authenticate(page: Page, roles: string[]): Promise<void> {
   const accessToken = jwt(roles)
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([token]) => {
       localStorage.setItem('token_type', 'Bearer')

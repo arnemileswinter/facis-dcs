@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 const target = {
   id: 'target-1',
@@ -40,6 +41,7 @@ function jwt(): string {
 
 async function authenticate(page: Page): Promise<void> {
   const accessToken = jwt()
+  await withholdUnsignedToken(page)
   await page.addInitScript(
     ([token]) => {
       localStorage.setItem('token_type', 'Bearer')

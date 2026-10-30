@@ -90,19 +90,34 @@ func (s *stubIdentityRegistry) List(context.Context) ([]machineidentity.Identity
 	return nil, nil
 }
 
-func (s *stubIdentityRegistry) Read(context.Context, string) (*machineidentity.Identity, error) {
+// The stub uses the client id as the row id.
+func (s *stubIdentityRegistry) Read(_ context.Context, id string) (*machineidentity.Identity, error) {
+	if identity, ok := s.rows[id]; ok {
+		return &identity, nil
+	}
 	return nil, nil
 }
 
-func (s *stubIdentityRegistry) Create(context.Context, machineidentity.Identity) (*machineidentity.Identity, error) {
-	return nil, nil
+func (s *stubIdentityRegistry) Create(_ context.Context, data machineidentity.Identity) (*machineidentity.Identity, error) {
+	data.ID = data.OAuthClientID
+	s.rows[data.OAuthClientID] = data
+	return &data, nil
 }
 
-func (s *stubIdentityRegistry) Update(context.Context, machineidentity.Identity) (*machineidentity.Identity, error) {
-	return nil, nil
+func (s *stubIdentityRegistry) Update(_ context.Context, data machineidentity.Identity) (*machineidentity.Identity, error) {
+	existing, ok := s.rows[data.ID]
+	if !ok {
+		return nil, nil
+	}
+	data.OAuthClientID = existing.OAuthClientID
+	s.rows[data.ID] = data
+	return &data, nil
 }
 
-func (s *stubIdentityRegistry) Delete(context.Context, string) error { return nil }
+func (s *stubIdentityRegistry) Delete(_ context.Context, id string) error {
+	delete(s.rows, id)
+	return nil
+}
 
 func (s *stubIdentityRegistry) DeleteByClientIDTx(_ context.Context, _ *sqlx.Tx, clientID string) error {
 	delete(s.rows, clientID)

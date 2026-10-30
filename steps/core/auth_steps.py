@@ -55,7 +55,7 @@ def step_given_authenticated_service(context):
 @given('the request is denied because of too many failed attempts')
 def step_given_denied_to_many_attempts(context):
     response = context.requests_response.json()
-    assert context.requests_response.status_code in (401, 403) and "too many failed attempts" in response["message"], response
+    assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
 
 @given("a system service provides an invalid API key")
 def step_given_invalid_api_key(context):

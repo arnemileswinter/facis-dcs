@@ -9,10 +9,14 @@ import (
 	"time"
 
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
+	autheventtype "digital-contracting-service/internal/auth/datatype/eventtype"
+	authevents "digital-contracting-service/internal/auth/event"
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/machineidentity"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/middleware"
 
 	"github.com/google/uuid"
@@ -52,15 +56,73 @@ func machineIdentityView(identity *machineidentity.Identity) (*contractworkflowe
 
 // validateRoles refuses an unknown role at configuration time. A caller whose
 // role does not exist would otherwise authenticate and then be refused
-// everywhere, with nothing to say why.
+// everywhere, with nothing to say why. A machine identity holds system roles
+// only: a human role such as Sys. Administrator is more scope than any
+// integration needs (NFR-BR-07).
 func validateRoles(roles []string) error {
 	if len(roles) == 0 {
 		return errors.New("a machine identity needs at least one role")
 	}
 	for _, role := range roles {
-		if !userrole.UserRole(strings.TrimSpace(role)).IsValid() {
+		ur := userrole.UserRole(strings.TrimSpace(role))
+		if !ur.IsValid() {
 			return fmt.Errorf("unknown role %q", role)
 		}
+		if !ur.IsSystemRole() {
+			return fmt.Errorf("role %q is not a system role; a machine identity holds system roles only", role)
+		}
+	}
+	return nil
+}
+
+// requireOwnParticipant refuses a machine identity that would act for another
+// participant than this deployment. Machine credentials are issued only to
+// this deployment's own verified participant (NFR-BR-07).
+func (s *contractWorkflowEnginesrvc) requireOwnParticipant(participantDID string) error {
+	own, err := s.DIDDocument.GetID()
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not read this deployment's DID: %w", err))
+	}
+	if strings.TrimSpace(participantDID) != own {
+		return contractworkflowengine.MakeBadRequest(fmt.Errorf("a machine identity can act only for this participant %s, not for %s", own, participantDID))
+	}
+	return nil
+}
+
+// auditMachineIdentity writes an administrator's change to a machine identity
+// to the audit trail in tx (FR-UC-09-2).
+func auditMachineIdentity(ctx context.Context, tx *sqlx.Tx, change autheventtype.EventType, identity *machineidentity.Identity) error {
+	roles, err := identity.Roles()
+	if err != nil {
+		return err
+	}
+	return baseevent.Create(ctx, tx, authevents.MachineIdentityChangedEvent{
+		Change:              change,
+		IdentityID:          identity.ID,
+		OAuthClientID:       identity.OAuthClientID,
+		Name:                identity.Name,
+		ParticipantDID:      identity.ParticipantDID,
+		Roles:               roles,
+		Enabled:             identity.Enabled,
+		ActorDID:            middleware.GetHolderDID(ctx),
+		ActorParticipantDID: middleware.GetParticipantID(ctx),
+		OccurredAt:          time.Now().UTC(),
+	}, componenttype.System)
+}
+
+// recordMachineIdentityChange is auditMachineIdentity in its own transaction,
+// for the registry writes that do not take one.
+func (s *contractWorkflowEnginesrvc) recordMachineIdentityChange(ctx context.Context, change autheventtype.EventType, identity *machineidentity.Identity) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := auditMachineIdentity(ctx, tx, change, identity); err != nil {
+		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not audit the machine identity change: %w", err))
+	}
+	if err := tx.Commit(); err != nil {
+		return contractworkflowengine.MakeInternalError(err)
 	}
 	return nil
 }
@@ -95,6 +157,9 @@ func (s *contractWorkflowEnginesrvc) CreateMachineIdentity(ctx context.Context, 
 	}
 	if err := validateRoles(req.Roles); err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+	if err := s.requireOwnParticipant(req.ParticipantDid); err != nil {
+		return nil, err
 	}
 
 	rolesJSON, err := machineidentity.EncodeRoles(req.Roles)
@@ -131,6 +196,9 @@ func (s *contractWorkflowEnginesrvc) CreateMachineIdentity(ctx context.Context, 
 		}
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
+	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityCreated, created); err != nil {
+		return nil, err
+	}
 
 	view, err := machineIdentityView(created)
 	if err != nil {
@@ -158,6 +226,9 @@ func (s *contractWorkflowEnginesrvc) UpdateMachineIdentity(ctx context.Context, 
 	if err := validateRoles(req.Roles); err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
+	if err := s.requireOwnParticipant(req.ParticipantDid); err != nil {
+		return nil, err
+	}
 
 	rolesJSON, err := machineidentity.EncodeRoles(req.Roles)
 	if err != nil {
@@ -177,6 +248,9 @@ func (s *contractWorkflowEnginesrvc) UpdateMachineIdentity(ctx context.Context, 
 	}
 	if updated == nil {
 		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no machine identity %s", req.ID))
+	}
+	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityUpdated, updated); err != nil {
+		return nil, err
 	}
 
 	view, err := machineIdentityView(updated)
@@ -206,7 +280,7 @@ func (s *contractWorkflowEnginesrvc) DeleteMachineIdentity(ctx context.Context, 
 	if err := s.MachineIdentities.Delete(ctx, req.ID); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
 	}
-	return nil
+	return s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityDeleted, identity)
 }
 
 func (s *contractWorkflowEnginesrvc) RotateMachineIdentitySecret(ctx context.Context, req *contractworkflowengine.MachineIdentityRotateRequest) (res *contractworkflowengine.MachineCredential, err error) {
@@ -230,6 +304,9 @@ func (s *contractWorkflowEnginesrvc) RotateMachineIdentitySecret(ctx context.Con
 	if err := s.MachineIdentities.TouchSecretIssuedAt(ctx, identity.ID, issuedAt); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentitySecretRotated, identity); err != nil {
+		return nil, err
+	}
 
 	return &contractworkflowengine.MachineCredential{
 		ClientID:     identity.OAuthClientID,
@@ -250,6 +327,8 @@ type issuedTargetCredential struct {
 	// one the target already has, so only a first issue leaves anything behind
 	// when the write that accounts for it fails.
 	clientCreated bool
+	// identity is the registry row written for the credential.
+	identity machineidentity.Identity
 }
 
 // RotateContractTargetSecret issues the credential a target authenticates its
@@ -276,6 +355,14 @@ func (s *contractWorkflowEnginesrvc) RotateContractTargetSecret(ctx context.Cont
 	issued, err := s.issueTargetCredential(ctx, tx, req.ID, participantDID)
 	if err != nil {
 		return nil, err
+	}
+	change := autheventtype.MachineIdentitySecretRotated
+	if issued.clientCreated {
+		change = autheventtype.MachineIdentityCreated
+	}
+	if err := auditMachineIdentity(ctx, tx, change, &issued.identity); err != nil {
+		s.discardUnaccountedClient(ctx, issued)
+		return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not audit the target credential: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
 		s.discardUnaccountedClient(ctx, issued)
@@ -351,6 +438,7 @@ func (s *contractWorkflowEnginesrvc) issueTargetCredential(ctx context.Context, 
 	if err := s.TargetRepo.SetCredential(ctx, tx, target.ID, credential.clientID, credential.issuedAt); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	credential.identity = identity
 	return credential, nil
 }
 
