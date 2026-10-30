@@ -91,6 +91,13 @@ Feature: Template Approval Workflow
     When I approve template "Standard NDA"
     Then the request is denied with an authorization error
 
+  @clean_db @DCS-FR-TR-06
+  Scenario: Template Manager cannot approve template
+    Given I am authenticated with roles: "Template Manager"
+    And template "Standard NDA" is in "Reviewed" status
+    When I approve template "Standard NDA"
+    Then the request is denied with an authorization error
+
   # DCS-FR-TR-16: updating a registered template runs through the
   # copy-on-version scheme (POST /template/copy inherits the source's
   # base_template lineage at version+1); the updated copy is re-registered as

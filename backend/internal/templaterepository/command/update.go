@@ -32,6 +32,8 @@ type UpdateCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
+	Jurisdiction *string
+	Industry     *string
 	HolderDID    string
 	UserRoles    userrole.UserRoles
 }
@@ -130,6 +132,8 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
+		Jurisdiction: cmd.Jurisdiction,
+		Industry:     cmd.Industry,
 	}
 	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {

@@ -6,7 +6,7 @@ import { TemplateType } from '@template-repository/models/contract-template'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
-import { type ContractTemplateState, TemplateState } from '@/types/contract-template-state'
+import { TemplateState } from '@/types/contract-template-state'
 import { reportActionError } from '@/utils/report-action-error'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
@@ -40,10 +40,10 @@ const { isManager } = useTemplatePermissions()
 
 const isPublishing = ref(false)
 
-const canArchive = computed(() => {
-  const archiveStates: ContractTemplateState[] = [TemplateState.deleted, TemplateState.deprecated]
-  return isManager.value && !archiveStates.includes(props.template.state)
-})
+// DCS-FR-TR-18: a deprecated template stays deletable; only a deleted one has no archive action.
+const canArchive = computed(() => isManager.value && props.template.state !== TemplateState.deleted)
+
+const archiveLabel = computed(() => (props.template.state === TemplateState.deprecated ? 'Delete' : 'Archive'))
 
 const showPublishButton = computed(() => {
   return (
@@ -64,7 +64,9 @@ const showRegisterButton = computed(() => {
 const archive = async () => {
   try {
     if (!confirmationModal.value) return
-    const { isCanceled } = await confirmationModal.value.reveal({ message: 'Proceed with archiving?' })
+    const { isCanceled } = await confirmationModal.value.reveal({
+      message: props.template.state === TemplateState.deprecated ? 'Proceed with deletion?' : 'Proceed with archiving?',
+    })
     if (!isCanceled) {
       await contractTemplateService.archive({ did: props.template.did, updated_at: props.template.updated_at })
       await router.push({ name: ROUTES.TEMPLATES.LIST })
@@ -112,6 +114,6 @@ async function register() {
     <span v-if="isPublishing" class="loading loading-sm loading-spinner"></span>
     Publish
   </button>
-  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">Archive</button>
+  <button v-if="canArchive" :class="[filteredClass, 'btn-error']" @click="archive">{{ archiveLabel }}</button>
   <ConfirmationModal ref="confirmation-modal" />
 </template>

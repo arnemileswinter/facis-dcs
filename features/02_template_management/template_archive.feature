@@ -25,12 +25,12 @@ Feature: Archive Contract Templates
     When I delete template "Old NDA"
     Then the template status is "Deleted"
 
-  @clean_db
-  Scenario: Cannot delete deprecated template
+  @clean_db @DCS-FR-TR-18
+  Scenario: Delete deprecated template
     Given I am authenticated with roles: "Template Manager"
     And template "Standard NDA" is in "Deprecated" status
     When I delete template "Standard NDA"
-    Then I receive error "invalid contract template state"
+    Then the template status is "Deleted"
 
   @clean_db
   Scenario: Unauthorized role cannot delete template

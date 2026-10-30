@@ -4,7 +4,17 @@ import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { PartyType } from '@/types/party-type'
 import type { TemplateType } from '@/types/template-type'
 
-export interface ContractTemplate {
+export const templateComplianceStatuses = ['UNASSESSED', 'COMPLIANT', 'NON_COMPLIANT'] as const
+export type TemplateComplianceStatus = (typeof templateComplianceStatuses)[number]
+
+/** DCS-FR-TR-10: the searchable template metadata. */
+export interface TemplateSearchableMetadata {
+  jurisdiction?: string
+  industry?: string
+  compliance_status?: TemplateComplianceStatus
+}
+
+export interface ContractTemplate extends TemplateSearchableMetadata {
   did: string
   created_by: string
   created_at: string

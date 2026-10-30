@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
+import {
+  type PartialContractTemplate,
+  type TemplateComplianceStatus,
+  templateComplianceStatuses,
+} from '@/models/contract-template/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
 import { type PartyType, partyTypes } from '@/types/party-type'
+import { toProperCase } from '@/utils/string'
 import ListSearch from '../ListSearch.vue'
-import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 import type { ContractTemplateSearchResponse } from '@/models/responses/template-response'
 
 defineProps<{
@@ -12,7 +17,12 @@ defineProps<{
 
 const partyType = ref<PartyType | ''>('')
 const partyTypeId = useId()
-const filters = computed(() => ({ party_type: partyType.value || undefined }))
+const complianceStatus = ref<TemplateComplianceStatus | ''>('')
+const complianceStatusId = useId()
+const filters = computed(() => ({
+  party_type: partyType.value || undefined,
+  compliance_status: complianceStatus.value || undefined,
+}))
 const emit = defineEmits<{
   searchResult: [value: PartialContractTemplate[] | null]
 }>()
@@ -23,6 +33,8 @@ const filterLabels: Partial<Record<keyof PartialContractTemplate, string>> = {
   description: 'Description',
   version: 'Version',
   template_data: 'Template Data',
+  jurisdiction: 'Jurisdiction',
+  industry: 'Industry',
 }
 
 const emptyTemplate: PartialContractTemplate = {
@@ -49,6 +61,9 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
     template_type: item.template_type,
     party_type: item.party_type,
     created_by: item.created_by,
+    jurisdiction: item.jurisdiction,
+    industry: item.industry,
+    compliance_status: item.compliance_status,
   }))
 </script>
 
@@ -59,6 +74,15 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
       <select :id="partyTypeId" v-model="partyType" class="select w-max min-w-44">
         <option value="">All party types</option>
         <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </div>
+    <div class="shrink-0 text-sm">
+      <label :for="complianceStatusId" class="sr-only">Compliance status</label>
+      <select :id="complianceStatusId" v-model="complianceStatus" class="select w-max min-w-44">
+        <option value="">All compliance statuses</option>
+        <option v-for="status in templateComplianceStatuses" :key="status" :value="status">
+          {{ toProperCase(status.replace('_', ' ')) }}
+        </option>
       </select>
     </div>
     <ListSearch

@@ -36,6 +36,8 @@ type CreateCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
+	Jurisdiction *string
+	Industry     *string
 	HolderDID    string
 	UserRoles    userrole.UserRoles
 }
@@ -74,6 +76,10 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
+		SearchableMetadata: db.SearchableMetadata{
+			Jurisdiction: cmd.Jurisdiction,
+			Industry:     cmd.Industry,
+		},
 	}
 	createdAt, err := h.CTRepo.Create(ctx, tx, data)
 	if err != nil {

@@ -62,6 +62,8 @@ watch(
           description: template.description ?? '',
           templateType: template.template_type,
           partyType: template.party_type,
+          jurisdiction: template.jurisdiction,
+          industry: template.industry,
           state: template.state,
           version: template.version ?? null,
           created_at: template.created_at ?? null,
@@ -171,18 +173,14 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
         <!-- Return to draft / request changes -->
-        <button
-          class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
-          @click="returnToDraft"
-        >
+        <button class="btn flex-1 btn-primary" :disabled="!isReviewer || isSubmitting" @click="returnToDraft">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
         <!-- Complete review (verify then forward to approval) -->
         <VerificationFindingsDialog
           class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
+          :disabled="!isReviewer || isSubmitting"
           @confirm="forwardToApproval"
         />
         <TemplateManagerActions

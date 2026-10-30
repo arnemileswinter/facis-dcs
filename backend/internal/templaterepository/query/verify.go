@@ -19,6 +19,8 @@ import (
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/fcasset"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
+	"digital-contracting-service/internal/templaterepository/command"
+	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
@@ -44,6 +46,8 @@ type Verifier struct {
 	CTRepo   db.ContractTemplateRepo
 	RTRepo   db.ReviewTaskRepo
 	FCClient *fcclient.FederatedCatalogueClient
+	// VerifyCredential checks the proof of a template provenance credential against its issuer.
+	VerifyCredential func(json.RawMessage) error
 }
 
 func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, error) {
@@ -71,22 +75,30 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 		return nil, fmt.Errorf("template data validation failed: %w", err)
 	}
 
-	var findings []string
+	findings, err := h.provenanceFindings(ctx, tx, fullTemplate)
+	if err != nil {
+		return nil, err
+	}
 	if h.FCClient != nil {
-		findings, err = h.verifyTemplateResourceSelfDescription(ctx, cmd, processData, fullTemplate)
+		catalogueFindings, err := h.verifyTemplateResourceSelfDescription(ctx, cmd, processData, fullTemplate)
 		if err != nil {
 			return nil, err
 		}
-		if len(findings) > 0 {
-			return &VerifyResult{
-				Findings: findings,
-			}, nil
-		}
+		findings = append(findings, catalogueFindings...)
+	}
+	if len(findings) > 0 {
+		return &VerifyResult{
+			Findings: findings,
+		}, nil
 	}
 
-	hasTask, err := h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
-	if err != nil {
-		return nil, err
+	// DCS-FR-TR-06: only a Template Reviewer's verification completes a review task.
+	hasTask := false
+	if cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
+		hasTask, err = h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if hasTask {
@@ -117,6 +129,56 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 	return &VerifyResult{
 		Findings: findings,
 	}, nil
+}
+
+// provenanceFindings checks the template against its provenance credentials
+// (DCS-FR-TR-09, DCS-FR-TR-20): each credential proof must verify, and the
+// credential of the current version must bind the current content hash. A
+// template from REGISTERED onwards must have that credential.
+func (h *Verifier) provenanceFindings(ctx context.Context, tx *sqlx.Tx, template *db.ContractTemplate) ([]string, error) {
+	credentials, err := h.CTRepo.ReadProvenanceCredentials(ctx, tx, template.DID)
+	if err != nil {
+		return nil, err
+	}
+
+	var findings []string
+	var current *db.TemplateProvenanceCredential
+	for i := range credentials {
+		credential := &credentials[i]
+		if h.VerifyCredential == nil {
+			findings = append(findings, fmt.Sprintf("provenance credential %s cannot be verified: no credential verifier is configured", credential.VCID))
+		} else if err := h.VerifyCredential(json.RawMessage(credential.Credential)); err != nil {
+			findings = append(findings, fmt.Sprintf("provenance credential %s does not verify: %v", credential.VCID, err))
+		}
+		if credential.Version == template.Version {
+			current = credential
+		}
+	}
+
+	if current == nil {
+		switch template.State {
+		case contracttemplatestate.Registered.String(), contracttemplatestate.Published.String(), contracttemplatestate.Deprecated.String():
+			findings = append(findings, fmt.Sprintf("version %d has no provenance credential", template.Version))
+		}
+		return findings, nil
+	}
+
+	var sealed struct {
+		CredentialSubject struct {
+			TemplateHash string `json:"template_hash"`
+		} `json:"credentialSubject"`
+	}
+	if err := json.Unmarshal(current.Credential, &sealed); err != nil {
+		return nil, fmt.Errorf("decode provenance credential %s: %w", current.VCID, err)
+	}
+	var content []byte
+	if template.TemplateData != nil {
+		content = []byte(*template.TemplateData)
+	}
+	if sealed.CredentialSubject.TemplateHash != command.TemplateContentHash(content) {
+		findings = append(findings, fmt.Sprintf("template content changed since approval: its hash does not match provenance credential %s", current.VCID))
+	}
+	return findings, nil
 }
 
 func (h *Verifier) verifyTemplateResourceSelfDescription(ctx context.Context, cmd VerifyQry, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) ([]string, error) {

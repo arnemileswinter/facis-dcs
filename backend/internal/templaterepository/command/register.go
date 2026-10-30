@@ -27,6 +27,9 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// ErrInvalidTemplateState refuses a command that the template's current state does not allow.
+var ErrInvalidTemplateState = errors.New("invalid contract template state")
+
 type RegisterCmd struct {
 	DID          string
 	Version      int
@@ -75,6 +78,17 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 	}
 
 	if existing != nil {
+
+		// Only an approved template enters the pool of contract-ready
+		// templates (DCS-IR-TR-06). A repeated register of a registered
+		// template changes nothing.
+		switch existing.State {
+		case contracttemplatestate.Approved.String():
+		case contracttemplatestate.Registered.String():
+			return &cmd.DID, nil
+		default:
+			return nil, fmt.Errorf("%w: %s cannot be registered", ErrInvalidTemplateState, existing.State)
+		}
 
 		tx, err := h.DB.BeginTxx(ctx, nil)
 		if err != nil {

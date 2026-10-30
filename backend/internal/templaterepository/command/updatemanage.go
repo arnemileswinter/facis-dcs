@@ -32,6 +32,8 @@ type UpdateManageCmd struct {
 	Name         *string
 	Description  *string
 	TemplateData *datatype.JSON
+	Jurisdiction *string
+	Industry     *string
 	HolderDID    string
 	UserRoles    userrole.UserRoles
 }
@@ -96,6 +98,8 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,
+		Jurisdiction: cmd.Jurisdiction,
+		Industry:     cmd.Industry,
 	}
 	if err := h.CTRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
 		return fmt.Errorf("could not create history: %w", err)

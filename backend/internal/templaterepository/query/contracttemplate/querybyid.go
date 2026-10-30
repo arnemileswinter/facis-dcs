@@ -39,6 +39,7 @@ type GetByIDResult struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	TemplateData *datatype.JSON
+	db.SearchableMetadata
 }
 
 type GetByIDHandler struct {
@@ -103,5 +104,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, query GetByIDQry) (*GetByID
 		CreatedAt:    data.CreatedAt,
 		UpdatedAt:    data.UpdatedAt,
 		TemplateData: data.TemplateData,
+
+		SearchableMetadata: data.SearchableMetadata,
 	}, nil
 }
