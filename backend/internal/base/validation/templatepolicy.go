@@ -102,7 +102,7 @@ func loadTemplatePolicySet() (*templatePolicySet, error) {
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(path) // #nosec G304 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("read template policy file %q: %w", path, err)
 	}

@@ -554,7 +554,7 @@ func main() {
 	// recreated every run. Entries already present are left untouched, so an
 	// administrator who repoints one is not overruled by the next restart.
 	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
-		raw, err := os.ReadFile(seedPath)
+		raw, err := os.ReadFile(seedPath) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
 		if err != nil {
 			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
 		}
@@ -722,7 +722,7 @@ func main() {
 	// material: it prepares the COSE Sig_structures, this process signs them with
 	// the dcs-c2pa key, and the certificate naming that key travels with each
 	// request rather than being configured into a renderer several instances share.
-	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv))
+	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv)) // #nosec G703 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CredentialsV2Context = "https://www.w3.org/ns/credentials/v2"
+	CredentialsV2Context = "https://www.w3.org/ns/credentials/v2" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 	DCSContextURL        = "https://w3id.org/facis/dcs/1#"
 	SchemaContextURL     = "https://schema.org/"
 	ProvContextURL       = "http://www.w3.org/ns/prov#"

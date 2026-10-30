@@ -294,7 +294,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}
 
 	(*wg).Add(1)
-	go func() {
+	go func() { // #nosec G118 -- server lifecycle goroutine; it outlives the request contexts by design
 		defer (*wg).Done()
 
 		// Start HTTP server in a separate goroutine.
@@ -355,7 +355,7 @@ func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
 	srv := &http.Server{Addr: net.JoinHostPort("", port), Handler: newMetricsHandler(), ReadHeaderTimeout: time.Second * 60}
 
 	wg.Add(1)
-	go func() {
+	go func() { // #nosec G118 -- server lifecycle goroutine; it outlives the request contexts by design
 		defer wg.Done()
 		go func() {
 			log.Printf(ctx, "metrics server listening on %q", srv.Addr)
@@ -392,7 +392,7 @@ func httpsMiddleware(publicBaseURL string, next http.Handler) http.Handler {
 		switch strings.ToLower(strings.TrimSpace(proto)) {
 		case "http":
 			// 308 keeps the method and the body of a POST.
-			http.Redirect(w, r, "https://"+public.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+			http.Redirect(w, r, "https://"+public.Host+r.URL.RequestURI(), http.StatusPermanentRedirect) // #nosec G710 -- the redirect host is the configured public host, not taken from the request
 			return
 		case "https":
 			w.Header().Set("Strict-Transport-Security", hstsHeader)

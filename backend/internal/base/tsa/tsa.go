@@ -64,7 +64,7 @@ func loadTrustedTSACertificate() (*x509.Certificate, error) {
 	if path == "" {
 		return embeddedTSACert, nil
 	}
-	pemBytes, err := os.ReadFile(path)
+	pemBytes, err := os.ReadFile(path) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		return nil, fmt.Errorf("TSA_TRUST_CERT_FILE %s is unreadable: %w", path, err)
 	}
