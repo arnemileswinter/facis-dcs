@@ -213,11 +213,7 @@ const exportPDF = async () => {
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
-        <button
-          :disabled="isSubmitting || !isApprover"
-          class="btn flex-1 btn-primary"
-          @click="resubmit"
-        >
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="resubmit">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Resubmit
         </button>

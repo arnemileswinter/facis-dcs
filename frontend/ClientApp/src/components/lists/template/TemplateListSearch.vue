@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
-import { contractTemplateService } from '@/services/contract-template-service'
-import { type PartyType, partyTypes } from '@/types/party-type'
-import ListSearch from '../ListSearch.vue'
 import {
   type PartialContractTemplate,
   type TemplateComplianceStatus,
   templateComplianceStatuses,
 } from '@/models/contract-template/contract-template'
+import { contractTemplateService } from '@/services/contract-template-service'
+import { type PartyType, partyTypes } from '@/types/party-type'
 import { toProperCase } from '@/utils/string'
+import ListSearch from '../ListSearch.vue'
 import type { ContractTemplateSearchResponse } from '@/models/responses/template-response'
 
 defineProps<{

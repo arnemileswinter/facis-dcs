@@ -1,5 +1,5 @@
-import type { TemplateComplianceStatus } from '@/models/contract-template/contract-template'
 import type { DcsTemplateData } from '../dcs-jsonld'
+import type { TemplateComplianceStatus } from '@/models/contract-template/contract-template'
 import type { ContractTemplateActionFlag } from '@/types/contract-template-action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { PartyType } from '@/types/party-type'
