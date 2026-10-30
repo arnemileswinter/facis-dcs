@@ -56,6 +56,12 @@ export interface ContractRetrieveByIdResponse {
   /** The data of that contract */
   contract_data: ContractData
   negotiations: ContractNegotiation[]
+  /** True when outbound Proposals/Decisions still await peer ACK. */
+  pending_negotiation_sync?: boolean
+  /** True when own + matching peer settlements are held (Approve/Sign gate). */
+  settlement_ready?: boolean
+  /** When settlement_ready is false, short reason for a UI warning. */
+  settlement_ready_detail?: string
   /** KPI reports received via deployment callback, each with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) */
   kpis?: ContractDeploymentKpi[]
 }
@@ -148,6 +154,15 @@ export interface ContractAuditResponseItem {
 
 export type ContractAuditResponse = ContractAuditResponseItem[]
 
+/** One lifecycle transition from GET /contract/lifecycle/{did}, without the event body. */
+export interface ContractLifecycleEvent {
+  event_type: string
+  actor?: string
+  occurred_at: string
+  previous_state?: string
+  new_state?: string
+}
+
 export interface ContractHistoryItem {
   did: string
   contract_version: number
@@ -163,6 +178,9 @@ export interface ContractHistoryItem {
   exp_notice_period?: number
   responsible?: unknown
   contract_data?: ContractData
+  /** Actor of the save that replaced this version. Absent on versions recorded before the actor was stored. */
+  modified_by?: string
+  modified_at?: string
 }
 
 export type ContractHistoryResponse = ContractHistoryItem[]

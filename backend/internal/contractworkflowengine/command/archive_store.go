@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -49,11 +50,13 @@ func BuildManualArchiveEntry(contract *db.Contract, storedBy string) (db.Contrac
 	if err != nil {
 		return db.ContractArchiveEntry{}, err
 	}
+	storedAt := time.Now().UTC()
 	return db.ContractArchiveEntry{
 		DID:              contract.DID,
 		ContractVersion:  contract.ContractVersion,
 		StoredBy:         storedBy,
-		StoredAt:         time.Now().UTC(),
+		StoredAt:         storedAt,
+		RetentionUntil:   retentionUntil(contract.ExpDate, storedAt, conf.ArchiveRetentionYears()),
 		ContractSnapshot: snapshot,
 		ContentHash:      contentHash,
 		Evidence:         &evidence,

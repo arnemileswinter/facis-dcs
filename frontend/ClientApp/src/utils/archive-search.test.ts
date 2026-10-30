@@ -18,7 +18,10 @@ function memoryStorage(): Storage {
 
 describe('archive search (DCS-FR-CSA-22)', () => {
   it('keeps only the filters that are set', () => {
-    expect(activeFilters({ state: 'SIGNED', name: ' ', party: '' })).toEqual({ state: 'SIGNED' })
+    expect(activeFilters({ state: 'SIGNED', name: ' ', party: '', contract_version: 2 })).toEqual({
+      state: 'SIGNED',
+      contract_version: 2,
+    })
   })
 
   it('saves, replaces and deletes named queries', () => {

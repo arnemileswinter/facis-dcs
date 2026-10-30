@@ -114,6 +114,37 @@ var DCSToDCSSettlementWithdrawalResponse = Type("DCSToDCSSettlementWithdrawalRes
 	Required("from_peer_did", "withdrawn")
 })
 
+var DCSToDCSNegotiationMessageRequest = Type("DCSToDCSNegotiationMessageRequest", func() {
+	Description("One negotiation message (Proposal, Accept or Reject) shipped to a peer DCS. Authenticated with the same did:web challenge-response as post_pdf. The receiver persists the domain fact and acknowledges; acknowledgment means received-and-stored, not accepted as a contract change. Retries re-send the same message_id so receipt is idempotent.")
+
+	Attribute("secret_value", String, "Secret value")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the peer shipping the message")
+	Attribute("contract_iri", String, "IRI of the contract the negotiation belongs to")
+	Attribute("message_id", String, "Stable outbound message identity; retries re-send the same id")
+	Attribute("kind", String, "PROPOSAL, ACCEPT, REJECT, WITHDRAW or OFFER_ACCEPTED")
+	Attribute("negotiation_id", String, "Id of the contract_negotiations row (zero UUID for OFFER_ACCEPTED)")
+	Attribute("decision_id", String, "Id of the contract_negotiation_decisions row (required for ACCEPT/REJECT)")
+	Attribute("contract_version", Int, "Formal contract version the message was proposed or decided against")
+	Attribute("change_request", Any, "Proposal change_request JSON (PROPOSAL only)")
+	Attribute("created_by", String, "Author of the proposal (PROPOSAL) or decision actor identity")
+	Attribute("created_at", String, "RFC3339 timestamp of the domain row")
+	Attribute("negotiator", String, "Decision negotiator DID (ACCEPT/REJECT)")
+	Attribute("decision", String, "ACCEPTED or REJECTED (ACCEPT/REJECT)")
+	Attribute("rejection_reason", String, "Optional rejection reason (REJECT)")
+
+	Required("from_peer_did", "contract_iri", "message_id", "kind", "negotiation_id", "contract_version", "secret_value", "secret_hash")
+})
+
+var DCSToDCSNegotiationMessageResponse = Type("DCSToDCSNegotiationMessageResponse", func() {
+	Description("Result for receiving a negotiation message: durable persistence acknowledged")
+
+	Attribute("from_peer_did", String, "Decentralized Identifier of the receiving peer")
+
+	Required("from_peer_did")
+})
+
 var DCSToDCSContractEraseRequest = Type("DCSToDCSContractEraseRequest", func() {
 	Description("A counterparty's request to shred this instance's wrapped CEKs for a contract (DCS-NFR-COMP-03, DCS-NFR-SEC-13): erasure of a federated contract completes only when both instances have destroyed their key records. Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
 
@@ -202,6 +233,23 @@ var _ = Service("DcsToDcs", func() {
 
 		HTTP(func() {
 			POST("/peer/contracts/settlement-withdrawal")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("post_negotiation", func() {
+		Description("Receive a negotiation message (Proposal, Accept, Reject or Withdraw) from a peer. Authenticated and trust-gated like post_pdf. The receiver upserts the domain fact idempotently by negotiation_id / decision_id and returns only after durable persistence — the ACK is received-and-stored, not agreement. An Accept or Reject whose Proposal is not yet held is refused so the sender retries after the predecessor arrives, except when that Proposal was already withdrawn (then Accept/Reject ACK as a no-op so concurrent partition races converge on Withdraw). Withdraw deletes the proposal even if a local Accept already landed.")
+
+		Payload(DCSToDCSNegotiationMessageRequest)
+		Result(DCSToDCSNegotiationMessageResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/negotiation")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

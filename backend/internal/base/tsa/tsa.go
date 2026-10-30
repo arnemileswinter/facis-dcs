@@ -199,7 +199,8 @@ func requestTimestampToken(ctx context.Context, httpClient *http.Client, tsaURL 
 	if err != nil {
 		tsResp, respErr := timestamp.ParseResponse(body)
 		if respErr != nil {
-			return nil, nil, fmt.Errorf("parse TSA token: %w", err)
+			// respErr carries a refusal: status, status text and failure info.
+			return nil, nil, fmt.Errorf("parse TSA token: %w (as a time-stamp response: %v)", err, respErr)
 		}
 		ts = tsResp
 	}

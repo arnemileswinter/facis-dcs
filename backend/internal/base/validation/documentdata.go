@@ -306,9 +306,11 @@ func enforceCanonicalOntologyIRIMap(context map[string]any, canonicalIRIs map[st
 }
 
 // domainField is one dcs:DomainField from the hub's SLA ontology; its IRI
-// is its identity — documents reference it via dcs:domainField {"@id": …}.
+// is its identity — documents reference it via dcs:shape / dcs:domainField {"@id": …}.
 type domainField struct {
 	IRI        string
+	Label      string
+	Range      string
 	Constraint *valueConstraint
 }
 

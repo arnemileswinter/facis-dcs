@@ -147,11 +147,6 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		return nil, fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	didToVersion := make(map[string]int, len(contractsMetadata))
-	for _, c := range contractsMetadata {
-		didToVersion[c.DID] = c.ContractVersion
-	}
-
 	var reviewTaskItems []ReviewTaskItem
 	for _, data := range reviewerTasks {
 		state, err := reviewtaskstate.NewReviewTaskState(data.State)
@@ -161,7 +156,7 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		reviewTaskItems = append(reviewTaskItems, ReviewTaskItem{
 			DID:             data.DID,
 			State:           state,
-			ContractVersion: didToVersion[data.DID],
+			ContractVersion: data.ContractVersion,
 			Reviewer:        data.Reviewer,
 			CreatedAt:       data.CreatedAt,
 		})
@@ -193,7 +188,7 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 		}
 		approvalTasksItems = append(approvalTasksItems, ApprovalTaskItem{
 			DID:             data.DID,
-			ContractVersion: didToVersion[data.DID],
+			ContractVersion: data.ContractVersion,
 			State:           state,
 			Approver:        data.Approver,
 			CreatedAt:       data.CreatedAt,

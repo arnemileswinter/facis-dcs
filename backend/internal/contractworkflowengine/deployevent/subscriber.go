@@ -34,6 +34,7 @@ type Subscriber struct {
 // ContractDeployer is the deployment implementation this subscriber shares with
 // the manual POST /contract/deploy endpoint (command.Deployer).
 type ContractDeployer interface {
+	Deployable(ctx context.Context, did, localPeer string) error
 	Handle(ctx context.Context, cmd command.DeployCmd) (*command.DeployResult, error)
 }
 
@@ -51,7 +52,9 @@ func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
 		// party deploys what it signs — a negotiating peer may simply hold the
 		// agreement. Deployment is opt-in, so this is an ordinary outcome
 		// (ADR-25) and must not be reported as a failure.
-		if err := s.handle(ctx, evt); err != nil && !errors.Is(err, command.ErrNoTargetDesignated) {
+		// A partially signed contract fires this event after each signature but
+		// the last; that is the expected path, not a failure.
+		if err := s.handle(ctx, evt); err != nil && !errors.Is(err, command.ErrNoTargetDesignated) && !errors.Is(err, command.ErrSigningIncomplete) {
 			log.Printf("contractworkflowengine/deployevent: could not auto-deploy: %v", err)
 		}
 	})
@@ -72,6 +75,10 @@ func (s *Subscriber) handle(ctx context.Context, evt cloudevent.Event) error {
 	}
 	if envelope.DID == "" {
 		return nil
+	}
+	// The gate is dispatched only for a contract that may deploy now.
+	if err := s.Deployer.Deployable(ctx, envelope.DID, s.LocalPeer); err != nil {
+		return err
 	}
 	if s.Gate != nil {
 		if _, _, err := s.Gate.Execute(ctx, workflowgate.Input{

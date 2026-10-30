@@ -9,10 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/contractworkflowengine/command"
+	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 )
 
 type recordingDeployer struct {
 	commands []command.DeployCmd
+	notReady error
+}
+
+func (r *recordingDeployer) Deployable(context.Context, string, string) error {
+	return r.notReady
 }
 
 func (r *recordingDeployer) Handle(_ context.Context, cmd command.DeployCmd) (*command.DeployResult, error) {
@@ -52,5 +58,21 @@ func TestAutoDeployIgnoresAnEventWithoutAContract(t *testing.T) {
 	sub := &Subscriber{Deployer: deployer, LocalPeer: "did:web:dcs-a.localhost"}
 
 	require.NoError(t, sub.handle(context.Background(), appliedSignatureEvent(t, "")))
+	require.Empty(t, deployer.commands)
+}
+
+// After the first of two signatures the contract may not deploy yet. The
+// deployment workflow gate must not be dispatched then: an open gate run
+// blocks the deployment once the last signature arrives.
+func TestAutoDeployDispatchesNoGateForAPartiallySignedContract(t *testing.T) {
+	deployer := &recordingDeployer{notReady: command.ErrSigningIncomplete}
+	// An unconfigured coordinator answers every Execute with a BlockedError.
+	sub := &Subscriber{Deployer: deployer, Gate: &workflowgate.Coordinator{}, LocalPeer: "did:web:dcs-a.localhost"}
+
+	err := sub.handle(context.Background(), appliedSignatureEvent(t, "did:web:example#contract"))
+
+	require.ErrorIs(t, err, command.ErrSigningIncomplete)
+	var blocked *workflowgate.BlockedError
+	require.NotErrorAs(t, err, &blocked, "the gate ran for a contract that may not deploy")
 	require.Empty(t, deployer.commands)
 }

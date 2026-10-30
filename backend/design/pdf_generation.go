@@ -91,7 +91,11 @@ var _ = Service("PDFGeneration", func() {
 			Attribute("did", String, "DID of the contract")
 			Required("did")
 		})
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/pdf/export/contract/{did}")
 			SkipResponseBodyEncodeDecode()
 			Response(StatusOK, func() {
@@ -147,7 +151,11 @@ var _ = Service("PDFGeneration", func() {
 			Attribute("content_type", String, "Media type of the response body (application/zip)")
 		})
 		Error("refused", BundleExportRefusedError, "Structural-integrity pre-flight refused the export")
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/contract/export/{did}")
 			SkipResponseBodyEncodeDecode()
 			Response(StatusOK, func() {
@@ -203,7 +211,11 @@ var _ = Service("PDFGeneration", func() {
 			Required("did")
 		})
 		Result(PDFVerifyResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			GET("/pdf/verify/contract/{did}")
 			Response(StatusOK)
 		})

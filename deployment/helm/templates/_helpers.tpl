@@ -243,11 +243,11 @@ UI path override or derived default.
 {{- end }}
 
 {{/*
-IPFS MFS base URL - Kubo RPC API (auto-wired when ipfs sub-chart is enabled).
+IPFS Kubo RPC URL: explicit URL before the enabled sub-chart endpoint.
 */}}
 {{- define "digital-contracting-service.ipfsMfsBaseURL" -}}
-{{- if .Values.ipfsClient.mfsBaseURL -}}
-{{- .Values.ipfsClient.mfsBaseURL -}}
+{{- if .Values.ipfs.mfsBaseURL -}}
+{{- .Values.ipfs.mfsBaseURL -}}
 {{- else if .Values.ipfs.enabled -}}
 {{- $host := printf "%s-ipfs" .Release.Name -}}
 {{- $port := default 5001 .Values.ipfs.service.apiPort -}}

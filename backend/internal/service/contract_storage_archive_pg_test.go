@@ -16,10 +16,12 @@ import (
 	"digital-contracting-service/internal/middleware"
 )
 
-const archiveManager = "did:web:dcs.example:archive-manager"
+// archiveManager is the organization of the Archive Manager; it created the
+// seeded contracts, so the contract read scope admits them.
+const archiveManager = "did:web:creator"
 
-func archiveTestService(db *sqlx.DB) *contractStorageArchivesrvc {
-	return &contractStorageArchivesrvc{DB: db, CRepo: &pg.PostgresContractRepo{}}
+func archiveTestService(t *testing.T, db *sqlx.DB) *contractStorageArchivesrvc {
+	return &contractStorageArchivesrvc{DB: db, CRepo: &pg.PostgresContractRepo{}, DIDDocument: *eraseTestDIDDocument(t, "dcs.example")}
 }
 
 func archiveManagerContext() context.Context {
@@ -58,7 +60,7 @@ func archiveEvents(t *testing.T, db *sqlx.DB, eventType string) []map[string]any
 func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	db := pgtest.Open(t)
 	seedArchivedContract(t, db, "did:web:dcs.example:contract:a", "SIGNED")
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 
 	_, err := svc.Retrieve(archiveManagerContext(), &contractstoragearchive.ArchiveRetrieveRequest{})
 	require.NoError(t, err)
@@ -78,7 +80,7 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 
 func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {
 	db := pgtest.Open(t)
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 
 	_, err := svc.Delete(archiveManagerContext(), &contractstoragearchive.DeletePayload{Did: "did:web:dcs.example:contract:none", Justification: "retention over"})
 	require.Error(t, err)
@@ -99,7 +101,7 @@ func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {
 // to change or remove them.
 func TestAccessAttemptsAreAppendOnly(t *testing.T) {
 	db := pgtest.Open(t)
-	_, err := db.Exec(`INSERT INTO access_attempts (attempt_by, ip_address, attempted_at, success, service, method) VALUES ('u', '10.0.0.1', now(), false, 'ContractStorageArchive', 'retrieve')`)
+	_, err := db.Exec(`INSERT INTO access_attempts (attempt_by, ip_address, attempted_at, success, outcome, service, method) VALUES ('u', '10.0.0.1', now(), false, 'DENIED', 'ContractStorageArchive', 'retrieve')`)
 	require.NoError(t, err)
 
 	_, err = db.Exec(`UPDATE access_attempts SET success = true`)
@@ -132,7 +134,7 @@ func TestTerminatedContractStaysInTheArchiveReadOnly(t *testing.T) {
 	_, err := db.Exec(`UPDATE contracts SET state = 'TERMINATED' WHERE did = $1`, did)
 	require.NoError(t, err)
 
-	res, err := archiveTestService(db).Retrieve(archiveManagerContext(), &contractstoragearchive.ArchiveRetrieveRequest{})
+	res, err := archiveTestService(t, db).Retrieve(archiveManagerContext(), &contractstoragearchive.ArchiveRetrieveRequest{})
 	require.NoError(t, err)
 	require.Len(t, res.Contracts, 1)
 	require.Equal(t, did, res.Contracts[0].Did)
@@ -171,7 +173,7 @@ func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
 	require.NoError(t, err)
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 	artifacts := newMemoryArtifacts()
 	svc.Artifacts = artifacts
 
@@ -199,7 +201,7 @@ func TestArchiveManagerCannotArchiveAContractInWork(t *testing.T) {
 	did := "did:web:dcs.example:contract:draft"
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version) VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'DRAFT', 'did:web:tpl', 1)`, did)
 	require.NoError(t, err)
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 
 	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "contract", Did: did})
@@ -211,7 +213,7 @@ func TestArchiveManagerStoresEvidenceThatIsReadableUntilErasure(t *testing.T) {
 	db := pgtest.Open(t)
 	did := "did:web:dcs.example:contract:evidence"
 	seedArchivedContract(t, db, did, "SIGNED")
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 	artifacts := newMemoryArtifacts()
 	svc.Artifacts = artifacts
 
@@ -240,7 +242,7 @@ func TestArchiveManagerStoresEvidenceThatIsReadableUntilErasure(t *testing.T) {
 
 func TestEvidenceNeedsALiveArchiveEntry(t *testing.T) {
 	db := pgtest.Open(t)
-	svc := archiveTestService(db)
+	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 	name, mediaType := "note.txt", "text/plain"
 

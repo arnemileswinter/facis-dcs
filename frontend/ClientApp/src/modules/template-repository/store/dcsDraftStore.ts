@@ -43,6 +43,7 @@ import type {
 } from '@/models/requests/template-request'
 import type { DcsOperator } from '@/models/semantic/facis-dcs-semantic'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type {
   DomainFieldDefinition,
   MetaData,
@@ -64,8 +65,10 @@ export interface LoadDocumentMeta {
   name: string
   description: string
   templateType?: TemplateTypeValue
+  partyType?: PartyType
   state?: ContractTemplateState | null
   version?: number | null
+  created_at?: string | null
   updated_at?: string | null
   created_by?: string
   responsible?: ContractTemplateResponsible | null
@@ -113,10 +116,12 @@ export const useDcsDraftStore = defineStore(storeId, {
       }) as DcsTemplateData
     },
     templateCreateRequestData(): ContractTemplateCreateRequest {
+      if (!this.partyType) throw new Error('Party type is required.')
       return {
         name: this.name,
         description: this.description,
         template_type: this.templateType,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -127,6 +132,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         updated_at: this.updated_at,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -138,6 +144,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         template_type: this.templateType,
         name: this.name,
         description: this.description,
+        party_type: this.partyType,
         template_data: this.templateDocument,
       }
     },
@@ -155,6 +162,7 @@ export const useDcsDraftStore = defineStore(storeId, {
         const structure = rawDoc['dcs:documentStructure']
 
         this.reset({
+          partyType: meta.partyType,
           did: meta.did,
           documentIri: rawDoc['@id'] ?? null,
           name: meta.name ? meta.name : (metadata['dcs:title'] ?? ''),
@@ -162,6 +170,7 @@ export const useDcsDraftStore = defineStore(storeId, {
           templateType: templateType !== TemplateType.component ? templateType : derivedTemplateType,
           state: meta.state ?? undefined,
           version: meta.version ?? null,
+          created_at: meta.created_at ?? null,
           updated_at: meta.updated_at ?? null,
           created_by: meta.created_by ?? '',
           responsible: meta.responsible ?? null,
@@ -179,12 +188,14 @@ export const useDcsDraftStore = defineStore(storeId, {
 
       // Unknown / empty format — start fresh
       this.reset({
+        partyType: meta.partyType,
         did: meta.did,
         name: meta.name,
         description: meta.description,
         templateType,
         state: meta.state ?? undefined,
         version: meta.version ?? null,
+        created_at: meta.created_at ?? null,
         updated_at: meta.updated_at ?? null,
         created_by: meta.created_by ?? '',
         responsible: meta.responsible ?? null,
@@ -719,6 +730,10 @@ interface CanonicalDocumentInput {
   documentId?: string
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   templateType?: TemplateTypeValue
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
@@ -747,6 +762,19 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
     ...(input.description ? { 'dcs:description': input.description } : {}),
     ...(input.customMetaData?.length ? { 'dcs:customMetaData': input.customMetaData } : {}),
   }
+  const contractSharedDetails =
+    input.documentType === 'dcs:Contract'
+      ? {
+          ...(input.startDate ? { 'dcs:startDate': { '@value': input.startDate, '@type': 'xsd:dateTime' } } : {}),
+          ...(input.expirationDate
+            ? { 'dcs:expirationDate': { '@value': input.expirationDate, '@type': 'xsd:dateTime' } }
+            : {}),
+          ...(input.expirationNoticePeriod !== undefined
+            ? { 'dcs:expirationNoticePeriod': input.expirationNoticePeriod }
+            : {}),
+          ...(input.expirationPolicy ? { 'dcs:expirationPolicy': input.expirationPolicy } : {}),
+        }
+      : {}
   const metadata =
     input.documentType === 'dcs:ContractTemplate'
       ? {
@@ -755,7 +783,7 @@ function assembleCanonicalDocument(input: CanonicalDocumentInput): DcsDocumentDa
           'dcs:templateType':
             input.templateType === TemplateType.contractTemplate ? 'dcs:ContractTemplate' : 'dcs:Component',
         }
-      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata }
+      : { '@type': 'dcs:ContractMetadata' as const, ...commonMetadata, ...contractSharedDetails }
 
   return {
     '@type': input.documentType,
@@ -803,6 +831,10 @@ export interface ContractDocumentInput {
   storedDocument?: DcsContractData
   name?: string
   description?: string
+  startDate?: string
+  expirationDate?: string
+  expirationNoticePeriod?: number
+  expirationPolicy?: string
   blocks: DcsBlock[]
   layout: DcsLayoutNode[]
   contractFields: DcsContractField[]
@@ -1236,9 +1268,11 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   contractData: [],
   policies: [],
   customMetaData: [],
+  partyType: undefined,
   templateType: TemplateType.component,
   state: undefined,
   version: null,
+  created_at: null,
   updated_at: null,
   created_by: '',
   responsible: null,

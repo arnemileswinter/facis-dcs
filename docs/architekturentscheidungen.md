@@ -143,12 +143,56 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   frühere „irgendein Ziel kannte das Shared Secret"). Das Ack versiegelt
   ein RFC-3161-gestempeltes Execution-Evidence-Receipt im Archiv und
   schaltet SIGNED→ACTIVE.
-- **Was gilt:** Die Webhook-Plattform ist eine In-Memory-Fan-Out-Schicht:
-  feste Liste abonnierbarer Events (`KnownEvents`), Mapping interner
+- **Was gilt:** Die Webhook-Plattform ist eine Fan-Out-Schicht: feste
+  Liste abonnierbarer Events (`KnownEvents`), Mapping interner
   NATS-Event-Typen auf Webhook-Namen (`DCSEventMap`), asynchrone
-  Zustellung, Delivery-Log begrenzt auf die letzten 512 Einträge (die
-  Beobachtungsfläche von GET /deliveries). Abonnements überleben keinen
-  Restart.
+  Zustellung. Abonnements liegen in Postgres (`webhook_subscriptions`)
+  und gehören der Organisation (Participant-DID) des Anlegers. Anlegen,
+  Auflisten und Löschen verlangen `Integration Manager` oder
+  `Sys. Administrator` (sonst 403); GET /webhooks zeigt nur die
+  Abonnements der eigenen Organisation, DELETE auf ein fremdes Abonnement
+  antwortet 404. DCS erzeugt pro Abonnement ein Signatur-Secret nach
+  Standard Webhooks (`whsec_` + Base64 von 32 Zufallsbytes) und gibt es
+  genau einmal zurück, in der 201-Antwort von POST /webhooks; ein vom
+  Client mitgesendetes `secret` lehnt DCS mit 400 ab. Postgres hält das
+  Secret nur verschlüsselt: AES-256-GCM unter einem eigenen CEK pro
+  Abonnement, gebunden an die Abonnement-ID, und der CEK ist per
+  ECDH-ES+A256KW auf den keyAgreement-Schlüssel der Instanz gewrappt.
+  Nur das HSM entschlüsselt ihn, bei jeder Zustellung. Jede Zustellung
+  trägt die Header `webhook-id` (Event-ID), `webhook-timestamp`
+  (Unix-Sekunden) und `webhook-signature: v1,<Base64 HMAC-SHA256>` über
+  `webhook-id.webhook-timestamp.Body` mit dem Base64-dekodierten Teil
+  nach `whsec_` als Schlüssel; `X-Event-ID` und `X-Correlation-ID`
+  bleiben. Der ORCE-Empfänger `/dcs-dispatch` prüft die Signatur über die
+  empfangenen Bytes (`msg.req.rawBody`) mit den Secrets aus
+  `WEBHOOK_SECRET` (eines pro Abonnement, durch Leerzeichen oder Komma
+  getrennt; `timingSafeEqual`, höchstens 300 s Zeitabweichung, jede
+  `webhook-id` nur einmal) und antwortet sonst 401, auch ohne
+  `WEBHOOK_SECRET` oder ohne Raw-Body. Den Raw-Body liefert
+  die vom Chart gemountete `settings.js` (Image-Standard plus ein
+  JSON-Parser mit `verify` als `httpAdminMiddleware` und
+  `httpNodeMiddleware`); der Editor-Parser unter `httpAdminRoot` `/` liest
+  sonst jeden Body vor den http-in-Routen. Die BDD-Szenarien stellen an
+  einen Empfänger im behave-Prozess zu, der die Signatur mit dem Secret
+  aus der 201-Antwort prüft. Der Betreiber kopiert das Secret aus der
+  201-Antwort in ein Kubernetes-Secret und gibt es ORCE über
+  `orce.extraEnv` mit `valueFrom.secretKeyRef` als `WEBHOOK_SECRET`. Der
+  ORCE-Subflow „DCS Subscribe“ abonniert mit dem Bearer-Token aus
+  `DCS_TOKEN` (Integration Manager der abonnierenden Organisation).
+  DCS stellt ein Vertrags-Event nur Abonnements von Organisationen zu,
+  die den Vertrag lesen dürfen (F03); Template-Events gehen an alle.
+  Callback-URLs sind absolute http- oder https-URLs ohne Zugangsdaten;
+  der Dispatcher erreicht weder Loopback noch Link-Local-Adressen und
+  folgt keinen Redirects.
+  Pending-Callbacks und das Delivery-Log (letzte 512 Einträge, GET /deliveries
+  mit Verwaltungsrolle, nur die eigene Organisation) bleiben im Speicher.
+  **Warum:** Ein Abonnement verbindet ein Drittsystem mit DCS-Events,
+  das ist nach ADR-29 eine Integrationsaufgabe. Die HMAC-Signatur
+  beweist dem Empfänger Herkunft und Unversehrtheit jeder Zustellung,
+  ohne das Secret zu übertragen; der Zeitstempel in der Signatur begrenzt
+  Replays. Das verschlüsselte Speichern mit HSM-gewrapptem CEK erfüllt
+  DCS-NFR-SEC-06 und DCS-NFR-SEC-14. Standard Webhooks ist ein
+  verbreitetes Format, für das Empfänger fertige Bibliotheken haben.
 
 - **Was gilt:** Vertragszustände sind ein Postgres-Enum, das nur additiv
   erweitert wird (`ALTER TYPE … ADD VALUE`); Views, die neue Werte
@@ -169,6 +213,14 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   `DCS_SYNC_FAIL_RETRY_INTERVAL`, `DCS_ARCHIVE_EXPIRING_WINDOW_DAYS`,
   `DCS_API_RATE_LIMIT_PER_MINUTE`) fallen bei unparsbaren oder nicht
   positiven Werten stets auf den Default zurück.
+- **Was gilt:** Die Aufbewahrungsfrist archivierter Verträge kommt aus
+  `DCS_ARCHIVE_RETENTION_YEARS` (DCS-FR-CSA-14). Bei der Archivierung gilt
+  `retention_until` = Ablaufdatum (ohne Ablaufdatum: Archivierungszeitpunkt)
+  plus Frist. Ohne Wert gibt es keine Frist: `retention_until` bleibt leer,
+  Löschen bleibt erlaubt. **Warum:** Die SRS verlangt eine konfigurierte
+  Aufbewahrungsrichtlinie ohne festen Wert, und Löschen nur „if permitted by
+  policy“ (DCS-FR-CSA-17). Ein Default würde jedes Löschen und die
+  DSGVO-Löschung (Key Shredding) bis zum Fristende sperren.
 
 ## Identität (did:web, Peer-Vertrauen, Maschinen-Identitäten)
 

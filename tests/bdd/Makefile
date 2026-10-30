@@ -45,6 +45,8 @@ IS_WSL := $(shell grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && e
 # attempt dies before it leaves the pod. The address that always works there is
 # the kind bridge network's gateway, i.e. the host as the node container sees it;
 # it only exists once the cluster does, so BDD_HELM_SET below is expanded lazily.
+# The BDD webhook receiver (features/02 notifications) is reached at the same
+# address, as BDD_WEBHOOK_RECEIVER_HOST in run_bdd_helm.
 KIND_DOCKER_NETWORK ?= kind
 ifeq ($(IS_WSL),1)
 BDD_CHECKPOINT_SINK_HOST ?= $(shell ip -4 -o addr show dev veth-rd-wsl 2>/dev/null | awk '$$3 == "inet" { split($$4, address, "/"); print address[1]; exit }')
@@ -181,6 +183,7 @@ run_bdd_helm: setup_environment ensure_k8s_tools
 		DCS_DEPLOYMENT_B="$(DCS_DEPLOYMENT_B)" \
 		BDD_DCS_BASE_URL_B="$(BDD_DCS_BASE_URL_B)" \
 		BDD_PUBLIC_ORIGIN_B="$(BDD_PUBLIC_ORIGIN_B)" \
+		BDD_WEBHOOK_RECEIVER_HOST="$(BDD_CHECKPOINT_SINK_HOST)" \
 		ARG_BDD_JUNIT="$(ARG_BDD_JUNIT)" \
 		ARG_BDD_TAGS="$(ARG_BDD_TAGS)" \
 		ARG_BDD="$(ARG_BDD)" \
@@ -197,7 +200,10 @@ DCS_BUILD_CACHE ?=
 PDF_CORE_BUILD_CACHE ?=
 
 build_dcs_image:
-	@$(DOCKER_BUILD) $(DCS_BUILD_CACHE) -f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
+	@$(DOCKER_BUILD) $(DCS_BUILD_CACHE) \
+		--build-arg GIT_SHA="$$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
+		--build-arg BUILD_TIME="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
 
 build_pdf_core_image:
 	@$(DOCKER_BUILD) $(PDF_CORE_BUILD_CACHE) -f ../../pdf-core/Dockerfile -t "$(PDF_CORE_IMAGE)" ../..

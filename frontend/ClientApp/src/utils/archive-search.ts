@@ -11,7 +11,9 @@ const STORAGE_KEY = 'dcs.archive.saved-queries'
 /** The filters that are set; empty ones are left out of the request. */
 export function activeFilters(query: ArchiveSearchQuery): ArchiveSearchQuery {
   return Object.fromEntries(
-    Object.entries(query).filter(([, value]) => typeof value === 'string' && value.trim() !== ''),
+    Object.entries(query).filter(([, value]) =>
+      typeof value === 'string' ? value.trim() !== '' : value !== undefined && value !== null,
+    ),
   )
 }
 

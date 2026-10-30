@@ -190,6 +190,13 @@ func (s *contractStorageArchivesrvc) Evidence(ctx context.Context, p *contractst
 	if s.Artifacts == nil {
 		return nil, contractstoragearchive.MakeInternalError(errors.New("artifact store is not configured"))
 	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	if err := authorizeContractRead(ctx, s.DB, localPeer, p.Did); err != nil {
+		return nil, err
+	}
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
@@ -231,6 +238,10 @@ func (s *contractStorageArchivesrvc) Evidence(ctx context.Context, p *contractst
 // Compliance verifies every live archive entry against the archive
 // compliance rules and flags the entries that fail one (DCS-FR-CSA-19).
 func (s *contractStorageArchivesrvc) Compliance(ctx context.Context, _ *contractstoragearchive.CompliancePayload) ([]*contractstoragearchive.ArchiveComplianceItem, error) {
+	ctx, err := contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -308,11 +319,9 @@ func archiveComplianceChecks(entry db.ContractArchiveEntry, meta *db.ContractMet
 		signature = append(signature, "no signer credential hashes recorded")
 	}
 
-	var missing []string
-	switch {
-	case meta == nil:
-		missing = append(missing, "contract metadata unavailable")
-	default:
+	metadata := []string{"contract metadata unavailable"}
+	if meta != nil {
+		var missing []string
 		if meta.Name == nil || strings.TrimSpace(*meta.Name) == "" {
 			missing = append(missing, "name")
 		}
@@ -322,9 +331,10 @@ func archiveComplianceChecks(entry db.ContractArchiveEntry, meta *db.ContractMet
 		if meta.StartDate == nil || meta.ExpDate == nil {
 			missing = append(missing, "validity period")
 		}
-	}
-	if len(missing) > 0 && meta != nil {
-		missing = []string{"missing " + strings.Join(missing, ", ")}
+		metadata = nil
+		if len(missing) > 0 {
+			metadata = []string{"missing " + strings.Join(missing, ", ")}
+		}
 	}
 
 	var evidence []string
@@ -338,7 +348,7 @@ func archiveComplianceChecks(entry db.ContractArchiveEntry, meta *db.ContractMet
 	return []*contractstoragearchive.ArchiveComplianceCheck{
 		check("retention", retention),
 		check("signature_policy", signature),
-		check("metadata_completeness", missing),
+		check("metadata_completeness", metadata),
 		check("evidence_completeness", evidence),
 	}
 }

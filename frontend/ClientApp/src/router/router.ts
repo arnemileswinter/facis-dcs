@@ -35,6 +35,7 @@ import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
 import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
+import ArchiveDetailView from '@/views/archive/ArchiveDetailView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
 import AuthSuccessView from '@/views/auth/AuthSuccessView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
@@ -77,6 +78,7 @@ const ROUTES = {
     LIST: 'audit.list',
   },
   ARCHIVE: {
+    DETAIL: 'archive-detail',
     DASHBOARD: 'archive.dashboard',
   },
   AUTH: {
@@ -279,7 +281,19 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Audit',
       order: 5,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
+      roles: ['AUDITOR', 'COMPLIANCE_OFFICER', 'ARCHIVE_MANAGER'],
+    },
+  },
+  {
+    path: '/archive/detail',
+    name: ROUTES.ARCHIVE.DETAIL,
+    component: ArchiveDetailView,
+    meta: {
+      name: 'Archived contract',
+      hideInSidebar: true,
+      title: 'DCS - Archived contract',
+      requiresAuth: true,
+      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
   {
@@ -292,7 +306,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Archive Dashboard',
       order: 6,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER'],
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
     },
   },
   {

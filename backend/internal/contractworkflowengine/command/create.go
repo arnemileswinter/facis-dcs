@@ -288,6 +288,14 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		normalizedContractData = &seeded
 	}
 
+	normalizedContractData, _, err = stampSharedDetailsIntoContractData(normalizedContractData, sharedContractDetails{
+		Name:        contractTemplate.Name,
+		Description: contractTemplate.Description,
+	})
+	if err != nil {
+		return err
+	}
+
 	data, evt := withCreationTimestamp(db.Contract{
 		DID:             cmd.DID,
 		Origin:          localPeer,
@@ -563,8 +571,8 @@ func SeedPartiesAndSignatureFields(raw datatype.JSON, partyDIDs []string) (datat
 // reseedPartiesAndSignatureFields re-applies SeedPartiesAndSignatureFields to
 // the stored document and persists only a real addition. It is called from
 // every command that has just replaced the document wholesale with one a client
-// assembled (negotiate's redline, submit's submitted draft), which is where the
-// party nodes go missing.
+// assembled (submit's merged redline, submit's submitted draft), which is where
+// the party nodes go missing.
 //
 // The party set is the workflow's record of who the parties are
 // (db.Responsible), so it is what must be present; the document is not pruned to

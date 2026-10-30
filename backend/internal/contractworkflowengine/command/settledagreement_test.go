@@ -277,9 +277,9 @@ func TestSettlementIsReadFromTheArtifactNotTheLocalWorkflowState(t *testing.T) {
 	}
 }
 
-// negotiate applies a structured redline to contract_data straight away and
-// re-ships the result, so that is the change the settled-agreement gate has to
-// stand in front of.
+// Submit applies a structured redline to contract_data and re-ships the
+// result, so that is the change the settled-agreement gate has to stand in
+// front of.
 func TestStructuredRedlineRewritesTheDocument(t *testing.T) {
 	redline, err := datatype.NewJSON(map[string]any{
 		"contract_data": map[string]any{"dcs:documentStructure": map[string]any{}},
@@ -302,4 +302,51 @@ func TestFreeTextNegotiationLeavesTheDocumentAlone(t *testing.T) {
 	if err := json.Unmarshal(note, &change); err == nil {
 		require.Nil(t, change.ContractData)
 	}
+}
+
+func TestAssertCounterpartiesSettledPassesWithoutRemoteSlots(t *testing.T) {
+	require.NoError(t, AssertCounterpartiesSettled(
+		context.Background(), nil, nil, settledContractDID, thisInstance, nil, nil))
+	require.NoError(t, AssertCounterpartiesSettled(
+		context.Background(), nil, nil, settledContractDID, thisInstance,
+		&db.Responsible{Creator: thisInstance, Counterparty: theCounterparty},
+		[]string{"local-signatory"},
+	))
+}
+
+func TestAssertCounterpartiesSettledRequiresPeerSettlement(t *testing.T) {
+	store := emptyStore()
+	settledOn(t, store, thisInstance, agreedDocument)
+	resp := &db.Responsible{Creator: thisInstance, Counterparty: theCounterparty}
+	fields := []string{thisInstance, theCounterparty}
+
+	err := AssertCounterpartiesSettled(context.Background(), nil, store, settledContractDID, thisInstance, resp, fields)
+	require.ErrorIs(t, err, ErrCounterpartiesNotSettled)
+
+	settledOn(t, store, theCounterparty, agreedDocument)
+	require.NoError(t, AssertCounterpartiesSettled(
+		context.Background(), nil, store, settledContractDID, thisInstance, resp, fields))
+}
+
+func TestAssertCounterpartiesSettledRejectsDigestMismatch(t *testing.T) {
+	store := emptyStore()
+	settledOn(t, store, thisInstance, agreedDocument)
+	settledOn(t, store, theCounterparty, `{"dcs:documentStructure":{"dcs:clause":"other terms"}}`)
+	resp := &db.Responsible{Creator: thisInstance, Counterparty: theCounterparty}
+	fields := []string{thisInstance, theCounterparty}
+
+	err := AssertCounterpartiesSettled(context.Background(), nil, store, settledContractDID, thisInstance, resp, fields)
+	require.ErrorIs(t, err, ErrCounterpartiesNotSettled)
+}
+
+func TestSettlementReadyReportsDetailWhenNotReady(t *testing.T) {
+	store := emptyStore()
+	settledOn(t, store, thisInstance, agreedDocument)
+	resp := &db.Responsible{Creator: thisInstance, Counterparty: theCounterparty}
+	fields := []string{thisInstance, theCounterparty}
+
+	ready, detail, err := SettlementReady(context.Background(), nil, store, settledContractDID, thisInstance, resp, fields)
+	require.NoError(t, err)
+	require.False(t, ready)
+	require.Contains(t, detail, theCounterparty)
 }

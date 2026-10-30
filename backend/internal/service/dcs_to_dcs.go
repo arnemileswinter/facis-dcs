@@ -224,6 +224,19 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		return nil, contractworkflowengine.MakeBadRequest(
 			fmt.Errorf("post_pdf rejected: peer %s shipped a Power of Attorney that does not verify: %w", req.FromPeerDid, err))
 	}
+	peerSignatures, err := trustgate.PeerSignatures(localPeer, embeddedEvidence)
+	if err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
+	}
+	if syncSignature != nil && len(peerSignatures) > 0 {
+		evidence, err := json.Marshal(peerSignatures)
+		if err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		revalidatedAt := time.Now().UTC()
+		syncSignature.PoAEvidence = evidence
+		syncSignature.PoARevalidatedAt = &revalidatedAt
+	}
 
 	// Semantic bundle (ADR-8): the shipped contract's dcs:effectiveShapes pin was
 	// written from the SENDER's hub, so the shape libraries it names travel with
@@ -265,7 +278,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		}
 	}
 
-	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, Artifacts: s.Artifacts}
+	receiver := command.PeerPdfReceiver{DB: s.DB, CRepo: s.CRepo, NRepo: s.NRepo, RTRepo: s.RTRepo, ATRepo: s.ATRepo, NTRepo: s.NTRepo, Artifacts: s.Artifacts}
 	if err := receiver.Handle(ctx, command.PeerPdfReceiveCmd{
 		ContractIRI:  req.ContractIri,
 		Counterparty: req.FromPeerDid,
@@ -278,6 +291,12 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 			return nil, contractworkflowengine.MakeBadRequest(
 				fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", req.ContractIri, err))
 		}
+
+		if errors.Is(err, command.ErrShippedDisagreesWithLocalRound) {
+			return nil, contractworkflowengine.MakeBadRequest(
+				fmt.Errorf("post_pdf rejected: %w", err))
+		}
+
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 
