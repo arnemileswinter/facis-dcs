@@ -269,6 +269,9 @@ func (s *DCSToDCSSynchronizer) deliverSettlement(ctx context.Context, settlement
 	if err := s.SRepo.MarkSettlementDelivered(ctx, tx, settlement.DID, settlement.FromPeerDID, settlement.ToPeerDID); err != nil {
 		return fmt.Errorf("could not mark the settlement of %s delivered: %w", settlement.DID, err)
 	}
+	if err := RecordPeerExchangeTx(ctx, tx, settlement.DID, "post_settlement", ExchangeSent, settlement.ToPeerDID); err != nil {
+		return fmt.Errorf("could not audit the settlement of %s: %w", settlement.DID, err)
+	}
 	return tx.Commit()
 }
 
@@ -325,6 +328,9 @@ func (s *DCSToDCSSynchronizer) deliverSettlementWithdrawal(ctx context.Context, 
 	}(tx)
 	if err := s.SRepo.MarkSettlementWithdrawalDelivered(ctx, tx, withdrawal.DID, withdrawal.FromPeerDID, withdrawal.ToPeerDID); err != nil {
 		return fmt.Errorf("could not mark the settlement withdrawal of %s delivered: %w", withdrawal.DID, err)
+	}
+	if err := RecordPeerExchangeTx(ctx, tx, withdrawal.DID, "post_settlement_withdrawal", ExchangeSent, withdrawal.ToPeerDID); err != nil {
+		return fmt.Errorf("could not audit the settlement withdrawal of %s: %w", withdrawal.DID, err)
 	}
 	return tx.Commit()
 }
