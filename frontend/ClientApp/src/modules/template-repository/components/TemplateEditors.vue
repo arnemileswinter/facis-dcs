@@ -55,16 +55,18 @@ const isAuditingAuthorized = computed(
         {{ title }}
       </p>
       <div role="tablist" class="tabs-border tabs tabs-lg">
-        <a
+        <button
           v-for="(tab, _index) in tabs"
           :key="tab.id"
+          type="button"
           role="tab"
+          :aria-selected="activeTab === tab.id"
           class="tab text-base-content/70"
           :class="{ 'tab-active text-primary': activeTab === tab.id }"
           @click="templateEditorUiStore.setActiveTab(tab.id)"
         >
           {{ tab.label }}
-        </a>
+        </button>
       </div>
     </div>
   </div>

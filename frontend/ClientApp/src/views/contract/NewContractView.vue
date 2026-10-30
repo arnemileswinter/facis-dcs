@@ -471,16 +471,18 @@ onBeforeRouteLeave(() => {
               {{ isEditMode ? 'Update Contract' : 'Create Contract' }}
             </p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
-              <a
+              <button
                 v-for="tab in tabs"
                 :key="tab.id"
+                type="button"
                 role="tab"
+                :aria-selected="activeTab === tab.id"
                 class="tab text-base-content/70"
                 :class="{ 'tab-active text-primary': activeTab === tab.id }"
                 @click="contractEditorUiStore.setActiveTab(tab.id)"
               >
                 {{ tab.label }}
-              </a>
+              </button>
             </div>
           </div>
         </div>
