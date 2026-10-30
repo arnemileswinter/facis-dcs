@@ -39,9 +39,9 @@ type AuthConfig struct {
 	// value means the "pre-registered" prefix, which wallets outside a
 	// pre-agreed federation refuse outright.
 	OID4VPClientID string
-	// ParticipantDID is this instance's own participant identity. A login
-	// credential attests authority for one organization, and an instance only
-	// grants access to itself — see the login check in auth_login.go.
+	// ParticipantDID is this instance's own participant identity. Login does
+	// not compare it with the credential's organization: the organizations a
+	// login issuer may attest are set per issuer in the trust configuration.
 	ParticipantDID    string
 	PublicAPIBase     string
 	LogoutRedirectURI string
