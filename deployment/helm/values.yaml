@@ -290,7 +290,9 @@ pkcs11:
   modulePath: "/usr/lib/softhsm/libsofthsm2.so"
   tokenLabel: "dcs"
   # PIN for the auto-created Secret. Ignored when pinSecretRef.name is set.
-  pin: "1234"
+  # Empty: the chart generates a random PIN on install and keeps the one in the
+  # existing Secret on upgrade (DCS-NFR-SEC-12).
+  pin: ""
   pinSecretRef:
     name: ""
     key: "PKCS11_PIN"
@@ -308,7 +310,8 @@ pkcs11:
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
     # SO (security officer) PIN used only during token initialization.
-    soPin: "12345678"
+    # Empty: a random SO PIN is used for the initialization and not kept.
+    soPin: ""
     persistence:
       # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
       # refuse to provision below 1Gi and the claim then never binds, which
@@ -627,49 +630,22 @@ ipfs:
     storageClassName: ""
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
+# monitoring.enabled co-deploys kube-prometheus-stack. Its values go under the
+# kube-prometheus-stack key; top-level grafana/prometheus keys do not reach it.
 monitoring:
   enabled: false
 
-grafana:
-  enabled: false
-  adminPassword: YourStrongPassword
-  persistence:
-    enabled: true
-    storageClassName: local-path
-    size: 5Gi
-
-prometheus:
-  enabled: false
-  prometheusSpec:
-    retention: 15d
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 10Gi
-    serviceMonitorSelectorNilUsesHelmValues: true
-    podMonitorSelectorNilUsesHelmValues: true
-
-alertmanager:
-  enabled: false
-  alertmanagerSpec:
-    storage:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 2Gi
-
-nodeExporter:
-  enabled: false
-
-kubeStateMetrics:
-  enabled: false
+kube-prometheus-stack:
+  grafana:
+    # No adminPassword (DCS-NFR-SEC-12): the grafana chart generates a random
+    # one on install and keeps it in the <release>-grafana Secret on upgrade.
+    #   kubectl get secret <release>-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+    persistence:
+      enabled: true
+      size: 5Gi
+  prometheus:
+    prometheusSpec:
+      retention: 15d
 
 # EU DSS demonstration webapp (AdES validation alongside the PKCS#11 signing
 # path — DCS-FR-SM-18, DCS-IR-SI-10, DCS-IR-CI-08). DISABLED by default:
