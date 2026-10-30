@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"goa.design/clue/log"
@@ -377,6 +379,69 @@ func eraseForPeer(ctx context.Context, shredder trustgate.ScopeShredder, parties
 
 	if _, err := shredder.Shred(ctx, contractIRI, peerDID, fmt.Sprintf("erasure requested by peer %s", peerDID)); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
+	}
+	return nil
+}
+
+// Terminate applies a counterparty's termination notice to the local copy
+// (DCS-NFR-BR-06).
+func (s *dcsToDcssrvc) Terminate(ctx context.Context, req *dcstodcs.DCSToDCSContractTerminateRequest) (res *dcstodcs.DCSToDCSContractTerminateResponse, err error) {
+	if !strings.HasPrefix(req.SecretValue, trustgate.TerminationNoticePrefix(req.ContractIri)) {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("termination notice: the signed secret does not name this contract"))
+	}
+	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
+		return nil, contractworkflowengine.MakeBadRequest(errors.New("a termination notice from the same peer is not allowed"))
+	}
+	if err := terminateForPeer(ctx, s.DB, s.CRepo, s.SRepo, s.DIDDocument, req); err != nil {
+		return nil, err
+	}
+	return &dcstodcs.DCSToDCSContractTerminateResponse{FromPeerDid: localPeer}, nil
+}
+
+// terminateForPeer authorizes and executes a peer's termination notice: only a
+// party of the contract may terminate it, and a contract already terminated
+// confirms again.
+func terminateForPeer(ctx context.Context, database *sqlx.DB, cRepo db.ContractRepo, sRepo db2.SyncRepository, didDocument identity.DIDDocument, req *dcstodcs.DCSToDCSContractTerminateRequest) error {
+	tx, err := database.BeginTxx(ctx, nil)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(err)
+	}
+	contract, err := cRepo.ReadDataByDID(ctx, tx, req.ContractIri)
+	_ = tx.Rollback()
+	if err != nil {
+		return contractworkflowengine.MakeBadRequest(fmt.Errorf("termination rejected: could not read contract %s: %w", req.ContractIri, err))
+	}
+	if contract.Responsible == nil || !slices.Contains(contract.Responsible.GetParties(), req.FromPeerDid) {
+		return contractworkflowengine.MakeBadRequest(fmt.Errorf("termination rejected: peer %s is not a party of contract %s", req.FromPeerDid, req.ContractIri))
+	}
+	if contract.State == contractstate.Terminated.String() {
+		return nil
+	}
+
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+	handler := command.Terminator{DB: database, CRepo: cRepo, SRepo: sRepo, DIDDocument: didDocument}
+	if err := handler.Handle(ctx, command.TerminateCmd{
+		DID:          req.ContractIri,
+		TerminatedBy: req.FromPeerDid,
+		Reason:       reason,
+		UpdatedAt:    contract.UpdatedAt,
+		CauserDID:    req.FromPeerDid,
+	}); err != nil {
+		return mapContractCommandError(err)
 	}
 	return nil
 }

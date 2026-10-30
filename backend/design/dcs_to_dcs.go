@@ -165,6 +165,27 @@ var DCSToDCSContractEraseResponse = Type("DCSToDCSContractEraseResponse", func()
 	Required("from_peer_did")
 })
 
+var DCSToDCSContractTerminateRequest = Type("DCSToDCSContractTerminateRequest", func() {
+	Description("A counterparty's notice that it terminated a contract both instances hold (DCS-NFR-BR-06). Authenticated with the body-level did:web challenge-response; the signed secret_value names the contract.")
+
+	Attribute("secret_value", String, "Secret value: \"terminate|<contract_iri>|<nonce>\"")
+	Attribute("secret_hash", Bytes, "Secret hash")
+
+	Attribute("from_peer_did", String, "The did of the terminating peer")
+	Attribute("contract_iri", String, "IRI of the terminated contract")
+	Attribute("reason", String, "Termination reason")
+
+	Required("from_peer_did", "contract_iri", "secret_value", "secret_hash")
+})
+
+var DCSToDCSContractTerminateResponse = Type("DCSToDCSContractTerminateResponse", func() {
+	Description("Result for a contract termination notice")
+
+	Attribute("from_peer_did", String, "Decentralized Identifier of the confirming peer")
+
+	Required("from_peer_did")
+})
+
 var DCSToDCSContractPdfResponse = Type("DCSToDCSContractPdfResponse", func() {
 	Description("Result for receiving a contract PDF")
 
@@ -267,6 +288,24 @@ var _ = Service("DcsToDcs", func() {
 
 		HTTP(func() {
 			POST("/peer/contracts/erase")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("terminate", func() {
+		Description("Terminate this instance's copy of a contract on notice of the authenticated counterparty (DCS-NFR-BR-06). The requester is verified via the did:web challenge-response signature and must be a party of the contract. The local copy moves to TERMINATED through the same transition table as a local termination, which closes its open tasks. Idempotent: a notice for an already terminated contract confirms again.")
+		Meta("dcs:requirements", "DCS-NFR-BR-06")
+
+		Payload(DCSToDCSContractTerminateRequest)
+		Result(DCSToDCSContractTerminateResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			POST("/peer/contracts/terminate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

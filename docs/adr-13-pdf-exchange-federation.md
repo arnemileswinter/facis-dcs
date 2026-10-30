@@ -132,6 +132,12 @@ never cross an instance boundary.
   its per-instance states; the cross-instance transitions (offer, negotiate,
   sign) are driven by shipping/receiving a PDF, and review/approval become
   purely local.
+- Termination is the one transition that crosses as a notice, not a PDF
+  (DCS-NFR-BR-06): the terminating instance queues a signed notice per
+  counterparty in `contract_peer_terminations` and re-delivers it to
+  `POST /peer/contracts/terminate` until the peer confirms. The receiver
+  accepts it only from a party of the contract and applies it through its own
+  transition table.
 
 ## Implementation state (verified shipped 2026-07-30)
 

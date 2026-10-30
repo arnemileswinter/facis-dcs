@@ -512,6 +512,11 @@ func main() {
 	}
 	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
 
+	// Termination propagation (DCS-NFR-BR-06): notices queued by the terminate
+	// command go to every counterparty instance and are retried until confirmed.
+	terminationNotifier := &dcstodcs2.TerminationNotifier{DB: db, DIDDocument: *didDocument, Sender: dcstodcs2.HTTPPeerTerminationSender{}}
+	terminationNotifier.Start(ctx, 5*time.Second)
+
 	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
 		event.StartEventLogger(ctx, cepSubClient)
 	}
