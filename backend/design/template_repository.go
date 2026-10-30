@@ -791,7 +791,6 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
-			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateApproveRequest)
@@ -815,7 +814,6 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")
-			Scope("Template Manager")
 		})
 
 		Payload(ContractTemplateRejectRequest)
@@ -885,6 +883,7 @@ var _ = Service("TemplateRepository", func() {
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Template Manager")
 			Scope("Compliance Officer")
 		})
 

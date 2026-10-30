@@ -84,9 +84,13 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 		}
 	}
 
-	hasTask, err := h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
-	if err != nil {
-		return nil, err
+	// DCS-FR-TR-06: only a Template Reviewer's verification completes a review task.
+	hasTask := false
+	if cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
+		hasTask, err = h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if hasTask {

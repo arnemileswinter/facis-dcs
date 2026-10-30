@@ -207,19 +207,19 @@ const exportPDF = async () => {
         <button class="btn btn-outline md:w-32" @click="router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
         <CopyTemplateButton :disabled="!isCreator && !isManager" class="btn flex-1 btn-primary" />
-        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="reject">
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="reject">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Reject
         </button>
         <button
-          :disabled="isSubmitting || (!isApprover && !isManager)"
+          :disabled="isSubmitting || !isApprover"
           class="btn flex-1 btn-primary"
           @click="resubmit"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Resubmit
         </button>
-        <button :disabled="isSubmitting || (!isApprover && !isManager)" class="btn flex-1 btn-primary" @click="approve">
+        <button :disabled="isSubmitting || !isApprover" class="btn flex-1 btn-primary" @click="approve">
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
           Approve
         </button>

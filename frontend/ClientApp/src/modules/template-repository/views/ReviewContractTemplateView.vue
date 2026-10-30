@@ -173,7 +173,7 @@ const exportPDF = async () => {
         <!-- Return to draft / request changes -->
         <button
           class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
+          :disabled="!isReviewer || isSubmitting"
           @click="returnToDraft"
         >
           <span v-if="isSubmitting" class="loading loading-sm loading-spinner"></span>
@@ -182,7 +182,7 @@ const exportPDF = async () => {
         <!-- Complete review (verify then forward to approval) -->
         <VerificationFindingsDialog
           class="btn flex-1 btn-primary"
-          :disabled="(!isReviewer && !isManager) || isSubmitting"
+          :disabled="!isReviewer || isSubmitting"
           @confirm="forwardToApproval"
         />
         <TemplateManagerActions
