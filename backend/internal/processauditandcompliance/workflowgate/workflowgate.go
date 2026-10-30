@@ -281,6 +281,12 @@ func (c *Coordinator) ExecuteSnapshot(ctx context.Context, input Input) (string,
 	localFindings, err := validation.AuditContractContent(ctx, snapshot.Content, nil, validation.ContractContentAuditMetadata{
 		ContractDID: snapshot.ContractDID, ContractVersion: fmt.Sprint(snapshot.ContractVersion), AuditedBy: input.Requester,
 	})
+	if err == nil && input.Gate == regulatoryGate {
+		var facts regulatoryFacts
+		if facts, err = loadRegulatoryFacts(ctx, c.DB, snapshot.ContractDID, snapshot.Content); err == nil {
+			localFindings = append(localFindings, regulatoryFindings(snapshot.Content, facts)...)
+		}
+	}
 	if err != nil {
 		runID, persistErr := c.persistClosedRun(ctx, input, snapshot, snapshotID, "BLOCKED", LocalEvaluation{Result: "BLOCKED"}, err)
 		if persistErr != nil {
