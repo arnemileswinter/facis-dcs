@@ -78,12 +78,19 @@ func (c CloudEventSubClient) Subscribe(f func(evt event.Event)) error {
 	return c.client.SubCtx(c.ctx, f)
 }
 
-func NewNatsSubClient(topic string, natsURL string) (*CloudEventSubClient, error) {
-	log.Println("nats: create subscriber client for topic", topic)
+// NewNatsSubClient subscribes to topic in the NATS queue group queueGroup.
+// NATS gives each event to one member of a queue group, so the replicas of one
+// DCS instance that subscribe with the same group handle each event once. Each
+// consumer (webhooks, PDF regeneration, deployment, ...) uses its own group,
+// because consumers in one group divide the events between them. An empty
+// queueGroup gives each event to every subscriber.
+func NewNatsSubClient(topic, natsURL, queueGroup string) (*CloudEventSubClient, error) {
+	log.Println("nats: create subscriber client for topic", topic, "queue group", queueGroup)
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{
 		Protocol: cloudeventprovider.ProtocolTypeNats,
 		Settings: cloudeventprovider.NatsConfig{
-			Url: natsURL,
+			Url:        natsURL,
+			QueueGroup: queueGroup,
 		},
 	}, cloudeventprovider.ConnectionTypeSub, topic)
 	if err != nil {

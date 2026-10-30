@@ -2,9 +2,10 @@ package webhookplatform
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -180,77 +181,90 @@ type PendingCallback struct {
 // Delivery is the recorded outcome of one webhook notification attempt —
 // the observable behind GET /deliveries (monitoring and BDD assertions).
 type Delivery struct {
-	EventID       string    `json:"event_id"`
-	CorrelationID string    `json:"correlation_id"`
-	Event         string    `json:"event"`
-	DID           string    `json:"did"`
-	CallbackURL   string    `json:"callback_url"`
-	OwnerDID      string    `json:"-"`
-	StatusCode    int       `json:"status_code,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	DeliveredAt   time.Time `json:"delivered_at"`
-	Acknowledged  bool      `json:"acknowledged"`
+	EventID       string    `json:"event_id" db:"event_id"`
+	CorrelationID string    `json:"correlation_id" db:"correlation_id"`
+	Event         string    `json:"event" db:"event"`
+	DID           string    `json:"did" db:"did"`
+	CallbackURL   string    `json:"callback_url" db:"callback_url"`
+	OwnerDID      string    `json:"-" db:"owner_did"`
+	StatusCode    int       `json:"status_code,omitempty" db:"status_code"`
+	Error         string    `json:"error,omitempty" db:"error"`
+	DeliveredAt   time.Time `json:"delivered_at" db:"delivered_at"`
+	Acknowledged  bool      `json:"acknowledged" db:"acknowledged"`
 }
 
-// maxDeliveries bounds the in-memory delivery log (newest kept).
+// maxDeliveries bounds how many entries ListDeliveries returns (newest kept).
 const maxDeliveries = 512
 
-// DeliveryLog is a thread-safe in-memory store for pending callbacks and the
-// recent-delivery log.
-type DeliveryLog struct {
-	mu         sync.RWMutex
-	pending    map[string]PendingCallback // event_id → pending
-	deliveries []Delivery                 // newest last, capped at maxDeliveries
+// Deliveries stores pending callbacks and the delivery log.
+type Deliveries interface {
+	// TrackPending records an in-flight dispatch so its callback can be correlated.
+	TrackPending(ctx context.Context, p PendingCallback) error
+	// ResolvePending marks the dispatch for eventID as acknowledged and returns
+	// it. Only the first callback for an event_id resolves it.
+	ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error)
+	// AddDelivery records a notification outcome.
+	AddDelivery(ctx context.Context, d Delivery) error
+	// ListDeliveries returns the newest deliveries to ownerDID's subscriptions,
+	// newest last.
+	ListDeliveries(ctx context.Context, ownerDID string) ([]Delivery, error)
 }
 
-// NewDeliveryLog returns an empty log.
-func NewDeliveryLog() *DeliveryLog {
-	return &DeliveryLog{pending: make(map[string]PendingCallback)}
+// PostgresDeliveries stores pending callbacks and the delivery log in
+// webhook_dispatches and webhook_deliveries, so every replica of the instance
+// sees the same state (DCS-NFR-PER-02).
+type PostgresDeliveries struct {
+	DB *sqlx.DB
 }
 
-// TrackPending records an in-flight dispatch so its callback can be correlated.
-func (s *DeliveryLog) TrackPending(p PendingCallback) {
-	s.mu.Lock()
-	s.pending[p.EventID] = p
-	s.mu.Unlock()
-}
-
-// ResolvePending looks up and removes a pending callback by event_id, and
-// flips the matching delivery-log entries to acknowledged.
-func (s *DeliveryLog) ResolvePending(eventID string) (PendingCallback, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	p, ok := s.pending[eventID]
-	if ok {
-		delete(s.pending, eventID)
-		for i := range s.deliveries {
-			if s.deliveries[i].EventID == eventID {
-				s.deliveries[i].Acknowledged = true
-			}
-		}
+func (s PostgresDeliveries) TrackPending(ctx context.Context, p PendingCallback) error {
+	if _, err := s.DB.ExecContext(ctx, `
+        INSERT INTO webhook_dispatches (event_id, correlation_id, event, did, sent_at)
+        VALUES ($1, $2, $3, $4, $5)`,
+		p.EventID, p.CorrelationID, p.Event, p.DID, p.SentAt); err != nil {
+		return fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
 	}
-	return p, ok
+	return nil
 }
 
-// AddDelivery appends a notification outcome to the delivery log.
-func (s *DeliveryLog) AddDelivery(d Delivery) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.deliveries = append(s.deliveries, d)
-	if len(s.deliveries) > maxDeliveries {
-		s.deliveries = s.deliveries[len(s.deliveries)-maxDeliveries:]
+func (s PostgresDeliveries) ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error) {
+	var p PendingCallback
+	err := s.DB.QueryRowxContext(ctx, `
+        UPDATE webhook_dispatches SET acknowledged_at = now()
+        WHERE event_id = $1 AND acknowledged_at IS NULL
+        RETURNING event_id, correlation_id, event, did, sent_at`, eventID).
+		Scan(&p.EventID, &p.CorrelationID, &p.Event, &p.DID, &p.SentAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PendingCallback{}, false, nil
 	}
+	if err != nil {
+		return PendingCallback{}, false, fmt.Errorf("resolve webhook dispatch %s: %w", eventID, err)
+	}
+	return p, true, nil
 }
 
-// ListDeliveries returns the deliveries to ownerDID's subscriptions, newest last.
-func (s *DeliveryLog) ListDeliveries(ownerDID string) []Delivery {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s PostgresDeliveries) AddDelivery(ctx context.Context, d Delivery) error {
+	if _, err := s.DB.ExecContext(ctx, `
+        INSERT INTO webhook_deliveries (event_id, callback_url, owner_did, status_code, error, delivered_at)
+        VALUES ($1, $2, $3, $4, $5, $6)`,
+		d.EventID, d.CallbackURL, d.OwnerDID, d.StatusCode, d.Error, d.DeliveredAt); err != nil {
+		return fmt.Errorf("record webhook delivery %s: %w", d.EventID, err)
+	}
+	return nil
+}
+
+func (s PostgresDeliveries) ListDeliveries(ctx context.Context, ownerDID string) ([]Delivery, error) {
 	out := []Delivery{}
-	for _, d := range s.deliveries {
-		if d.OwnerDID == ownerDID {
-			out = append(out, d)
-		}
+	if err := s.DB.SelectContext(ctx, &out, `
+        SELECT event_id, correlation_id, event, did, callback_url, owner_did, status_code, error, delivered_at, acknowledged
+        FROM (
+            SELECT d.id, d.event_id, p.correlation_id, p.event, p.did, d.callback_url, d.owner_did,
+                   d.status_code, d.error, d.delivered_at, p.acknowledged_at IS NOT NULL AS acknowledged
+            FROM webhook_deliveries d JOIN webhook_dispatches p ON p.event_id = d.event_id
+            WHERE d.owner_did = $1
+            ORDER BY d.id DESC LIMIT $2
+        ) newest ORDER BY id`, ownerDID, maxDeliveries); err != nil {
+		return nil, fmt.Errorf("list webhook deliveries: %w", err)
 	}
-	return out
+	return out, nil
 }

@@ -34,7 +34,7 @@ type Audience func(ctx context.Context, event, did, ownerDID string) bool
 // Dispatcher fans out events to the registered subscribers asynchronously.
 type Dispatcher struct {
 	subs       Subscriptions
-	store      *DeliveryLog
+	store      Deliveries
 	audience   Audience
 	httpClient *http.Client
 }
@@ -42,7 +42,7 @@ type Dispatcher struct {
 // NewDispatcher creates a Dispatcher that reads subscribers from subs, delivers
 // to those audience admits, and records outcomes in store. Callback URLs are
 // caller-supplied, so the client refuses loopback, link-local and redirects.
-func NewDispatcher(subs Subscriptions, store *DeliveryLog, audience Audience) *Dispatcher {
+func NewDispatcher(subs Subscriptions, store Deliveries, audience Audience) *Dispatcher {
 	return &Dispatcher{
 		subs:       subs,
 		store:      store,
@@ -75,13 +75,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 		Data:          data,
 	}
 
-	d.store.TrackPending(PendingCallback{
+	if err := d.store.TrackPending(ctx, PendingCallback{
 		EventID:       payload.EventID,
 		CorrelationID: payload.CorrelationID,
 		Event:         event,
 		DID:           did,
 		SentAt:        payload.OccurredAt,
-	})
+	}); err != nil {
+		log.Printf("webhookplatform: %v", err)
+		return
+	}
 
 	for _, sub := range subs {
 		go d.notify(sub, payload)
@@ -99,6 +102,13 @@ func (d *Dispatcher) DispatchFromDCS(ctx context.Context, dcsEventType, did stri
 }
 
 func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
+	record := func(delivery Delivery) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := d.store.AddDelivery(ctx, delivery); err != nil {
+			log.Printf("webhookplatform: %v", err)
+		}
+	}
 	delivery := Delivery{
 		EventID:       payload.EventID,
 		CorrelationID: payload.CorrelationID,
@@ -113,7 +123,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	if err != nil {
 		log.Printf("webhookplatform: marshal payload for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
-		d.store.AddDelivery(delivery)
+		record(delivery)
 		return
 	}
 
@@ -122,7 +132,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	if err != nil {
 		log.Printf("webhookplatform: sign payload for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
-		d.store.AddDelivery(delivery)
+		record(delivery)
 		return
 	}
 
@@ -130,7 +140,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	if err != nil {
 		log.Printf("webhookplatform: build request for %s: %v", sub.CallbackURL, err)
 		delivery.Error = err.Error()
-		d.store.AddDelivery(delivery)
+		record(delivery)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -145,7 +155,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	if err != nil {
 		log.Printf("webhookplatform: notify %s [%s]: %v", sub.CallbackURL, payload.Event, err)
 		delivery.Error = err.Error()
-		d.store.AddDelivery(delivery)
+		record(delivery)
 		return
 	}
 	defer func(Body io.ReadCloser) {
@@ -160,7 +170,7 @@ func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {
 	}
 
 	delivery.StatusCode = resp.StatusCode
-	d.store.AddDelivery(delivery)
+	record(delivery)
 
 	log.Printf("webhookplatform: notified %s [%s] → HTTP %d", sub.CallbackURL, payload.Event, resp.StatusCode)
 }
