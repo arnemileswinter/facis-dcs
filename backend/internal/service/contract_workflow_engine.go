@@ -1933,6 +1933,19 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
+	handler := command.Deployer{
+		DB:             s.DB,
+		CRepo:          s.CRepo,
+		DeploymentRepo: s.DeploymentRepo,
+		TargetRepo:     s.TargetRepo,
+		Target:         s.TargetClient,
+		PeerSigs:       s.SRepo,
+	}
+	// A contract that may not deploy (not SIGNED, or a signature field still
+	// unsigned) is refused before the deployment workflow gate is dispatched.
+	if err := handler.Deployable(ctx, req.Did, localPeer); err != nil {
+		return nil, mapContractCommandError(err)
+	}
 	updatedAt, _, err = s.runWorkflowGate(ctx, "deployment", req.Did, updatedAt, map[string]any{
 		"requested_by": middleware.GetParticipantID(ctx),
 		"causer_did":   localPeer,
@@ -1942,14 +1955,6 @@ func (s *contractWorkflowEnginesrvc) Deploy(ctx context.Context, req *contractwo
 		return nil, err
 	}
 
-	handler := command.Deployer{
-		DB:             s.DB,
-		CRepo:          s.CRepo,
-		DeploymentRepo: s.DeploymentRepo,
-		TargetRepo:     s.TargetRepo,
-		Target:         s.TargetClient,
-		PeerSigs:       s.SRepo,
-	}
 	result, err := handler.Handle(ctx, command.DeployCmd{
 		DID:              req.Did,
 		UpdatedAt:        updatedAt,
