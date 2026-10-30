@@ -2,7 +2,9 @@ package command
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,7 +84,8 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	// Exclude remote calls from the transaction to avoid a long-running transaction.
-	if err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate); err != nil {
+	assetHash, err := h.publishTemplateResourceToFC(ctx, cmd, processData, fullTemplate)
+	if err != nil {
 		return err
 	}
 
@@ -114,6 +117,9 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}
+	if err := h.CTRepo.UpdateCatalogueAssetHash(ctx, tx, cmd.DID, assetHash); err != nil {
+		return fmt.Errorf("could not record catalogue asset: %w", err)
+	}
 
 	evt := templateevents.PublishEvent{
 		DID:         cmd.DID,
@@ -131,9 +137,9 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	return tx.Commit()
 }
 
-func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) error {
+func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd PublishCmd, processData *db.ContractTemplateProcessData, fullTemplate *db.ContractTemplate) (string, error) {
 	if cmd.InstanceDID == "" {
-		return fmt.Errorf("instance did is empty")
+		return "", fmt.Errorf("instance did is empty")
 	}
 
 	name := ""
@@ -147,7 +153,7 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 
 	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
-		return fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
+		return "", fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
@@ -167,21 +173,30 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 	})
 
 	if err != nil {
-		return fmt.Errorf("build template asset payload failed: %w", err)
+		return "", fmt.Errorf("build template asset payload failed: %w", err)
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal template asset payload failed: %w", err)
+		return "", fmt.Errorf("marshal template asset payload failed: %w", err)
 	}
 
 	resp, err := h.FCClient.PostRaw(ctx, fcclient.AssetsEndpointPath, nil, fcclient.JSONLDContentType, body)
 	if err != nil {
-		return fmt.Errorf("publish template resource failed: %w", err)
+		return "", fmt.Errorf("publish template resource failed: %w", err)
 	}
 
+	// FC names an asset by the SHA-256 of its content.
+	sum := sha256.Sum256(body)
+	assetHash := hex.EncodeToString(sum[:])
 	if resp.StatusCode == http.StatusCreated {
-		return nil
+		var created struct {
+			AssetHash string `json:"assetHash"`
+		}
+		if json.Unmarshal(resp.Body, &created) == nil && created.AssetHash != "" {
+			assetHash = created.AssetHash
+		}
+		return assetHash, nil
 	}
 
 	// FC duplicate self-descriptions return conflict_error
@@ -190,15 +205,15 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		message := h.FCClient.ExtractErrorMessage(resp.Body)
 		// The template SD already exists in the FC
 		if code == "conflict_error" {
-			return nil
+			return assetHash, nil
 		}
 		if message != "" {
-			return fmt.Errorf("publish template resource failed: %s", message)
+			return "", fmt.Errorf("publish template resource failed: %s", message)
 		}
-		return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
 	}
 	if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
-		return fmt.Errorf("publish template resource failed: %s", message)
+		return "", fmt.Errorf("publish template resource failed: %s", message)
 	}
-	return fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
+	return "", fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
 }

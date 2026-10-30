@@ -63,6 +63,8 @@ type ContractTemplateProcessData struct {
 	// benign write (a state transition, the background PDF write) that merely
 	// nudged updated_at.
 	ContentUpdatedAt time.Time `db:"content_updated_at"`
+	// CatalogueAssetHash is the Federated Catalogue asset of the published version (DCS-NFR-BR-09).
+	CatalogueAssetHash *string `db:"catalogue_asset_hash"`
 }
 
 type ContractTemplateUpdateData struct {
@@ -138,6 +140,7 @@ type ContractTemplateRepo interface {
 	ReadProvenanceCredentials(ctx context.Context, tx *sqlx.Tx, did string) ([]TemplateProvenanceCredential, error)
 	ReadLatestProvenanceVCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
 	UpdateComplianceStatus(ctx context.Context, tx *sqlx.Tx, did string, status string) error
+	UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error
 }
 
 // TemplateProvenanceCredential is one registered template version's signed

@@ -237,7 +237,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Conte
 
 func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplateProcessData, error) {
 	query := `
-		SELECT did, version, state, updated_at, content_updated_at, created_by
+		SELECT did, version, state, updated_at, content_updated_at, created_by, catalogue_asset_hash
         FROM contract_templates WHERE did = $1
     `
 	var processData db.ContractTemplateProcessData
@@ -531,5 +531,11 @@ func (r *PostgresContractTemplateRepo) ReadLatestProvenanceVCID(ctx context.Cont
 // UpdateComplianceStatus records the result of the template policy audit (DCS-FR-TR-10).
 func (r *PostgresContractTemplateRepo) UpdateComplianceStatus(ctx context.Context, tx *sqlx.Tx, did string, status string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET compliance_status = $2 WHERE did = $1`, did, status)
+	return err
+}
+
+// UpdateCatalogueAssetHash records the Federated Catalogue asset of the published version (DCS-NFR-BR-09).
+func (r *PostgresContractTemplateRepo) UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET catalogue_asset_hash = $2 WHERE did = $1`, did, hash)
 	return err
 }

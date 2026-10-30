@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
@@ -26,10 +27,11 @@ type ArchiveCmd struct {
 }
 
 type Archiver struct {
-	DB     *sqlx.DB
-	CTRepo db.ContractTemplateRepo
-	RTRepo db.ReviewTaskRepo
-	ATRepo db.ApprovalTaskRepo
+	DB       *sqlx.DB
+	CTRepo   db.ContractTemplateRepo
+	RTRepo   db.ReviewTaskRepo
+	ATRepo   db.ApprovalTaskRepo
+	FCClient *fcclient.FederatedCatalogueClient
 }
 
 func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
@@ -59,6 +61,16 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 	// template is then deleted (DCS-FR-TR-17, DCS-FR-TR-18).
 	if processData.State == contracttemplatestate.Deleted.String() {
 		return ErrInvalidTemplateState
+	}
+
+	// DCS-NFR-BR-09: a deprecated template is withdrawn from the catalogue first.
+	if processData.State == contracttemplatestate.Published.String() && processData.CatalogueAssetHash != nil {
+		if h.FCClient == nil {
+			return fcclient.ErrFederatedCatalogueNotConfigured
+		}
+		if err := h.FCClient.RevokeAsset(ctx, *processData.CatalogueAssetHash); err != nil {
+			return fmt.Errorf("could not withdraw the template from the Federated Catalogue: %w", err)
+		}
 	}
 
 	if processData.State == contracttemplatestate.Registered.String() || processData.State == contracttemplatestate.Published.String() {

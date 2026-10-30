@@ -312,6 +312,23 @@ func (c *FederatedCatalogueClient) Get(ctx context.Context, path string, query u
 	return c.doRequest(ctx, http.MethodGet, path, query, JSONContentType, JSONContentType, nil)
 }
 
+// RevokeAsset revokes an asset, which removes its claims from the catalogue
+// graph. An asset that is already revoked or unknown counts as revoked.
+func (c *FederatedCatalogueClient) RevokeAsset(ctx context.Context, assetHash string) error {
+	resp, err := c.Post(ctx, AssetsEndpointPath+"/"+url.PathEscape(assetHash)+"/revoke", nil, nil)
+	if err != nil {
+		return fmt.Errorf("revoke asset %s: %w", assetHash, err)
+	}
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300, resp.StatusCode == http.StatusNotFound, resp.StatusCode == http.StatusConflict:
+		return nil
+	}
+	if message := c.ExtractErrorMessage(resp.Body); message != "" {
+		return fmt.Errorf("revoke asset %s failed: %s", assetHash, message)
+	}
+	return fmt.Errorf("revoke asset %s failed with status %d", assetHash, resp.StatusCode)
+}
+
 // Delete sends a DELETE request to Federated Catalogue.
 func (c *FederatedCatalogueClient) Delete(ctx context.Context, path string, query url.Values) (*Response, error) {
 	return c.doRequest(ctx, http.MethodDelete, path, query, JSONContentType, JSONContentType, nil)

@@ -792,10 +792,11 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 		UserRoles:  middleware.GetUserRoles(ctx),
 	}
 	handler := command.Archiver{
-		DB:     s.DB,
-		CTRepo: s.CTRepo,
-		RTRepo: s.RTRepo,
-		ATRepo: s.ATRepo,
+		DB:       s.DB,
+		CTRepo:   s.CTRepo,
+		RTRepo:   s.RTRepo,
+		ATRepo:   s.ATRepo,
+		FCClient: s.FCClient,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
