@@ -772,7 +772,9 @@ def step_when_create_and_offer_cross_instance(context):
             {
                 "template_did": t_did,
                 "counterparty": context.peer_did_b,
-                **ContractService._reading_parties(context),
+                # Instance B acts as the default organization and as its
+                # counterparty organization; both read B's copy.
+                "parties": ContractService._reading_parties(context)["parties"] + [_B_COUNTERPARTY_ORG],
             },
             headers=creator_h,
         )

@@ -566,7 +566,7 @@ _PARTY_ORG = {
 # so here they are two — the negotiating participant's dedicated one and the
 # suite-shared one every other role token presents — and both are declared,
 # because a company that reads the contract is a company the creator declares.
-_READING_ORGANIZATIONS = [_PARTY_ORG["B"], AuthService.DEFAULT_ORGANIZATION]
+_READING_ORGANIZATIONS = [_PARTY_ORG["B"], _PARTY_ORG["A"], AuthService.DEFAULT_ORGANIZATION]
 
 
 def _base(context, label: str) -> str:
