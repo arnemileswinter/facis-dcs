@@ -206,10 +206,11 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 
 	Method("audit_report", func() {
 		Description("generate and retrieve audit reports.")
-		Meta("dcs:requirements", "DCS-IR-PACM-02")
+		Meta("dcs:requirements", "DCS-IR-PACM-02", "DCS-FR-PACM-05")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
@@ -259,7 +260,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	})
 
 	Method("incident_report", func() {
-		Description("submit non-compliance findings as case records.")
+		Description("submit non-compliance findings as one case; the response carries the case_id of the case file (DCS-FR-PACM-05).")
 		Meta("dcs:requirements", "DCS-IR-PACM-04")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
@@ -281,6 +282,31 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response("internal_error", StatusInternalServerError)
 		})
 		Result(Any)
+	})
+
+	Method("case_file", func() {
+		Description("export the case file of an incident for regulatory review: the reported findings, and the compliance risks, workflow gate runs and event timeline of the linked contract. The export and its justification are recorded in the audit trail.")
+		Meta("dcs:requirements", "DCS-FR-PACM-05")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("case_id", String, "Case ID returned by POST /pac/report")
+			Attribute("justification", String, "Required export justification", func() { MinLength(1) })
+			Required("case_id", "justification")
+		})
+		Result(Bytes)
+		Error("not_found", ErrorResult, "No incident report has this case ID")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/case/{case_id}")
+			Param("justification")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
 	})
 
 	Method("checkpoint_head", func() {

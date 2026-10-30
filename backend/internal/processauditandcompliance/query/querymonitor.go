@@ -243,6 +243,12 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 	}
 	risks = append(risks, dispatchRisks...)
 
+	sigRisks, err := signatureRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, sigRisks...)
+
 	denialQuery := `
         SELECT COALESCE(did, '') AS did,
                COALESCE(event_data ->> 'retrieved_by', '') AS retrieved_by
