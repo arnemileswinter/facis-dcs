@@ -238,6 +238,34 @@ async function applySignature() {
   }
 }
 
+// Step 3, wallet path (ADR-12, DCS-FR-SM-06/-23): run the PID ceremony, publish
+// the signing request and let the wallet sign the document and post it back.
+// The dialog waits until the DCS accepted the wallet's signature; download and
+// upload stay as the fallback.
+async function signWithWallet() {
+  busy.value = true
+  delete stepError.value.apply
+  try {
+    const outcome = await ceremonyDialog.value?.reveal({ contractDid: did.value, fieldName: signatureFieldName.value })
+    if (!outcome || outcome.isCanceled || !outcome.data) return
+    const published = await signatureManagementService.publishSignatureRequest(outcome.data.ceremonyId)
+    const signing = await ceremonyDialog.value?.reveal({
+      contractDid: did.value,
+      fieldName: signatureFieldName.value,
+      signingRequest: { ceremonyId: published.ceremony_id, walletUri: published.wallet_uri },
+    })
+    if (!signing || signing.isCanceled) return
+    envelope.value = (await signatureManagementService.retrieveById(did.value)).signature_envelope
+    done.value.apply = true
+    done.value.submit = true
+    await loadProvenance()
+  } catch (e: unknown) {
+    stepError.value.apply = `Wallet signing failed: ${signingErrorMessage(e)}`
+  } finally {
+    busy.value = false
+  }
+}
+
 // Step 4 — upload the externally-signed PDF; the DCS validates sole control and records it.
 async function submitSigned(event: Event) {
   const input = event.target as HTMLInputElement
@@ -451,7 +479,8 @@ async function validate() {
               <p class="text-xs text-base-content/70">
                 Present your PID in the wallet ceremony. The DCS then builds the to-be-signed PDF (with your Power of
                 Attorney and the signing summary embedded, targeting {{ CREDENTIAL_TARGET }}) and downloads it to your
-                device. The DCS holds no signing key. You sign the document yourself.
+                device. The DCS holds no signing key. You sign the document yourself. With “Sign with wallet”, your
+                wallet fetches the document, signs it and sends it back.
               </p>
               <div v-if="!isSigner" class="text-xs text-warning">
                 Your role can review and validate this contract, but signing requires the Signer role.
@@ -465,6 +494,13 @@ async function validate() {
                 >
                   <span v-if="busy && currentStep === 'apply'" class="loading loading-xs loading-spinner" />
                   {{ done.apply ? 'Verify & download again' : 'Verify identity & download document to sign' }}
+                </button>
+                <button
+                  class="btn btn-outline btn-sm btn-primary"
+                  :disabled="busy || !isSigner || !done.verify || signed"
+                  @click="signWithWallet"
+                >
+                  Sign with wallet
                 </button>
               </div>
               <div v-if="done.apply && !signed" class="mt-1 flex items-center gap-2 text-xs text-info">

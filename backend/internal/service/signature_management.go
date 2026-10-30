@@ -21,6 +21,7 @@ import (
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -682,6 +683,10 @@ func mapDSSReport(r *dss.Report) *signaturemanagement.SMDSSReport {
 }
 
 func (s *signatureManagementsrvc) Revoke(ctx context.Context, req *signaturemanagement.SMContractRevokeRequest) (res *signaturemanagement.SMContractRevokeResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -763,6 +768,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		DB:           s.DB,
 		CRepo:        s.CRepo,
 		CeremonyRepo: s.CeremonyRepo,
+		CredentialState: func(ctx context.Context, presentation string) (status.State, error) {
+			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposeLogin)
+		},
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)
@@ -1080,6 +1088,10 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 	res.SignerDid = ceremony.SignerDID
 	expiresAt := ceremony.ExpiresAt.Format(time.RFC3339)
 	res.ExpiresAt = &expiresAt
+	if ceremony.ConsumedAt != nil {
+		signedAt := ceremony.ConsumedAt.UTC().Format(time.RFC3339)
+		res.SignedAt = &signedAt
+	}
 	return res, nil
 }
 

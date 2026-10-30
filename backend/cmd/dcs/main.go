@@ -919,6 +919,7 @@ func main() {
 			TargetRepo:     &cweTargetRepo,
 			Target:         contractTargetClient,
 			PeerSigs:       &syncRepo,
+			Artifacts:      artifactStore,
 		},
 		LocalPeer: did,
 	}

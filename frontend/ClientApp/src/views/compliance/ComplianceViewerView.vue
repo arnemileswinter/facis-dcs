@@ -40,10 +40,15 @@ import type { PartyComplianceReport } from '@/utils/party-compliance-report'
 type Tab = 'validation' | 'revocation' | 'compliance' | 'audit'
 
 const authStore = useAuthStore()
-// The validate / revoke / compliance endpoints require a Contract Manager scope;
-// the audit endpoint requires Auditor or Compliance Officer. Gate the controls
-// so the UI only offers actions the caller can actually perform.
-const canManage = computed(() => authStore.user?.roles?.includes('CONTRACT_MANAGER') ?? false)
+// The validate / revoke / compliance endpoints admit the Contract Manager and the
+// compliance users (DCS-IR-SM-05/-06/-07); the audit endpoint requires Auditor or
+// Compliance Officer. Gate the controls so the UI only offers actions the caller
+// can actually perform.
+const canManage = computed(
+  () =>
+    authStore.user?.roles?.some((r) => r === 'CONTRACT_MANAGER' || r === 'AUDITOR' || r === 'COMPLIANCE_OFFICER') ??
+    false,
+)
 const canAudit = computed(
   () => authStore.user?.roles?.some((r) => r === 'AUDITOR' || r === 'COMPLIANCE_OFFICER') ?? false,
 )
@@ -589,7 +594,9 @@ function exportPdf() {
                   <span v-if="busy" class="loading loading-xs loading-spinner" />
                   Validate
                 </button>
-                <span v-if="!canManage" class="text-xs text-base-content/50">Requires Contract Manager role.</span>
+                <span v-if="!canManage" class="text-xs text-base-content/50">
+                  Requires the Contract Manager, Auditor or Compliance Officer role.
+                </span>
               </div>
 
               <div v-if="activeDss" class="card border border-base-content/10 bg-base-100" data-testid="dss-validation">
@@ -755,7 +762,7 @@ function exportPdf() {
                 </tbody>
               </table>
               <p v-if="!canManage" class="mt-2 text-xs text-base-content/50">
-                Revocation requires the Contract Manager role.
+                Revocation requires the Contract Manager, Auditor or Compliance Officer role.
               </p>
             </div>
 
@@ -766,7 +773,9 @@ function exportPdf() {
                   <span v-if="busy" class="loading loading-xs loading-spinner" />
                   Run Compliance
                 </button>
-                <span v-if="!canManage" class="text-xs text-base-content/50">Requires Contract Manager role.</span>
+                <span v-if="!canManage" class="text-xs text-base-content/50">
+                  Requires the Contract Manager, Auditor or Compliance Officer role.
+                </span>
               </div>
 
               <ComplianceReportPanel

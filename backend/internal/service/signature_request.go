@@ -23,11 +23,14 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
+	smevent "digital-contracting-service/internal/signingmanagement/event"
 )
 
 // signingRequestTTL is how long a published OID4VP signing request stays valid
@@ -313,6 +316,16 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
+	retrieval := smevent.RetrieveForSigningEvent{
+		DID: ceremony.ContractDID, CeremonyID: ceremony.ID, FieldName: ceremony.FieldName,
+		DocumentSHA256: *ceremony.PreparedPDFSHA256, Channel: smevent.ChannelWalletDocument, OccurredAt: time.Now().UTC(),
+	}
+	if ceremony.SignerDID != nil {
+		retrieval.SignerDID = *ceremony.SignerDID
+	}
+	if err := event.CreateInOwnTx(ctx, s.DB, retrieval, componenttype.SignatureManagement); err != nil {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("audit the retrieval of the document to be signed: %w", err))
+	}
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
 }
 
@@ -344,9 +357,6 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if err != nil {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("parse direct_post body: %w", err))
 	}
-	if walletErr := strings.TrimSpace(form.Get("error")); walletErr != "" {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("wallet reported an error: %s", walletErr))
-	}
 	if state := strings.TrimSpace(form.Get("state")); state != "" && state != p.CeremonyID {
 		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("callback state %q does not match ceremony %s", state, p.CeremonyID))
 	}
@@ -355,7 +365,24 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		return s.ceremonyPresentationDirectPost(ctx, p.CeremonyID, vpToken)
 	}
 
-	ceremony, err := s.loadPublishedCeremony(ctx, p.CeremonyID)
+	return s.signedDocumentCallback(ctx, p.CeremonyID, form)
+}
+
+// signedDocumentCallback accepts the signed document a wallet posts for a
+// published signing request. A refusal before the submit is audited here; the
+// submit audits its own refusals (DCS-FR-SM-19).
+func (s *signatureManagementsrvc) signedDocumentCallback(ctx context.Context, ceremonyID string, form url.Values) (res *signaturemanagement.SMSignatureRequestCallbackResponse, err error) {
+	submitted := false
+	defer func() {
+		if err != nil && !submitted {
+			s.auditRefusedCallback(ctx, ceremonyID, err)
+		}
+	}()
+	if walletErr := strings.TrimSpace(form.Get("error")); walletErr != "" {
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("wallet reported an error: %s", walletErr))
+	}
+
+	ceremony, err := s.loadPublishedCeremony(ctx, ceremonyID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +392,7 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	// ONE transaction, so two concurrent callbacks can never both finalize
 	// even though both may pass this early, non-atomic read.
 	if ceremony.ConsumedAt != nil {
-		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", p.CeremonyID))
+		return nil, signaturemanagement.MakeBadRequest(fmt.Errorf("ceremony %s signing request has already been consumed", ceremonyID))
 	}
 
 	signedDocs := formList(form, "documentWithSignature")
@@ -416,6 +443,7 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
 	}
+	submitted = true
 	if err := applier.SubmitSignature(ctx, command.SubmitSignatureCmd{
 		ApplyCmd: command.ApplyCmd{
 			DID:            ceremony.ContractDID,
@@ -462,6 +490,32 @@ func (s *signatureManagementsrvc) SignatureRequestCallback(ctx context.Context, 
 		Did:        &did,
 		Status:     processData.State,
 	}, nil
+}
+
+// auditRefusedCallback audits a refused wallet callback against the contract
+// of its ceremony. A callback for an unknown ceremony names no contract and is
+// only logged.
+func (s *signatureManagementsrvc) auditRefusedCallback(ctx context.Context, ceremonyID string, refusal error) {
+	ctx = context.WithoutCancel(ctx)
+	ceremony, err := s.getCeremony(ctx, ceremonyID)
+	if err != nil || ceremony == nil {
+		log.Printf(ctx, "could not audit the refused wallet callback for ceremony %s: %v (refusal: %v)", ceremonyID, err, refusal)
+		return
+	}
+	cmd := command.ApplyCmd{DID: ceremony.ContractDID, FieldName: ceremony.FieldName, CeremonyID: ceremony.ID}
+	if ceremony.SignerDID != nil {
+		cmd.SignerDID = *ceremony.SignerDID
+	}
+	if ceremony.CredentialType != nil {
+		cmd.CredentialType = *ceremony.CredentialType
+	}
+	if ceremony.PublishedBy != nil {
+		cmd.AppliedBy = *ceremony.PublishedBy
+	}
+	if ceremony.PublishedHolderDID != nil {
+		cmd.HolderDID = *ceremony.PublishedHolderDID
+	}
+	command.AuditRefusedSigning(ctx, s.DB, cmd, smevent.StepWalletCallback, refusal)
 }
 
 func (s *signatureManagementsrvc) ceremonyPresentationDirectPost(ctx context.Context, ceremonyID, vpToken string) (*signaturemanagement.SMSignatureRequestCallbackResponse, error) {

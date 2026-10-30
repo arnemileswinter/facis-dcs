@@ -426,6 +426,7 @@ var SMSignatureRequestStatusResponse = Type("SMSignatureRequestStatusResponse", 
 	Attribute("status", String, "Ceremony lifecycle status: pending, verified, expired, failed")
 	Attribute("signer_did", String, "DID of the signer resolved from the presented PID, once verified")
 	Attribute("expires_at", String, "ISO-8601 timestamp when the ceremony expires")
+	Attribute("signed_at", String, "ISO-8601 timestamp when a signature submitted for this ceremony was accepted; absent until then")
 
 	Required("ceremony_id", "status")
 })
@@ -863,12 +864,15 @@ var _ = Service("SignatureManagement", func() {
 		Meta("dcs:requirements", "DCS-IR-SM-04", "DCS-IR-SM-05")
 
 		// The signer closes the Secure Contract Viewer wizard on the signature
-		// they just applied; validation is a read-only check.
+		// they just applied; compliance users validate in the Signature
+		// Compliance Viewer. Validation is a read-only check.
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
 			Scope("Contract Signer")
 			Scope("Sys. Contract Signer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractValidateRequest)
@@ -896,6 +900,8 @@ var _ = Service("SignatureManagement", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractRevokeRequest)
@@ -904,7 +910,11 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("internal_error", ErrorResult, "Internal server error")
 
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
 		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
 			POST("/signature/revoke")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
@@ -974,12 +984,14 @@ var _ = Service("SignatureManagement", func() {
 	})
 
 	Method("compliance", func() {
-		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: signature level SES/AES/QES, signature status, presence of active signed credentials) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
+		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: achieved against required signature level, signature status, certificate and Power of Attorney status, Power of Attorney organization and roles) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
 		Meta("dcs:requirements", "DCS-IR-SM-07")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(SMContractComplianceRequest)
