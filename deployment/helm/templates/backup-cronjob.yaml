@@ -1,0 +1,97 @@
+{{- if .Values.backup.enabled -}}
+{{- $name := printf "%s-db-backup" (include "digital-contracting-service.fullname" .) -}}
+{{- $claim := .Values.backup.persistence.existingClaim | default $name -}}
+# Scheduled dump of the DCS database (DCS-NFR-SF-03). The dcs database holds the
+# only copy of the wrapped content keys, so it is the backup that decides
+# whether the archive can be restored: docs/backup-integration-guide.md. Each run
+# writes one pg_dump custom-format file and deletes the files older than
+# backup.retentionDays. The retention is part of the erasure guarantee (guide,
+# section 4.1).
+{{- if not .Values.backup.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+  annotations:
+    # The dumps must outlive an uninstall of the release.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.backup.persistence.size }}
+  {{- with .Values.backup.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "digital-contracting-service.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ $name }}
+        spec:
+          restartPolicy: Never
+          securityContext:
+            # The postgres user of the postgres image.
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+          containers:
+            - name: pg-dump
+              # The pg_dump major version must be at least the server's.
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: DATABASE_URL
+                  {{- if .Values.database.secretRef.name }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.database.secretRef.name | quote }}
+                      key: {{ .Values.database.secretRef.key | quote }}
+                  {{- else }}
+                  value: {{ include "digital-contracting-service.databaseURL" . | quote }}
+                  {{- end }}
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  file="/backup/dcs-$(date -u +%Y%m%dT%H%M%SZ).dump"
+                  pg_dump --format=custom --dbname="$DATABASE_URL" --file="$file.partial"
+                  mv "$file.partial" "$file"
+                  echo "wrote $file ($(wc -c < "$file") bytes)"
+                  find /backup -name 'dcs-*.dump' -mtime +"$RETENTION_DAYS" -print -delete
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ $claim }}
+{{- end }}

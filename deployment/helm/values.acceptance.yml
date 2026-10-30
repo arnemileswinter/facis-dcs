@@ -84,3 +84,15 @@ ipfs:
   mfsBaseURLSecretRef:
     name: dcs-acceptance-ipfs-credentials
     key: IPFS_MFS_BASE_URL
+
+# EU DSS validates the wallet-produced signature on /signature/submit (ADR-12,
+# DCS-FR-SM-18). Without a DSS_URL the backend refuses every signature, so
+# signing needs it. enabled deploys the in-cluster DSS; to validate against an
+# existing DSS instead, set dss.url and enabled: false.
+dss:
+  enabled: true
+
+# Daily dump of the DCS database (DCS-NFR-SF-03): docs/backup-integration-guide.md.
+# Set persistence.storageClassName to an encrypted class.
+backup:
+  enabled: true

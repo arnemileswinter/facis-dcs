@@ -26,7 +26,7 @@ func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDispatcher(&fakeSubscriptions{}, NewDeliveryLog(), admitAll)
+	d := NewDispatcher(&fakeSubscriptions{}, newMemDeliveries(), admitAll)
 	d.httpClient = receiver.Client()
 	payload := WebhookPayload{
 		EventID:       "evt-1",
@@ -75,7 +75,7 @@ func TestDispatchDeliversOnlyToAdmittedOrganizations(t *testing.T) {
 	audience := func(_ context.Context, event, did, owner string) bool {
 		return event == "contract.created" && did == "contract-1" && owner == orgA
 	}
-	d := NewDispatcher(subs, NewDeliveryLog(), audience)
+	d := NewDispatcher(subs, newMemDeliveries(), audience)
 	d.httpClient = receiver.Client()
 
 	d.Dispatch(context.Background(), "contract.created", "contract-1", json.RawMessage(`{"contract_data":{}}`))
@@ -104,10 +104,10 @@ func TestDefaultClientRefusesLoopbackCallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewDeliveryLog()
+	store := newMemDeliveries()
 	d := NewDispatcher(&fakeSubscriptions{}, store, admitAll)
 	d.notify(Subscription{CallbackURL: receiver.URL, Secret: secret, OwnerDID: orgA}, WebhookPayload{EventID: "e", Event: "template.updated"})
-	got := store.ListDeliveries(orgA)
+	got, _ := store.ListDeliveries(context.Background(), orgA)
 	if len(got) != 1 || got[0].Error == "" || got[0].StatusCode != 0 {
 		t.Fatalf("deliveries = %+v, want one refused delivery", got)
 	}

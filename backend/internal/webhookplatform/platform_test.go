@@ -82,7 +82,7 @@ var testCallers = map[string]Caller{
 }
 
 func newTestPlatform(subs Subscriptions) *Platform {
-	store := NewDeliveryLog()
+	store := newMemDeliveries()
 	validate := func(_ context.Context, token string) (Caller, error) {
 		c, ok := testCallers[token]
 		if !ok {
@@ -232,9 +232,9 @@ func TestSubscribeRejectsCallbackURLsThatAreNotPlainHTTP(t *testing.T) {
 }
 
 func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
-	store := NewDeliveryLog()
-	store.AddDelivery(Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA})
-	store.AddDelivery(Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB})
+	store := newMemDeliveries()
+	_ = store.AddDelivery(context.Background(), Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA})
+	_ = store.AddDelivery(context.Background(), Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB})
 	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
 	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll), validate, nil)
 

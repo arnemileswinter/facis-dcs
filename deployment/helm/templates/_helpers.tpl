@@ -388,3 +388,33 @@ Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
 {{- printf "%s/ontology/dcs-pdf-core" (include "digital-contracting-service.pdfCoreURL" .) -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+"true" when the chart enforces the minimum TLS version itself: the ingress
+terminates TLS and Traefik serves it (DCS-IR-CI-01, DCS-NFR-SEC-01).
+*/}}
+{{- define "digital-contracting-service.tlsOptionEnforced" -}}
+{{- if and .Values.ingress.enabled .Values.ingress.tlsOptions.enabled .Values.ingress.tls (or .Values.traefik.enabled (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/TLSOption")) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+DCS_CONFIG_SHA256_PINS (DCS-NFR-SEC-04): configIntegrity.pins plus the SHA-256
+of the operator trust ConfigMap as the cluster holds it at render time.
+*/}}
+{{- define "digital-contracting-service.configPins" -}}
+{{- $pins := deepCopy .Values.configIntegrity.pins -}}
+{{- $trust := .Values.oid4vp.trust -}}
+{{- if and $trust.enabled $trust.existingConfigMap (not (hasKey $pins "oid4vp-trust-data")) -}}
+{{- $cm := lookup "v1" "ConfigMap" .Release.Namespace $trust.existingConfigMap -}}
+{{- with (get ($cm.data | default dict) $trust.existingConfigMapKey) -}}
+{{- $_ := set $pins "oid4vp-trust-data" (sha256sum .) -}}
+{{- end -}}
+{{- end -}}
+{{- $parts := list -}}
+{{- range $name, $hash := $pins -}}
+{{- $parts = append $parts (printf "%s=%s" $name $hash) -}}
+{{- end -}}
+{{- join "," $parts -}}
+{{- end }}

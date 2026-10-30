@@ -463,7 +463,7 @@ func main() {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}
 
-	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".dcstodcs")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events bus")
 	}
@@ -513,7 +513,13 @@ func main() {
 	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
 
 	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
-		event.StartEventLogger(ctx, cepSubClient)
+		// No queue group: every replica prints every event.
+		logSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, "")
+		if err != nil {
+			log.Fatalf(ctx, err, "Could not create event logger NATS subscriber")
+		}
+		defer func() { _ = logSubClient.Close() }()
+		event.StartEventLogger(ctx, logSubClient)
 	}
 
 	auditTrailReader := base.AuditTrailReader{
@@ -548,7 +554,7 @@ func main() {
 	// recreated every run. Entries already present are left untouched, so an
 	// administrator who repoints one is not overruled by the next restart.
 	if seedPath := strings.TrimSpace(os.Getenv("CONTRACT_TARGETS_FILE")); seedPath != "" {
-		raw, err := os.ReadFile(seedPath)
+		raw, err := os.ReadFile(seedPath) // #nosec G304 G703 -- path comes from operator configuration (environment), not from a request
 		if err != nil {
 			log.Fatalf(ctx, err, "could not read CONTRACT_TARGETS_FILE %s", seedPath)
 		}
@@ -611,7 +617,7 @@ func main() {
 		DB:      db,
 		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
 	}
-	webhookStore := webhookplatform.NewDeliveryLog()
+	webhookStore := webhookplatform.PostgresDeliveries{DB: db}
 	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did))
 	webhookPlatform := webhookplatform.New(
 		webhookSubs,
@@ -629,7 +635,7 @@ func main() {
 
 	// Start the NATS→Webhook bridge: automatically fans out to all registered
 	// webhook subscribers whenever a DCS lifecycle event fires on the event bus.
-	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create webhook NATS subscriber")
 	}
@@ -716,7 +722,7 @@ func main() {
 	// material: it prepares the COSE Sig_structures, this process signs them with
 	// the dcs-c2pa key, and the certificate naming that key travels with each
 	// request rather than being configured into a renderer several instances share.
-	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv))
+	issuerX5ChainPEM, err := os.ReadFile(os.Getenv(issuerX5ChainPathEnv)) // #nosec G703 -- path comes from operator configuration (environment), not from a request
 	if err != nil {
 		log.Fatalf(ctx, err, "read %s: pdf-core signs this instance's manifests under this chain", issuerX5ChainPathEnv)
 	}
@@ -867,7 +873,7 @@ func main() {
 	// Start the PDF lifecycle C2PA subscriber (appends C2PA assertions on state changes).
 	// Only start when a real signing URL is configured; without one, the subscriber
 	// would attempt signing on every CWE event and log spurious HTTP errors.
-	pdfSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	pdfSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".pdfgeneration")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create PDF generation NATS subscriber")
 	}
@@ -896,7 +902,7 @@ func main() {
 	// Start the auto-deploy subscriber (DCS-FR-CWE-06): once the signing
 	// workflow completes (APPLIED_SIGNATURE), it calls the same
 	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses.
-	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
+	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create contract-deployment NATS subscriber")
 	}

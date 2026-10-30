@@ -21,11 +21,11 @@ const PIDVCT = "urn:eudi:pid:de:1"
 // not an EUDI type: it describes a person nobody verified.
 const DemoPIDVCT = "urn:dcs:pid:demo:v1"
 
-const PIDCredentialQueryID = "eudi_pid_credential"
+const PIDCredentialQueryID = "eudi_pid_credential" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // PIDLegacyCredentialQueryID asks for the same PID under the SD-JWT VC format
 // identifier that predates dc+sd-jwt.
-const PIDLegacyCredentialQueryID = "eudi_pid_credential_vc_sd_jwt"
+const PIDLegacyCredentialQueryID = "eudi_pid_credential_vc_sd_jwt" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 // DefaultPIDDCQLQuery requests an SD-JWT VC PID credential for identity
 // presentation, under either format identifier — a wallet matches a credential

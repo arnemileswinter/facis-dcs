@@ -632,6 +632,15 @@ Two trust configurations follow from that:
 ### TLS
 - Use certificates from a trusted Certificate Authority
 - Recommend [cert-manager](https://cert-manager.io/) for automatic renewal
+- TLS 1.3 minimum (DCS-IR-CI-01, DCS-NFR-SEC-01). When Traefik terminates the ingress TLS, the chart enforces it: it writes a `TLSOption` with `minVersion: VersionTLS13` and names it on the ingress (`ingress.tlsOptions`, on by default). For another controller, set the minimum on the controller. For ingress-nginx, set `ssl-protocols: "TLSv1.3"` in the controller ConfigMap.
+- Verify after install. The first command must fail, the second must connect:
+  ```bash
+  openssl s_client -connect dcs.example.org:443 -tls1_2 </dev/null
+  openssl s_client -connect dcs.example.org:443 -tls1_3 </dev/null
+  ```
+- HTTPS redirect and HSTS (DCS-IR-CI-03): when `route.publicBaseURL` is `https://`, the backend answers a request that the proxy received over plain HTTP (`X-Forwarded-Proto: http`) with a redirect to HTTPS, and sends `Strict-Transport-Security` on HTTPS responses.
+- PostgreSQL: put `sslmode=verify-full` (with `sslrootcert`) in the `DATABASE_URL` of the external database. `database.sslmode` sets the mode of a URL the chart derives.
+- In-cluster traffic between the backend and NATS, IPFS, pdf-core, DSS and the co-deployed PostgreSQL is plain HTTP/TCP inside the namespace. Encrypt it with a service mesh (mTLS) or a CNI with transparent encryption.
 
 ### Values
 Override the following at minimum:

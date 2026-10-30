@@ -337,7 +337,7 @@ func (s *PostgresStatusListRevocations) RevokedIndices(ctx context.Context, list
 	}
 	indices := make([]uint32, 0, len(rows))
 	for _, row := range rows {
-		indices = append(indices, uint32(row))
+		indices = append(indices, uint32(row)) // #nosec G115 -- entry_index is a non-negative INTEGER (CHECK constraint)
 	}
 	return indices, nil
 }

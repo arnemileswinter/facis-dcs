@@ -42,18 +42,13 @@ ingress:
   hosts: []
   tls: []
 
-  # Mindestversion fuer TLS (DCS-IR-CI-01, DCS-NFR-SEC-01). Wirkt nur, wo
-  # Traefik aus diesem Chart terminiert: die Ressource ist eine Traefik-
-  # TLSOption, und der Ingress muss sie ueber die Annotation
-  #   traefik.ingress.kubernetes.io/router.tls.options: <ns>-<name>@kubernetescrd
-  # referenzieren, sonst bleibt sie wirkungslos.
-  #
-  # Terminiert der Ingress der Plattform (className leer, wie in
-  # values.prod.yml), gehoert die Einstellung dorthin. Der Deployment-Leitfaden
-  # nennt unter "TLS-Version erzwingen" die Entsprechung je Controller und den
-  # Befehl, mit dem sich das Ergebnis nachmessen laesst.
+  # Minimum TLS version (DCS-IR-CI-01, DCS-NFR-SEC-01). The chart writes a
+  # Traefik TLSOption and names it on the ingress when the ingress terminates
+  # TLS (ingress.tls is set) and Traefik serves it (the TLSOption CRD exists or
+  # traefik.enabled). For other ingress controllers, set the minimum on the
+  # controller: deployment/README.md, "TLS".
   tlsOptions:
-    enabled: false
+    enabled: true
     minVersion: "VersionTLS13"
     # Leer lassen: eine Obergrenze schliesst kuenftige Versionen aus.
     maxVersion: ""
@@ -211,6 +206,44 @@ readinessProbe:
   failureThreshold: 3
   successThreshold: 1
 
+# Process liveness (DCS-NFR-PER-03). /livez answers 200 while the process
+# serves HTTP, also during initialization, so a slow HSM or catalogue gate does
+# not cause a restart; a process that stops serving is restarted. The startup
+# probe gives the steps before the listener opens (database connection,
+# migrations) up to 5 minutes.
+startupProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Keeps at least one backend pod during voluntary disruptions (node drain,
+# cluster upgrade) when more than one replica runs (DCS-NFR-PER-03).
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Config file integrity (DCS-NFR-SEC-04). The backend hashes its mounted config
+# files at startup and refuses to start when a pinned file does not match its
+# SHA-256 pin (DCS_CONFIG_SHA256_PINS). Names: did-document, oid4vp-trust-data,
+# x5c-trust-anchors-poa, x5c-trust-anchors-pid, oid4vp-trust-policy.
+#   pins:
+#     x5c-trust-anchors-poa: <sha256sum of the file>
+# The chart pins oid4vp-trust-data itself when oid4vp.trust.existingConfigMap
+# exists at install or upgrade time: an edit of that ConfigMap outside a release
+# then stops the backend at its next start.
+configIntegrity:
+  pins: {}
+
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
   realmURL: ""
@@ -290,7 +323,9 @@ pkcs11:
   modulePath: "/usr/lib/softhsm/libsofthsm2.so"
   tokenLabel: "dcs"
   # PIN for the auto-created Secret. Ignored when pinSecretRef.name is set.
-  pin: "1234"
+  # Empty: the chart generates a random PIN on install and keeps the one in the
+  # existing Secret on upgrade (DCS-NFR-SEC-12).
+  pin: ""
   pinSecretRef:
     name: ""
     key: "PKCS11_PIN"
@@ -308,7 +343,8 @@ pkcs11:
     # Volume path holding the SoftHSM2 token directory + softhsm2.conf.
     tokenDir: "/var/lib/softhsm"
     # SO (security officer) PIN used only during token initialization.
-    soPin: "12345678"
+    # Empty: a random SO PIN is used for the initialization and not kept.
+    soPin: ""
     persistence:
       # 1Gi rather than the ~10Mi the token actually needs: several CSI drivers
       # refuse to provision below 1Gi and the claim then never binds, which
@@ -627,49 +663,33 @@ ipfs:
     storageClassName: ""
 
 # ---- Optional monitoring stack (Prometheus, Grafana, Alertmanager) ----------------
+# monitoring.enabled co-deploys kube-prometheus-stack. Its values go under the
+# kube-prometheus-stack key; top-level grafana/prometheus keys do not reach it.
 monitoring:
   enabled: false
 
-grafana:
-  enabled: false
-  adminPassword: YourStrongPassword
-  persistence:
-    enabled: true
-    storageClassName: local-path
-    size: 5Gi
+kube-prometheus-stack:
+  grafana:
+    # No adminPassword (DCS-NFR-SEC-12): the grafana chart generates a random
+    # one on install and keeps it in the <release>-grafana Secret on upgrade.
+    #   kubectl get secret <release>-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+    persistence:
+      enabled: true
+      size: 5Gi
+  prometheus:
+    prometheusSpec:
+      retention: 15d
 
-prometheus:
-  enabled: false
-  prometheusSpec:
-    retention: 15d
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 10Gi
-    serviceMonitorSelectorNilUsesHelmValues: true
-    podMonitorSelectorNilUsesHelmValues: true
-
-alertmanager:
-  enabled: false
-  alertmanagerSpec:
-    storage:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: local-path
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 2Gi
-
-nodeExporter:
-  enabled: false
-
-kubeStateMetrics:
-  enabled: false
+# Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule when the Prometheus
+# Operator CRD exists or monitoring.enabled. labels must match the
+# ruleSelector of the Prometheus that should load them.
+alerts:
+  enabled: true
+  labels:
+    release: prometheus
+  serverErrorRatio: 0.05
+  authFailuresPerSecond: 1
+  p95LatencySeconds: 2
 
 # EU DSS demonstration webapp (AdES validation alongside the PKCS#11 signing
 # path — DCS-FR-SM-18, DCS-IR-SI-10, DCS-IR-CI-08). DISABLED by default:
@@ -767,6 +787,30 @@ complianceMonitor:
     limits:
       cpu: 200m
       memory: 256Mi
+
+# ---- Database backup (DCS-NFR-SF-03) ------------------------------------
+# A CronJob dumps the DCS database (DATABASE_URL) to a PersistentVolumeClaim.
+# The schedule is the recovery point objective. Restore, the IPFS snapshot and
+# the erasure obligations of the retention: docs/backup-integration-guide.md.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  # Also the time until an erased contract's keys are gone from every backup
+  # (guide, section 4.1).
+  retentionDays: 14
+  image:
+    repository: postgres
+    # At least the major version of the database server.
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    # Empty: the chart creates <fullname>-db-backup (kept on uninstall).
+    existingClaim: ""
+    size: 10Gi
+    # Set an encrypted StorageClass: a dump holds the wrapped content keys
+    # (guide, section 2.1).
+    storageClassName: ""
+  resources: {}
 
 # ---- Shared supporting services for a resource-constrained peer -------
 # Exposes this instance's stateless services under https://<host>/shared/<name>

@@ -37,7 +37,7 @@ var managementRoles = []string{userrole.IntegrationManager.String(), userrole.Sy
 // Mount it on any path prefix with http.StripPrefix.
 type Platform struct {
 	subs       Subscriptions
-	store      *DeliveryLog
+	store      Deliveries
 	dispatcher *Dispatcher
 	validate   TokenValidator
 	onCallback CallbackHandler
@@ -47,7 +47,7 @@ type Platform struct {
 // New creates a ready-to-use Platform.
 // validate:   JWT validator — use middleware.HydraJWTValidator.ValidateToken
 // onCallback: called when ORCE POSTs to /callbacks (may be nil)
-func New(subs Subscriptions, store *DeliveryLog, dispatcher *Dispatcher, validate TokenValidator, onCallback CallbackHandler) *Platform {
+func New(subs Subscriptions, store Deliveries, dispatcher *Dispatcher, validate TokenValidator, onCallback CallbackHandler) *Platform {
 	p := &Platform{
 		subs:       subs,
 		store:      store,
@@ -174,7 +174,13 @@ func (p *Platform) listWebhooks(w http.ResponseWriter, r *http.Request) {
 // acknowledged) of the caller organization's subscriptions, the monitoring
 // surface for DCS-FR-TR-22 subscribers.
 func (p *Platform) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, p.store.ListDeliveries(callerFromCtx(r.Context()).ParticipantDID))
+	deliveries, err := p.store.ListDeliveries(r.Context(), callerFromCtx(r.Context()).ParticipantDID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not list deliveries")
+		return
+	}
+	jsonOK(w, deliveries)
 }
 
 // POST /webhooks
@@ -275,7 +281,12 @@ func (p *Platform) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, ok := p.store.ResolvePending(req.EventID)
+	pending, ok, err := p.store.ResolvePending(r.Context(), req.EventID)
+	if err != nil {
+		log.Printf("webhookplatform: %v", err)
+		jsonError(w, http.StatusInternalServerError, "could not resolve the callback")
+		return
+	}
 	if !ok {
 		jsonError(w, http.StatusNotFound, "unknown event_id")
 		return

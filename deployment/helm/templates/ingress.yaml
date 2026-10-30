@@ -8,12 +8,12 @@ metadata:
   name: {{ include "digital-contracting-service.fullname" . }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
-  {{- if or .Values.ingress.annotations .Values.ingress.tlsOptions.enabled }}
+  {{- if or .Values.ingress.annotations (include "digital-contracting-service.tlsOptionEnforced" .) }}
   annotations:
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.ingress.tlsOptions.enabled }}
+    {{- if include "digital-contracting-service.tlsOptionEnforced" . }}
     {{/*
     Die TLSOption gilt erst, wenn der Router sie nennt. Ohne diese Annotation
     liegt die Ressource im Cluster und Traefik handelt trotzdem TLS 1.2 aus —

@@ -111,7 +111,7 @@ spec:
               TOKEN_DIR={{ .Values.pkcs11.provisioning.tokenDir | quote }}
               LABEL={{ .Values.pkcs11.tokenLabel | quote }}
               MODULE={{ .Values.pkcs11.modulePath | quote }}
-              SO_PIN={{ .Values.pkcs11.provisioning.soPin | quote }}
+              SO_PIN={{ .Values.pkcs11.provisioning.soPin | default (randAlphaNum 32) | quote }}
               IDENTITY_SECRET_NAME={{ include "digital-contracting-service.identitySecretName" . | quote }}
               DID_HOSTNAME={{ include "digital-contracting-service.didHostname" . | quote }}
               CRL_URL={{ printf "http://%s:%v%s/crl/dcs-c2pa.crl" (include "digital-contracting-service.fullname" .) .Values.service.port (include "digital-contracting-service.apiPath" .) | quote }}

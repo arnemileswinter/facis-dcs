@@ -13,7 +13,7 @@ import (
 // backend stores claims as RDF-star reified triples
 // (<<(?s ?p ?o)>> credentialSubjectIRI ?s), not plain triples — see
 // eu.xfsc.fc.graphdb.service.SparqlGraphStore in the upstream FC source.
-const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubject"
+const credentialSubjectIRI = "https://www.w3.org/2018/credentials#credentialSubject" // #nosec G101 -- identifier or vocabulary IRI, not a credential
 
 var (
 	dcsTemplateUUIDIRI       = fcasset.DCSContextURL + "templateUuid"

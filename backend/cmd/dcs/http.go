@@ -245,6 +245,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	handler = service.RequestContextMiddleware(handler)
 	handler = middleware.InjectIP(handler)
 	handler = metricsMiddleware(handler)
+	handler = httpsMiddleware(os.Getenv("DCS_PUBLIC_BASE_URL"), handler)
 	if dbg {
 		// Log query and response bodies if debug logs are enabled.
 		handler = debug.HTTP()(handler)
@@ -293,7 +294,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}
 
 	(*wg).Add(1)
-	go func() {
+	go func() { // #nosec G118 -- server lifecycle goroutine; it outlives the request contexts by design
 		defer (*wg).Done()
 
 		// Start HTTP server in a separate goroutine.
@@ -354,7 +355,7 @@ func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
 	srv := &http.Server{Addr: net.JoinHostPort("", port), Handler: newMetricsHandler(), ReadHeaderTimeout: time.Second * 60}
 
 	wg.Add(1)
-	go func() {
+	go func() { // #nosec G118 -- server lifecycle goroutine; it outlives the request contexts by design
 		defer wg.Done()
 		go func() {
 			log.Printf(ctx, "metrics server listening on %q", srv.Addr)
@@ -369,6 +370,35 @@ func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
 			log.Printf(ctx, "failed to shutdown metrics server: %v", err)
 		}
 	}()
+}
+
+// hstsHeader tells the browser to use HTTPS only for this host for one year.
+const hstsHeader = "max-age=31536000"
+
+// httpsMiddleware delivers browser and API access over HTTPS behind a
+// TLS-terminating proxy (DCS-IR-CI-03). It acts only when publicBaseURL is an
+// https URL. A request that the proxy received over plain HTTP
+// (X-Forwarded-Proto: http) gets a permanent redirect to the same path on the
+// public HTTPS origin. A response to a request received over HTTPS carries
+// HSTS. A request without X-Forwarded-Proto (probes, in-cluster calls) passes
+// unchanged.
+func httpsMiddleware(publicBaseURL string, next http.Handler) http.Handler {
+	public, err := url.Parse(strings.TrimSpace(publicBaseURL))
+	if err != nil || public.Scheme != "https" || public.Host == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+		switch strings.ToLower(strings.TrimSpace(proto)) {
+		case "http":
+			// 308 keeps the method and the body of a POST.
+			http.Redirect(w, r, "https://"+public.Host+r.URL.RequestURI(), http.StatusPermanentRedirect) // #nosec G710 -- the redirect host is the configured public host, not taken from the request
+			return
+		case "https":
+			w.Header().Set("Strict-Transport-Security", hstsHeader)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func reportContentTypeMiddleware(next http.Handler) http.Handler {
