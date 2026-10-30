@@ -239,6 +239,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
+		errors.Is(err, command.ErrKPIContractTerminated) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
