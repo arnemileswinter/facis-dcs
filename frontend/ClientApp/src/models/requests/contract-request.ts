@@ -112,6 +112,7 @@ export interface ContractNegotiationRespondRequest {
 export interface ContractApproveRequest {
   did: string
   updated_at: string
+  decision_notes?: string[]
 }
 
 export interface ContractRejectRequest {

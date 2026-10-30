@@ -30,7 +30,7 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
-import { ContractState } from '@/types/contract-state'
+import { ContractState, isEditableContractState } from '@/types/contract-state'
 import { declaredPartyRoles, type ParticipantSelection } from '@/utils/participant-selection'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
@@ -78,10 +78,10 @@ const draftContracts = computed(() => contractStore.contracts.filter((c) => c.st
 
 const canSubmit = computed(() => isEditMode.value || (hasApprovedTemplates.value && selectedTemplate.value !== null))
 const canSubmitContract = computed(
-  () => isEditMode.value && contract.value !== null && contract.value.state === ContractState.draft,
+  () => isEditMode.value && contract.value !== null && isEditableContractState(contract.value.state),
 )
 
-const isContractMutable = computed(() => !isEditMode.value || contract.value?.state === ContractState.draft)
+const isContractMutable = computed(() => !isEditMode.value || isEditableContractState(contract.value?.state))
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   if (!isEditMode.value || !isContractMutable.value) return null
@@ -294,7 +294,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          templateEditorUiStore.setTemplateEditable(contract.value?.state === ContractState.draft)
+          templateEditorUiStore.setTemplateEditable(isEditableContractState(contract.value?.state))
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract')
@@ -584,7 +584,7 @@ onBeforeRouteLeave(() => {
           Update
         </button>
         <button
-          v-if="contract?.state === ContractState.draft && canSubmitContract"
+          v-if="canSubmitContract"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
           @click="submitContract"

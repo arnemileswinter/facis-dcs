@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
 import { ROUTES } from '@/router/router'
 import { useContractsStore } from '@/stores/contracts-store'
-import { ContractState } from '@/types/contract-state'
+import { ContractState, isEditableContractState } from '@/types/contract-state'
 import type { Contract } from '@/models/contract/contract'
 
 const props = defineProps<{
@@ -15,7 +15,7 @@ const { isCreator } = useContractPermissions()
 const contractsStore = useContractsStore()
 
 const canEdit = computed(() => {
-  return props.contract.state === ContractState.draft && isCreator.value
+  return isEditableContractState(props.contract.state) && isCreator.value
 })
 
 const hasNegotiationTask = computed(() => contractsStore.hasNegotiationTask(props.contract))
