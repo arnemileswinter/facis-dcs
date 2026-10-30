@@ -79,4 +79,6 @@ export type ContractChangeRequest = Pick<
    *  contract_data is replaced only when Submit merges accepted proposals.
    *  Nested partial patches are not part of the negotiation contract. */
   contract_data?: ContractData
+  /** A comment to the other party on this proposal (DCS-IR-CWE-03). */
+  comment?: string
 }
