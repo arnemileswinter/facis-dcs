@@ -546,23 +546,34 @@ func toArchiveContractItem(item db.ContractMetadata) *contractstoragearchive.Con
 	}
 
 	return &contractstoragearchive.ContractItem{
-		Did:             item.DID,
-		ContractVersion: item.ContractVersion,
-		State:           item.State,
-		Name:            item.Name,
-		Description:     item.Description,
-		CreatedBy:       item.CreatedBy,
-		CreatedAt:       item.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
-		StartDate:       startDate,
-		ExpDate:         expDate,
-		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: item.ExpNoticePeriod,
-		Responsible:     item.Responsible,
-		Evidence:        archiveEvidenceValue(item.Evidence),
-		ArchiveSummary:  item.ArchiveSummary,
-		ArchiveTags:     decodeArchiveTags(item.ArchiveTags),
+		Did:               item.DID,
+		ContractVersion:   item.ContractVersion,
+		State:             item.State,
+		Name:              item.Name,
+		Description:       item.Description,
+		CreatedBy:         item.CreatedBy,
+		CreatedAt:         item.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
+		StartDate:         startDate,
+		ExpDate:           expDate,
+		ExpPolicy:         expPolicy,
+		ExpNoticePeriod:   item.ExpNoticePeriod,
+		Responsible:       item.Responsible,
+		Evidence:          archiveEvidenceValue(item.Evidence),
+		ArchiveSummary:    item.ArchiveSummary,
+		ArchiveTags:       decodeArchiveTags(item.ArchiveTags),
+		TerminationReason: item.TerminationReason,
+		TerminatedAt:      formatOptionalTimePtr(item.TerminatedAt),
+		TerminationRole:   item.TerminationRole,
 	}
+}
+
+func formatOptionalTimePtr(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := value.UTC().Format(time.RFC3339)
+	return &formatted
 }
 
 // generateArchiveSummary derives the automatic half of DCS-FR-CSA-11 from

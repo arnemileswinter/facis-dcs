@@ -14,6 +14,10 @@ export interface ArchivedContract {
   exp_date?: string
   archive_summary?: string
   archive_tags?: string[]
+  /** The termination record of a terminated contract (DCS-FR-CSA-16). */
+  termination_reason?: string
+  terminated_at?: string
+  termination_role?: string
 }
 
 /** The stored annotation of an archive entry (DCS-FR-CSA-11). */

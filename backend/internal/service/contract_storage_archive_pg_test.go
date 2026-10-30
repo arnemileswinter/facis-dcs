@@ -5,16 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	"digital-contracting-service/internal/base/artifactstore"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/base/tsa"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/db/pg"
+	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
 )
 
@@ -144,6 +147,45 @@ func TestTerminatedContractStaysInTheArchiveReadOnly(t *testing.T) {
 
 	_, err = db.Exec(`UPDATE contract_archive_entries SET contract_snapshot = '{"forged":true}'::jsonb WHERE did = $1`, did)
 	require.ErrorContains(t, err, "immutable")
+}
+
+// DCS-FR-CSA-16: the archive item of a terminated contract carries the
+// recorded termination reason, the effective date and the initiating role. A
+// termination a counterparty instance notified names the Counterparty.
+func TestTerminatedArchiveItemCarriesReasonDateAndRole(t *testing.T) {
+	db := pgtest.Open(t)
+	byManager, byPeer := "did:web:dcs.example:contract:ended-here", "did:web:dcs.example:contract:ended-there"
+	seedArchivedContract(t, db, byManager, "SIGNED")
+	seedArchivedContract(t, db, byPeer, "SIGNED")
+	svc := archiveTestService(t, db)
+	local, err := svc.DIDDocument.GetID()
+	require.NoError(t, err)
+	handler := cwecommand.Terminator{DB: db, CRepo: &pg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}, DIDDocument: svc.DIDDocument}
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, handler.Handle(context.Background(), cwecommand.TerminateCmd{
+		DID: byManager, TerminatedBy: archiveManager, Reason: "breach of the SLA", UpdatedAt: later, CauserDID: local,
+		UserRoles: userrole.UserRoles{userrole.ContractObserver, userrole.ArchiveManager},
+	}))
+	require.NoError(t, handler.Handle(context.Background(), cwecommand.TerminateCmd{
+		DID: byPeer, TerminatedBy: "did:web:peer.example", Reason: "insolvency", UpdatedAt: later, CauserDID: "did:web:peer.example",
+	}))
+
+	res, err := svc.Retrieve(archiveManagerContext(), &contractstoragearchive.ArchiveRetrieveRequest{})
+	require.NoError(t, err)
+	items := map[string]*contractstoragearchive.ContractItem{}
+	for _, item := range res.Contracts {
+		items[item.Did] = item
+	}
+	require.Len(t, items, 2)
+	for did, want := range map[string][2]string{byManager: {"breach of the SLA", "Archive Manager"}, byPeer: {"insolvency", "Counterparty"}} {
+		item := items[did]
+		require.Equal(t, "TERMINATED", item.State)
+		require.Equal(t, want[0], *item.TerminationReason)
+		require.Equal(t, want[1], *item.TerminationRole)
+		effective, err := time.Parse(time.RFC3339, *item.TerminatedAt)
+		require.NoError(t, err)
+		require.WithinDuration(t, time.Now(), effective, time.Minute)
+	}
 }
 
 // memoryArtifacts stands in for the encrypting IPFS store.

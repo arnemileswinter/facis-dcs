@@ -446,11 +446,16 @@ func (r *PostgresContractRepo) ReadSignedSignatures(ctx context.Context, tx *sql
 	return signatures, nil
 }
 
+// archivedContractColumns and archivedContractSource read an archived
+// contract with its termination record (DCS-FR-CSA-16). USING keeps the
+// unqualified did of the search conditions unambiguous.
+const archivedContractColumns = `did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date,
+	exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags,
+	reason AS termination_reason, effective_at AS terminated_at, initiating_role AS termination_role`
+const archivedContractSource = `contracts_archive_metadata LEFT JOIN contract_terminations USING (did)`
+
 func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sqlx.Tx) ([]db.ContractMetadata, error) {
-	query := `
-	    SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
-    FROM contracts_archive_metadata
-	`
+	query := `SELECT ` + archivedContractColumns + ` FROM ` + archivedContractSource
 	var params []any
 	query += " WHERE " + contractreadpolicy.SQL(ctx, "contracts_archive_metadata.did", &params)
 	var cts []db.ContractMetadata
@@ -463,10 +468,7 @@ func (r *PostgresContractRepo) ReadArchivedContracts(ctx context.Context, tx *sq
 }
 
 func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues) ([]db.ContractMetadata, error) {
-	query := `
-	        SELECT did, state, name, description, created_by, created_at, updated_at, contract_version, start_date, exp_date, exp_policy, exp_notice_period, responsible, evidence, archive_summary, archive_tags
-        FROM contracts_archive_metadata
-    `
+	query := `SELECT ` + archivedContractColumns + ` FROM ` + archivedContractSource
 	conditions, params, err := createSearchConditions(values)
 	if err != nil {
 		return nil, err

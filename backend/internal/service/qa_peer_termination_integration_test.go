@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	trustgate "digital-contracting-service/internal/dcstodcs"
@@ -41,6 +42,7 @@ func TestQATerminationIsPropagatedToThePeerPostgres(t *testing.T) {
 	handler := command.Terminator{DB: database, CRepo: &cwepg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}, DIDDocument: *document}
 	require.NoError(t, handler.Handle(context.Background(), command.TerminateCmd{
 		DID: "c1", TerminatedBy: "Org A", Reason: "breach", UpdatedAt: time.Now().Add(time.Hour), CauserDID: peer,
+		UserRoles: userrole.UserRoles{userrole.ContractManager},
 	}))
 
 	sender := &capturingTerminationSender{fail: errors.New("peer down")}
