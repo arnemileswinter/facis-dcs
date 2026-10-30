@@ -654,6 +654,7 @@ var _ = Service("TemplateRepository", func() {
 			Scope("Template Reviewer")
 			Scope("Template Approver")
 			Scope("Template Manager")
+			Scope("Contract Creator")
 		})
 
 		Payload(TemplateProvenanceRetrieveRequest)
@@ -762,12 +763,13 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/verify
 	Method("verify", func() {
-		Description("run policy, schema, and semantic validations; return findings.")
-		Meta("dcs:requirements", "DCS-IR-TR-03")
+		Description("run policy, schema, and semantic validations, verify the provenance credentials and compare the content hash with the registered one; return findings.")
+		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-FR-TR-09", "DCS-FR-TR-20")
 
 		Security(JWTAuth, func() {
 			Scope("Template Reviewer")
 			Scope("Template Manager")
+			Scope("Contract Creator")
 		})
 
 		Payload(ContractTemplateVerifyRequest)

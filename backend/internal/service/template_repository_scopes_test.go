@@ -55,3 +55,21 @@ func TestTemplateRepositoryScopes(t *testing.T) {
 		t.Errorf("audit scopes = %v, want Template Manager", audit)
 	}
 }
+
+// DCS-FR-TR-09, DCS-FR-TR-20: the template user (Contract Creator) verifies a template and its provenance.
+func TestTemplateUserMayVerifyTemplates(t *testing.T) {
+	ctx := context.Background()
+	verify := requiredTemplateScopes(t, func(e *templaterepository.Endpoints) error {
+		_, err := e.Verify(ctx, &templaterepository.ContractTemplateVerifyRequest{})
+		return err
+	})
+	provenance := requiredTemplateScopes(t, func(e *templaterepository.Endpoints) error {
+		_, err := e.Provenance(ctx, &templaterepository.TemplateProvenanceRetrieveRequest{})
+		return err
+	})
+	for name, scopes := range map[string][]string{"verify": verify, "provenance": provenance} {
+		if !slices.Contains(scopes, "Contract Creator") {
+			t.Errorf("%s scopes = %v, want Contract Creator", name, scopes)
+		}
+	}
+}

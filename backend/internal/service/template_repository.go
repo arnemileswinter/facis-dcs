@@ -49,13 +49,15 @@ type templateRepositorysrvc struct {
 	// registration (DCS-FR-TR-09, command/provenance.go).
 	VCSigner  provenance.VCSigner
 	IssuerDID string
+	// Credentials verifies the provenance credentials on /template/verify (DCS-FR-TR-09, DCS-FR-TR-20).
+	Credentials *provenance.CredentialVerifier
 	auth.JWTAuthenticator
 }
 
 // NewTemplateRepository returns the TemplateRepository service implementation.
 func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db.ContractTemplateRepo,
 	RTRepo db.ReviewTaskRepo, ATRepo db.ApprovalTaskRepo, fcClient *fcclient.FederatedCatalogueClient,
-	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string) templaterepository.Service {
+	auditTrailReader base.AuditTrailReader, vcSigner provenance.VCSigner, issuerDID string, credentials *provenance.CredentialVerifier) templaterepository.Service {
 	return &templateRepositorysrvc{
 		DB:               db,
 		JWTAuthenticator: jwtAuth,
@@ -66,6 +68,7 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 		ATrailReader:     auditTrailReader,
 		VCSigner:         vcSigner,
 		IssuerDID:        issuerDID,
+		Credentials:      credentials,
 	}
 }
 
@@ -592,10 +595,11 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 		ParticipantID: middleware.GetParticipantID(ctx),
 	}
 	handler := query.Verifier{
-		DB:       s.DB,
-		CTRepo:   s.CTRepo,
-		RTRepo:   s.RTRepo,
-		FCClient: s.FCClient,
+		DB:               s.DB,
+		CTRepo:           s.CTRepo,
+		RTRepo:           s.RTRepo,
+		FCClient:         s.FCClient,
+		VerifyCredential: s.Credentials.Verify,
 	}
 	result, err := handler.Handle(ctx, qry)
 	if err != nil {

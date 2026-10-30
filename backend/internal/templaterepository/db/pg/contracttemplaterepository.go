@@ -484,15 +484,17 @@ func (r *PostgresContractTemplateRepo) ReadProvenanceCredentials(ctx context.Con
 	return rows, nil
 }
 
-// ReadLatestProvenanceVCID returns the newest issued credential's vc_id for
-// linkage, or nil when this is the first registered version.
+// ReadLatestProvenanceVCID returns the vc_id of the newest credential issued
+// in the template's version lineage (base_template), for linkage, or nil when
+// this is the first registered version.
 func (r *PostgresContractTemplateRepo) ReadLatestProvenanceVCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error) {
 	var vcID string
 	err := tx.GetContext(ctx, &vcID,
-		`SELECT vc_id
-		   FROM template_provenance_credentials
-		  WHERE did = $1
-		  ORDER BY version DESC
+		`SELECT p.vc_id
+		   FROM template_provenance_credentials p
+		   JOIN contract_templates t ON t.did = p.did
+		  WHERE t.base_template = (SELECT base_template FROM contract_templates WHERE did = $1)
+		  ORDER BY p.version DESC
 		  LIMIT 1`,
 		did,
 	)
