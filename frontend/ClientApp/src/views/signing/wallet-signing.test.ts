@@ -84,6 +84,36 @@ describe('Secure Contract Viewer wallet signing', () => {
   })
 })
 
+describe('Secure Contract Viewer signing workflow', () => {
+  it('shows the signing order with the own slot and a passed signing deadline (DCS-FR-SM-13)', async () => {
+    service.retrieveById.mockResolvedValueOnce({
+      contract: {
+        did: CONTRACT_DID,
+        name: 'Supply agreement',
+        state: 'APPROVED',
+        contract_data: {
+          'dcs:signatureFields': [
+            { 'dcs:signatoryName': 'did:web:org', 'dcs:signingOrder': 2 },
+            { 'dcs:signatoryName': 'did:web:peer', 'dcs:signingOrder': 1 },
+          ],
+          'dcs:signingDeadline': { '@value': '2026-01-01T00:00:00Z', '@type': 'xsd:dateTime' },
+        },
+      },
+    })
+    const wrapper = shallowMount(SecureContractViewerView, {
+      global: { stubs: { SigningCeremonyDialog: DialogStub } },
+    })
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="signing-workflow"]')
+    expect(panel.text()).toContain('Deadline passed')
+    const entries = panel.findAll('li').map((li) => li.text())
+    expect(entries[0]).toContain('did:web:peer')
+    expect(entries[1]).toContain('did:web:org')
+    expect(entries[1]).toContain('Your signature')
+  })
+})
+
 describe('Signing ceremony dialog for a published signing request', () => {
   beforeEach(() => {
     vi.useFakeTimers()

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
+	"digital-contracting-service/internal/base/validation"
 	event2 "digital-contracting-service/internal/processauditandcompliance/event"
 )
 
@@ -17,6 +19,13 @@ const RiskTypeLateSignature = "LATE_SIGNATURE"
 // RiskTypeInvalidCredential flags a signature that relies on a certificate
 // the CRL check found revoked (DCS-FR-PACM-05).
 const RiskTypeInvalidCredential = "INVALID_CREDENTIAL" // #nosec G101 -- risk type name, not a credential
+
+// RiskTypeSigningDeadlineMissed flags a contract that is not signed although
+// the signing deadline its document states has passed (DCS-FR-SM-13).
+const RiskTypeSigningDeadlineMissed = "SIGNING_DEADLINE_MISSED"
+
+// unsignedStates are the states of a contract on its way to signature.
+var unsignedStates = []string{"OFFERED", "NEGOTIATION", "SUBMITTED", "REVIEWED", "APPROVED"}
 
 // lateSignature is a contract that waits for signatures after its start date.
 // When the last signature arrives the risk resolves; the register keeps it.
@@ -51,7 +60,36 @@ func signatureRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]ev
         ORDER BY id`); err != nil {
 		return nil, fmt.Errorf("could not read signatures on revoked certificates: %w", err)
 	}
-	return signatureRisksFrom(late, revoked, checkedAt), nil
+	var unsigned []activeContract
+	if err := tx.SelectContext(ctx, &unsigned, `
+        SELECT did, contract_data FROM contracts_effective
+        WHERE state = ANY($1) AND contract_data IS NOT NULL
+        ORDER BY did`, pq.Array(unsignedStates)); err != nil {
+		return nil, fmt.Errorf("could not read contracts waiting for signatures: %w", err)
+	}
+	risks := signatureRisksFrom(late, revoked, checkedAt)
+	return append(risks, signingDeadlineRisksFrom(unsigned, checkedAt)...), nil
+}
+
+// signingDeadlineRisksFrom flags each contract whose signing deadline lies
+// before checkedAt. The detail names the deadline only, so the same miss
+// hashes the same on every sweep.
+func signingDeadlineRisksFrom(unsigned []activeContract, checkedAt time.Time) []event2.ComplianceRisk {
+	var risks []event2.ComplianceRisk
+	for _, contract := range unsigned {
+		deadline, ok := validation.SigningDeadline(contract.ContractData)
+		if !ok || !deadline.Before(checkedAt) {
+			continue
+		}
+		risks = append(risks, event2.ComplianceRisk{
+			DID:      contract.DID,
+			RiskType: RiskTypeSigningDeadlineMissed,
+			Detail: fmt.Sprintf("contract is not signed although its signing deadline %s has passed",
+				deadline.Format(time.RFC3339)),
+			DetectedAt: checkedAt,
+		})
+	}
+	return risks
 }
 
 func signatureRisksFrom(late []lateSignature, revoked []revokedCredential, checkedAt time.Time) []event2.ComplianceRisk {

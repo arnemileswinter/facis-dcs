@@ -20,6 +20,7 @@ import {
   signingErrorMessage,
 } from '@/services/signature-management-service'
 import { downloadBlob } from '@/utils/download-blob'
+import { signingWorkflow } from '@/utils/signing-workflow'
 
 // The level requested here is a hint to the wallet only — the backend gates
 // on the contract's OWN declared per-field requirement regardless of what is
@@ -120,6 +121,10 @@ const signatureFieldName = computed<string>(() => {
   const own = names.find((name) => name === localInstanceDid.value)
   return own ?? names[0] ?? ''
 })
+
+// The signing order and deadline the contract defines (DCS-FR-SM-13).
+const workflow = computed(() => signingWorkflow(contract.value?.contract_data))
+const deadlinePassed = computed(() => !!workflow.value.deadline && workflow.value.deadline.getTime() < Date.now())
 
 onMounted(async () => {
   try {
@@ -357,6 +362,28 @@ async function validate() {
                 Review the full clauses and machine-readable terms above before signing. The to-be-signed PDF with the
                 embedded PoA and signing summary is produced at the Apply Signature step.
               </p>
+            </div>
+          </div>
+
+          <div
+            v-if="workflow.order.length || workflow.deadline"
+            data-testid="signing-workflow"
+            class="card mt-4 border border-base-300 bg-base-100 shadow-sm"
+          >
+            <div class="card-body gap-3">
+              <h4 class="text-sm font-bold">Signing order and deadline</h4>
+              <p v-if="workflow.deadline" class="text-sm">
+                Sign by {{ workflow.deadline.toLocaleString() }}
+                <span v-if="deadlinePassed" class="badge badge-sm badge-error">Deadline passed</span>
+              </p>
+              <ol v-if="workflow.order.length" class="list-inside list-decimal text-sm">
+                <li v-for="entry in workflow.order" :key="entry.field" :value="entry.position">
+                  <span class="font-mono text-xs break-all">{{ entry.field }}</span>
+                  <span v-if="entry.field === signatureFieldName" class="ml-2 badge badge-sm badge-primary">
+                    Your signature
+                  </span>
+                </li>
+              </ol>
             </div>
           </div>
 

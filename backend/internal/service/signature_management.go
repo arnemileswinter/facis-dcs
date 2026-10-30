@@ -97,6 +97,8 @@ func mapSignatureCommandError(err error) error {
 		errors.Is(err, command.ErrFieldAlreadySigned) ||
 		errors.Is(err, command.ErrCeremonyNotPrepared) ||
 		errors.Is(err, command.ErrCeremonyConsumed) ||
+		errors.Is(err, command.ErrSigningOutOfOrder) ||
+		errors.Is(err, command.ErrSigningDeadlinePassed) ||
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, db.ErrSignatureNotFound) {
 		return signaturemanagement.MakeBadRequest(err)

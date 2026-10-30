@@ -656,6 +656,11 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if err := assertFieldUnsigned(existingRecords, ceremony.FieldName); err != nil {
 		return err
 	}
+	if data.ContractData != nil {
+		if err := assertSigningWorkflow(ctx, tx, h.CRepo, cmd.DID, *data.ContractData, ceremony.FieldName, existingRecords); err != nil {
+			return err
+		}
+	}
 
 	// TBS byte pinning (ADR-20): a submitted PDF may only ADD a PAdES
 	// incremental update to the document prepare committed to — it may never
@@ -1087,6 +1092,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 				return nil, fmt.Errorf("%w: missing ceremonies for %v", ErrCeremoniesIncomplete, missing)
 			}
 		}
+	}
+	if err := assertSigningWorkflow(ctx, tx, h.CRepo, cmd.DID, *data.ContractData, ceremony.FieldName, existingRecords); err != nil {
+		return nil, err
 	}
 
 	// The stored artifact is read ONCE, here, because two decisions below hang on
