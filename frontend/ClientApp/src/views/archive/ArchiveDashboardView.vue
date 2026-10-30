@@ -5,15 +5,27 @@ import { RouterLink } from 'vue-router'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { ROUTES } from '@/router/router'
 import {
+  type ArchiveComplianceItem,
   type ArchivedContract,
   type ArchiveErasureStatus,
+  type ArchiveEvidenceItem,
   type ArchiveSearch,
   archiveService,
 } from '@/services/archive-service'
 import { type ArchiveStatistics, archiveStatisticsService } from '@/services/archive-statistics-service'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
 import { contractStates } from '@/types/contract-state'
+import {
+  activeFilters,
+  archiveResultsToCsv,
+  deleteSavedQuery,
+  loadSavedQueries,
+  type SavedArchiveQuery,
+  saveQuery,
+} from '@/utils/archive-search'
+import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 
 /**
@@ -22,7 +34,10 @@ import { claimReportedHttpError } from '@/utils/report-action-error'
  * and compliance status. Rows drill down into the per-contract archive
  * audit trail. Archive Managers additionally see the archived-contract
  * entries with their key-erasure state and the delete-with-shred action
- * (DCS-FR-CSA-17, DCS-NFR-SEC-13).
+ * (DCS-FR-CSA-17, DCS-NFR-SEC-13), store contracts and evidence
+ * (DCS-IR-CSA-02), terminate archived contracts (DCS-IR-CSA-03), see the
+ * compliance verdict per entry (DCS-FR-CSA-19) and search the archive
+ * (DCS-FR-CSA-22).
  */
 
 const statistics = ref<ArchiveStatistics | null>(null)
@@ -88,12 +103,171 @@ async function loadEntries() {
     const result = Object.keys(filters).length ? await archiveService.search(filters) : await archiveService.retrieve()
     if (request !== entriesRequest) return
     entries.value = result
-    if (isArchiveManager.value) await loadErasureStatuses(request)
+    if (isArchiveManager.value) await Promise.all([loadErasureStatuses(request), loadCompliance()])
   } catch (err) {
     if (request === entriesRequest) entriesError.value = err instanceof Error ? err.message : String(err)
   } finally {
     if (request === entriesRequest) entriesLoading.value = false
   }
+}
+
+const compliance = ref<Record<string, ArchiveComplianceItem>>({})
+
+// A missing compliance verdict leaves the column empty; the entries stay listed.
+async function loadCompliance() {
+  try {
+    const items = await archiveService.compliance()
+    compliance.value = Object.fromEntries(items.map((item) => [`${item.did}#${item.contract_version}`, item]))
+  } catch {
+    compliance.value = {}
+  }
+}
+
+function complianceOf(entry: ArchivedContract): ArchiveComplianceItem | undefined {
+  return compliance.value[`${entry.did}#${entry.contract_version}`]
+}
+
+function failedChecks(item: ArchiveComplianceItem): string {
+  return item.checks
+    .filter((check) => !check.passed)
+    .map((check) => `${check.rule}: ${check.reason ?? 'failed'}`)
+    .join('\n')
+}
+
+// DCS-IR-CSA-02: store a contract or an evidence document in the archive.
+const storeDid = ref('')
+const evidenceDescription = ref('')
+const evidenceFile = ref<File | null>(null)
+const storing = ref(false)
+
+function onEvidenceFile(event: Event) {
+  evidenceFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+}
+
+function toBase64(bytes: ArrayBuffer): string {
+  let binary = ''
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+async function storeContract() {
+  const did = storeDid.value.trim()
+  if (!did) return
+  storing.value = true
+  try {
+    const result = await archiveService.storeContract(did)
+    errorStore.add(`Version ${result.contract_version} of the contract is archived.`, 'info')
+    await loadEntries()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    storing.value = false
+  }
+}
+
+async function storeEvidence() {
+  const did = storeDid.value.trim()
+  const file = evidenceFile.value
+  if (!did || !file) return
+  storing.value = true
+  try {
+    await archiveService.storeEvidence(did, {
+      name: file.name,
+      media_type: file.type || 'application/octet-stream',
+      content: toBase64(await file.arrayBuffer()),
+      description: evidenceDescription.value.trim() || undefined,
+    })
+    errorStore.add(`Evidence "${file.name}" is stored.`, 'info')
+    evidenceDescription.value = ''
+    if (expandedEvidenceDid.value === did) await loadEvidence(did)
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    storing.value = false
+  }
+}
+
+const expandedEvidenceDid = ref<string | null>(null)
+const evidenceItems = ref<ArchiveEvidenceItem[]>([])
+
+async function loadEvidence(did: string) {
+  evidenceItems.value = await archiveService.evidence(did)
+}
+
+async function toggleEvidence(did: string) {
+  if (expandedEvidenceDid.value === did) {
+    expandedEvidenceDid.value = null
+    return
+  }
+  expandedEvidenceDid.value = did
+  evidenceItems.value = []
+  try {
+    await loadEvidence(did)
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  }
+}
+
+function downloadEvidence(item: ArchiveEvidenceItem) {
+  if (!item.content) return
+  const bytes = Uint8Array.from(atob(item.content), (char) => char.charCodeAt(0))
+  downloadBlob(new Blob([bytes], { type: item.media_type }), item.name)
+}
+
+// DCS-IR-CSA-03: the contract state machine decides which contracts can end.
+const terminalStates = ['TERMINATED', 'EXPIRED', 'REJECTED', 'WITHDRAWN', 'REVOKED']
+const terminating = ref(false)
+
+async function terminateEntry(entry: ArchivedContract) {
+  const dialog = confirmationModal.value
+  if (!dialog) return
+  const displayName = entry.name?.trim() ? entry.name : entry.did
+  const { isCanceled, data: reason } = await dialog.reveal({
+    message: `Terminate "${displayName}"? A reason is required and is recorded with the termination.`,
+    editor: { requiredText: true, placeholder: 'Termination reason' },
+  })
+  if (isCanceled || !reason) return
+  terminating.value = true
+  try {
+    await contractWorkflowService.terminate({ did: entry.did, reason, updated_at: entry.updated_at })
+    errorStore.add('Contract terminated.', 'info')
+    await loadEntries()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  } finally {
+    terminating.value = false
+  }
+}
+
+// DCS-FR-CSA-22: saved queries and export of the search results.
+const savedQueries = ref<SavedArchiveQuery[]>(loadSavedQueries())
+const queryName = ref('')
+
+function saveCurrentQuery() {
+  const name = queryName.value.trim()
+  if (!name) return
+  savedQueries.value = saveQuery(name, search.value)
+  queryName.value = ''
+}
+
+function applySavedQuery(saved: SavedArchiveQuery) {
+  search.value = { ...saved.query }
+  void loadEntries()
+}
+
+function removeSavedQuery(name: string) {
+  savedQueries.value = deleteSavedQuery(name)
+}
+
+function exportEntries(format: 'csv' | 'json') {
+  const stamp = new Date().toISOString().slice(0, 10)
+  const blob =
+    format === 'csv'
+      ? new Blob([archiveResultsToCsv(entries.value)], { type: 'text/csv' })
+      : new Blob([JSON.stringify({ query: activeFilters(search.value), results: entries.value }, null, 2)], {
+          type: 'application/json',
+        })
+  downloadBlob(blob, `archive-search-${stamp}.${format}`)
 }
 
 async function loadErasureStatuses(request: number) {
@@ -206,6 +380,52 @@ function shortDid(did: string): string {
       </p>
     </header>
 
+    <!-- Store a contract or evidence in the archive (DCS-IR-CSA-02) -->
+    <section
+      v-if="isArchiveManager"
+      class="card min-w-0 border border-base-300 bg-base-100 shadow-sm"
+      data-testid="archive-store"
+    >
+      <div class="card-body min-w-0 space-y-2 p-4 sm:p-6">
+        <h2 class="card-title">Store in the archive</h2>
+        <label class="fieldset max-w-xl min-w-0">
+          Contract DID
+          <input v-model="storeDid" class="input w-full" placeholder="did:web:…" data-testid="archive-store-did" />
+        </label>
+        <div class="flex flex-wrap items-end gap-2">
+          <button
+            class="btn btn-sm btn-primary"
+            :disabled="storing || !storeDid.trim()"
+            data-testid="archive-store-contract"
+            @click="storeContract"
+          >
+            Archive contract
+          </button>
+          <input
+            type="file"
+            class="file-input file-input-sm"
+            aria-label="Evidence document"
+            data-testid="archive-store-evidence-file"
+            @change="onEvidenceFile"
+          />
+          <input
+            v-model="evidenceDescription"
+            class="input input-sm"
+            placeholder="Evidence description (optional)"
+            aria-label="Evidence description"
+          />
+          <button
+            class="btn btn-sm"
+            :disabled="storing || !storeDid.trim() || !evidenceFile"
+            data-testid="archive-store-evidence"
+            @click="storeEvidence"
+          >
+            Store evidence
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Archived contract entries with key-erasure state and delete-with-shred -->
     <section
       v-if="canReadEntries"
@@ -250,6 +470,57 @@ function shortDid(did: string): string {
               <span v-if="additionalFilterCount" class="badge badge-sm badge-primary">{{ additionalFilterCount }}</span>
             </button>
             <button class="btn btn-ghost btn-sm" type="button" @click="resetSearch">Reset search</button>
+            <input
+              v-model="queryName"
+              class="input input-sm"
+              placeholder="Name for this query"
+              aria-label="Name for this query"
+              data-testid="archive-search-query-name"
+            />
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              :disabled="!queryName.trim()"
+              data-testid="archive-search-save"
+              @click="saveCurrentQuery"
+            >
+              Save query
+            </button>
+            <span v-for="saved in savedQueries" :key="saved.name" class="badge gap-1 badge-outline">
+              <button
+                type="button"
+                class="link"
+                :data-testid="`archive-saved-query-${saved.name}`"
+                @click="applySavedQuery(saved)"
+              >
+                {{ saved.name }}
+              </button>
+              <button
+                type="button"
+                class="link"
+                :aria-label="`Delete saved query ${saved.name}`"
+                @click="removeSavedQuery(saved.name)"
+              >
+                ×
+              </button>
+            </span>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              :disabled="entries.length === 0"
+              data-testid="archive-export-csv"
+              @click="exportEntries('csv')"
+            >
+              Export CSV
+            </button>
+            <button
+              class="btn btn-ghost btn-sm"
+              type="button"
+              :disabled="entries.length === 0"
+              @click="exportEntries('json')"
+            >
+              Export JSON
+            </button>
           </div>
           <div
             v-show="showAdditionalFilters"
@@ -297,6 +568,7 @@ function shortDid(did: string): string {
                 <th class="w-20">Version</th>
                 <th>State</th>
                 <th>Annotation</th>
+                <th v-if="isArchiveManager">Compliance</th>
                 <th v-if="isArchiveManager">Encryption</th>
                 <th v-if="isArchiveManager"><span class="sr-only">Actions</span></th>
               </tr>
@@ -344,6 +616,16 @@ function shortDid(did: string): string {
                       </span>
                     </div>
                   </td>
+                  <td v-if="isArchiveManager" :data-testid="`archive-compliance-${entry.did}`">
+                    <span
+                      v-if="complianceOf(entry)?.flagged"
+                      class="badge badge-sm badge-warning"
+                      :title="failedChecks(complianceOf(entry)!)"
+                    >
+                      Flagged
+                    </span>
+                    <span v-else-if="complianceOf(entry)" class="badge badge-sm badge-success">Compliant</span>
+                  </td>
                   <td v-if="isArchiveManager">
                     <button
                       v-if="erasureStatuses[entry.did]?.local_status === 'shredded'"
@@ -382,6 +664,22 @@ function shortDid(did: string): string {
                       Annotate
                     </button>
                     <button
+                      class="btn btn-ghost btn-sm"
+                      :data-testid="`archive-evidence-${entry.did}`"
+                      @click="toggleEvidence(entry.did)"
+                    >
+                      Evidence
+                    </button>
+                    <button
+                      v-if="!terminalStates.includes(entry.state)"
+                      class="btn btn-ghost btn-sm"
+                      :disabled="terminating"
+                      :data-testid="`archive-terminate-${entry.did}`"
+                      @click="terminateEntry(entry)"
+                    >
+                      Terminate
+                    </button>
+                    <button
                       class="btn text-error btn-ghost btn-sm"
                       :disabled="deleting"
                       :data-testid="`archive-delete-${entry.did}`"
@@ -391,8 +689,39 @@ function shortDid(did: string): string {
                     </button>
                   </td>
                 </tr>
+                <tr v-if="expandedEvidenceDid === entry.did">
+                  <td colspan="7" :data-testid="`evidence-details-${entry.did}`">
+                    <p v-if="evidenceItems.length === 0" class="p-2 text-sm opacity-70">No evidence stored.</p>
+                    <table v-else class="table table-xs">
+                      <thead>
+                        <tr>
+                          <th>Document</th>
+                          <th>Stored</th>
+                          <th>Hash</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="item in evidenceItems" :key="item.id">
+                          <td>
+                            {{ item.name }}
+                            <div v-if="item.description" class="text-xs opacity-70">{{ item.description }}</div>
+                          </td>
+                          <td>{{ formatTimestamp(item.stored_at) }} by {{ item.stored_by }}</td>
+                          <td class="font-mono text-xs">{{ item.content_hash }}</td>
+                          <td>
+                            <button v-if="item.content" class="btn btn-ghost btn-xs" @click="downloadEvidence(item)">
+                              Download
+                            </button>
+                            <span v-else class="text-xs opacity-70">Content erased</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
                 <tr v-if="expandedErasureDid === entry.did && expandedStatus">
-                  <td colspan="6">
+                  <td colspan="7">
                     <div
                       class="space-y-2 overflow-x-auto p-2 text-sm wrap-anywhere"
                       :data-testid="`erasure-details-${entry.did}`"

@@ -117,6 +117,7 @@ func (s *dcsToDcssrvc) assertionKeyOf(ownerDID, localPeer, peerDID string, peerD
 // extract the embedded JSON-LD, and upserts this instance's own local copy of
 // the contract. No tasks cross the boundary — each DCS runs its own workflow.
 func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (res *dcstodcs.DCSToDCSContractPdfResponse, err error) {
+	defer func() { s.auditReceivedExchange(ctx, "post_pdf", req.ContractIri, req.FromPeerDid, err) }()
 	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -355,6 +356,19 @@ func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContract
 		return nil, err
 	}
 	return &dcstodcs.DCSToDCSContractEraseResponse{FromPeerDid: localPeer}, nil
+}
+
+// auditReceivedExchange records a completed inbound peer exchange in the
+// contract's audit trail (DCS-NFR-BR-08). Refused requests are not recorded
+// here: an unauthenticated caller must not be able to write the audit trail.
+// A failure to record is logged; the exchange itself already completed.
+func (s *dcsToDcssrvc) auditReceivedExchange(ctx context.Context, exchange, contractIRI, peerDID string, exchangeErr error) {
+	if exchangeErr != nil {
+		return
+	}
+	if err := trustgate.RecordPeerExchange(context.WithoutCancel(ctx), s.DB, contractIRI, exchange, trustgate.ExchangeReceived, peerDID); err != nil {
+		log.Printf(ctx, "could not audit received %s for %s from %s: %v", exchange, contractIRI, peerDID, err)
+	}
 }
 
 // eraseForPeer authorizes and executes a peer-requested shred: only a party

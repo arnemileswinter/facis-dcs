@@ -48,7 +48,7 @@ Feature: Authentication Endpoints
       | method | endpoint           | payload |
       | GET    | /archive/retrieve  | {}      |
       | GET    | /archive/search    | {}      |
-      | POST   | /archive/store     | {}      |
+      | POST   | /archive/store     | {'kind':'contract','did':'placeholder'} |
       # archive/delete requires did+justification in the query string; without
       # them Goa's request decoder answers 400 before the JWT check can 401,
       # so the row supplies placeholders to reach the auth layer at all.

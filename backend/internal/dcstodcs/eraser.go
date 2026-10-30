@@ -38,10 +38,11 @@ type PeerEraseSender interface {
 	SendErase(ctx context.Context, peerDID string, req *dcstodcs.DCSToDCSContractEraseRequest) error
 }
 
-// AuditedShredder is the production ScopeShredder: it marks every wrapped-CEK
-// record of the contract scope destroyed and writes the KEY_SHREDDED audit
-// event in the same transaction, then drops the plaintext CEK from the store
-// cache. Repeating a shred is a no-op without a duplicate event.
+// AuditedShredder is the production ScopeShredder: it destroys every
+// wrapped-CEK record of the contract scope, erases the plaintext contract
+// content from Postgres and writes the KEY_SHREDDED audit event in the same
+// transaction, then drops the plaintext CEK from the store cache. Repeating a
+// shred is a no-op without a duplicate event.
 type AuditedShredder struct {
 	DB        *sqlx.DB
 	Keys      *artifactstore.PostgresCEKRepo
@@ -60,6 +61,9 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 	affected, err := s.Keys.ShredTx(ctx, tx, scope, actor, reason)
 	if err != nil {
 		return 0, fmt.Errorf("shred cek records for %s: %w", contractIRI, err)
+	}
+	if err := eraseContractContent(ctx, tx, contractIRI); err != nil {
+		return 0, fmt.Errorf("erase plaintext content of %s: %w", contractIRI, err)
 	}
 	if affected > 0 {
 		evt := contractevents.KeyShreddedEvent{
@@ -80,6 +84,28 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 	}
 	s.Artifacts.Forget(scope)
 	return affected, nil
+}
+
+// eraseContractContent removes the plaintext copies of the contract content
+// that Postgres holds (DCS-NFR-SEC-13, DCS-NFR-COMP-03): the current and
+// historical contract data, negotiation change requests and drafts, the
+// archive snapshot, and the payload pinned for signing. Metadata, hashes and
+// signatures stay as evidence.
+func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
+	statements := []string{
+		`UPDATE contracts SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
+		`UPDATE contract_history SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
+		`UPDATE contract_negotiations SET change_request = '{}'::jsonb WHERE did = $1 AND change_request IS DISTINCT FROM '{}'::jsonb`,
+		`DELETE FROM contract_negotiation_drafts WHERE contract_did = $1`,
+		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1 AND contract_snapshot <> '{}'::jsonb`,
+		`UPDATE signature_ceremonies SET pinned_payload = NULL WHERE contract_did = $1 AND pinned_payload IS NOT NULL`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement, contractIRI); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DBContractParties reads the contract's parties from its Responsible record.

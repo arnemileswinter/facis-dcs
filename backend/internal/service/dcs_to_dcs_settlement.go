@@ -37,6 +37,7 @@ const settlementClockSkew = 5 * time.Minute
 // shipped — held locally, re-verifiable, and bound to the document this
 // instance itself holds. Every refusal names the check that failed.
 func (s *dcsToDcssrvc) PostSettlement(ctx context.Context, req *dcstodcs.DCSToDCSContractSettlementRequest) (res *dcstodcs.DCSToDCSContractSettlementResponse, err error) {
+	defer func() { s.auditReceivedExchange(ctx, "post_settlement", req.ContractIri, req.FromPeerDid, err) }()
 	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -333,6 +334,9 @@ func verifyShippedSettlement(jadesSignature, fromPeerDID string, remoteDIDDocume
 // because a withdrawal is the same statement in reverse and must be no easier
 // to inject than the settlement it revokes.
 func (s *dcsToDcssrvc) PostSettlementWithdrawal(ctx context.Context, req *dcstodcs.DCSToDCSSettlementWithdrawalRequest) (res *dcstodcs.DCSToDCSSettlementWithdrawalResponse, err error) {
+	defer func() {
+		s.auditReceivedExchange(ctx, "post_settlement_withdrawal", req.ContractIri, req.FromPeerDid, err)
+	}()
 	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)

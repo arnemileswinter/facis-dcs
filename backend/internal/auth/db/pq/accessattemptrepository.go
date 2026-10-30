@@ -94,18 +94,6 @@ func (r *PostgresAccessAttemptRepo) CountFailedAttemptsByIP(ctx context.Context,
 	return count, nil
 }
 
-func (r *PostgresAccessAttemptRepo) DeleteOlderThan(ctx context.Context, tx *sqlx.Tx, before time.Time) error {
-	statement := `
-        DELETE FROM access_attempts
-        WHERE attempted_at < $1
-    `
-	_, err := tx.ExecContext(ctx, statement, before.UTC())
-	if err != nil {
-		return fmt.Errorf("failed to delete old login attempts: %w", err)
-	}
-	return nil
-}
-
 func (r *PostgresAccessAttemptRepo) ReadPage(ctx context.Context, tx *sqlx.Tx, before *db.AccessAttemptCursor, limit int) ([]db.AccessAttempt, error) {
 	query := `SELECT id, attempt_by, ip_address, attempted_at, success, service, method, roles, scope, did, justification, outcome FROM access_attempts`
 	args := []any{}

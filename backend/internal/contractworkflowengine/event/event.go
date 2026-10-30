@@ -363,10 +363,78 @@ type RetrieveAllEvent struct {
 	UserRoles   userrole.UserRoles `json:"user_roles"`
 }
 
-// RetrieveArchivedEvent is emitted when archive data is retrieved.
+// RetrieveArchivedEvent is emitted when archive data is retrieved. It names
+// every archived contract the caller received (DCS-FR-CSA-18).
 type RetrieveArchivedEvent struct {
-	RetrievedBy string    `json:"retrieved_by"`
+	RetrievedBy  string    `json:"retrieved_by"`
+	ContractDIDs []string  `json:"contract_dids"`
+	OccurredAt   time.Time `json:"occurred_at"`
+}
+
+// SearchArchivedEvent is emitted when the archive is searched. It names the
+// search criteria and every archived contract in the result (DCS-FR-CSA-18).
+type SearchArchivedEvent struct {
+	RetrievedBy  string            `json:"retrieved_by"`
+	Criteria     map[string]string `json:"criteria"`
+	ContractDIDs []string          `json:"contract_dids"`
+	OccurredAt   time.Time         `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e SearchArchivedEvent) EventType() string {
+	return eventtype.SearchArchived.String()
+}
+
+// GetDID implements [event.Event].
+func (e SearchArchivedEvent) GetDID() string {
+	return "*"
+}
+
+// ArchiveOperationFailedEvent records an archive operation that did not
+// complete (DCS-FR-CSA-18: every archival and retrieval operation is logged
+// with its outcome). DID is empty when the operation names no contract.
+type ArchiveOperationFailedEvent struct {
+	DID        string    `json:"did,omitempty"`
+	Operation  string    `json:"operation"`
+	Actor      string    `json:"actor"`
+	Outcome    string    `json:"outcome"`
+	Reason     string    `json:"reason"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e ArchiveOperationFailedEvent) EventType() string {
+	return eventtype.ArchiveOperationFailed.String()
+}
+
+// GetDID implements [event.Event].
+func (e ArchiveOperationFailedEvent) GetDID() string {
+	if e.DID == "" {
+		return "*"
+	}
+	return e.DID
+}
+
+// StoreArchiveEvidenceEvent is emitted when an Archive Manager stores an
+// evidence document for an archived contract (DCS-IR-CSA-02).
+type StoreArchiveEvidenceEvent struct {
+	DID         string    `json:"did"`
+	EvidenceID  string    `json:"evidence_id"`
+	StoredBy    string    `json:"stored_by"`
+	Name        string    `json:"name"`
+	MediaType   string    `json:"media_type"`
+	ContentHash string    `json:"content_hash"`
 	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreArchiveEvidenceEvent) EventType() string {
+	return eventtype.StoreArchiveEvidence.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreArchiveEvidenceEvent) GetDID() string {
+	return e.DID
 }
 
 // StoreArchivedEvent is emitted when a contract is stored in the archive.

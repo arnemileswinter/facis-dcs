@@ -89,6 +89,12 @@ func (s *processAuditAndCompliancesrvc) auditArchiveTrailEntries(ctx context.Con
 func stringPointer(value string) *string { return &value }
 
 func archiveJSONStatus(raw *datatype.JSON) string {
+	return archiveJSONField(raw, "status")
+}
+
+// archiveJSONField returns a string field of an archive evidence document;
+// empty when the document or the field is absent.
+func archiveJSONField(raw *datatype.JSON, key string) string {
 	if raw == nil {
 		return ""
 	}
@@ -100,8 +106,8 @@ func archiveJSONStatus(raw *datatype.JSON) string {
 	if err := json.Unmarshal(bytes, &data); err != nil {
 		return ""
 	}
-	status, _ := data["status"].(string)
-	return status
+	value, _ := data[key].(string)
+	return value
 }
 
 func formatOptionalTime(value *time.Time) string {

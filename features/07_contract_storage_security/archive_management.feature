@@ -35,21 +35,22 @@ Feature: Contract storage and archive retrieval
     Then get http 200:Success code
     And the archive audit log is a non-empty list
 
-  # DCS-IR-CSA-02: the dashboard's store-into-archive surface. The
-  # /archive/store implementation is currently a stub (it logs and returns a
-  # placeholder — backend/internal/service/contract_storage_archive.go; the
-  # real archive entry is written automatically at SIGNED), so the assertable
-  # contract here is the endpoint's RBAC gate: Archive Manager scope gets a
-  # 200, any role outside the archive scope is refused.
-  @UC-07-01 @DCS-IR-CSA-02
-  Scenario: Archive Manager can invoke the archive store endpoint
-    When the Archive Manager stores a contract in the archive
+  # DCS-IR-CSA-02: the Archive Manager stores evidence for an archived
+  # contract. The content is encrypted under the contract's key in IPFS; the
+  # archiving of a contract itself and the validation rules are unit tested
+  # in backend/internal/service/contract_storage_archive_pg_test.go.
+  @UC-07-01 @DCS-IR-CSA-02 @DCS-FR-CSA-25
+  Scenario: Archive Manager stores evidence for an archived contract
+    Given contract "Archive Evidence Contract" has reached contract state "SIGNED"
+    When the Archive Manager stores evidence "delivery-note.txt" for the archived contract "Archive Evidence Contract"
     Then get http 200:Success code
+    And the archive evidence of contract "Archive Evidence Contract" includes "delivery-note.txt"
 
   @UC-07-02 @DCS-IR-CSA-02 @DCS-FR-CSA-02
   Scenario: A role outside the archive scope cannot store into the archive
-    Given I am authenticated with roles: "Template Creator"
-    When I attempt to store a contract in the archive with my current role
+    Given contract "Unauthorized Archive Evidence Contract" has reached contract state "SIGNED"
+    And I am authenticated with roles: "Template Creator"
+    When I attempt to store evidence for the archived contract "Unauthorized Archive Evidence Contract" with my current role
     Then the request is denied with a client error
 
   # DCS-NFR-SEC-13 (secure data disposal): a successful delete also removes

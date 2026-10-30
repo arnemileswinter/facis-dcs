@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -66,8 +67,9 @@ func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchi
 	}
 
 	evt := events.RetrieveArchivedEvent{
-		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now().UTC(),
+		RetrievedBy:  query.RetrievedBy,
+		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
+		OccurredAt:   time.Now().UTC(),
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractStorageArchive)
@@ -123,9 +125,11 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		return nil, fmt.Errorf("could not search archived contracts: %w", err)
 	}
 
-	evt := events.SearchEvent{
-		RetrievedBy: query.RetrievedBy,
-		OccurredAt:  time.Now().UTC(),
+	evt := events.SearchArchivedEvent{
+		RetrievedBy:  query.RetrievedBy,
+		Criteria:     searchCriteria(searchValues),
+		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
+		OccurredAt:   time.Now().UTC(),
 	}
 
 	err = event.Create(ctx, tx, evt, componenttype.ContractStorageArchive)
@@ -141,4 +145,41 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 	return &GetArchivedContractsResult{
 		Contracts: archivedContractsMetadata,
 	}, nil
+}
+
+// archivedContractDIDs lists the contract IDs a retrieval returned, so the
+// audit entry names every contract the caller received (DCS-FR-CSA-18).
+func archivedContractDIDs(rows []db.ContractMetadata) []string {
+	dids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		dids = append(dids, row.DID)
+	}
+	return dids
+}
+
+// searchCriteria keeps the filters the caller set; empty filters are left out.
+func searchCriteria(v db.SearchValues) map[string]string {
+	criteria := map[string]string{}
+	set := func(key, value string) {
+		if value != "" {
+			criteria[key] = value
+		}
+	}
+	set("did", v.DID)
+	if v.ContractVersion != 0 {
+		set("contract_version", strconv.Itoa(v.ContractVersion))
+	}
+	set("state", v.State)
+	set("name", v.Name)
+	set("description", v.Description)
+	set("contract_data", v.ContractData)
+	set("tag", v.Tag)
+	set("party", v.Party)
+	if v.ValidFrom != nil {
+		set("valid_from", v.ValidFrom.UTC().Format(time.RFC3339))
+	}
+	if v.ValidUntil != nil {
+		set("valid_until", v.ValidUntil.UTC().Format(time.RFC3339))
+	}
+	return criteria
 }

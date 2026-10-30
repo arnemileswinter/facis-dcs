@@ -505,6 +505,9 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		}); err != nil {
 			return err
 		}
+		if err := RecordPeerExchange(ctx, s.DB, did, "post_pdf", ExchangeSent, peer); err != nil {
+			log.Printf(ctx, "could not audit the %s ship of %s to %s: %v", state, did, peer, err)
+		}
 	}
 	return nil
 }

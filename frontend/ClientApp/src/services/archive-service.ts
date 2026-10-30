@@ -43,26 +43,93 @@ export interface ArchiveErasureStatus {
   peers: ArchiveErasurePeerStatus[]
 }
 
-export interface ArchiveSearch {
-  did?: string
+/** The record /archive/store wrote (DCS-IR-CSA-02). */
+export interface ArchiveStoreResult {
+  did: string
+  kind: 'contract' | 'evidence'
+  contract_version?: number
+  evidence_id?: string
+  content_hash: string
+}
+
+/** An evidence document stored for an archived contract. `content` is base64 and absent once erased. */
+export interface ArchiveEvidenceItem {
+  id: string
+  did: string
+  name: string
+  media_type: string
+  description?: string
+  content_hash: string
+  size_bytes: number
+  stored_by: string
+  stored_at: string
+  content?: string
+}
+
+/** One archive compliance rule result (DCS-FR-CSA-19). */
+export interface ArchiveComplianceCheck {
+  rule: 'retention' | 'signature_policy' | 'metadata_completeness' | 'evidence_completeness'
+  passed: boolean
+  reason?: string
+}
+
+/** The compliance verdict of one live archive entry (DCS-FR-CSA-19). */
+export interface ArchiveComplianceItem {
+  did: string
+  contract_version: number
   name?: string
-  party?: string
+  flagged: boolean
+  checks: ArchiveComplianceCheck[]
+}
+
+/** The filters of /archive/search (DCS-FR-CSA-10, DCS-FR-CSA-13, DCS-FR-CSA-22). */
+export interface ArchiveSearchQuery {
+  did?: string
   state?: string
+  name?: string
+  description?: string
+  contract_data?: string
+  tag?: string
+  party?: string
   valid_from?: string
   valid_until?: string
   contract_version?: number
-  tag?: string
 }
+
+/** The /archive/search filters under the name the archive views use. */
+export type ArchiveSearch = ArchiveSearchQuery
 
 export const archiveService = {
   async detail(did: string, contract_version: number): Promise<Contract> {
     return http.get<Contract>('/archive/detail', { params: { did, contract_version } }).then((res) => res.data)
   },
-  async search(params: ArchiveSearch): Promise<ArchivedContract[]> {
-    return http.get<ArchivedContract[]>('/archive/search', { params }).then((res) => res.data)
-  },
   async retrieve(): Promise<ArchivedContract[]> {
     return http.get<{ contracts?: ArchivedContract[] }>('/archive/retrieve').then((res) => res.data.contracts ?? [])
+  },
+
+  async search(query: ArchiveSearchQuery): Promise<ArchivedContract[]> {
+    return http.get<ArchivedContract[]>('/archive/search', { params: query }).then((res) => res.data ?? [])
+  },
+
+  /** Archives the current version of a SIGNED, TERMINATED or EXPIRED contract (DCS-IR-CSA-02). */
+  async storeContract(did: string): Promise<ArchiveStoreResult> {
+    return http.post<ArchiveStoreResult>('/archive/store', { kind: 'contract', did }).then((res) => res.data)
+  },
+
+  /** Stores an evidence document for an archived contract; `content` is base64 (DCS-IR-CSA-02). */
+  async storeEvidence(
+    did: string,
+    evidence: { name: string; media_type: string; content: string; description?: string },
+  ): Promise<ArchiveStoreResult> {
+    return http.post<ArchiveStoreResult>('/archive/store', { kind: 'evidence', did, ...evidence }).then((res) => res.data)
+  },
+
+  async evidence(did: string): Promise<ArchiveEvidenceItem[]> {
+    return http.get<ArchiveEvidenceItem[]>('/archive/evidence', { params: { did } }).then((res) => res.data ?? [])
+  },
+
+  async compliance(): Promise<ArchiveComplianceItem[]> {
+    return http.get<ArchiveComplianceItem[]>('/archive/compliance').then((res) => res.data ?? [])
   },
 
   async erasureStatus(did: string): Promise<ArchiveErasureStatus> {
