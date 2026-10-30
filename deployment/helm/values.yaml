@@ -206,6 +206,32 @@ readinessProbe:
   failureThreshold: 3
   successThreshold: 1
 
+# Process liveness (DCS-NFR-PER-03). /livez answers 200 while the process
+# serves HTTP, also during initialization, so a slow HSM or catalogue gate does
+# not cause a restart; a process that stops serving is restarted. The startup
+# probe gives the steps before the listener opens (database connection,
+# migrations) up to 5 minutes.
+startupProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 60
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Keeps at least one backend pod during voluntary disruptions (node drain,
+# cluster upgrade) when more than one replica runs (DCS-NFR-PER-03).
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
   realmURL: ""

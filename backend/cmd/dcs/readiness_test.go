@@ -43,3 +43,19 @@ func TestFinalReadinessIsUnauthenticatedAndReady(t *testing.T) {
 		t.Fatalf("body = %q, want ready", got)
 	}
 }
+
+// DCS-NFR-PER-03: the liveness probe sees a serving process as alive during
+// initialization and after it.
+func TestLivenessDuringAndAfterInitialization(t *testing.T) {
+	t.Parallel()
+
+	final := http.NewServeMux()
+	mountReadinessEndpoint(final)
+	for name, h := range map[string]http.Handler{"bootstrap": bootstrapHTTPHandler(), "final": final} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, livenessEndpointPath, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s status = %d, want %d", name, livenessEndpointPath, rec.Code, http.StatusOK)
+		}
+	}
+}

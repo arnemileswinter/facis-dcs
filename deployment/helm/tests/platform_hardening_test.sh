@@ -42,4 +42,11 @@ render "${ACK[@]}" --api-versions traefik.io/v1alpha1/TLSOption --set ingress.en
   --set 'ingress.hosts[0].host=a.example' --set 'ingress.tls[0].hosts[0]=a.example' --set 'ingress.tls[0].secretName=t' \
   --set 'ingress.tlsOptions.cipherSuites[0]=TLS_AES_128_GCM_SHA256' >/dev/null || fail "TLSOption with cipherSuites does not render"
 
+# DCS-NFR-PER-03: liveness probe and, with more than one replica, a PodDisruptionBudget.
+prod="$(render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}")"
+grep -A4 'livenessProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no liveness probe on /livez"
+grep -A4 'startupProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no startup probe on /livez"
+grep -q 'kind: PodDisruptionBudget' <<<"$prod" || fail "no PodDisruptionBudget for 3 replicas"
+render "${ACK[@]}" | grep -q 'kind: PodDisruptionBudget' && fail "PodDisruptionBudget for a single replica blocks drains"
+
 echo 'platform hardening render tests passed'
