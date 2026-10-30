@@ -250,12 +250,18 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 
 	grantedRoles := verified.GrantedRoles
 
+	credentialStatus, err := oid4vp.StatusReference(verified.RawClaims)
+	if err != nil {
+		return nil, goa.PermanentError("unauthorized", "credential status reference: %v", err)
+	}
+
 	redirectTo, err := s.hydra.AcceptLoginAndConsent(
 		ctx,
 		*attempt.HydraLoginChallenge,
 		verified.SubjectDID,
 		verified.ParticipantDID,
 		grantedRoles,
+		credentialStatus,
 	)
 
 	if err != nil {

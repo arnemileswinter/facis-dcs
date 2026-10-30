@@ -59,6 +59,32 @@ func ConfigureStatusListVerification(trustCfg *TrustConfig) error {
 	return nil
 }
 
+// statusReferenceClaims are the claims a status check reads: the credential's
+// issuer, which the status list must match, and its status pointer.
+var statusReferenceClaims = []string{"iss", "issuer", "status", "credentialStatus"}
+
+// StatusReference keeps from verified credential claims only what a later
+// status check of the same credential needs, so a session can carry it.
+func StatusReference(rawClaims json.RawMessage) (json.RawMessage, error) {
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(rawClaims, &claims); err != nil {
+		return nil, fmt.Errorf("parse credential claims: %w", err)
+	}
+	ref := map[string]json.RawMessage{}
+	for _, name := range statusReferenceClaims {
+		if v, ok := claims[name]; ok {
+			ref[name] = v
+		}
+	}
+	return json.Marshal(ref)
+}
+
+// CheckStatus checks the current status of a credential again, from claims
+// that StatusReference kept. A revoked or suspended credential is an error.
+func CheckStatus(statusReference json.RawMessage) error {
+	return checkStatusList(statusReference)
+}
+
 func checkStatusList(rawClaims json.RawMessage) error {
 	if statusListVerifier == nil {
 		return fmt.Errorf("status list verifier is not configured")

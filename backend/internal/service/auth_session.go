@@ -5,18 +5,21 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
 	genauth "digital-contracting-service/gen/auth"
+	"digital-contracting-service/internal/auth"
 	authaudit "digital-contracting-service/internal/auth/audit"
 	authdb "digital-contracting-service/internal/auth/db"
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
 	goa "goa.design/goa/v3/pkg"
@@ -59,6 +62,8 @@ type authSvc struct {
 	requestSigner     oid4vprequest.Signer
 	oid4vpClientID    string
 	participantDID    string
+	// checkCredentialStatus checks a session's PoA status reference again.
+	checkCredentialStatus func(json.RawMessage) error
 }
 
 func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
@@ -108,6 +113,8 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		requestSigner:     cfg.RequestSigner,
 		oid4vpClientID:    cfg.OID4VPClientID,
 		participantDID:    cfg.ParticipantDID,
+
+		checkCredentialStatus: oid4vp.CheckStatus,
 	}, nil
 }
 
@@ -179,6 +186,21 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 		return nil, goa.PermanentError("unauthorized", "token refresh failed: %v", err)
 	}
 
+	// A session lasts only as long as the credential it was opened with
+	// (NFR-BR-06, IR-CI-09): a revoked PoA ends it at the next refresh.
+	if err := s.checkSessionCredential(tokenResp.AccessToken); err != nil {
+		log.Printf(ctx, "auth.refresh refused: %v", err)
+		refreshToken := tokenResp.RefreshToken
+		if strings.TrimSpace(refreshToken) == "" {
+			refreshToken = cookie.Value
+		}
+		if err := s.hydra.RevokeRefreshToken(ctx, refreshToken); err != nil {
+			log.Printf(ctx, "auth.refresh could not revoke the session: %v", err)
+		}
+		clearAuthSessionCookies(ctx)
+		return nil, goa.PermanentError("unauthorized", auth.CredentialRefused)
+	}
+
 	if strings.TrimSpace(tokenResp.RefreshToken) != "" {
 		SetRefreshTokenInContext(ctx, tokenResp.RefreshToken)
 	}
@@ -192,6 +214,26 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 		TokenType:   tokenResp.TokenType,
 		ExpiresIn:   tokenResp.ExpiresIn,
 	}, nil
+}
+
+// checkSessionCredential checks again the status of the PoA credential named
+// in a refreshed access token. The token comes directly from the Hydra token
+// endpoint, so its signature is not checked here.
+func (s *authSvc) checkSessionCredential(accessToken string) error {
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(accessToken, claims); err != nil {
+		return fmt.Errorf("read refreshed access token: %w", err)
+	}
+	ext, _ := claims["ext"].(map[string]any)
+	ref, ok := ext[hydra.CredentialStatusClaim]
+	if !ok {
+		return fmt.Errorf("session carries no credential status reference")
+	}
+	raw, err := json.Marshal(ref)
+	if err != nil {
+		return err
+	}
+	return s.checkCredentialStatus(raw)
 }
 
 func (s *authSvc) Logout(ctx context.Context) (*genauth.LogoutResult, error) {
