@@ -454,8 +454,40 @@ type Applier struct {
 // range the external signature will cover (embed-then-sign, ADR-3), and returns
 // the unsigned PDF with the signature field placed. The sealed agreement is
 // persisted so the content the signatory signs is frozen. The DCS applies no
-// signature and holds no signing key.
+// signature and holds no signing key. A refused attempt is audited
+// (DCS-FR-SM-19).
 func (h *Applier) Prepare(ctx context.Context, cmd ApplyCmd) ([]byte, error) {
+	toBeSigned, err := h.prepareToBeSigned(ctx, cmd)
+	if err != nil {
+		AuditRefusedSigning(ctx, h.DB, cmd, event2.StepPrepare, err)
+	}
+	return toBeSigned, err
+}
+
+// AuditRefusedSigning records a refused signing attempt with its signer,
+// credential and error (DCS-FR-SM-19). The attempt's own transaction rolls
+// back, so the entry commits in a transaction of its own.
+func AuditRefusedSigning(ctx context.Context, sqlDB *sqlx.DB, cmd ApplyCmd, step string, refusal error) {
+	evt := event2.ApplyEvent{
+		DID:            cmd.DID,
+		AppliedBy:      cmd.AppliedBy,
+		OccurredAt:     time.Now().UTC(),
+		HolderDID:      cmd.HolderDID,
+		UserRoles:      cmd.UserRoles,
+		CredentialType: cmd.CredentialType,
+		SignerDID:      cmd.SignerDID,
+		FieldName:      cmd.FieldName,
+		CeremonyID:     cmd.CeremonyID,
+		Step:           step,
+		Outcome:        event2.OutcomeFailed,
+		Error:          refusal.Error(),
+	}
+	if err := event.CreateInOwnTx(ctx, sqlDB, evt, componenttype.SignatureManagement); err != nil {
+		log.Printf("could not audit the refused signing attempt on %s: %v", cmd.DID, err)
+	}
+}
+
+func (h *Applier) prepareToBeSigned(ctx context.Context, cmd ApplyCmd) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -526,8 +558,16 @@ type SubmitSignatureCmd struct {
 // and records what the signatory returned. This is the same acceptance path for
 // the wallet callback and for a downloaded-then-Adobe-signed re-upload — the DCS
 // is ignorant of how the signature was produced, only that it is the
-// signatory's.
+// signatory's. A refused attempt is audited (DCS-FR-SM-19).
 func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) error {
+	err := h.submitSignature(ctx, cmd)
+	if err != nil {
+		AuditRefusedSigning(ctx, h.DB, cmd.ApplyCmd, event2.StepSubmit, err)
+	}
+	return err
+}
+
+func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) error {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -1391,6 +1431,11 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		CredentialType:  cmd.CredentialType,
 		AppliedBy:       cmd.AppliedBy,
 		OccurredAt:      in.signedAt,
+		SignerDID:       cmd.SignerDID,
+		FieldName:       in.ceremony.FieldName,
+		CeremonyID:      in.ceremony.ID,
+		Step:            event2.StepSubmit,
+		Outcome:         event2.OutcomeCompleted,
 	}
 	if err := event.Create(ctx, tx, evt, componenttype.SignatureManagement); err != nil {
 		return fmt.Errorf("could not create event: %w", err)

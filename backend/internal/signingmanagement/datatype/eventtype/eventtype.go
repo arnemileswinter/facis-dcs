@@ -10,6 +10,7 @@ type EventType string
 const (
 	Apply                EventType = "APPLY_SIGNATURE"
 	Applied              EventType = "APPLIED_SIGNATURE"
+	ApplyFailed          EventType = "APPLY_SIGNATURE_FAILED"
 	Validate             EventType = "VALIDATE_SIGNATURE"
 	ValidateFailed       EventType = "VALIDATE_SIGNATURE_FAILED"
 	Verify               EventType = "VERIFY_SIGNATURE"
@@ -26,6 +27,7 @@ const (
 var validStates = map[EventType]bool{
 	Apply:                true,
 	Applied:              true,
+	ApplyFailed:          true,
 	Validate:             true,
 	ValidateFailed:       true,
 	Verify:               true,

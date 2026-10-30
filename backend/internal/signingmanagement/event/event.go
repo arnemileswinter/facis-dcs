@@ -64,7 +64,7 @@ func (e SearchEvent) GetDID() string {
 	return "*"
 }
 
-// Outcome values of a Validate or Revoke audit entry (DCS-FR-SM-19).
+// Outcome values of an Apply, Validate or Revoke audit entry (DCS-FR-SM-19).
 const (
 	OutcomeCompleted = "COMPLETED"
 	OutcomeFailed    = "FAILED"
@@ -188,7 +188,15 @@ func (e ComplianceValidationEvent) GetDID() string {
 	return e.DID
 }
 
-// ApplyEvent is emitted when contract is reviewed.
+// Steps of a signing attempt recorded in an ApplyEvent.
+const (
+	StepPrepare        = "PREPARE"
+	StepSubmit         = "SUBMIT"
+	StepWalletCallback = "WALLET_CALLBACK"
+)
+
+// ApplyEvent is emitted when a signature is applied, and when a signing
+// attempt is refused (DCS-FR-SM-19). Error is set only for a refused attempt.
 type ApplyEvent struct {
 	DID             string             `json:"did"`
 	ContractVersion int                `json:"contract_version"`
@@ -197,10 +205,20 @@ type ApplyEvent struct {
 	HolderDID       string             `json:"holder_did"`
 	UserRoles       userrole.UserRoles `json:"user_roles"`
 	CredentialType  string             `json:"credential_type"`
+	SignerDID       string             `json:"signer_did"`
+	FieldName       string             `json:"field_name,omitempty"`
+	CeremonyID      string             `json:"ceremony_id,omitempty"`
+	Step            string             `json:"step"`
+	Outcome         string             `json:"outcome"`
+	Error           string             `json:"error,omitempty"`
 }
 
-// EventType implements the Event interface.
+// EventType implements the Event interface. A refused attempt has its own
+// type, so it does not trigger what an applied signature triggers.
 func (e ApplyEvent) EventType() string {
+	if e.Outcome == OutcomeFailed {
+		return eventtype.ApplyFailed.String()
+	}
 	return eventtype.Applied.String()
 }
 
