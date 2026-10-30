@@ -90,6 +90,54 @@ type PeerSignatures interface {
 	GetSyncSignature(ctx context.Context, tx *sqlx.Tx, did string) (*db2.SyncSignature, error)
 }
 
+// Deployable reports whether the contract may deploy now: it is SIGNED and
+// every declared signature field is signed. Callers run it before the
+// deployment workflow gate, so a partially signed contract dispatches no gate.
+func (h *Deployer) Deployable(ctx context.Context, did, localPeer string) error {
+	tx, err := h.DB.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	data, err := h.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract %s: %w", did, err)
+	}
+	return h.deployable(ctx, tx, did, data, localPeer)
+}
+
+func (h *Deployer) deployable(ctx context.Context, tx *sqlx.Tx, did string, data *db.Contract, localPeer string) error {
+	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventDeploy); err != nil {
+		return err
+	}
+
+	// Multi-signer gate (DCS-FR-SM-07/-17, DCS-NFR-BR-03): a contract that
+	// declares signature fields may only deploy once EVERY declared field is
+	// signed. The auto-deploy subscriber fires after each signature, so a
+	// partially signed contract hits this gate until the last signatory
+	// signs.
+	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
+		required := validation.RequiredSignatureFields([]byte(*data.ContractData))
+		if len(required) > 0 {
+			signedFields, err := h.CRepo.ReadSignedSignatureFieldNames(ctx, tx, did)
+			if err != nil {
+				return fmt.Errorf("could not read signed signature fields: %w", err)
+			}
+			if h.PeerSigs == nil {
+				return fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", did)
+			}
+			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, did)
+			if err != nil {
+				return fmt.Errorf("could not read the counterparty signature for %s: %w", did, err)
+			}
+			if missing := signatureEvidence(required, signedFields, data.Responsible, localPeer, peerSig).Unsigned(); len(missing) > 0 {
+				return fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
+			}
+		}
+	}
+	return nil
+}
+
 func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, error) {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -105,34 +153,8 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 	if err != nil {
 		return nil, fmt.Errorf("could not read contract %s: %w", cmd.DID, err)
 	}
-
-	if err := contractstate.ValidateTransition(contractstate.ContractState(data.State), contractstate.EventDeploy); err != nil {
+	if err := h.deployable(ctx, tx, cmd.DID, data, cmd.LocalPeer); err != nil {
 		return nil, err
-	}
-
-	// Multi-signer gate (DCS-FR-SM-07/-17, DCS-NFR-BR-03): a contract that
-	// declares signature fields may only deploy once EVERY declared field is
-	// signed. The auto-deploy subscriber fires after each signature, so a
-	// partially signed contract hits this gate until the last signatory
-	// signs.
-	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
-		required := validation.RequiredSignatureFields([]byte(*data.ContractData))
-		if len(required) > 0 {
-			signedFields, err := h.CRepo.ReadSignedSignatureFieldNames(ctx, tx, cmd.DID)
-			if err != nil {
-				return nil, fmt.Errorf("could not read signed signature fields: %w", err)
-			}
-			if h.PeerSigs == nil {
-				return nil, fmt.Errorf("could not check counterparty signatures for %s: no peer signature store is configured", cmd.DID)
-			}
-			peerSig, err := h.PeerSigs.GetSyncSignature(ctx, tx, cmd.DID)
-			if err != nil {
-				return nil, fmt.Errorf("could not read the counterparty signature for %s: %w", cmd.DID, err)
-			}
-			if missing := signatureEvidence(required, signedFields, data.Responsible, cmd.LocalPeer, peerSig).Unsigned(); len(missing) > 0 {
-				return nil, fmt.Errorf("%w: unsigned signature fields: %s", ErrSigningIncomplete, strings.Join(missing, ", "))
-			}
-		}
 	}
 
 	contractDataBytes := []byte(`{}`)

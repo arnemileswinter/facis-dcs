@@ -175,6 +175,7 @@ test('Template create trims required details, blocks the request, exposes inline
   })
   await page.goto('/ui/templates/new')
   await page.getByRole('button', { name: /^Contract/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByTestId('template-global-name').fill('   ')
   await page.getByTestId('template-base-description').fill('   ')
   await page.getByRole('button', { name: 'Create', exact: true }).click()

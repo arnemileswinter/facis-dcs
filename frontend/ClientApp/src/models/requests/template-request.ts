@@ -1,9 +1,11 @@
 import type { DcsTemplateData } from '../dcs-jsonld'
 import type { ContractTemplateActionFlag } from '@/types/contract-template-action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
+import type { PartyType } from '@/types/party-type'
 import type { TemplateType } from '@/types/template-type'
 
 export interface ContractTemplateCreateRequest {
+  party_type: PartyType
   template_type: TemplateType
   name?: string
   description?: string
@@ -25,6 +27,7 @@ export interface ContractTemplateSubmitRequest {
 }
 
 export interface ContractTemplateUpdateRequest {
+  party_type?: PartyType
   did: string
   updated_at: string
   name?: string
@@ -34,6 +37,7 @@ export interface ContractTemplateUpdateRequest {
 }
 
 export interface ContractTemplateUpdateManageRequest {
+  party_type?: PartyType
   did: string
   updated_at: string
   template_type?: TemplateType
@@ -44,6 +48,7 @@ export interface ContractTemplateUpdateManageRequest {
 }
 
 export interface ContractTemplateSearchRequest {
+  party_type?: PartyType
   offset?: number
   limit?: number
   did?: string
@@ -93,7 +98,7 @@ export interface ContractTemplateRegisterRequest {
 
 export interface ContractTemplateAuditRequest {
   did: string
-  updated_at: string
+  updated_at?: string
   justification: string
 }
 

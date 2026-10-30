@@ -50,11 +50,14 @@ database:
     name: dcs-prod-db-credentials
     key: DATABASE_URL
 
-# See values.acceptance.yml's comment: Hydra's system secret and client
-# secrets have no secretKeyRef in this chart version yet — inject both via
-# --set from your secret manager, never commit them.
+# See values.acceptance.yml's comment: the Hydra system secret comes from a
+# Kubernetes Secret; client secrets are injected via --set from your secret
+# manager, never committed.
 hydra:
   enabled: true
+  secrets:
+    systemSecretRef:
+      name: dcs-prod-hydra-secrets
   config:
     dev: false
     selfIssuerURL: "https://dcs.example.org"

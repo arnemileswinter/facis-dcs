@@ -47,12 +47,17 @@ type DCSToDCSSynchronizer struct {
 	DB          *sqlx.DB
 	CRepo       db.ContractRepo
 	SRepo       db2.SyncRepository
+	NRepo       db.NegotiationRepo
+	NORepo      db.NegotiationOutboundRepo
 	Artifacts   *artifactstore.Store
 	DIDDocument identity.DIDDocument
 	TrustGate   TrustGate
 	// SettlementSender delivers this instance's settlement artifact — the
 	// evidence the counterparty needs before it may sign.
 	SettlementSender SettlementSender
+	// NegotiationSender delivers Proposal / Accept / Reject messages queued in
+	// contract_negotiation_outbound.
+	NegotiationSender NegotiationSender
 }
 
 // shippableStates are the contract states whose PDF is shipped to the
@@ -82,6 +87,16 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		// signed PDF directly). shipContractPDF gates on the shippable state.
 		switch source {
 		case componenttype.ContractWorkflowEngine:
+			// Negotiation messages are queued at Propose/Accept/Reject and shipped
+			// here so peer downtime does not fail the local create; the retry
+			// scheduler drains anything still pending.
+			if isNegotiationDeliveryEvent(evt.Type()) {
+				if negotiationDID, err := didFromEvent(evt); err == nil {
+					s.shipNegotiationMessagesForDID(ctx, negotiationDID)
+				} else {
+					log.Errorf(ctx, err, "could not read did from event %s", evt.Data())
+				}
+			}
 			// The two edges that take an agreement back — a reviewer sending the
 			// submission back (SUBMIT_CONTRACT) and an approver rejecting
 			// (REJECT_CONTRACT) — queue a withdrawal toward every peer that was
@@ -236,6 +251,7 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		// deliver either.
 		s.retryUndeliveredSettlements(ctx)
 		s.retryUndeliveredSettlementWithdrawals(ctx)
+		s.retryUndeliveredNegotiationMessages(ctx)
 	}
 }
 

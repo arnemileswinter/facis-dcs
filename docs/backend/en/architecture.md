@@ -20,7 +20,7 @@ This document describes the architecture as it emerges from the codebase — as 
 
 | Building Block | Technology | Purpose |
 |---|---|---|
-| Language/Runtime | Go 1.25 | Backend service |
+| Language/Runtime | Go 1.26 | Backend service |
 | API Framework | [Goa v3](https://goa.design) (design-first) | DSL-based API definition, code generation for transport/types |
 | Database | PostgreSQL (`sqlx`) | Transactional persistence per domain |
 | Event Bus | NATS (CloudEvents format) | Cross-domain asynchronous communication |

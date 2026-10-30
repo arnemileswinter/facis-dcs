@@ -207,6 +207,7 @@ func buildCatalogueVerificationPayload(
 			name,
 			description,
 			fullTemplate.TemplateType,
+			fullTemplate.PartyType,
 		),
 		TemplateDataString: templateDataString,
 	})

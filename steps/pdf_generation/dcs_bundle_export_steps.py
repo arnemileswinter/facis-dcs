@@ -54,6 +54,7 @@ def step_given_template_for_bundle_export(context, name):
         template_create_url(context),
         {
             "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
             "name": name,
             "description": "BDD template for bundle export",
             "template_data": TemplateService.canonical_document_data(name, clause_text="Base clause"),

@@ -5,11 +5,29 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"goa.design/goa/v3/security"
 
 	pac "digital-contracting-service/gen/process_audit_and_compliance"
+	pacqry "digital-contracting-service/internal/processauditandcompliance/query"
 )
+
+// DCS-FR-PACM-07: the clause report carries the credential metadata of the
+// signatures over the contract.
+func TestClauseReportCarriesCredentialMetadata(t *testing.T) {
+	signedAt := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	subject, org := "CN=Jane Smith", "did:web:org-a"
+	got := mapClauseReportCredentials([]pacqry.CredentialMetadata{{
+		Party: org, SignerDID: "did:key:jane", SignatureStatus: "SIGNED", SignedAt: &signedAt,
+		AchievedLevel: "AES", RequiredLevel: "QES", CertSubject: &subject, PoAOrganization: &org,
+	}})
+	if len(got) != 1 || got[0].Party != org || got[0].AchievedLevel != "AES" || got[0].RequiredLevel != "QES" ||
+		got[0].SignedAt == nil || *got[0].SignedAt != "2026-10-01T09:00:00Z" ||
+		got[0].SignerCertSubject == nil || *got[0].SignerCertSubject != subject || got[0].PoaOrganization == nil {
+		t.Fatalf("credentials = %+v", got)
+	}
+}
 
 // DCS-FR-PACM-05: a Compliance Officer investigates non-compliance, so the
 // report and case file exports admit the role.

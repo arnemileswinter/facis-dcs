@@ -21,6 +21,11 @@ from support.api_client import (
 )
 from support.services.auth_service import AuthService
 
+@given("no bearer token is supplied")
+def step_given_anonymous_request(context):
+    context.headers = {}
+
+
 @given('I hold an expired credential with roles: "{roles}"')
 def step_given_expired_credential_with_roles(context, roles):
     role_list = [role.strip() for role in roles.split(",")]

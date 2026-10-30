@@ -51,6 +51,7 @@ type PeerPdfReceiveCmd struct {
 type PeerPdfReceiver struct {
 	DB        *sqlx.DB
 	CRepo     db.ContractRepo
+	NRepo     db.NegotiationRepo
 	RTRepo    db.ReviewTaskRepo
 	ATRepo    db.ApprovalTaskRepo
 	NTRepo    db.NegotiationTaskRepo
@@ -59,8 +60,9 @@ type PeerPdfReceiver struct {
 
 // Handle upserts the local copy from the shipped contract's JSON-LD. A first
 // ship creates the copy owned by the counterparty (its origin); a later ship
-// updates the content and bumps the local version. The contract lands in
-// NEGOTIATION — the settlement and signing phases are separate ships (ADR-13).
+// snapshots the held version, updates the content and bumps the local version.
+// The contract lands in NEGOTIATION — the settlement and signing phases are
+// separate ships (ADR-13).
 func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) error {
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -92,7 +94,8 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// is already this instance's native DCS form — the exact bytes the originator
 	// embedded — so it is used as-is, with no dialect round-trip.
 	payload := datatype.JSON(cmd.Payload)
-	templateIRI, templateVersion, name := parseShippedContractMeta(cmd.Payload)
+	templateIRI, templateVersion := parseShippedTemplateProvenance(cmd.Payload)
+	shared := parseShippedSharedDetails(cmd.Payload)
 	now := time.Now().UTC()
 
 	data := db.Contract{
@@ -101,10 +104,24 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		ContractData:    &payload,
 		TemplateDID:     templateIRI,
 		TemplateVersion: templateVersion,
-		Name:            name,
+		Name:            shared.Name,
+		Description:     shared.Description,
+		StartDate:       shared.StartDate,
+		ExpDate:         shared.ExpDate,
+		ExpPolicy:       shared.ExpPolicy,
+		ExpNoticePeriod: shared.ExpNoticePeriod,
 	}
 
 	if existing != nil {
+		// Before adopting a post-Submit re-ship, rebuild the expected document
+		// from this instance's formal base and confirmed Accepts.
+		// Counteroffer / signed-artifact re-ships with no local Accepts adopt
+		// without reconstruct (ADR-13 PDF exchange).
+		if h.NRepo != nil {
+			if err := VerifyShippedAgainstLocalRound(ctx, tx, h.CRepo, h.NRepo, cmd.ContractIRI, existing.ContractVersion, cmd.Payload); err != nil {
+				return err
+			}
+		}
 		// A re-ship (a counteroffer or a settled/signed version) refreshes the
 		// content but must not clobber this instance's own local RBAC progress —
 		// its intrinsic state is private and advances through its own workflow.
@@ -118,6 +135,11 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		data.Origin = existing.Origin
 		data.CreatedBy = existing.CreatedBy
 		data.ContractVersion = existing.ContractVersion + 1
+		// Snapshot the current row to contract_history before the re-ship
+		// replaces it and bumps contract_version (ADR-0006).
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI, cmd.Counterparty); err != nil {
+			return fmt.Errorf("could not create history entry for did %s: %w", cmd.ContractIRI, err)
+		}
 		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
 		}
@@ -125,7 +147,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// engagement this instance had with the superseded version is owed again
 		// against this one. This carries tasks forward, it never mints a first
 		// one — receiving a document is not engaging with it.
-		if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+		if isSignedArtifactReship(cmd) {
+			// Peer sent an already-signed PDF: bump version, but do not reopen negotiation tasks.
+			if err := h.NTRepo.RollForwardKeepingState(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+				return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+			}
+		} else if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
 			return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
 		}
 	} else {
@@ -224,12 +251,19 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	return tx.Commit()
 }
 
-// parseShippedContractMeta pulls the template provenance and title out of the
+func isSignedArtifactReship(cmd PeerPdfReceiveCmd) bool {
+	if cmd.AdoptRevoked {
+		return false
+	}
+	return provenance.CarriesPAdESSignature(cmd.Pdf)
+}
+
+// parseShippedTemplateProvenance pulls the template DID and version out of the
 // shipped contract's JSON-LD (derivedFromTemplate.@id ends in the template IRI).
-func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersion int, name *string) {
+func parseShippedTemplateProvenance(payload []byte) (templateIRI string, templateVersion int) {
 	var doc map[string]any
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return "", 0, nil
+		return "", 0
 	}
 	if prov, ok := doc["derivedFromTemplate"].(map[string]any); ok {
 		if id, ok := prov["@id"].(string); ok {
@@ -239,10 +273,5 @@ func parseShippedContractMeta(payload []byte) (templateIRI string, templateVersi
 			templateVersion = int(v)
 		}
 	}
-	if meta, ok := doc["dcs:metadata"].(map[string]any); ok {
-		if t, ok := meta["dcs:title"].(string); ok && t != "" {
-			name = &t
-		}
-	}
-	return templateIRI, templateVersion, name
+	return templateIRI, templateVersion
 }

@@ -115,6 +115,7 @@ test('catalog-backed purpose values are grouped and retain their concept IRIs', 
   await loginAs('Template Creator')
   await page.goto('/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page
     .getByRole('group')
     .filter({ hasText: 'Global Name' })

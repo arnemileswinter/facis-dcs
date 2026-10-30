@@ -16,6 +16,7 @@ import (
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
+	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
@@ -65,6 +66,10 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 }
 
 func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractstoragearchive.ArchiveRetrieveRequest) (res *contractstoragearchive.ArchiveRetrieveResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -94,6 +99,10 @@ func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractst
 }
 
 func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstoragearchive.ArchiveSearchRequest) (res []*contractstoragearchive.ContractItem, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -173,11 +182,16 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	// The snapshot CIDs must be captured before the soft-delete: afterwards
 	// there is no other record of which IPFS objects the entries pointed at
 	// for this deletion.
-	entries, err := s.CRepo.ReadArchiveEntries(ctx, tx)
+	// Delete is a role-authorized write; F03 party scoping applies to reads only.
+	entries, err := s.CRepo.ReadArchiveEntries(contractreadpolicy.WithSystemScope(ctx), tx)
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
+	if until := retainedUntil(entries, p.Did, time.Now().UTC()); until != nil {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
+			"archive entry for DID %q is retained until %s (retention policy)", p.Did, until.Format(time.RFC3339)))
+	}
 
 	deletedBy := middleware.GetParticipantID(ctx)
 	affected, err := s.CRepo.MarkArchiveEntryDeleted(ctx, tx, p.Did, deletedBy, p.Justification)
@@ -229,6 +243,9 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 // pending while a contract_erasures row awaits the peer's confirmation,
 // confirmed once the peer acknowledged shredding its own CEKs.
 func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contractstoragearchive.ErasureStatusPayload) (res *contractstoragearchive.ArchiveErasureStatusResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -237,8 +254,17 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
+	requests, err := s.ERepo.ListByDID(ctx, p.Did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	return erasureStatusResponse(p.Did, records, requests), nil
+}
+
+func erasureStatusResponse(did string, records []artifactstore.CEKRecord, requests []dcstodcsdb.EraseRequest) *contractstoragearchive.ArchiveErasureStatusResponse {
+
 	response := &contractstoragearchive.ArchiveErasureStatusResponse{
-		Did:         p.Did,
+		Did:         did,
 		LocalStatus: "live",
 		Peers:       []*contractstoragearchive.ArchiveErasurePeerStatus{},
 	}
@@ -257,10 +283,6 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 		response.ShredReason = record.ShredReason
 	}
 
-	requests, err := s.ERepo.ListByDID(ctx, p.Did)
-	if err != nil {
-		return nil, contractstoragearchive.MakeInternalError(err)
-	}
 	for _, request := range requests {
 		peer := &contractstoragearchive.ArchiveErasurePeerStatus{
 			PeerDid:     request.PeerDID,
@@ -280,7 +302,7 @@ func (s *contractStorageArchivesrvc) ErasureStatus(ctx context.Context, p *contr
 		response.Peers = append(response.Peers, peer)
 	}
 
-	return response, nil
+	return response
 }
 
 // archiveSnapshotStore is the slice of the IPFS client the delete path needs
@@ -293,6 +315,23 @@ type archiveSnapshotStore interface {
 // DID's live (not yet soft-deleted) archive entries — the IPFS objects a
 // delete of that DID must dispose of. Entries without a stored snapshot CID
 // carry nothing in IPFS and are skipped.
+// retainedUntil returns the latest future retention_until of did's live
+// archive entries, or nil when the retention policy permits deletion
+// (DCS-FR-CSA-17). The archive trigger refuses the deletion as well; this
+// check turns that refusal into a client error.
+func retainedUntil(entries []db.ContractArchiveEntry, did string, now time.Time) *time.Time {
+	var latest *time.Time
+	for _, entry := range entries {
+		if entry.DID != did || entry.DeletedAt != nil || entry.RetentionUntil == nil || !entry.RetentionUntil.After(now) {
+			continue
+		}
+		if latest == nil || entry.RetentionUntil.After(*latest) {
+			latest = entry.RetentionUntil
+		}
+	}
+	return latest
+}
+
 func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []string {
 	seen := map[string]bool{}
 	cids := []string{}
@@ -338,7 +377,8 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := s.CRepo.ReadArchivedContractsByFilter(ctx, tx, db.SearchValues{DID: p.Did})
+	// Annotate is a role-authorized write; F03 party scoping applies to reads only.
+	rows, err := s.CRepo.ReadArchivedContractsByFilter(contractreadpolicy.WithSystemScope(ctx), tx, db.SearchValues{DID: p.Did})
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
@@ -408,6 +448,15 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 // reusing the same cross-component reader process_audit_and_compliance's
 // own audit method is built on (qry.Auditor / ReadAuditLogEntriesByComponent).
 func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstoragearchive.AuditPayload) (res []*contractstoragearchive.PACAuditResponse, err error) {
+	ctx, err = contractReadContext(ctx, s.DIDDocument)
+	if err != nil {
+		return nil, err
+	}
+	if p.Did != nil && strings.TrimSpace(*p.Did) != "" {
+		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, strings.TrimSpace(*p.Did)); err != nil {
+			return nil, err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()

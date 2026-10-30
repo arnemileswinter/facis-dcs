@@ -13,9 +13,12 @@ import type { UserRole } from '@/types/user-role'
  * EventWithdraw, command/renew.go renewableStates) that no control reached.
  */
 
+const routeName = vi.hoisted(() => ({ value: 'contracts.view' }))
+
 vi.mock(import('vue-router'), async (importOriginal) => ({
   ...(await importOriginal()),
   useRouter: () => ({ push: vi.fn(), go: vi.fn(), back: vi.fn() }) as never,
+  useRoute: () => ({ name: routeName.value }) as never,
 }))
 
 vi.mock('@/services/contract-workflow-service', () => ({
@@ -100,7 +103,13 @@ describe('contract off-ramps', () => {
   // The responder instance drives its inbound contracts as Contract Manager,
   // and this button is the only route into the negotiate view from OFFERED.
   it('lets a manager open a received offer', () => {
+    routeName.value = 'contracts.view'
     expect(labels(mountActions(['CONTRACT_MANAGER'], 'OFFERED'))).toContain('Review offer')
+  })
+
+  it('hides Negotiate when already on the negotiate page', () => {
+    routeName.value = 'contracts.negotiate'
+    expect(labels(mountActions(['CONTRACT_MANAGER'], 'NEGOTIATION'))).not.toContain('Negotiate')
   })
 })
 

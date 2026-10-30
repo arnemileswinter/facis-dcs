@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 const (
@@ -25,6 +26,7 @@ type CatalogueSubject struct {
 	Description  string
 	Version      string
 	TemplateType string
+	PartyType    string
 }
 
 // BuildInput carries catalogue metadata required for an FC /assets JSON-LD payload.
@@ -38,6 +40,9 @@ type BuildInput struct {
 
 // BuildPayload assembles a thin catalogue VC for FC publish.
 func BuildPayload(input BuildInput) (map[string]any, error) {
+	if _, err := partytype.New(input.Subject.PartyType); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(input.SubjectIRI) == "" {
 		return nil, fmt.Errorf("template subject iri is empty")
 	}
@@ -98,6 +103,7 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 			"dcs:templateUuid":       input.Subject.ID,
 			"dcs:state":              input.Subject.State,
 			"dcs:templateType":       input.Subject.TemplateType,
+			"dcs:partyType":          input.Subject.PartyType,
 			"schema:name":            input.Subject.Name,
 			"schema:description":     input.Subject.Description,
 			"schema:version":         input.Subject.Version,
@@ -128,6 +134,7 @@ func CatalogueSubjectFromRepository(
 	name string,
 	description string,
 	templateType string,
+	partyType string,
 ) CatalogueSubject {
 	return CatalogueSubject{
 		ID:           did,
@@ -136,5 +143,6 @@ func CatalogueSubjectFromRepository(
 		Description:  description,
 		Version:      strconv.Itoa(version),
 		TemplateType: templateType,
+		PartyType:    partyType,
 	}
 }

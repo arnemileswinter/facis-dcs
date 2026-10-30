@@ -35,8 +35,13 @@ route:
     - /.well-known
 
 secrets:
-  # Required for non-dev deployments. Leave empty for generated fallback.
+  # Hydra's system secret. Outside dev mode, systemSecretRef is required and
+  # the chart refuses to render without it. `system` (inline) applies in dev
+  # mode only, with a fixed placeholder as fallback.
   system: ""
+  systemSecretRef:
+    name: ""
+    key: secretsSystem
 
 resources: {}
 

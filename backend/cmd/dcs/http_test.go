@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
@@ -77,5 +79,22 @@ func TestErrorFormatterRefusalNilFindings(t *testing.T) {
 	}
 	if string(raw) != "[]" {
 		t.Errorf("findings = %s, want []", raw)
+	}
+}
+
+// TestMetricsOnlyOnMetricsListener: the public handler chain must not serve
+// /metrics; the metrics listener must.
+func TestMetricsOnlyOnMetricsListener(t *testing.T) {
+	public := newOuterMux(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler())
+	rec := httptest.NewRecorder()
+	public.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("public GET /metrics = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	rec = httptest.NewRecorder()
+	newMetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "# HELP") {
+		t.Errorf("metrics GET /metrics = %d, body %.80q; want 200 with Prometheus text", rec.Code, rec.Body.String())
 	}
 }

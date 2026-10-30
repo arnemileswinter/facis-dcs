@@ -38,6 +38,8 @@ func TestEveryAuditEndpointRequiresAJustification(t *testing.T) {
 			func(r *http.Request) error { return asErr(pacsrv.DecodeAuditRequest(mux, dec)(r)) }},
 		{"pac report", http.MethodGet, "/pac/report?scope=contract", "",
 			func(r *http.Request) error { return asErr(pacsrv.DecodeAuditReportRequest(mux, dec)(r)) }},
+		{"access attempts", http.MethodGet, "/pac/access-attempts?limit=5", "",
+			func(r *http.Request) error { return asErr(pacsrv.DecodeAccessAttemptsRequest(mux, dec)(r)) }},
 		{"case file", http.MethodGet, "/pac/case/c1?x=1", "",
 			func(r *http.Request) error { return asErr(pacsrv.DecodeCaseFileRequest(mux, dec)(r)) }},
 	}

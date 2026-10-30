@@ -203,6 +203,10 @@ def admin_hsm_keys_url(context) -> str:
     return f"{context.base_url}/admin/hsm-keys"
 
 
+def pac_access_attempts_url(context) -> str:
+    return f"{context.base_url}/pac/access-attempts"
+
+
 def pac_report_url(context) -> str:
     return f"{context.base_url}/pac/report"
 

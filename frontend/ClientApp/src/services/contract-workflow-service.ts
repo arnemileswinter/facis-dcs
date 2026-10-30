@@ -1,4 +1,5 @@
 import http from '@/api/http'
+import type { ContractEvidence, StoreContractEvidence } from '@/models/contract/contract-evidence'
 import type {
   ContractApproveRequest,
   ContractAuditRequest,
@@ -32,6 +33,7 @@ import type {
   ContractCreateResponse,
   ContractDeployResponse,
   ContractHistoryResponse,
+  ContractLifecycleEvent,
   ContractNegotiationDraftResponse,
   ContractNegotiationRespondResponse,
   ContractNegotiationResponse,
@@ -55,6 +57,23 @@ import type {
 import type { ContractWorkflowService } from '@/models/services/contract-workflow-service'
 
 export const contractWorkflowService: ContractWorkflowService = {
+  async storeEvidence(request: StoreContractEvidence) {
+    return http.post<{ did: string; evidence_id: string }>('/contract/store', request).then((res) => res.data)
+  },
+  async lifecycle(did: string) {
+    return http
+      .get<ContractLifecycleEvent[]>(`/contract/lifecycle/${encodeURIComponent(did)}`)
+      .then((res) => res.data ?? [])
+  },
+  async listEvidence(did: string) {
+    return http.get<ContractEvidence[]>(`/contract/${encodeURIComponent(did)}/evidence`).then((res) => res.data)
+  },
+  async retrieveEvidence(did: string, evidenceId: string) {
+    return http
+      .get<ContractEvidence>(`/contract/${encodeURIComponent(did)}/evidence/${encodeURIComponent(evidenceId)}`)
+      .then((res) => res.data)
+  },
+
   async create(request: ContractCreateRequest) {
     return http.post<ContractCreateResponse>('/contract/create', request).then((res) => res.data)
   },
@@ -132,13 +151,7 @@ export const contractWorkflowService: ContractWorkflowService = {
   },
 
   async retrieveById(request: ContractRetrieveByIdRequest) {
-    return http
-      .get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`)
-      .then((res) => ({ ...res.data }))
-      .catch((err: unknown) => {
-        console.error('Retrieve ID Error:', err)
-        return null
-      })
+    return http.get<ContractRetrieveByIdResponse>(`/contract/retrieve/${request.did}`).then((res) => ({ ...res.data }))
   },
 
   async search(request: ContractSearchRequest) {

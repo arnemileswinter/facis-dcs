@@ -460,7 +460,7 @@ let hubFingerprint = ''
 function fingerprintOf(inventory: SchemaListEntry[]): string {
   return inventory
     .map((e) => `${e.name}|${e.kind}|${e.active_version ?? ''}|${e.latest_version ?? ''}|${e.updated_at ?? ''}`)
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .join(';')
 }
 

@@ -18,7 +18,7 @@ export const pacNonComplianceService: PACNonComplianceService = {
       .then((res) => res.data)
   },
 
-  async exportComplianceReport(did: string) {
-    return http.get<Blob>('/pac/compliance-report', { params: { did }, responseType: 'blob' }).then((res) => res.data)
+  async exportPartyReport(did: string) {
+    return http.get<Blob>('/pac/party-report', { params: { did }, responseType: 'blob' }).then((res) => res.data)
   },
 }

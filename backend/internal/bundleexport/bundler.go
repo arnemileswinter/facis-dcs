@@ -44,6 +44,8 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/base/contractreadpolicy"
+
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
@@ -157,6 +159,8 @@ type componentInfo struct {
 // including one on a related member — it returns an *ErrRefused. On success
 // it also records an EXPORT audit event (FR-CSA-18).
 func (b *Bundler) ExportContract(ctx context.Context, did string, ec ExportContext) (io.ReadCloser, error) {
+	ctx = contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Organization: ec.ExportedBy, Roles: ec.UserRoles, LocalPeer: b.LocalPeer})
+
 	files := bundleFiles{}
 	var components []componentInfo
 	packaged := map[string]bool{}
@@ -210,6 +214,10 @@ func (b *Bundler) collectContract(ctx context.Context, did, pathPrefix string, v
 	contract, err := b.CRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return &ErrRefused{Findings: []string{fmt.Sprintf("contract %s: not found or unreadable", did)}}
+	}
+
+	if scope, ok := contractreadpolicy.FromContext(ctx); ok && !scope.MayRead(contract.Origin, contract.CreatedBy, contract.ContractData) {
+		return contractreadpolicy.ErrDenied
 	}
 
 	pdfState, err := b.CRepo.ReadPDFState(ctx, tx, did)

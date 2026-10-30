@@ -13,6 +13,11 @@ RUN npm ci
 # Copy frontend source
 COPY frontend/ClientApp/ ./
 
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=
+ENV DCS_GIT_SHA=$GIT_SHA
+ENV DCS_BUILD_TIME=$BUILD_TIME
+
 # Build frontend (type-checking skipped — use build:docker to avoid blocking on TS errors)
 RUN npm run build:docker
 
@@ -20,7 +25,7 @@ RUN npm run build:docker
 #-- Go Build Stage --
 # glibc (Debian) toolchain with cgo: the PKCS#11 layer (ThalesGroup/crypto11 →
 # miekg/pkcs11) is cgo-only, so a static CGO_ENABLED=0 build cannot link it.
-FROM golang:1.25 AS go-builder
+FROM golang:1.26.10 AS go-builder
 
 WORKDIR /build
 
@@ -38,8 +43,15 @@ COPY backend/ ./
 # pinned in go.mod. GOPROXY=off keeps the step hermetic.
 RUN GOPROXY=off go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
+# Declared here, not earlier: a changed build arg invalidates every later RUN
+# layer, and the module download and goa gen layers must stay cached.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=
+
 # Build binary (cgo enabled so the PKCS#11 signing path links).
-RUN CGO_ENABLED=1 GOOS=linux go build -o dcs ./cmd/dcs
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-X digital-contracting-service/internal/buildinfo.GitSHA=${GIT_SHA} -X digital-contracting-service/internal/buildinfo.BuiltAt=${BUILD_TIME}" \
+    -o dcs ./cmd/dcs
 # BDD/CI helpers: gendid regenerates did.json from the token key inside the
 # hsm-provision hook job; hsmsign lets the BDD harness sign did:web challenges
 # with the in-cluster token via kubectl exec (no extractable private keys).

@@ -22,6 +22,7 @@ import type {
   ContractTemplateAuditResponse,
   ContractTemplateCopyResponse,
   ContractTemplateCreateResponse,
+  ContractTemplateHistoryResponse,
   ContractTemplatePublishResponse,
   ContractTemplateRegisterResponse,
   ContractTemplateRejectResponse,
@@ -42,6 +43,7 @@ export interface ContractTemplateService {
   search: (request: ContractTemplateSearchRequest) => Promise<ContractTemplateSearchResponse>
   retrieve: (request?: ContractTemplateRetrieveRequest) => Promise<ContractTemplateRetrieveResponse>
   retrieveById: (request: ContractTemplateRetrieveByIdRequest) => Promise<ContractTemplate | null>
+  retrieveHistory: (did: string) => Promise<ContractTemplateHistoryResponse>
   approve: (request: ContractTemplateApproveRequest) => Promise<ContractTemplateApproveResponse>
   reject: (request: ContractTemplateRejectRequest) => Promise<ContractTemplateRejectResponse>
   verify: (request: ContractTemplateVerifyRequest) => Promise<ContractTemplateVerifyResponse>
