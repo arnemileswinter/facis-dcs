@@ -15,15 +15,26 @@ import (
 	"digital-contracting-service/migrations"
 )
 
-// Open returns a database handle on a fresh schema with every migration
-// applied. The test is skipped when QA_DATABASE_URL is not set. The schema
-// is dropped when the test ends.
-func Open(t *testing.T) *sqlx.DB {
+// URL returns QA_DATABASE_URL. Without it the test is skipped, except in CI
+// (CI set), where the test fails: CI must run every Postgres-backed test.
+func URL(t testing.TB) string {
 	t.Helper()
 	base := os.Getenv("QA_DATABASE_URL")
 	if base == "" {
+		if os.Getenv("CI") != "" {
+			t.Fatal("QA_DATABASE_URL not set in CI; a Postgres-backed test must not be skipped")
+		}
 		t.Skip("QA_DATABASE_URL not set; skipping Postgres-backed test")
 	}
+	return base
+}
+
+// Open returns a database handle on a fresh schema with every migration
+// applied. See URL for when the test is skipped. The schema is dropped when
+// the test ends.
+func Open(t *testing.T) *sqlx.DB {
+	t.Helper()
+	base := URL(t)
 	schema := "t_" + strings.ToLower(rand.Text()[:12])
 
 	admin, err := sqlx.Open("postgres", base)

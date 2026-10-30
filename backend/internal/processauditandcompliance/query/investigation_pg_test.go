@@ -4,38 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 
+	"digital-contracting-service/internal/base/pgtest"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	pacrepo "digital-contracting-service/internal/processauditandcompliance/db/pg"
 	qry "digital-contracting-service/internal/processauditandcompliance/query"
-	"digital-contracting-service/migrations"
 )
-
-// investigationDB opens the Postgres named by QA_DATABASE_URL with every
-// migration applied. Without it the test is skipped.
-func investigationDB(t *testing.T) *sqlx.DB {
-	t.Helper()
-	url := os.Getenv("QA_DATABASE_URL")
-	if url == "" {
-		t.Skip("QA_DATABASE_URL is not set")
-	}
-	db, err := sqlx.Connect("postgres", url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := migrations.Run(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
 
 func insertContract(t *testing.T, db *sqlx.DB, state string, startDate time.Time) string {
 	t.Helper()
@@ -50,7 +29,7 @@ func insertContract(t *testing.T, db *sqlx.DB, state string, startDate time.Time
 // DCS-FR-PACM-05: the monitor flags late signatures and signatures that rely
 // on a revoked certificate.
 func TestMonitorFlagsLateSignaturesAndInvalidCredentials(t *testing.T) {
-	db := investigationDB(t)
+	db := pgtest.Open(t)
 	late := insertContract(t, db, "APPROVED", time.Now().Add(-48*time.Hour))
 	notYetDue := insertContract(t, db, "APPROVED", time.Now().Add(48*time.Hour))
 	revoked := insertContract(t, db, "SIGNED", time.Now().Add(-48*time.Hour))
@@ -84,7 +63,7 @@ func TestMonitorFlagsLateSignaturesAndInvalidCredentials(t *testing.T) {
 // DCS-FR-PACM-05: an incident report opens a case, and the case file exports
 // its findings and records the export with the justification.
 func TestIncidentReportOpensACaseWithAnExportableCaseFile(t *testing.T) {
-	db := investigationDB(t)
+	db := pgtest.Open(t)
 	did := insertContract(t, db, "SIGNED", time.Now())
 	ctx := context.Background()
 
@@ -122,7 +101,7 @@ func TestIncidentReportOpensACaseWithAnExportableCaseFile(t *testing.T) {
 // DCS-FR-PACM-07: the party report reads the contract and its signatures
 // with their ceremonies from the database.
 func TestPartyReportReadsTheContractFromTheDatabase(t *testing.T) {
-	db := investigationDB(t)
+	db := pgtest.Open(t)
 	did := insertContract(t, db, "SIGNED", time.Now())
 	if _, err := db.Exec(`UPDATE contracts SET contract_data = $2 WHERE did = $1`, did,
 		`{"dcs:signatureFields":[{"dcs:signatoryName":"did:web:org-a","dcs:requiredCredentialType":"QES"}]}`); err != nil {

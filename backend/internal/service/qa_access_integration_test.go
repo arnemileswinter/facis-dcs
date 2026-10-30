@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"testing"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	pg "digital-contracting-service/internal/auth/db/pq"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/migrations"
 )
@@ -35,10 +35,7 @@ import (
 // qaPostgresSchema owns only its temporary schema in the explicitly configured test database.
 func qaPostgresSchema(t *testing.T) (*sqlx.DB, string) {
 	t.Helper()
-	dsn := os.Getenv("QA_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set QA_DATABASE_URL to a disposable PostgreSQL database")
-	}
+	dsn := pgtest.URL(t)
 	admin, err := sqlx.Connect("postgres", dsn)
 	if err != nil {
 		t.Fatal(err)

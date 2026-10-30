@@ -52,14 +52,6 @@ export ISSUER_BASE_URL="${ISSUER_BASE_URL:-${BDD_PUBLIC_ORIGIN}/issuer}"
 export BDD_DCS_BASE_URL_A="$BDD_DCS_BASE_URL"
 export BDD_DCS_BASE_URL_B="${BDD_DCS_BASE_URL_B:-http://dcs-b.localhost:18080/digital-contracting-service/api}"
 
-# Sign did:web challenges through the in-cluster token: the BDD harness has no
-# local SoftHSM token in the Helm/kind harness (keys are
-# non-extractable, PKCS#11-only). Resolve the pod by label rather than
-# `exec deploy/...`: the DCS deployment's selector also matches pdf-core pods
-# (no component label in matchLabels), so kubectl's deploy→pod resolution can
-# pick a pod that has no digital-contracting-service container. Scoped by
-# instance (see HELM_RELEASE above) so this always signs through instance A's
-# own token, never instance B's, when both releases share the namespace.
 # Resolve a Running pod's name by label, waiting for one to appear: the one-shot
 # get can race a rollout (a rollout-restart transiently has the old pod
 # Terminating and the new one not yet phase=Running, i.e. zero Running matches),
@@ -92,7 +84,10 @@ REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 # A previous local run must not satisfy the fail-closed scenario-count gate
 # below. Behave writes one report per feature, so remove only its generated
 # JUnit XML artifacts before starting the selected suite.
-find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+# The load run keeps them: it follows the suite in the same CI job.
+if [[ "${RUN_MODE:-bdd}" != "load" ]]; then
+  find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+fi
 
 # Emits `--resolve <host>:<port>:127.0.0.1` for a URL's host[:port], so
 # *.localhost hostnames the host machine's own resolver may not know (e.g.
@@ -188,9 +183,12 @@ echo "DCS is reachable at $DCS_HEALTH_URL"
 # Resolve test seams only after the deployment startup gate is green. Doing
 # this earlier hid terminal FC failures behind a generic "no Running pod"
 # timeout and delayed the actual workload diagnostics.
-DCS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
-  "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
-export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec ${DCS_POD} -c digital-contracting-service --"
+# Sign did:web challenges through the in-cluster token: the Helm/kind harness
+# has no local SoftHSM token (keys are non-extractable, PKCS#11-only). Exec
+# through the deployment, not a pod name: the deployment selector holds the
+# backend component label, and kubectl resolves the pod at each call, so a DCS
+# restart (NFR-SF-01 scenario) does not leave a stale pod name here.
+export BDD_HSMSIGN_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec deployment/${DCS_DEPLOYMENT} -c digital-contracting-service --"
 
 IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
   "app.kubernetes.io/name=ipfs,app.kubernetes.io/instance=dcs")"
@@ -266,9 +264,11 @@ echo "Port-forward on 5432 is ready"
 DCS_SERVICE="${DCS_SERVICE:-$DCS_DEPLOYMENT}"
 LOCAL_FORWARD_PORT="${LOCAL_FORWARD_PORT:-18991}"
 SERVICE_PORT="${SERVICE_PORT:-8991}"
+# keep_port_forward.sh restarts the forward when the DCS pod is replaced.
 echo "Starting port-forward for DCS service ($DCS_SERVICE)"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/$DCS_SERVICE" \
-  "$LOCAL_FORWARD_PORT:$SERVICE_PORT" > .tmp/port-forward-dcs.log 2>&1 &
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+  SERVICE_NAME="$DCS_SERVICE" PORT_MAPPING="$LOCAL_FORWARD_PORT:$SERVICE_PORT" \
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-dcs.log 2>&1 &
 echo $! > .tmp/port-forward-dcs.pid
 
 deadline=$(( $(date +%s) + 30 ))
@@ -286,8 +286,9 @@ echo "Port-forward on $LOCAL_FORWARD_PORT is ready"
 # /metrics is on its own ClusterIP Service, not on the API port.
 METRICS_LOCAL_FORWARD_PORT="${METRICS_LOCAL_FORWARD_PORT:-19464}"
 echo "Starting port-forward for DCS metrics (${DCS_SERVICE}-metrics)"
-"$KUBECTL_BIN" -n "$K8S_NAMESPACE" port-forward "svc/${DCS_SERVICE}-metrics" \
-  "$METRICS_LOCAL_FORWARD_PORT:9464" > .tmp/port-forward-metrics.log 2>&1 &
+KUBECTL_BIN="$KUBECTL_BIN" K8S_NAMESPACE="$K8S_NAMESPACE" \
+  SERVICE_NAME="${DCS_SERVICE}-metrics" PORT_MAPPING="$METRICS_LOCAL_FORWARD_PORT:9464" \
+  bash "$PWD/scripts/keep_port_forward.sh" > .tmp/port-forward-metrics.log 2>&1 &
 echo $! > .tmp/port-forward-metrics.pid
 
 deadline=$(( $(date +%s) + 30 ))
@@ -472,7 +473,12 @@ fi
 #   e2e           — the Playwright suite (its own vite servers + the venv-backed
 #                   signing helpers), so the frontend E2E gets the same live
 #                   two-instance stack + DSS forward the BDD suite uses.
-if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
+#   load          — the k6 load test (tests/load/run_load.py, NFR-PER-01/02).
+if [[ "${RUN_MODE:-bdd}" == "load" ]]; then
+  echo "Running the load test against the deployed stack"
+  cd "$PROJECT_ROOT"
+  python tests/load/run_load.py
+elif [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
   # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed

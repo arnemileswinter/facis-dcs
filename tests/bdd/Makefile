@@ -107,7 +107,7 @@ BDD_HELM_SET_B := \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/callback" \
 	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/logout-complete"
 
-.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once kind_down
+.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once run_load_kind_once kind_down
 
 help:
 	@echo "make setup_environment   # Create venv and install bdd-executor"
@@ -224,7 +224,7 @@ KIND_GOALS := kind_create kind_load_image kind_load_pdf_core_image kind_deploy k
 	kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
 	run_e2e_kind run_e2e_kind_ci \
 	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once \
-	run_bdd_audit_kind_once kind_down
+	run_bdd_audit_kind_once run_load_kind_once kind_down
 $(KIND_GOALS): export KUBECONFIG := $(KIND_KUBECONFIG)
 
 kind_export_kubeconfig:
@@ -501,6 +501,13 @@ run_bdd_kind_once:
 		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
 		HELM_RELEASE="$(HELM_RELEASE)" \
 		FEATURES_PATH="$(if $(F),$(F),$(FEATURES_PATH))"
+
+# k6 load test (tests/load) against the deployed stack, without redeploying.
+run_load_kind_once:
+	@$(MAKE) run_bdd_helm \
+		K8S_NAMESPACE="$(KIND_NAMESPACE)" \
+		HELM_RELEASE="$(HELM_RELEASE)" \
+		RUN_MODE="load"
 
 run_bdd_audit_kind_once:
 	@$(MAKE) run_bdd_helm \

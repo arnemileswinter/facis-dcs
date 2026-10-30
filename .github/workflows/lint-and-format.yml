@@ -178,6 +178,24 @@ jobs:
     name: Go unit tests (backend + pdf-core)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The Postgres-backed tests read QA_DATABASE_URL. In CI (CI=true) a test
+    # without it fails instead of skipping (internal/base/pgtest.URL).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: qa
+          POSTGRES_PASSWORD: qa
+          POSTGRES_DB: qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      QA_DATABASE_URL: postgres://qa:qa@localhost:5432/qa?sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v6

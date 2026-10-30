@@ -2,15 +2,12 @@ package webhookplatform
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 
-	"digital-contracting-service/migrations"
+	"digital-contracting-service/internal/base/pgtest"
 )
 
 // DCS-NFR-PER-02: with a NATS queue group, the replica that dispatches an event
@@ -18,18 +15,7 @@ import (
 // has its own PostgresDeliveries over the shared database, and both must see
 // the same dispatch. Runs only against a real database (QA_DATABASE_URL).
 func TestPostgresDeliveriesAreSharedAcrossReplicas(t *testing.T) {
-	url := os.Getenv("QA_DATABASE_URL")
-	if url == "" {
-		t.Skip("QA_DATABASE_URL is not set")
-	}
-	db, err := sqlx.Connect("postgres", url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := migrations.Run(db); err != nil {
-		t.Fatalf("migrations: %v", err)
-	}
+	db := pgtest.Open(t)
 
 	ctx := context.Background()
 	dispatching, receiving := PostgresDeliveries{DB: db}, PostgresDeliveries{DB: db}

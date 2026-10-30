@@ -3,18 +3,12 @@ package statuspublication
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq"
-
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
-	"digital-contracting-service/migrations"
 )
 
 type failingPublisher struct{ provenance.StatusListPublisher }
@@ -27,7 +21,7 @@ func (failingPublisher) PublishStatus(context.Context, string, string, string, t
 // list this deployment serves (DCS-IR-SI-09): a failed delivery stays pending
 // with its error, and the next delivery sets the contract's revocation bit.
 func TestQueuedTerminationSetsTheServedRevocationBit(t *testing.T) {
-	db := queueTestDB(t)
+	db := pgtest.Open(t)
 	ctx := context.Background()
 	const contract = "did:web:dcs.example:contract:terminated"
 
@@ -82,39 +76,4 @@ func TestQueuedTerminationSetsTheServedRevocationBit(t *testing.T) {
 	if !slices.Contains(revoked, entry.Index) {
 		t.Fatalf("revoked indices %v of list %d do not contain the terminated contract's index %d", revoked, entry.ListID, entry.Index)
 	}
-}
-
-// queueTestDB migrates a temporary schema of the database QA_DATABASE_URL names.
-func queueTestDB(t *testing.T) *sqlx.DB {
-	t.Helper()
-	dsn := os.Getenv("QA_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set QA_DATABASE_URL to a disposable PostgreSQL database")
-	}
-	admin, err := sqlx.Connect("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = admin.Close() })
-	schema := fmt.Sprintf("status_publication_%d", time.Now().UnixNano())
-	if _, err := admin.Exec("CREATE SCHEMA " + pq.QuoteIdentifier(schema)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = admin.Exec("DROP SCHEMA " + pq.QuoteIdentifier(schema) + " CASCADE") })
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := parsed.Query()
-	params.Set("search_path", schema)
-	parsed.RawQuery = params.Encode()
-	db, err := sqlx.Connect("postgres", parsed.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := migrations.Run(db); err != nil {
-		t.Fatalf("migrations: %v", err)
-	}
-	return db
 }
