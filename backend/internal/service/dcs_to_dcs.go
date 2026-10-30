@@ -303,15 +303,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	}
 
 	if syncSignature != nil {
-		tx, err := s.DB.BeginTxx(ctx, nil)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := s.SRepo.UpsertSyncSignature(ctx, tx, *syncSignature); err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
-		}
-		if err := tx.Commit(); err != nil {
+		if err := s.recordSyncSignature(ctx, *syncSignature); err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
 	}
@@ -325,6 +317,26 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	}
 
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil
+}
+
+// recordSyncSignature stores the verified signature a peer shipped. This
+// instance archives the contract when its own signatures are complete, so a
+// counterparty signature that arrives later goes into that archive entry too.
+func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.SyncSignature) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.SRepo.UpsertSyncSignature(ctx, tx, signature); err != nil {
+		return err
+	}
+	if len(signature.PoAEvidence) > 0 {
+		if _, err := s.CRepo.AppendArchivePeerSignatures(ctx, tx, signature.DID, signature.PoAEvidence); err != nil {
+			return fmt.Errorf("add the peer signatures to the archive entry of %s: %w", signature.DID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // Erase shreds this instance's wrapped CEKs for a contract on request of the

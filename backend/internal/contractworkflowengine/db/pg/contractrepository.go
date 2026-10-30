@@ -359,6 +359,37 @@ func (r *PostgresContractRepo) StoreArchiveEntry(ctx context.Context, tx *sqlx.T
 	return err
 }
 
+func (r *PostgresContractRepo) AppendArchivePeerSignatures(ctx context.Context, tx *sqlx.Tx, did string, peerSignatures []byte) (bool, error) {
+	statement := `
+        WITH entry AS (
+            SELECT id, COALESCE(signature_metadata -> 'peer_signatures', '[]'::jsonb) AS held
+            FROM contract_archive_entries
+            WHERE did = $1 AND archive_status IN ('STORED', 'RETAINED')
+            ORDER BY contract_version DESC
+            LIMIT 1
+        ), fresh AS (
+            SELECT received.element, min(received.position) AS position
+            FROM entry, jsonb_array_elements($2::jsonb) WITH ORDINALITY AS received(element, position)
+            WHERE NOT entry.held @> jsonb_build_array(received.element)
+            GROUP BY received.element
+        )
+        UPDATE contract_archive_entries a
+        SET signature_metadata = jsonb_set(a.signature_metadata, '{peer_signatures}',
+            entry.held || (SELECT jsonb_agg(fresh.element ORDER BY fresh.position) FROM fresh))
+        FROM entry
+        WHERE a.id = entry.id AND EXISTS (SELECT 1 FROM fresh)
+    `
+	res, err := tx.ExecContext(ctx, statement, did, peerSignatures)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]db.ContractArchiveEntry, error) {
 	query := `
         SELECT did, contract_version, archive_status, stored_by, stored_at, contract_snapshot,

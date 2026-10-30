@@ -268,6 +268,11 @@ type ContractRepo interface {
 	// the event at most once per expiry date.
 	ClaimRenewalNotice(ctx context.Context, tx *sqlx.Tx, did string, expDate time.Time) (bool, error)
 	StoreArchiveEntry(ctx context.Context, tx *sqlx.Tx, data ContractArchiveEntry) error
+	// AppendArchivePeerSignatures appends to signature_metadata.peer_signatures
+	// of the latest active archive entry of did each entry of peerSignatures
+	// (a JSON array) that the entry does not hold yet. It returns false when
+	// did has no active archive entry or nothing was new.
+	AppendArchivePeerSignatures(ctx context.Context, tx *sqlx.Tx, did string, peerSignatures []byte) (bool, error)
 	ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]ContractArchiveEntry, error)
 	// MarkArchiveEntryDeleted soft-deletes every not-yet-deleted archive
 	// entry for did (DCS-FR-CSA-17): sets deleted_at/deleted_by/
