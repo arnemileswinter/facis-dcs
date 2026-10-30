@@ -983,7 +983,7 @@ var _ = Service("SignatureManagement", func() {
 	})
 
 	Method("compliance", func() {
-		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: signature level SES/AES/QES, signature status, presence of active signed credentials) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
+		Description("Run the signature compliance checks for the contract (DCS-FR-SM-21: achieved against required signature level, signature status, certificate and Power of Attorney status, Power of Attorney organization and roles) and return the findings; the check — findings included — is recorded as a ComplianceValidationEvent in the audit trail.")
 		Meta("dcs:requirements", "DCS-IR-SM-07")
 
 		Security(JWTAuth, func() {

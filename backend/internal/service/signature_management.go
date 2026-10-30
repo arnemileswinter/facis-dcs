@@ -21,6 +21,7 @@ import (
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/conf"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -767,6 +768,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		DB:           s.DB,
 		CRepo:        s.CRepo,
 		CeremonyRepo: s.CeremonyRepo,
+		CredentialState: func(ctx context.Context, presentation string) (status.State, error) {
+			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposeLogin)
+		},
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)
