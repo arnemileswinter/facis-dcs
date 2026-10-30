@@ -284,6 +284,8 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
 		errors.Is(err, command.ErrKPIContractTerminated) ||
 		errors.Is(err, command.ErrMissingRequiredMetadata) ||
+		errors.Is(err, command.ErrNotPublishable) ||
+		errors.Is(err, fcclient.ErrFederatedCatalogueNotConfigured) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -1591,6 +1593,32 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	return &contractworkflowengine.ContractApproveResponse{
 		Did: req.Did,
 	}, nil
+}
+
+// PublishCatalogue registers an approved, signed or active contract in the
+// Federated Catalogue (DCS-IR-CWE-10).
+func (s *contractWorkflowEnginesrvc) PublishCatalogue(ctx context.Context, req *contractworkflowengine.ContractCataloguePublishRequest) (*contractworkflowengine.ContractCataloguePublishResponse, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	instanceDID, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	assetHash, err := (&command.CataloguePublisher{DB: s.DB, CRepo: s.CRepo, FCClient: s.FCClient}).Handle(ctx, command.CataloguePublishCmd{
+		DID:         req.Did,
+		PublishedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		InstanceDID: instanceDID,
+		UserRoles:   middleware.GetUserRoles(ctx),
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+	return &contractworkflowengine.ContractCataloguePublishResponse{Did: req.Did, AssetHash: assetHash}, nil
 }
 
 func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractworkflowengine.ContractRejectRequest) (res *contractworkflowengine.ContractRejectResponse, err error) {

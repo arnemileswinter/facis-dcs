@@ -2,14 +2,10 @@ package command
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -176,44 +172,9 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return "", fmt.Errorf("build template asset payload failed: %w", err)
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal template asset payload failed: %w", err)
-	}
-
-	resp, err := h.FCClient.PostRaw(ctx, fcclient.AssetsEndpointPath, nil, fcclient.JSONLDContentType, body)
+	assetHash, err := h.FCClient.PublishAsset(ctx, payload)
 	if err != nil {
 		return "", fmt.Errorf("publish template resource failed: %w", err)
 	}
-
-	// FC names an asset by the SHA-256 of its content.
-	sum := sha256.Sum256(body)
-	assetHash := hex.EncodeToString(sum[:])
-	if resp.StatusCode == http.StatusCreated {
-		var created struct {
-			AssetHash string `json:"assetHash"`
-		}
-		if json.Unmarshal(resp.Body, &created) == nil && created.AssetHash != "" {
-			assetHash = created.AssetHash
-		}
-		return assetHash, nil
-	}
-
-	// FC duplicate self-descriptions return conflict_error
-	if resp.StatusCode == http.StatusConflict {
-		code := h.FCClient.ExtractErrorCode(resp.Body)
-		message := h.FCClient.ExtractErrorMessage(resp.Body)
-		// The template SD already exists in the FC
-		if code == "conflict_error" {
-			return assetHash, nil
-		}
-		if message != "" {
-			return "", fmt.Errorf("publish template resource failed: %s", message)
-		}
-		return "", fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
-	}
-	if message := h.FCClient.ExtractErrorMessage(resp.Body); message != "" {
-		return "", fmt.Errorf("publish template resource failed: %s", message)
-	}
-	return "", fmt.Errorf("publish template resource failed with status %d", resp.StatusCode)
+	return assetHash, nil
 }
