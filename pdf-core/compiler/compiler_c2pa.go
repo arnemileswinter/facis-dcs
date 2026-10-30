@@ -365,14 +365,6 @@ func renderBMFFBox(boxType string, payload []byte) []byte {
 	return box
 }
 
-func renderUUIDContentBox(uuidHex string, payload []byte) []byte {
-	uuid := decodeUUIDHex(uuidHex)
-	boxPayload := make([]byte, 0, 16+len(payload))
-	boxPayload = append(boxPayload, uuid[:]...)
-	boxPayload = append(boxPayload, payload...)
-	return renderBMFFBox("uuid", boxPayload)
-}
-
 func renderJUMBFDescriptionBox(uuidHex string, toggles byte, label string) []byte {
 	uuid := decodeUUIDHex(uuidHex)
 	payload := make([]byte, 0, 16+1+len(label)+1)
