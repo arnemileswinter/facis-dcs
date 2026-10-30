@@ -59,4 +59,13 @@ for profile in prod acceptance; do
 done
 render "${ACK[@]}" | grep -q 'db-backup' && fail "backup rendered while backup.enabled is false"
 
+# DCS-NFR-SEC-04: configIntegrity.pins reach the backend as DCS_CONFIG_SHA256_PINS.
+a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+pins="$(render -f "$CHART_DIR/values.bdd.yml" --set "configIntegrity.pins.x5c-trust-anchors-poa=$a" \
+  --set "configIntegrity.pins.did-document=$b" --show-only templates/deployment.yaml | grep -A1 'name: DCS_CONFIG_SHA256_PINS$')"
+grep -q "value: \"did-document=$b,x5c-trust-anchors-poa=$a\"" <<<"$pins" || fail "configIntegrity.pins not rendered: $pins"
+render -f "$CHART_DIR/values.bdd.yml" --show-only templates/deployment.yaml | grep -q DCS_CONFIG_SHA256_PINS \
+  && fail "empty pins rendered"
+
 echo 'platform hardening render tests passed'

@@ -232,6 +232,18 @@ podDisruptionBudget:
   enabled: true
   maxUnavailable: 1
 
+# Config file integrity (DCS-NFR-SEC-04). The backend hashes its mounted config
+# files at startup and refuses to start when a pinned file does not match its
+# SHA-256 pin (DCS_CONFIG_SHA256_PINS). Names: did-document, oid4vp-trust-data,
+# x5c-trust-anchors-poa, x5c-trust-anchors-pid, oid4vp-trust-policy.
+#   pins:
+#     x5c-trust-anchors-poa: <sha256sum of the file>
+# The chart pins oid4vp-trust-data itself when oid4vp.trust.existingConfigMap
+# exists at install or upgrade time: an edit of that ConfigMap outside a release
+# then stops the backend at its next start.
+configIntegrity:
+  pins: {}
+
 # Keycloak realm URL for Federated Catalogue.
 fcKeycloak:
   realmURL: ""
