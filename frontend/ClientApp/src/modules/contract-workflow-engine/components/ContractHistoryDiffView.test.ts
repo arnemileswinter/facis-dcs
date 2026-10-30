@@ -47,4 +47,34 @@ describe('ContractHistoryDiffView', () => {
     expect(labels[0]).not.toContain('Contract Creator')
     expect(labels[1]).not.toContain('replaced by')
   })
+
+  // DCS-FR-CWE-08: an old version is offered for rollback.
+  it('restores the version picked on the left', async () => {
+    const wrapper = shallowMount(ContractHistoryDiffView, {
+      props: {
+        contractDid: 'did:web:example.com:contract',
+        contractState: ContractState.draft,
+        currentContractData: {} as never,
+        restorable: true,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="restore-history-version"]').trigger('click')
+
+    const restored = wrapper.emitted('restore')?.[0]?.[0] as { updated_at: string }
+    expect(restored.updated_at).toBe('2026-10-27T08:00:00Z')
+  })
+
+  it('offers no restore unless the contract can be edited', async () => {
+    const wrapper = shallowMount(ContractHistoryDiffView, {
+      props: {
+        contractDid: 'did:web:example.com:contract',
+        contractState: ContractState.submitted,
+        currentContractData: {} as never,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="restore-history-version"]').exists()).toBe(false)
+  })
 })

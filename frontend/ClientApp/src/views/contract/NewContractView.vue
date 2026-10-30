@@ -18,6 +18,7 @@ import { useTemplateEditorUiStore } from '@template-repository/store/templateEdi
 import { CONTRACT_PARTY_ROLE_OPTIONS } from '@template-repository/utils/ontology-domain-fields'
 import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import {
   useSemanticValueVerification,
@@ -36,6 +37,7 @@ import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractHistoryItem } from '@/models/responses/contract-response'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -90,7 +92,10 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content']),
+  contractEditorUiStore.availableTabs(
+    contract.value?.state ?? ContractState.draft,
+    isEditMode.value ? ['details', 'content', 'diff'] : ['details', 'content'],
+  ),
 )
 
 const story = computed(() =>
@@ -260,6 +265,28 @@ const updateContract = async () => {
     }
   } catch (error) {
     reportActionError(error, 'Update contract')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// Rollback (DCS-FR-CWE-08): a saved version becomes the content of a new
+// version; the version it replaces stays in the history.
+const restoreVersion = async (item: ContractHistoryItem) => {
+  if (!contract.value || !isContractMutable.value) return
+  isSubmitting.value = true
+  try {
+    await contractWorkflowService.update({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      name: item.name,
+      description: item.description,
+      contract_data: item.contract_data,
+    })
+    contract.value = await contractWorkflowService.retrieveById({ did: contract.value.did })
+    applyContractDataToDraft(contract.value?.contract_data)
+  } catch (error) {
+    reportActionError(error, 'Restore version')
   } finally {
     isSubmitting.value = false
   }
@@ -536,6 +563,16 @@ onBeforeRouteLeave(() => {
                     <ClausesEditor />
                   </div>
                 </div>
+              </div>
+
+              <div v-if="isEditMode && contract" v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                  :restorable="isContractMutable && !isSubmitting"
+                  @restore="restoreVersion"
+                />
               </div>
 
               <!-- BUILDER TAB -->
