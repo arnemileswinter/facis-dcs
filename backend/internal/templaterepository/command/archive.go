@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -56,9 +55,10 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 
-	if processData.State == contracttemplatestate.Deprecated.String() ||
-		processData.State == contracttemplatestate.Deleted.String() {
-		return errors.New("invalid contract template state")
+	// A registered or published template is deprecated first; a deprecated
+	// template is then deleted (DCS-FR-TR-17, DCS-FR-TR-18).
+	if processData.State == contracttemplatestate.Deleted.String() {
+		return ErrInvalidTemplateState
 	}
 
 	if processData.State == contracttemplatestate.Registered.String() || processData.State == contracttemplatestate.Published.String() {
