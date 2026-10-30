@@ -112,6 +112,7 @@ type AuditEvt struct {
 	ComponentType componenttype.ComponentType `json:"component_type"`
 	HolderDID     string                      `json:"holder_did"`
 	UserRoles     userrole.UserRoles          `json:"user_roles"`
+	Justification string                      `json:"justification"`
 }
 
 // EventType implements the Event interface.

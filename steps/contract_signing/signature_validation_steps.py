@@ -276,7 +276,7 @@ def step_then_signature_audit_includes(context, name, event_type):
     while time.monotonic() < deadline:
         resp = requests.get(
             signature_audit_url(context),
-            params={"did": did},
+            params={"did": did, "justification": "BDD signature audit"},
             headers=auditor_h,
             timeout=context.http_timeout_seconds,
         )
@@ -302,7 +302,7 @@ def _signature_audit_entry(context, name, event_type):
     auditor_h = AuthService.get_headers_for_roles(["Auditor"])
     resp = requests.get(
         signature_audit_url(context),
-        params={"did": did},
+        params={"did": did, "justification": "BDD signature audit"},
         headers=auditor_h,
         timeout=context.http_timeout_seconds,
     )

@@ -699,10 +699,11 @@ func (s *signatureManagementsrvc) Audit(ctx context.Context, req *signaturemanag
 	defer cancel()
 
 	qry := query.GetAuditLogQry{
-		DID:       req.Did,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := query.Auditor{
 		DB:           s.DB,

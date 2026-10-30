@@ -853,7 +853,7 @@ def step_then_contract_has_audit_event(context, name, event_type):
     event_types = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         events = resp.json()
         assert isinstance(events, list), f"Expected audit response to be a list, got: {events}"
@@ -893,7 +893,7 @@ def step_then_create_event_has_effective_timestamp(context):
     events = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for created contract '{did}': "
             f"{resp.status_code} {resp.text}"
@@ -943,7 +943,7 @@ def step_then_terminate_event_records_payload(context, name, reason):
     record = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         )
@@ -1002,7 +1002,7 @@ def step_then_submit_event_records_finding(context, name, finding):
     events = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, (
             f"Audit query failed for contract '{name}': {resp.status_code} {resp.text}"
         )

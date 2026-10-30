@@ -73,7 +73,7 @@ def step_then_approval_logged_with_credentials(context):
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed: {resp.status_code} {resp.text}"
         events = resp.json()
         approve_events = [e for e in events if str(e.get("event_type", "")).upper() == "APPROVE_CONTRACT"]
@@ -215,7 +215,7 @@ def step_then_validates_organizational_policies(context):
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, resp.text
         events = resp.json()
         if any(str(e.get("event_type", "")).upper() == "APPROVE_CONTRACT" for e in events):
@@ -239,7 +239,7 @@ def step_then_see_completed_approvals_with_timestamps(context):
     deadline = time.monotonic() + 60
     events = []
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, resp.text
         events = resp.json()
         submit_events = [e for e in events if str(e.get("event_type", "")).upper() == "SUBMIT_CONTRACT"]

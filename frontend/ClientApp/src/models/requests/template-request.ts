@@ -94,6 +94,7 @@ export interface ContractTemplateRegisterRequest {
 export interface ContractTemplateAuditRequest {
   did: string
   updated_at: string
+  justification: string
 }
 
 export interface ContractTemplatePublishRequest {

@@ -201,10 +201,16 @@ function revocationPending(sig: SignatureViewItem): boolean {
 
 async function loadAudit() {
   if (!selected.value) return
+  const result = await confirmationModal.value?.reveal({
+    message: 'Reading the audit log is recorded with your justification.',
+    editor: { requiredText: true, placeholder: 'Audit justification' },
+  })
+  const justification = result?.data?.trim()
+  if (!result || result.isCanceled || !justification) return
   busy.value = true
   error.value = null
   try {
-    auditEntries.value = await signatureManagementService.getAudit(selected.value.did)
+    auditEntries.value = await signatureManagementService.getAudit(selected.value.did, justification)
   } catch (e: unknown) {
     claimReportedHttpError(e)
     error.value = `Failed to load audit report: ${e instanceof Error ? e.message : String(e)}`

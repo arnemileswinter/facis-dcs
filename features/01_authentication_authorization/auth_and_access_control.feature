@@ -37,7 +37,7 @@ Feature: Authentication Endpoints
       | POST   | /contract/reject               | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z','reason':'placeholder'}                            |
       | POST   | /contract/store                | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                                                   |
       | POST   | /contract/terminate            | {'did':'placeholder','reason':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                            |
-      | POST   | /contract/audit                | {'did':'placeholder'}                                                                                       |
+      | POST   | /contract/audit                | {'did':'placeholder','justification':'placeholder'}                                                         |
 
   Scenario Outline: Access restricted endpoint responds with access denied (Archive)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
@@ -76,7 +76,7 @@ Feature: Authentication Endpoints
       | POST   | /template/reject               | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z','reason':'placeholder'} |
       | POST   | /template/register             | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                        |
       | POST   | /template/archive              | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                        |
-      | GET    | /template/audit                | did=placeholder                                                                  |
+      | GET    | /template/audit                | did=placeholder&justification=placeholder                                        |
 
   Scenario Outline: Access restricted endpoint responds with access denied (Catalogue)
     When the system sends "<method>" request to endpoint "<endpoint>" with "<payload>"
@@ -99,7 +99,7 @@ Feature: Authentication Endpoints
       | POST   | /signature/verify               | {'did':'placeholder'}                                     |
       | POST   | /signature/validate             | {'did':'placeholder'}                                     |
       | POST   | /signature/revoke               | {'did':'placeholder','signer_did':'placeholder','reason':'Access-control probe'} |
-      | GET    | /signature/audit                | did=placeholder                                           |
+      | GET    | /signature/audit                | did=placeholder&justification=placeholder                 |
       | POST   | /signature/compliance           | {'did':'placeholder'}                                     |
 
   Scenario Outline: Access restricted endpoint responds with access denied (PAC)

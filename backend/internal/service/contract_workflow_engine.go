@@ -1671,11 +1671,12 @@ func (s *contractWorkflowEnginesrvc) Audit(ctx context.Context, req *contractwor
 	defer cancel()
 
 	qry := qry2.GetAuditLogByDIDQry{
-		DID:       req.Did,
-		Scope:     componenttype.ContractWorkflowEngine,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		Scope:         componenttype.ContractWorkflowEngine,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := qry2.AuditLogByDIDAuditor{
 		DB:           s.DB,

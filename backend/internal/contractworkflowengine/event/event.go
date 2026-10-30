@@ -744,6 +744,7 @@ type AuditEvent struct {
 	OccurredAt    time.Time                   `json:"occurred_at"`
 	ComponentType componenttype.ComponentType `json:"component_type"`
 	UserRoles     userrole.UserRoles          `json:"user_roles"`
+	Justification string                      `json:"justification"`
 }
 
 // EventType implements the Event interface.

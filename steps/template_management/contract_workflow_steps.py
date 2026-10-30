@@ -647,7 +647,7 @@ def step_then_access_denial_audited(context, name):
     event_types = []
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"contract audit query failed: {resp.status_code} {resp.text}"
         entries = resp.json()
         assert isinstance(entries, list), f"Expected audit entries list, got: {entries}"
@@ -1121,7 +1121,7 @@ def step_then_contract_returned_revision(context):
     events, found = [], False
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
-        resp = post_json(context, contract_audit_url(context), {"did": did}, headers=auditor_h)
+        resp = post_json(context, contract_audit_url(context), {"did": did, "justification": "BDD contract audit"}, headers=auditor_h)
         assert resp.status_code == 200, f"Audit query failed: {resp.status_code} {resp.text}"
         events = resp.json()
         assert isinstance(events, list), f"Expected audit response list, got: {events}"

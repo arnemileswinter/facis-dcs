@@ -742,11 +742,12 @@ func (s *templateRepositorysrvc) Audit(ctx context.Context, req *templatereposit
 	defer cancel()
 
 	qry := qry2.GetAuditLogByDIDQry{
-		Scope:     componenttype.ContractTemplateRepo,
-		DID:       req.Did,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		Scope:         componenttype.ContractTemplateRepo,
+		DID:           req.Did,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := qry2.AuditLogByDIDAuditor{
 		DB:           s.DB,

@@ -242,8 +242,9 @@ var SMContractAuditRequest = Type("SMContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
 
-	Required("did")
+	Required("did", "justification")
 })
 
 var SMContractAuditResponse = Type("SMContractAuditResponse", func() {
@@ -862,6 +863,7 @@ var _ = Service("SignatureManagement", func() {
 		HTTP(func() {
 			GET("/signature/audit")
 			Param("did")
+			Param("justification")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

@@ -441,7 +441,7 @@ def step_then_audit_records_poa(context, name):
     event_types = []
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
-        resp = requests.get(signature_audit_url(context), params={"did": did}, headers=auditor_h, timeout=context.http_timeout_seconds)
+        resp = requests.get(signature_audit_url(context), params={"did": did, "justification": "BDD signature audit"}, headers=auditor_h, timeout=context.http_timeout_seconds)
         assert resp.status_code == 200, f"signature audit read failed: {resp.status_code} {resp.text}"
         entries = resp.json()
         event_types = [str(e.get("event_type", "")).upper() for e in entries]
