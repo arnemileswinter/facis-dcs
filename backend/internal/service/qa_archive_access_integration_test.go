@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -90,14 +91,123 @@ func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	ownReport, err := auditService.AuditReport(manager, &pac.AuditReportPayload{Scope: &scope})
 	require.NoError(t, err)
 	require.NotEmpty(t, ownReport)
+	_, err = auditService.Audit(manager, &pac.PACAuditRequest{Scope: "archive", Justification: "QA latest own"})
+	require.NoError(t, err)
+	latestOwn := executor.requests[len(executor.requests)-1].AuditID
 	_, err = auditService.Audit(auditor, &pac.PACAuditRequest{Scope: "archive", Justification: "QA global"})
 	require.NoError(t, err)
-	report, err := auditService.AuditReport(manager, &pac.AuditReportPayload{Scope: &scope})
-	require.ErrorContains(t, err, "not authorized")
+	latestGlobal := executor.requests[len(executor.requests)-1].AuditID
+	database.SetMaxOpenConns(1)
+	singleConnection, cancelSingle := context.WithTimeout(manager, 3*time.Second)
+	selected, selectErr := auditService.latestAuditRun(singleConnection, scope, "")
+	cancelSingle()
+	database.SetMaxOpenConns(0)
+	require.NoError(t, selectErr)
+	var selectedRequest auditexecutor.Request
+	require.NoError(t, json.Unmarshal(selected.RequestBytes, &selectedRequest))
+	require.Equal(t, latestOwn, selectedRequest.AuditID)
+	assertReport := func(caller context.Context, wantID string) {
+		t.Helper()
+		content, err := auditService.AuditReport(caller, &pac.AuditReportPayload{Scope: &scope})
+		require.NoError(t, err)
+		var report auditReport
+		require.NoError(t, json.Unmarshal(content, &report))
+		require.Equal(t, wantID, report.ReportID)
+	}
+	assertReport(manager, latestOwn)
+	assertReport(middleware.InjectAuthContext(ctx, []string{"Archive Manager"}, "another-holder", "Org A"), latestOwn)
+	assertReport(auditor, latestGlobal)
+	require.Len(t, executor.requests, 3, "exports must not rerun the executor")
+	noAccess := middleware.InjectAuthContext(ctx, []string{"Archive Manager"}, "holder-c", "Org C")
+	report, err := auditService.AuditReport(noAccess, &pac.AuditReportPayload{Scope: &scope})
+	var named interface{ ErrorName() string }
+	require.True(t, errors.As(err, &named))
+	require.Equal(t, "forbidden", named.ErrorName())
 	require.Empty(t, report)
-	report, err = auditService.AuditReport(auditor, &pac.AuditReportPayload{Scope: &scope})
+	// Current resource rights, not the identity that requested the audit, govern selection.
+	_, err = database.Exec(`UPDATE contracts SET created_by='Org A' WHERE did='foreign'`)
 	require.NoError(t, err)
-	require.NotEmpty(t, report)
+	assertReport(manager, latestGlobal)
+	_, err = database.Exec(`UPDATE contracts SET created_by='Org B' WHERE did='foreign'`)
+	require.NoError(t, err)
+
+	// Deliberately corrupt immutable rows only inside this test's disposable schema.
+	_, err = database.Exec(`ALTER TABLE pac_audit_runs DISABLE TRIGGER pac_audit_runs_append_only`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := database.Exec(`ALTER TABLE pac_audit_runs ENABLE TRIGGER pac_audit_runs_append_only`)
+		require.NoError(t, err)
+	})
+	// A timestamp tie must progress by audit_id instead of repeating a denied candidate.
+	_, err = database.Exec(`UPDATE pac_audit_runs SET created_at='2026-01-01'`)
+	require.NoError(t, err)
+	wantOwn := latestOwn
+	if executor.requests[0].AuditID > wantOwn {
+		wantOwn = executor.requests[0].AuditID
+	}
+	assertReport(manager, wantOwn)
+	_, err = auditService.AuditReport(noAccess, &pac.AuditReportPayload{Scope: &scope})
+	require.True(t, errors.As(err, &named))
+	require.Equal(t, "forbidden", named.ErrorName())
+	_, err = database.Exec(`UPDATE pac_audit_runs SET created_at='2026-01-02' WHERE audit_id=$1`, latestGlobal)
+	require.NoError(t, err)
+
+	var originalSnapshot []byte
+	var originalHash string
+	require.NoError(t, database.QueryRow(`SELECT snapshot_bytes,response_hash FROM pac_audit_runs WHERE audit_id=$1`, latestGlobal).Scan(&originalSnapshot, &originalHash))
+	envelope, err := store.Decrypt(ctx, store.InstanceScope(), originalSnapshot)
+	require.NoError(t, err)
+	payloadBytes, scopes, err := unsealPACSnapshot(ctx, store, latestGlobal, envelope)
+	require.NoError(t, err)
+	var brokenPayload pacSnapshotPayload
+	require.NoError(t, json.Unmarshal(payloadBytes, &brokenPayload))
+	brokenPayload.ResponseBytes = []byte(`{"auditId":`)
+	brokenBytes, err := json.Marshal(brokenPayload)
+	require.NoError(t, err)
+	brokenEnvelope, err := sealPACSnapshot(ctx, store, latestGlobal, scopes, brokenBytes)
+	require.NoError(t, err)
+	brokenSnapshot, err := store.Encrypt(ctx, store.InstanceScope(), brokenEnvelope)
+	require.NoError(t, err)
+	assertTerminal := func(caller context.Context, want string) {
+		t.Helper()
+		var before, after int
+		require.NoError(t, database.Get(&before, `SELECT count(*) FROM outbox_events`))
+		blobCount := len(objects.blobs)
+		content, err := auditService.AuditReport(caller, &pac.AuditReportPayload{Scope: &scope})
+		require.Empty(t, content)
+		var named interface{ ErrorName() string }
+		require.True(t, errors.As(err, &named), "error: %v", err)
+		require.Equal(t, want, named.ErrorName())
+		require.NoError(t, database.Get(&after, `SELECT count(*) FROM outbox_events`))
+		require.Equal(t, before, after, "failed export must not emit an event")
+		require.Len(t, objects.blobs, blobCount)
+	}
+	for _, tc := range []struct {
+		name     string
+		snapshot []byte
+		hash     string
+	}{
+		{"ciphertext", []byte("corrupt"), originalHash},
+		{"hash", originalSnapshot, sha256String([]byte("wrong"))},
+		{"response decode", brokenSnapshot, sha256String(brokenPayload.ResponseBytes)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := database.Exec(`UPDATE pac_audit_runs SET snapshot_bytes=$2,response_hash=$3 WHERE audit_id=$1`, latestGlobal, tc.snapshot, tc.hash)
+			require.NoError(t, err)
+			assertTerminal(manager, "internal_error")
+		})
+	}
+	_, err = database.Exec(`UPDATE pac_audit_runs SET snapshot_bytes=$2,response_hash=$3 WHERE audit_id=$1`, latestGlobal, originalSnapshot, originalHash)
+	require.NoError(t, err)
+	cancelled, cancel := context.WithCancel(manager)
+	cancel()
+	assertTerminal(cancelled, "internal_error")
+	require.Contains(t, scopes, artifactstore.ContractScope(foreign))
+	_, err = keys.Shred(ctx, artifactstore.ContractScope(foreign), "holder", "QA erasure")
+	require.NoError(t, err)
+	store.Forget(artifactstore.ContractScope(foreign))
+	assertTerminal(manager, "not_found")
+
 	// Authorization examines identities even when no payload needs a contract encryption key.
 	for _, resource := range []persistedAuditEvidenceResource{
 		{DID: foreign},

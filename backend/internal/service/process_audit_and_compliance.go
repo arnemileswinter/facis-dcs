@@ -32,6 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type processAuditAndCompliancesrvc struct {
@@ -650,6 +651,10 @@ func (s *processAuditAndCompliancesrvc) AuditReport(ctx context.Context, p *proc
 	raw, err := s.readLatestAuditRun(ctx, normalized.scopeName, did)
 	if errors.Is(err, errPACAuditRunNotFound) || artifactstore.IsShredded(err) {
 		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	var serviceError *goa.ServiceError
+	if errors.As(err, &serviceError) && serviceError.Name == "forbidden" {
+		return nil, err
 	}
 	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
