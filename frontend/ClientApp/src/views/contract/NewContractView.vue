@@ -18,6 +18,7 @@ import { useTemplateEditorUiStore } from '@template-repository/store/templateEdi
 import { CONTRACT_PARTY_ROLE_OPTIONS } from '@template-repository/utils/ontology-domain-fields'
 import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractEvidencePanel from '@contract-workflow-engine/components/ContractEvidencePanel.vue'
 import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import {
@@ -529,6 +530,11 @@ onBeforeRouteLeave(() => {
                   :name-error="nameError ?? undefined"
                   :description-error="descriptionError ?? undefined"
                 />
+                <div v-if="isEditMode && contract" class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
+                  <div class="card-body">
+                    <ContractEvidencePanel :contract="contract" />
+                  </div>
+                </div>
               </div>
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">

@@ -1576,11 +1576,13 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("store", func() {
 		Description("store evidence.")
-		Meta("dcs:requirements", "DCS-IR-CWE-12")
+		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-02")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
 		})
 
 		Payload(ContractStoreRequest)
@@ -1607,6 +1609,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
 			Scope("Auditor")
 			Scope("Compliance Officer")
 		})
@@ -1627,6 +1631,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Contract Creator")
 			Scope("Auditor")
 			Scope("Compliance Officer")
 		})

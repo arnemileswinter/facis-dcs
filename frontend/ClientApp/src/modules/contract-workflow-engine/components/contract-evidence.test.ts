@@ -147,3 +147,14 @@ it('renders contract evidence alongside the audit trail with block and layout co
   expect(audit.props('layout')).toEqual(layout)
   wrapper.unmount()
 })
+
+// DCS-IR-CWE-02: the contract creator populates evidence while creating the contract.
+it('lets the contract creator store evidence', async () => {
+  mocks.auth.user.roles = ['CONTRACT_CREATOR']
+  mocks.listEvidence.mockResolvedValue([])
+  const wrapper = mount(ContractEvidencePanel, { props: { contract: { ...contract, state: 'DRAFT' } } })
+  await flushPromises()
+  expect(wrapper.findAll('button').some((button) => button.text() === 'Store evidence')).toBe(true)
+  mocks.auth.user.roles = ['CONTRACT_MANAGER']
+  wrapper.unmount()
+})
