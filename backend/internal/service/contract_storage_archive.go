@@ -144,6 +144,7 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		Party:           stringValue(p.Party),
 		ValidFrom:       validFrom,
 		ValidUntil:      validUntil,
+		Jurisdiction:    stringValue(p.Jurisdiction),
 	}
 	queryHandler := contract.GetArchivedContractsHandler{
 		DB:    s.DB,

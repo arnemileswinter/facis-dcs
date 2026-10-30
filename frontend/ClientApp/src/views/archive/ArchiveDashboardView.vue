@@ -551,6 +551,10 @@ function shortDid(did: string): string {
               Valid until
               <input v-model="search.valid_until" type="date" class="input w-full" />
             </label>
+            <label class="fieldset min-w-0">
+              Jurisdiction
+              <input v-model="search.jurisdiction" class="input w-full" />
+            </label>
           </div>
         </form>
         <p v-if="entriesLoading" role="status">Loading archived contracts…</p>

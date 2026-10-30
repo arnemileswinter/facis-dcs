@@ -78,6 +78,28 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	require.Equal(t, map[string]any{"did": did}, searched[0]["criteria"])
 }
 
+// DCS-FR-CSA-10: the archive search filters by jurisdiction, and the audit
+// entry records the filter.
+func TestArchiveSearchFiltersByJurisdiction(t *testing.T) {
+	db := pgtest.Open(t)
+	for did, jurisdiction := range map[string]string{"did:web:dcs.example:contract:de": "Germany", "did:web:dcs.example:contract:fr": "France"} {
+		seedArchivedContract(t, db, did, "SIGNED")
+		_, err := db.Exec(`UPDATE contracts SET contract_data = jsonb_build_object('dcs:contractFields', jsonb_build_array(jsonb_build_object(
+			'dcs:shape', jsonb_build_object('@id', 'https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction'), 'dcs:value', $2::text))) WHERE did = $1`, did, jurisdiction)
+		require.NoError(t, err)
+	}
+	svc := archiveTestService(t, db)
+
+	jurisdiction := "germ"
+	found, err := svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{Jurisdiction: &jurisdiction})
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	require.Equal(t, "did:web:dcs.example:contract:de", found[0].Did)
+	searched := archiveEvents(t, db, "SEARCH_ARCHIVED_CONTRACTS")
+	require.Len(t, searched, 1)
+	require.Equal(t, map[string]any{"jurisdiction": "germ"}, searched[0]["criteria"])
+}
+
 func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {
 	db := pgtest.Open(t)
 	svc := archiveTestService(t, db)

@@ -93,6 +93,7 @@ export interface ArchiveSearchQuery {
   party?: string
   valid_from?: string
   valid_until?: string
+  jurisdiction?: string
   contract_version?: number
 }
 
