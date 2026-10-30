@@ -20,3 +20,8 @@ export const ContractState = {
 } as const
 
 export const contractStates: ContractState[] = Object.values(ContractState)
+
+// A rejected contract is back in draft status (DCS-FR-CWE-15): its creator edits
+// and resubmits it like a draft.
+export const isEditableContractState = (state?: string): boolean =>
+  state === ContractState.draft || state === ContractState.rejected

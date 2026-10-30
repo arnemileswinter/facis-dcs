@@ -97,6 +97,7 @@ func NewDCSToDCSHttpClient(host string, pathPrefix string) *dcstodcs.Client {
 	postNegotiation := c.PostNegotiation()
 	erase := c.Erase()
 	getContractInfo := c.GetContractInfo()
+	terminate := c.Terminate()
 	getProvenance := c.GetProvenance()
-	return dcstodcs.NewClient(postPdf, postSettlement, postSettlementWithdrawal, postNegotiation, erase, getContractInfo, getProvenance)
+	return dcstodcs.NewClient(postPdf, postSettlement, postSettlementWithdrawal, postNegotiation, erase, getContractInfo, terminate, getProvenance)
 }

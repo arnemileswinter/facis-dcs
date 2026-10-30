@@ -176,6 +176,7 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 			latest.did AS latest_template_did,
 			COALESCE(tpl.state = 'DEPRECATED', FALSE) AS template_is_deprecated,
 			regexp_replace(ce.contract_data->'dcs:parentContract'->>'@id', '^.*/', '') AS parent_contract_did,
+			regexp_replace(ce.contract_data->'dcs:renewsContract'->>'@id', '^.*/', '') AS renews_contract_did,
 			COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title') AS name,
 			c.target_id,
 			tgt.name AS target_name
@@ -658,6 +659,19 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		// subquery so it composes with any outer metadata/archive table.
 		conditions += ` did IN (SELECT did FROM contracts_effective WHERE regexp_replace(contract_data->'dcs:parentContract'->>'@id', '^.*/', '') = $` + strconv.Itoa(paramIndex) + `) AND`
 		params = append(params, values.ParentDID)
+		paramIndex++
+	}
+	if len(values.TemplateDID) > 0 {
+		conditions += ` template_did = $` + strconv.Itoa(paramIndex) + ` AND`
+		params = append(params, values.TemplateDID)
+		paramIndex++
+	}
+	if len(values.Jurisdiction) > 0 {
+		conditions += ` did IN (SELECT c.did FROM contracts_effective c,
+			jsonb_array_elements(CASE WHEN jsonb_typeof(c.contract_data->'dcs:contractFields') = 'array' THEN c.contract_data->'dcs:contractFields' ELSE '[]'::jsonb END) f
+			WHERE f->'dcs:shape'->>'@id' LIKE '%#field-contract-jurisdiction'
+			AND COALESCE(f->'dcs:value'->>'@value', f->>'dcs:value') ILIKE $` + strconv.Itoa(paramIndex) + `) AND`
+		params = append(params, "%"+values.Jurisdiction+"%")
 	}
 	l := len(" AND")
 	if len(conditions) > l {

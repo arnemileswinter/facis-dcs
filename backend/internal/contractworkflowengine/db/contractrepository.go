@@ -104,6 +104,8 @@ type ContractMetadata struct {
 	LatestTemplateDID    *string      `db:"latest_template_did"`
 	TemplateIsDeprecated *bool        `db:"template_is_deprecated"`
 	ParentContractDID    *string      `db:"parent_contract_did"`
+	// RenewsContractDID is the contract this one renews (dcs:renewsContract).
+	RenewsContractDID *string `db:"renews_contract_did"`
 	// The registered target system this contract deploys to (ADR-25), resolved
 	// to its name so the destination is readable without a second lookup.
 	TargetID   *string `db:"target_id"`
@@ -219,6 +221,12 @@ type SearchValues struct {
 	// returned. It is a reverse-index QUERY over children the instance
 	// legitimately holds locally — never a field on the parent document.
 	ParentDID string
+	// TemplateDID matches the template the contract was created from
+	// (DCS-IR-CWE-07).
+	TemplateDID string
+	// Jurisdiction matches the value of the contract field whose shape is the
+	// contract-jurisdiction taxonomy concept (DCS-FR-CWE-13).
+	Jurisdiction string
 }
 
 // SignedSignature is one SIGNED signature of a contract.

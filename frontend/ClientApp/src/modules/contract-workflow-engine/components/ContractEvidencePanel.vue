@@ -8,7 +8,10 @@ import type { ContractEvidence } from '@/models/contract/contract-evidence'
 
 const props = defineProps<{ contract: Contract }>()
 const auth = useAuthStore()
-const canStore = computed(() => auth.user?.roles.includes('CONTRACT_MANAGER') ?? false)
+// The creator adds evidence while creating the contract (DCS-IR-CWE-02).
+const canStore = computed(
+  () => auth.user?.roles.some((role) => role === 'CONTRACT_MANAGER' || role === 'CONTRACT_CREATOR') ?? false,
+)
 const entries = ref<ContractEvidence[]>([])
 const loading = ref(false)
 const pending = ref(false)

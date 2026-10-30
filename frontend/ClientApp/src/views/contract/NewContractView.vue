@@ -18,6 +18,8 @@ import { useTemplateEditorUiStore } from '@template-repository/store/templateEdi
 import { CONTRACT_PARTY_ROLE_OPTIONS } from '@template-repository/utils/ontology-domain-fields'
 import ViewContractTemplateView from '@template-repository/views/ViewContractTemplateView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractEvidencePanel from '@contract-workflow-engine/components/ContractEvidencePanel.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
 import {
   useSemanticValueVerification,
@@ -30,12 +32,13 @@ import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useErrorStore } from '@/stores/error-store'
-import { ContractState } from '@/types/contract-state'
+import { ContractState, isEditableContractState } from '@/types/contract-state'
 import { declaredPartyRoles, type ParticipantSelection } from '@/utils/participant-selection'
 import { reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractData } from '@/models/contract/contract-data'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractHistoryItem } from '@/models/responses/contract-response'
 import type { SemanticConditionValueSetter } from '@contract-workflow-engine/models/contract-content-values-store'
 
 const route = useRoute()
@@ -78,10 +81,10 @@ const draftContracts = computed(() => contractStore.contracts.filter((c) => c.st
 
 const canSubmit = computed(() => isEditMode.value || (hasApprovedTemplates.value && selectedTemplate.value !== null))
 const canSubmitContract = computed(
-  () => isEditMode.value && contract.value !== null && contract.value.state === ContractState.draft,
+  () => isEditMode.value && contract.value !== null && isEditableContractState(contract.value.state),
 )
 
-const isContractMutable = computed(() => !isEditMode.value || contract.value?.state === ContractState.draft)
+const isContractMutable = computed(() => !isEditMode.value || isEditableContractState(contract.value?.state))
 
 const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
   if (!isEditMode.value || !isContractMutable.value) return null
@@ -90,7 +93,10 @@ const setSemanticConditionValue = computed<SemanticConditionValueSetter>(() => {
 })
 
 const tabs = computed(() =>
-  contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, ['details', 'content']),
+  contractEditorUiStore.availableTabs(
+    contract.value?.state ?? ContractState.draft,
+    isEditMode.value ? ['details', 'content', 'diff'] : ['details', 'content'],
+  ),
 )
 
 const story = computed(() =>
@@ -265,6 +271,28 @@ const updateContract = async () => {
   }
 }
 
+// Rollback (DCS-FR-CWE-08): a saved version becomes the content of a new
+// version; the version it replaces stays in the history.
+const restoreVersion = async (item: ContractHistoryItem) => {
+  if (!contract.value || !isContractMutable.value) return
+  isSubmitting.value = true
+  try {
+    await contractWorkflowService.update({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      name: item.name,
+      description: item.description,
+      contract_data: item.contract_data,
+    })
+    contract.value = await contractWorkflowService.retrieveById({ did: contract.value.did })
+    applyContractDataToDraft(contract.value?.contract_data)
+  } catch (error) {
+    reportActionError(error, 'Restore version')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
 const submitContract = async () => {
   if (!contract.value || !(await verifyContractDetails()) || !verifySemanticValues()) return
   isSubmitting.value = true
@@ -294,7 +322,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
-          templateEditorUiStore.setTemplateEditable(contract.value?.state === ContractState.draft)
+          templateEditorUiStore.setTemplateEditable(isEditableContractState(contract.value?.state))
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract')
@@ -504,6 +532,11 @@ onBeforeRouteLeave(() => {
                   :name-error="nameError ?? undefined"
                   :description-error="descriptionError ?? undefined"
                 />
+                <div v-if="isEditMode && contract" class="card mt-4 border border-base-300 bg-base-100 shadow-sm">
+                  <div class="card-body">
+                    <ContractEvidencePanel :contract="contract" />
+                  </div>
+                </div>
               </div>
               <div v-show="activeTab === 'content'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
@@ -538,6 +571,16 @@ onBeforeRouteLeave(() => {
                     <ClausesEditor />
                   </div>
                 </div>
+              </div>
+
+              <div v-if="isEditMode && contract" v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                  :restorable="isContractMutable && !isSubmitting"
+                  @restore="restoreVersion"
+                />
               </div>
 
               <!-- BUILDER TAB -->
@@ -586,7 +629,7 @@ onBeforeRouteLeave(() => {
           Update
         </button>
         <button
-          v-if="contract?.state === ContractState.draft && canSubmitContract"
+          v-if="canSubmitContract"
           class="btn flex-1 btn-primary"
           :disabled="isSubmitting"
           @click="submitContract"

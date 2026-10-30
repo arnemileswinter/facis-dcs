@@ -126,12 +126,15 @@ const approve = async () => {
   try {
     const confirmationResult = await confirmationDialog.value?.reveal({
       message: 'Confirm approval',
+      editor: { requiredText: false, placeholder: 'Comment (optional)' },
     })
     if (confirmationResult?.isCanceled) return
+    const comment = confirmationResult?.data?.trim()
     isSubmitting.value = true
     const response = await contractWorkflowService.approve({
       did: contract.value.did,
       updated_at: contract.value.updated_at,
+      ...(comment ? { decision_notes: [comment] } : {}),
     })
     if (response.did) {
       await navStore.goToPreviousRoute()
@@ -167,6 +170,33 @@ const reject = async () => {
     }
   } catch (err) {
     reportActionError(err, 'Reject contract')
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// REVIEWED -> SUBMITTED: the approver sends the contract back for another review
+// round (DCS-IR-CWE-09).
+const resubmit = async () => {
+  if (!contract.value) return
+  try {
+    const confirmationResult = await confirmationDialog.value?.reveal({
+      message: 'Send back for review',
+      editor: { requiredText: false, placeholder: 'Comment (optional)' },
+    })
+    if (confirmationResult?.isCanceled) return
+    const comment = confirmationResult?.data?.trim()
+    isSubmitting.value = true
+    const response = await contractWorkflowService.submit({
+      did: contract.value.did,
+      updated_at: contract.value.updated_at,
+      ...(comment ? { comments: [comment] } : {}),
+    })
+    if (response.did) {
+      await navStore.goToPreviousRoute()
+    }
+  } catch (err) {
+    reportActionError(err, 'Resubmit contract')
   } finally {
     isSubmitting.value = false
   }
@@ -227,7 +257,10 @@ const exportPDF = async () => {
         <!-- Tabs -->
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
-            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">Approve Contract</p>
+            <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">
+              Approve Contract
+              <span v-if="isApprover" class="font-normal normal-case">· as Contract Approver</span>
+            </p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
               <button
                 v-for="tab in tabs"
@@ -315,6 +348,14 @@ const exportPDF = async () => {
       <div class="mx-auto flex max-w-4xl flex-col gap-3 px-6 py-3 md:flex-row">
         <button class="btn btn-outline md:w-32" @click="$router.back()">Back</button>
         <button class="btn btn-outline md:w-32" :disabled="exporting" @click="exportPDF">Export PDF</button>
+        <button
+          v-if="contract?.state === ContractState.reviewed"
+          class="btn flex-1 btn-outline"
+          :disabled="!isApprover || isSubmitting"
+          @click="resubmit"
+        >
+          Resubmit
+        </button>
         <button
           v-if="contract?.state === ContractState.reviewed"
           class="btn flex-1 btn-primary"

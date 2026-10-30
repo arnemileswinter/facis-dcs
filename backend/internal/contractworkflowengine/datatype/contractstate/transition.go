@@ -85,7 +85,10 @@ var Transitions = map[ContractState]map[Event][]ContractState{
 		EventTerminate: {Terminated},
 	},
 	Rejected: {
+		// Rejection returns the contract to draft status (DCS-FR-CWE-15): the
+		// creator edits it like a draft and resubmits it into negotiation.
 		EventSubmit:    {Negotiation},
+		EventUpdate:    {Rejected},
 		EventTerminate: {Terminated},
 	},
 	Offered: {

@@ -241,6 +241,8 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
+		errors.Is(err, command.ErrKPIContractTerminated) ||
+		errors.Is(err, command.ErrMissingRequiredMetadata) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -621,6 +623,7 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 			LatestTemplateDid:    item.LatestTemplateDID,
 			TemplateIsDeprecated: item.TemplateIsDeprecated,
 			ParentContractDid:    item.ParentContractDID,
+			RenewsContractDid:    item.RenewsContractDID,
 			TargetID:             item.TargetID,
 			TargetName:           item.TargetName,
 		})
@@ -1449,6 +1452,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 		ContractData:    base.DerefString(req.ContractData),
 		ParentDID:       base.DerefString(req.ParentDid),
 		ValidUntil:      validUntil,
+		Party:           base.DerefString(req.Party),
+		TemplateDID:     base.DerefString(req.TemplateDid),
+		Jurisdiction:    base.DerefString(req.Jurisdiction),
 		Pagination:      pagination,
 	}
 	qryHandler := contract.GetAllMetaDataByFilterHandler{
@@ -1533,12 +1539,13 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	}
 
 	cmd := command.ApproveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ApprovedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
-		CauserDID:  localPeer,
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		ApprovedBy:    middleware.GetParticipantID(ctx),
+		DecisionNotes: req.DecisionNotes,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		CauserDID:     localPeer,
 	}
 	handler := command.Approver{
 		DB:          s.DB,

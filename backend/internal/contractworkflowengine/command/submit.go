@@ -134,6 +134,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		if err := validation.RequireHubConformance(ctx, contractData); err != nil {
 			return fmt.Errorf("contract submission blocked: %w", err)
 		}
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
 
 		// Submission into NEGOTIATION finalizes the participating parties, so seed
 		// the signable structure for them — one party node per party (origin and
@@ -170,6 +173,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 		if err := validation.RequireHubConformance(ctx, contractData); err != nil {
 			return fmt.Errorf("contract submission blocked: %w", err)
+		}
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
 		}
 
 		err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
@@ -506,6 +512,23 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		return nil, fmt.Errorf("could not read contract data: %w", err)
 	}
 	return contractData.ContractData, nil
+}
+
+// ErrMissingRequiredMetadata is returned when an assembled contract is
+// submitted without the metadata every contract carries.
+var ErrMissingRequiredMetadata = errors.New("contract is missing required metadata")
+
+// requireAssemblyMetadata checks the required metadata of an assembled
+// contract before it leaves draft (DCS-FR-CWE-03): the contract has a name.
+func requireAssemblyMetadata(ctx context.Context, tx *sqlx.Tx, repo db.ContractRepo, did string) error {
+	contract, err := repo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract metadata: %w", err)
+	}
+	if contract.Name == nil || strings.TrimSpace(*contract.Name) == "" {
+		return fmt.Errorf("%w: name", ErrMissingRequiredMetadata)
+	}
+	return nil
 }
 
 func canSubmitUpdatedContractData(state string) bool {

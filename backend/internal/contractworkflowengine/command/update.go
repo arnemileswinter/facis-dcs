@@ -118,6 +118,15 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		return err
 	}
 
+	// A rejected contract is back in draft (DCS-FR-CWE-15), but it was
+	// negotiated: an edit may not rewrite a version an instance still stands
+	// behind, the same rule a resubmission with new content follows.
+	if oldData.State == contractstate.Rejected.String() {
+		if err := requireUnsettledAgreement(ctx, tx, h.CRepo, h.SRepo, localPeer, cmd.DID); err != nil {
+			return err
+		}
+	}
+
 	// Reject an update whose (locally resolvable) parent chain would loop
 	// back to this contract. Non-local parents are simply not walked further —
 	// cross-instance parents are legitimate and unresolvable here by design.

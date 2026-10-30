@@ -197,6 +197,14 @@ func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx
 // holds them, the target holds the events. A report that carries no verdict is
 // stored as not_evaluated.
 func (h *DeploymentCallbackHandler) applyKPIReport(ctx context.Context, tx *sqlx.Tx, deployment *db.ContractDeployment, cmd DeploymentCallbackCmd) error {
+	processData, err := h.CRepo.ReadProcessDataByDID(ctx, tx, deployment.DID)
+	if err != nil {
+		return fmt.Errorf("could not read contract %s: %w", deployment.DID, err)
+	}
+	if processData.State == contractstate.Terminated.String() {
+		return fmt.Errorf("%w: %s", ErrKPIContractTerminated, deployment.DID)
+	}
+
 	verdict, err := reportedVerdict(cmd.KPIVerdict)
 	if err != nil {
 		return err
@@ -272,6 +280,9 @@ var (
 	// ErrKPIRuleUnknown is returned for a rule @id that is not among the rules
 	// this contract deployed to the target.
 	ErrKPIRuleUnknown = errors.New("KPI verdict names a rule this contract does not carry")
+	// ErrKPIContractTerminated is returned for a report on a terminated
+	// contract, which is no longer monitored (DCS-FR-CWE-23).
+	ErrKPIContractTerminated = errors.New("KPI report for a terminated contract")
 )
 
 func reportedVerdict(reported string) (string, error) {

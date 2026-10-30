@@ -87,6 +87,19 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 
+	if err := closeOpenTasks(ctx, tx, cmd.DID); err != nil {
+		return err
+	}
+
+	// A local termination notifies every counterparty instance
+	// (DCS-NFR-BR-06). A termination received from a peer does not: the
+	// terminating instance notifies all parties itself.
+	if cmd.CauserDID == localPeer {
+		if err := h.queuePeerTerminations(ctx, tx, cmd.DID, cmd.Reason, localPeer); err != nil {
+			return err
+		}
+	}
+
 	occurredAt := time.Now().UTC()
 	evt := contractevents.TerminateEvent{
 		DID:             cmd.DID,
@@ -106,4 +119,39 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 	}
 
 	return tx.Commit()
+}
+
+// queuePeerTerminations records one termination notice per party instance
+// other than this one; dcstodcs.TerminationNotifier delivers them.
+func (h *Terminator) queuePeerTerminations(ctx context.Context, tx *sqlx.Tx, did, reason, localPeer string) error {
+	contract, err := h.CRepo.ReadDataByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read contract parties: %w", err)
+	}
+	if contract.Responsible == nil {
+		return nil
+	}
+	for _, party := range contract.Responsible.GetParties() {
+		if party == localPeer {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO contract_peer_terminations (did, peer_did, reason) VALUES ($1, $2, $3)
+			ON CONFLICT (did, peer_did) DO NOTHING`, did, party, reason); err != nil {
+			return fmt.Errorf("could not queue the termination notice toward %s: %w", party, err)
+		}
+	}
+	return nil
+}
+
+// closeOpenTasks removes the contract's open negotiation, review and approval
+// tasks: a terminated contract leaves every active workflow (DCS-FR-CWE-23).
+// Decided tasks stay as the record of who decided what.
+func closeOpenTasks(ctx context.Context, tx *sqlx.Tx, did string) error {
+	for _, table := range []string{"contract_negotiation_task", "contract_review_task", "contract_approval_task"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE did = $1 AND state = 'OPEN'`, did); err != nil {
+			return fmt.Errorf("could not close open tasks in %s: %w", table, err)
+		}
+	}
+	return nil
 }

@@ -196,6 +196,7 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("latest_template_did", String, "The DID of the latest template for this contract")
 	Attribute("template_is_deprecated", Boolean, "Whether the template is deprecated")
 	Attribute("parent_contract_did", String, "The DID of the parent contract, if this is a sub-contract")
+	Attribute("renews_contract_did", String, "The DID of the contract this contract renews (DCS-FR-CWE-29)")
 	Attribute("evidence", Any, "Archive evidence blob (only populated for archived contracts), including a deployment sub-object with correlation_id/payload_hash/receipt_hash/tsa_token/activated_at (DCS-FR-SM-10, DCS-FR-SM-12)")
 	Attribute("archive_summary", String, "Archive annotation summary (only populated for archived contracts; DCS-FR-CSA-11)")
 	Attribute("archive_tags", ArrayOf(String), "Archive annotation tags (only populated for archived contracts; DCS-FR-CSA-11)")
@@ -371,6 +372,9 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
 	Attribute("valid_until", String, "Return only contracts whose validity period ends at or before the specified date and time)")
+	Attribute("party", String, "Return only contracts naming this party DID as creator or counterparty (DCS-IR-CWE-07)")
+	Attribute("template_did", String, "Return only contracts created from this template (DCS-IR-CWE-07)")
+	Attribute("jurisdiction", String, "Return only contracts whose jurisdiction field contains this text (DCS-FR-CWE-13)")
 })
 
 var ContractSearchResponse = Type("ContractSearchResponse", func() {
@@ -504,6 +508,8 @@ var ContractApproveRequest = Type("ContractApproveRequest", func() {
 	Attribute("did", String, "Decentralized Identifier of the contract")
 
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
+
+	Attribute("decision_notes", ArrayOf(String), "Approver comments recorded with the decision (DCS-FR-CWE-15)")
 
 	Required("did", "updated_at")
 })
@@ -1470,7 +1476,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("search", func() {
 		Description("locate contracts by data or state. filter/search across lifecycle states.")
-		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11")
+		Meta("dcs:requirements", "DCS-IR-CWE-07", "DCS-IR-CWE-11", "DCS-FR-CWE-13")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -1506,6 +1512,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("contract_data")
 			Param("parent_did")
 			Param("valid_until")
+			Param("party")
+			Param("template_did")
+			Param("jurisdiction")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -1568,11 +1577,13 @@ var _ = Service("ContractWorkflowEngine", func() {
 
 	Method("store", func() {
 		Description("store evidence.")
-		Meta("dcs:requirements", "DCS-IR-CWE-12")
+		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-02")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
 		})
 
 		Payload(ContractStoreRequest)
@@ -1599,6 +1610,8 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			// Evidence is populated when the contract is created (DCS-IR-CWE-02).
+			Scope("Contract Creator")
 			Scope("Auditor")
 			Scope("Compliance Officer")
 		})
@@ -1619,6 +1632,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")
 			Scope("Sys. Contract Manager")
+			Scope("Contract Creator")
 			Scope("Auditor")
 			Scope("Compliance Officer")
 		})
