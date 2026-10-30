@@ -155,7 +155,7 @@ func regulatoryFindings(content map[string]any, facts regulatoryFacts) []validat
 	levelFindings := 0
 	for _, sig := range facts.Signatures {
 		required := validation.RequiredCredentialType(raw, sig.Field)
-		if levelRank(sig.Achieved) >= levelRank(required) {
+		if validation.SignatureLevelSatisfies(sig.Achieved, required) {
 			continue
 		}
 		levelFindings++
@@ -231,15 +231,6 @@ func regulatoryFindings(content map[string]any, facts regulatoryFacts) []validat
 	return findings
 }
 
-func levelRank(level string) int {
-	switch strings.ToUpper(strings.TrimSpace(level)) {
-	case "QES":
-		return 2
-	case "AES":
-		return 1
-	}
-	return 0
-}
 
 func walkStrings(value any, visit func(string)) {
 	switch typed := value.(type) {

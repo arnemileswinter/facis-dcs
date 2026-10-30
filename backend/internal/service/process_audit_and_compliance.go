@@ -794,6 +794,23 @@ func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *process
 	return content, nil
 }
 
+// ComplianceReport exports the compliance report of a contract segmented by
+// party and by contract component (DCS-FR-PACM-07).
+func (s *processAuditAndCompliancesrvc) ComplianceReport(ctx context.Context, p *processauditandcompliance.ComplianceReportPayload) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.ComplianceReporter{DB: s.DB}
+	content, err := handler.Handle(ctx, qry2.ComplianceReportQry{DID: p.Did, GeneratedBy: middleware.GetParticipantID(ctx)})
+	if errors.Is(err, qry2.ErrContractNotFound) {
+		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return content, nil
+}
+
 // CheckpointHead serves the newest audit-trail checkpoint head. Everything in
 // the response is a hash, a count or a trusted timestamp, so a caller may
 // publish it onward to an external notary — which is the point: a head held by

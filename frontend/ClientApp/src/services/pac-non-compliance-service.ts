@@ -17,4 +17,8 @@ export const pacNonComplianceService: PACNonComplianceService = {
       .get<Blob>(`/pac/case/${encodeURIComponent(caseId)}`, { params: { justification }, responseType: 'blob' })
       .then((res) => res.data)
   },
+
+  async exportComplianceReport(did: string) {
+    return http.get<Blob>('/pac/compliance-report', { params: { did }, responseType: 'blob' }).then((res) => res.data)
+  },
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { pacNonComplianceService } from '@/services/pac-non-compliance-service'
 import {
   type SignatureAuditEntry,
   type SignatureComplianceResult,
@@ -295,6 +296,18 @@ function exportJson() {
   downloadBlob(blob, reportFilename('json'))
 }
 
+// The party and component report the server generates (DCS-FR-PACM-07).
+async function exportPartyReport() {
+  if (!selected.value) return
+  error.value = null
+  try {
+    downloadBlob(await pacNonComplianceService.exportComplianceReport(selected.value.did), reportFilename('parties.json'))
+  } catch (e: unknown) {
+    claimReportedHttpError(e)
+    error.value = `Failed to export the party report: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 function escapeHtml(value: string | number | boolean | null | undefined): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -471,6 +484,14 @@ function exportPdf() {
               </button>
               <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportPdf">
                 Export PDF
+              </button>
+              <button
+                v-if="canAudit"
+                class="btn whitespace-nowrap btn-outline btn-sm"
+                :disabled="!selected"
+                @click="exportPartyReport"
+              >
+                Export party report
               </button>
             </div>
           </div>

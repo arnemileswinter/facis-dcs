@@ -118,3 +118,33 @@ func TestIncidentReportOpensACaseWithAnExportableCaseFile(t *testing.T) {
 		t.Fatalf("unknown case: err %v, want ErrCaseNotFound", err)
 	}
 }
+
+// DCS-FR-PACM-07: the compliance report reads the contract, its signatures
+// with their ceremonies and its newest gate run from the database.
+func TestComplianceReportReadsTheContractFromTheDatabase(t *testing.T) {
+	db := investigationDB(t)
+	did := insertContract(t, db, "SIGNED", time.Now())
+	if _, err := db.Exec(`UPDATE contracts SET contract_data = $2 WHERE did = $1`, did,
+		`{"dcs:signatureFields":[{"dcs:signatoryName":"did:web:org-a"}]}`); err != nil {
+		t.Fatalf("update contract: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO contract_signatures (contract_did, signer_did, credential_type, status, field_name)
+        VALUES ($1, 'did:key:signer', 'AES', 'SIGNED', 'did:web:org-a')`, did); err != nil {
+		t.Fatalf("insert signature: %v", err)
+	}
+	reporter := qry.ComplianceReporter{DB: db}
+	raw, err := reporter.Handle(context.Background(), qry.ComplianceReportQry{DID: did})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	var report qry.ComplianceReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if len(report.Parties) != 1 || report.Parties[0].Status != qry.StatusCompliant || report.Parties[0].Credential.AchievedLevel != "AES" {
+		t.Fatalf("report = %+v", report)
+	}
+	if _, err := reporter.Handle(context.Background(), qry.ComplianceReportQry{DID: "did:web:test:missing"}); !errors.Is(err, qry.ErrContractNotFound) {
+		t.Fatalf("missing contract: err %v", err)
+	}
+}

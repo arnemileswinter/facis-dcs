@@ -309,6 +309,30 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 	})
 
+	Method("compliance_report", func() {
+		Description("export the compliance report of a contract segmented by party and by contract component (dcs:contractData objects). Each segment carries its compliance status, a timestamp, its non-conformances and the credential metadata of the signatures (level, certificate, PoA).")
+		Meta("dcs:requirements", "DCS-FR-PACM-07")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Contract DID")
+			Required("did")
+		})
+		Result(Bytes)
+		Error("not_found", ErrorResult, "Contract not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/compliance-report")
+			Param("did")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("checkpoint_head", func() {
 		Description("retrieve the newest audit-trail checkpoint head (ADR-16). Contains only hashes, counts and a trusted timestamp, so the response may be published onward — an external notary that stores one head pins the whole log before it, because every root chains to its predecessor.")
 		Meta("dcs:requirements", "DCS-IR-PACM-01")

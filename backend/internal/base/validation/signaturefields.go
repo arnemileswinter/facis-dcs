@@ -84,3 +84,9 @@ func RequiredCredentialType(contractData []byte, field string) string {
 	}
 	return defaultLevel
 }
+
+// SignatureLevelSatisfies reports whether an achieved signature level (SES,
+// AES, QES) meets a required level.
+func SignatureLevelSatisfies(achieved, required string) bool {
+	return signatureLevelSatisfies(achieved, required)
+}
