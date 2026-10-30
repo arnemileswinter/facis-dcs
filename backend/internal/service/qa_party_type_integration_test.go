@@ -146,7 +146,7 @@ func TestQAPartyTypeCatalogueImport(t *testing.T) {
 			var before int
 			require.NoError(t, database.Get(&before, `SELECT COUNT(*) FROM contract_templates`))
 			did, err := registrar.Handle(context.Background(), command.RegisterCmd{DID: source, Version: 1, RegisteredBy: "tester"})
-			if value == "invalid" {
+			if value == "" || value == "invalid" {
 				require.ErrorContains(t, err, "party type")
 				require.Nil(t, did)
 				var after, events int
@@ -160,11 +160,7 @@ func TestQAPartyTypeCatalogueImport(t *testing.T) {
 			require.NotNil(t, did)
 			var party string
 			require.NoError(t, database.Get(&party, `SELECT party_type FROM contract_templates WHERE did=$1`, *did))
-			want := value
-			if want == "" {
-				want = "MULTI_PARTY"
-			}
-			require.Equal(t, want, party)
+			require.Equal(t, value, party)
 			var events int
 			require.NoError(t, database.Get(&events, `SELECT COUNT(*) FROM outbox_events WHERE did=$1`, *did))
 			require.Equal(t, 1, events)

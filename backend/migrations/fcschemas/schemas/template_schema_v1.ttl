@@ -657,8 +657,6 @@ dcs-template:SubTemplateSnapshotShape
   sh:property [
     sh:path <https://w3id.org/facis/dcs/1#partyType> ;
     sh:datatype xsd:string ;
-    # Optional: templates published by older DCS versions carry no party type
-    # and count as MULTI_PARTY when read.
-    sh:minCount 0 ; sh:maxCount 1 ;
+    sh:minCount 1 ; sh:maxCount 1 ;
     sh:in ( "SINGLE_PARTY" "MULTI_PARTY" )
   ] .

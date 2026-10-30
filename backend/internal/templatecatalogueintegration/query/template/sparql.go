@@ -6,7 +6,6 @@ import (
 
 	"digital-contracting-service/internal/fcasset"
 	"digital-contracting-service/internal/templatecatalogueintegration/internal/ptr"
-	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 )
 
 // credentialSubjectIRI is the VC 2.0 term FC annotates every ingested triple
@@ -46,24 +45,9 @@ func coreFieldTriples() string {
 	b.WriteString(fieldTriple(schemaDescriptionIRI, "description"))
 	b.WriteString(fieldTriple(schemaVersionIRI, "version"))
 	b.WriteString(fieldTriple(dcsStateIRI, "state"))
-	// Entries published by older DCS versions can lack these triples.
-	b.WriteString(optionalFieldTriple(dcsTemplateTypeIRI, "template_type"))
-	b.WriteString(optionalFieldTriple(dcsPartyTypeIRI, "party_type"))
+	b.WriteString(fieldTriple(dcsTemplateTypeIRI, "template_type"))
+	b.WriteString(fieldTriple(dcsPartyTypeIRI, "party_type"))
 	return b.String()
-}
-
-func optionalFieldTriple(predicateIRI, varName string) string {
-	return fmt.Sprintf("  OPTIONAL { <<(?s <%s> ?%s)>> <%s> ?s . }\n", predicateIRI, varName, credentialSubjectIRI)
-}
-
-// unclassifiedPartyType matches the backfill of local templates created before the classification existed.
-const unclassifiedPartyType = partytype.MultiParty
-
-func cataloguePartyType(row map[string]interface{}) string {
-	if party := ptr.StringFromMap(row, "party_type"); party != "" {
-		return party
-	}
-	return unclassifiedPartyType.String()
 }
 
 // sparqlEscapeString escapes a string for safe embedding as a SPARQL string
