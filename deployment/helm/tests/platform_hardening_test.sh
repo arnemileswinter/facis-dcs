@@ -68,4 +68,13 @@ grep -q "value: \"did-document=$b,x5c-trust-anchors-poa=$a\"" <<<"$pins" || fail
 render -f "$CHART_DIR/values.bdd.yml" --show-only templates/deployment.yaml | grep -q DCS_CONFIG_SHA256_PINS \
   && fail "empty pins rendered"
 
+# DCS-NFR-SEC-11: alert rules where the Prometheus Operator runs.
+rules="$(render "${ACK[@]}" --set backup.enabled=true --api-versions monitoring.coreos.com/v1/PrometheusRule --show-only templates/prometheusrule.yaml)"
+for alert in DCSBackendDown DCSServerErrors DCSAuthFailureSpike DCSSlowResponses DCSBackendRestarting DCSBackupFailed; do
+  grep -q "alert: $alert" <<<"$rules" || fail "no $alert alert rule"
+done
+grep -q 'expr: up{namespace="dcs", service="dcs-digital-contracting-service-metrics"} == 0' <<<"$rules" \
+  || fail "DCSBackendDown does not select the backend metrics service"
+render "${ACK[@]}" | grep -q 'kind: PrometheusRule' && fail "PrometheusRule without the CRD"
+
 echo 'platform hardening render tests passed'

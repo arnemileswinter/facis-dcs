@@ -680,6 +680,17 @@ kube-prometheus-stack:
     prometheusSpec:
       retention: 15d
 
+# Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule when the Prometheus
+# Operator CRD exists or monitoring.enabled. labels must match the
+# ruleSelector of the Prometheus that should load them.
+alerts:
+  enabled: true
+  labels:
+    release: prometheus
+  serverErrorRatio: 0.05
+  authFailuresPerSecond: 1
+  p95LatencySeconds: 2
+
 # EU DSS demonstration webapp (AdES validation alongside the PKCS#11 signing
 # path — DCS-FR-SM-18, DCS-IR-SI-10, DCS-IR-CI-08). DISABLED by default:
 # there is no official EU-published container image (the webapp ships as a
