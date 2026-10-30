@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/artifactstore"
+	"digital-contracting-service/internal/base/contractreadpolicy"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 )
 
@@ -100,4 +102,81 @@ func TestShreddedKeyRowMustNotKeepItsWrappedKey(t *testing.T) {
 
 	_, err := db.Exec(`UPDATE content_encryption_keys SET shredded_at = now() WHERE scope_id = $1`, erasedDID)
 	require.ErrorContains(t, err, "chk_cek_shredded_has_no_key")
+}
+
+func shredForTest(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	shredder := &AuditedShredder{DB: db, Keys: &artifactstore.PostgresCEKRepo{DB: db}, Artifacts: artifactstore.New(nil, nil, nil, "", "", nil)}
+	_, err := shredder.Shred(context.Background(), erasedDID, "did:web:archive-manager", "Art. 17 request")
+	require.NoError(t, err)
+}
+
+// The shred also erases the copies of the contract and of the signers'
+// personal data outside the contract tables: the outbox bodies that the audit
+// trail erases with the key, the payload of every JAdES signature, and the
+// PID claims, presentations and prepared PDF of the signing ceremonies. The
+// erasure records and the bodies of other scopes stay.
+func TestShredErasesResidualCopiesOfTheContentAndPersonalData(t *testing.T) {
+	db := pgtest.Open(t)
+	seedErasableContract(t, db)
+	const jws = "aGVhZGVy.c2VjcmV0IHRlcm1z.c2ln"
+	statements := []string{
+		`UPDATE signature_ceremonies SET pid_claims = '{"given_name":"secret Anna"}', vp_token = 'secret-vp',
+		 poa_vp_token = 'secret-poa', prepared_pdf = 'secret pdf'::bytea WHERE contract_did = $1`,
+		`INSERT INTO contract_sync_signatures (did, contract_version, from_peer_did, jades_signature)
+		 VALUES ($1, 1, 'did:web:peer', '` + jws + `')`,
+		`INSERT INTO contract_signatures (contract_did, signer_did, status, jades_signature)
+		 VALUES ($1, 'did:jwk:anna', 'SIGNED', '` + jws + `')`,
+		`INSERT INTO outbox_events (component, event_type, event_data, did) VALUES
+		 ('CONTRACT_STORAGE_ARCHIVE', 'STORE_ARCHIVED_CONTRACT', '{"note":"secret terms"}', $1),
+		 ('CONTRACT_WORKFLOW_ENGINE', 'TERMINATE_CONTRACT', '{"reason":"secret reason"}', $1),
+		 ('CONTRACT_STORAGE_ARCHIVE', 'DELETE_ARCHIVED_CONTRACT', '{"justification":"kept record"}', $1),
+		 ('PROCESS_AUDIT_AND_COMPLIANCE', 'PAC_INCIDENT_REPORT', '{"case_id":"kept case"}', $1)`,
+	}
+	for _, statement := range statements {
+		_, err := db.Exec(statement, erasedDID)
+		require.NoError(t, err, statement)
+	}
+
+	shredForTest(t, db)
+
+	var personal int
+	require.NoError(t, db.Get(&personal, `SELECT count(*) FROM signature_ceremonies WHERE contract_did = $1
+		AND num_nonnulls(pid_claims, vp_token, poa_vp_token, prepared_pdf) > 0`, erasedDID))
+	require.Zero(t, personal, "a signing ceremony kept personal data or the prepared PDF")
+
+	var signatures []string
+	require.NoError(t, db.Select(&signatures, `SELECT jades_signature FROM contract_sync_signatures WHERE did = $1
+		UNION ALL SELECT jades_signature FROM contract_signatures WHERE contract_did = $1`, erasedDID))
+	require.Equal(t, []string{"aGVhZGVy..c2ln", "aGVhZGVy..c2ln"}, signatures, "a JAdES signature kept its contract payload")
+
+	var bodies []string
+	require.NoError(t, db.Select(&bodies, `SELECT event_data::text FROM outbox_events
+		WHERE did = $1 AND event_type <> 'KEY_SHREDDED' ORDER BY id`, erasedDID))
+	require.Equal(t, []string{`{"erased": true}`, `{"erased": true}`, `{"justification": "kept record"}`, `{"case_id": "kept case"}`}, bodies)
+}
+
+// After the erasure the contract keeps the organization names of its
+// parties, so the read policy still admits a named party. Nothing else of a
+// party node stays.
+func TestErasedContractStaysReadableForItsNamedParties(t *testing.T) {
+	db := pgtest.Open(t)
+	seedErasableContract(t, db)
+	_, err := db.Exec(`UPDATE contracts SET contract_data =
+		'{"clause":"secret terms","dcs:parties":[{"dcs:legalName":"Org B","dcs:email":"secret@b.example"}]}' WHERE did = $1`, erasedDID)
+	require.NoError(t, err)
+
+	shredForTest(t, db)
+
+	var data string
+	require.NoError(t, db.Get(&data, `SELECT contract_data::text FROM contracts WHERE did = $1`, erasedDID))
+	require.Equal(t, `{"dcs:parties": [{"dcs:legalName": "Org B"}]}`, data)
+
+	ctx := contractreadpolicy.WithScope(context.Background(),
+		contractreadpolicy.Scope{Organization: "Org B", Roles: userrole.UserRoles{userrole.ContractObserver}})
+	params := []any{erasedDID}
+	var readable int
+	require.NoError(t, db.Get(&readable, `SELECT count(*) FROM contracts WHERE did = $1 AND `+
+		contractreadpolicy.SQL(ctx, "contracts.did", &params), params...))
+	require.Equal(t, 1, readable, "the named party lost read access to the erased contract")
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"digital-contracting-service/internal/base/artifactstore"
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
@@ -18,6 +19,7 @@ import (
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 	"goa.design/clue/log"
 )
 
@@ -87,25 +89,72 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 }
 
 // eraseContractContent removes the plaintext copies of the contract content
-// that Postgres holds (DCS-NFR-SEC-13, DCS-NFR-COMP-03): the current and
-// historical contract data, negotiation change requests and drafts, the
-// archive snapshot, and the payload pinned for signing. Metadata, hashes and
-// signatures stay as evidence.
+// and of the signers' personal data that Postgres holds (DCS-NFR-SEC-13,
+// DCS-NFR-COMP-03): the current and historical contract data, negotiation
+// change requests and drafts, the archive snapshot, the payload pinned for
+// signing, the PDF prepared for signing, the PID claims and presentations of
+// the signing ceremonies, the payload of every JAdES signature over the
+// contract, and the outbox copies of the event bodies that the audit trail
+// erases with the key. The contract keeps its party names for the read
+// policy. Metadata, hashes and signature values stay as evidence.
 func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
 	statements := []string{
-		`UPDATE contracts SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
+		`UPDATE contracts SET contract_data = ` + partyNamesOnly + ` WHERE did = $1 AND contract_data IS DISTINCT FROM ` + partyNamesOnly,
 		`UPDATE contract_history SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
 		`UPDATE contract_negotiations SET change_request = '{}'::jsonb WHERE did = $1 AND change_request IS DISTINCT FROM '{}'::jsonb`,
 		`DELETE FROM contract_negotiation_drafts WHERE contract_did = $1`,
 		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1 AND contract_snapshot <> '{}'::jsonb`,
-		`UPDATE signature_ceremonies SET pinned_payload = NULL WHERE contract_did = $1 AND pinned_payload IS NOT NULL`,
+		`UPDATE signature_ceremonies SET pinned_payload = NULL, prepared_pdf = NULL, pid_claims = NULL, vp_token = NULL, poa_vp_token = NULL
+		 WHERE contract_did = $1 AND num_nonnulls(pinned_payload, prepared_pdf, pid_claims, vp_token, poa_vp_token) > 0`,
+		`UPDATE contract_sync_signatures SET jades_signature = ` + detachedJWS + ` WHERE did = $1 AND split_part(jades_signature, '.', 2) <> ''`,
+		`UPDATE contract_signatures SET jades_signature = ` + detachedJWS + ` WHERE contract_did = $1 AND split_part(jades_signature, '.', 2) <> ''`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement, contractIRI); err != nil {
 			return err
 		}
 	}
-	return nil
+	return eraseOutboxBodies(ctx, tx, contractIRI)
+}
+
+// partyNamesOnly keeps the dcs:legalName of each dcs:parties node: the
+// organization names contractreadpolicy authorizes on. Party nodes carry no
+// other field after the erasure.
+const partyNamesOnly = `(SELECT CASE WHEN jsonb_typeof(contract_data->'dcs:parties') = 'array'
+	THEN jsonb_build_object('dcs:parties', COALESCE((
+		SELECT jsonb_agg(jsonb_build_object('dcs:legalName', party->'dcs:legalName'))
+		FROM jsonb_array_elements(contract_data->'dcs:parties') party
+		WHERE jsonb_typeof(party->'dcs:legalName') = 'string'), '[]'::jsonb))
+	ELSE '{}'::jsonb END)`
+
+// detachedJWS removes the payload from a compact JWS (RFC 7515 Appendix F):
+// the protected header and the signature value stay as evidence.
+const detachedJWS = `split_part(jades_signature, '.', 1) || '..' || split_part(jades_signature, '.', 3)`
+
+// eraseOutboxBodies replaces the outbox copy of every event body that the
+// audit trail encrypts under the contract's key with the erased marker. The
+// audit chain hashes the stored IPFS entry, not the outbox row, so the chain
+// and the checkpoint proofs keep verifying. The erasure records and the
+// events of other scopes keep their bodies, as they do in the audit trail.
+func eraseOutboxBodies(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
+	var events []datatype.OutboxEvent
+	if err := tx.SelectContext(ctx, &events,
+		`SELECT id, component, event_type, did FROM outbox_events WHERE did = $1`, contractIRI); err != nil {
+		return err
+	}
+	contractScope := artifactstore.ContractScope(contractIRI)
+	ids := make([]int64, 0, len(events))
+	for _, evt := range events {
+		if baseevent.ScopeForEvent(evt, artifactstore.Scope{}) == contractScope {
+			ids = append(ids, evt.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE outbox_events SET event_data = $1 WHERE id = ANY($2)`,
+		string(datatype.ErasedEventData), pq.Array(ids))
+	return err
 }
 
 // DBContractParties reads the contract's parties from its Responsible record.
