@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -124,6 +125,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("invalid participant")
 		}
 
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
 		contractData, err := h.contractDataForSemanticValidation(ctx, tx, cmd)
 		if err != nil {
 			return err
@@ -133,9 +137,6 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 		if err := validation.RequireHubConformance(ctx, contractData); err != nil {
 			return fmt.Errorf("contract submission blocked: %w", err)
-		}
-		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
-			return err
 		}
 
 		// Submission into NEGOTIATION finalizes the participating parties, so seed
@@ -164,6 +165,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("invalid participant")
 		}
 
+		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
+			return err
+		}
 		contractData, err := h.contractDataForSemanticValidation(ctx, tx, cmd)
 		if err != nil {
 			return err
@@ -173,9 +177,6 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 		if err := validation.RequireHubConformance(ctx, contractData); err != nil {
 			return fmt.Errorf("contract submission blocked: %w", err)
-		}
-		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
-			return err
 		}
 
 		err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
@@ -515,18 +516,34 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 }
 
 // ErrMissingRequiredMetadata is returned when an assembled contract is
-// submitted without the metadata every contract carries.
-var ErrMissingRequiredMetadata = errors.New("contract is missing required metadata")
+// submitted without the metadata every contract carries, or with a validity
+// period that does not hold.
+var ErrMissingRequiredMetadata = errors.New("contract metadata is incomplete")
 
 // requireAssemblyMetadata checks the required metadata of an assembled
-// contract before it leaves draft (DCS-FR-CWE-03): the contract has a name.
+// contract before it leaves draft (DCS-FR-CWE-03): a name, a description (the
+// two fields the contract form requires), a validity period that ends after it
+// starts, and a notice period that is not negative.
 func requireAssemblyMetadata(ctx context.Context, tx *sqlx.Tx, repo db.ContractRepo, did string) error {
 	contract, err := repo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return fmt.Errorf("could not read contract metadata: %w", err)
 	}
-	if contract.Name == nil || strings.TrimSpace(*contract.Name) == "" {
-		return fmt.Errorf("%w: name", ErrMissingRequiredMetadata)
+	var problems []string
+	for field, value := range map[string]*string{"name": contract.Name, "description": contract.Description} {
+		if value == nil || strings.TrimSpace(*value) == "" {
+			problems = append(problems, field+" is missing")
+		}
+	}
+	if contract.StartDate != nil && contract.ExpDate != nil && !contract.ExpDate.After(*contract.StartDate) {
+		problems = append(problems, "expiration date is not after the start date")
+	}
+	if contract.ExpNoticePeriod != nil && *contract.ExpNoticePeriod < 0 {
+		problems = append(problems, "notice period is negative")
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("%w: %s", ErrMissingRequiredMetadata, strings.Join(problems, "; "))
 	}
 	return nil
 }
