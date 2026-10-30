@@ -231,7 +231,6 @@ func regulatoryFindings(content map[string]any, facts regulatoryFacts) []validat
 	return findings
 }
 
-
 func walkStrings(value any, visit func(string)) {
 	switch typed := value.(type) {
 	case string:

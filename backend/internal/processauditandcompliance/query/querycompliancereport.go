@@ -279,7 +279,6 @@ func signatureNonConformances(party string, sig reportSignature, required string
 	return found
 }
 
-
 func isNonConformance(severity string) bool {
 	switch strings.ToLower(strings.TrimSpace(severity)) {
 	case validation.SeverityError, validation.SeverityWarning, "critical", "blocking", "violation", "warn", "review":
