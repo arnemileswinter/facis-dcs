@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"database/sql"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -729,6 +731,9 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	signerCert, err := signerCertificateFromIncrementalUpdate(cmd.SignedPDF, ceremony.PreparedPDF)
 	if err != nil {
 		return fmt.Errorf("%w: could not read the submitted signature's own certificate: %v", ErrCertPIDMismatch, err)
+	}
+	if err := assertSigningKeyStrength(signerCert); err != nil {
+		return err
 	}
 	var certGiven, certSurname string
 	if nameMatchRequired {
@@ -1965,6 +1970,15 @@ var (
 // (already proven to be an exact byte-prefix of signedPDF, ADR-20 byte
 // pinning) — from that update's own CMS SignerInfo, independent of anything
 // DSS's validation report chooses to expose.
+// assertSigningKeyStrength refuses a signing certificate with an RSA key below
+// the minimum this instance accepts from outside (DCS-NFR-SEC-02).
+func assertSigningKeyStrength(cert *x509.Certificate) error {
+	if key, ok := cert.PublicKey.(*rsa.PublicKey); ok && key.N.BitLen() < sdjwt.MinRSAKeyBits {
+		return fmt.Errorf("%w: the signing certificate's RSA key is %d bits, below the %d-bit minimum", ErrSignatureInvalid, key.N.BitLen(), sdjwt.MinRSAKeyBits)
+	}
+	return nil
+}
+
 func signerCertificateFromIncrementalUpdate(signedPDF, preparedPDF []byte) (*x509.Certificate, error) {
 	if len(signedPDF) < len(preparedPDF) {
 		return nil, fmt.Errorf("signed PDF is shorter than the prepared document")
