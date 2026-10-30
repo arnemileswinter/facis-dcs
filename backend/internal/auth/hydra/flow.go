@@ -147,7 +147,7 @@ func rolesFromConsentContext(ctx map[string]any) ([]string, error) {
 
 // CredentialStatusClaim is the session claim that holds the status reference
 // of the PoA credential the session was opened with. Refresh checks it again.
-const CredentialStatusClaim = "credential_status"
+const CredentialStatusClaim = "credential_status" // #nosec G101 -- claim name, not a credential
 
 // AcceptLoginAndConsent accepts login and consent via the Hydra admin API.
 // organization, roles and the credential status reference come from verified
