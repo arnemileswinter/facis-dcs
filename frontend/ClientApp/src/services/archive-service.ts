@@ -1,4 +1,5 @@
 import http from '@/api/http'
+import type { Contract } from '@/models/contract/contract'
 
 /** An archived contract entry as returned by /archive/retrieve. */
 export interface ArchivedContract {
@@ -42,7 +43,24 @@ export interface ArchiveErasureStatus {
   peers: ArchiveErasurePeerStatus[]
 }
 
+export interface ArchiveSearch {
+  did?: string
+  name?: string
+  party?: string
+  state?: string
+  valid_from?: string
+  valid_until?: string
+  contract_version?: number
+  tag?: string
+}
+
 export const archiveService = {
+  async detail(did: string, contract_version: number): Promise<Contract> {
+    return http.get<Contract>('/archive/detail', { params: { did, contract_version } }).then((res) => res.data)
+  },
+  async search(params: ArchiveSearch): Promise<ArchivedContract[]> {
+    return http.get<ArchivedContract[]>('/archive/search', { params }).then((res) => res.data)
+  },
   async retrieve(): Promise<ArchivedContract[]> {
     return http.get<{ contracts?: ArchivedContract[] }>('/archive/retrieve').then((res) => res.data.contracts ?? [])
   },

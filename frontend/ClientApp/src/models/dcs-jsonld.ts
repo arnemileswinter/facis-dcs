@@ -22,6 +22,10 @@ export interface DcsContractMetadata {
   '@type': 'dcs:ContractMetadata'
   'dcs:title'?: string
   'dcs:description'?: string
+  'dcs:startDate'?: JsonLdTypedValue
+  'dcs:expirationDate'?: JsonLdTypedValue
+  'dcs:expirationNoticePeriod'?: number
+  'dcs:expirationPolicy'?: string
   'dcs:customMetaData'?: unknown[]
 }
 

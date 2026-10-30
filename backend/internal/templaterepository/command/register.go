@@ -20,6 +20,7 @@ import (
 	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 
@@ -167,6 +168,13 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		if fcTemplate.TemplateType == nil || strings.TrimSpace(*fcTemplate.TemplateType) == "" {
 			return nil, errors.New("template type is missing from Federated Catalogue")
 		}
+		if fcTemplate.PartyType == nil {
+			return nil, errors.New("party type is missing from Federated Catalogue")
+		}
+		partyType, err := partytype.New(*fcTemplate.PartyType)
+		if err != nil {
+			return nil, fmt.Errorf("invalid party type from Federated Catalogue: %w", err)
+		}
 		templateType, err := contracttemplatetype.NewContractTemplateType(*fcTemplate.TemplateType)
 		if err != nil {
 			return nil, fmt.Errorf("invalid template type from Federated Catalogue: %w", err)
@@ -190,6 +198,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			DID:          *newDID,
 			State:        contracttemplatestate.Draft.String(),
 			TemplateType: templateType.String(),
+			PartyType:    partyType.String(),
 			Name:         fcTemplate.Name,
 			Description:  fcTemplate.Description,
 			CreatedBy:    cmd.RegisteredBy,

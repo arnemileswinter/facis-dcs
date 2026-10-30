@@ -36,6 +36,7 @@ import (
 // the exported PDF is never generated on demand.
 var contractLifecycleEventTypes = map[string]bool{
 	cweeventtype.Create.String():                  true,
+	cweeventtype.Renew.String():                   true,
 	cweeventtype.Update.String():                  true,
 	cweeventtype.Offer.String():                   true,
 	cweeventtype.Withdraw.String():                true,

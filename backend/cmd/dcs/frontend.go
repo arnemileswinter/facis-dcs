@@ -68,7 +68,18 @@ func mountStaticHandler(mux goahttp.Muxer, staticDir, uiBasePath string) {
 	}
 }
 
+// uiContentSecurityPolicy permits only same-origin scripts and connections.
+// QR codes and bundled assets use data: and blob: URLs; Vue and the print view
+// set inline styles. frame-ancestors 'none' and X-Frame-Options stop another
+// site from framing the UI to trick a user into approving or signing.
+const uiContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; " +
+	"base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
 func serveFrontend(w http.ResponseWriter, r *http.Request, staticDir, uiPrefix string) {
+	w.Header().Set("Content-Security-Policy", uiContentSecurityPolicy)
+	w.Header().Set("X-Frame-Options", "DENY")
+
 	path := r.URL.Path
 	if uiPrefix != "" && uiPrefix != "/" {
 		path = strings.TrimPrefix(path, uiPrefix)

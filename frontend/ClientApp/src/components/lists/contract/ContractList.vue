@@ -99,10 +99,26 @@ onUnmounted(() => stateFilterStore.reset())
     <div v-if="loading" class="pl-4" role="status" aria-live="polite">Loading contracts...</div>
     <div v-else-if="error" class="pl-4" role="status" aria-live="assertive">{{ error }}</div>
     <ul v-else class="list flex-1 overflow-y-auto">
-      <li class="flex flex-col justify-between px-4 tracking-wide sm:flex-row">
-        <ContractListSearch :contracts="contracts" class="flex-1" @search-result="applySearchResult" />
-        <ListStateFilter label="Contract" :filters="contractStates" store-type="contracts" :disabled="!hasContracts" />
-        <ListSort v-model:sort-by="sortBy" v-model:sort-order="sortOrder" :sorter="sorter" :disabled="!hasContracts" />
+      <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
+        <ContractListSearch
+          :contracts="contracts"
+          class="w-full min-w-0 lg:w-auto lg:flex-1"
+          @search-result="applySearchResult"
+        />
+        <div class="ml-auto flex shrink-0 items-center gap-3 [&>button]:m-0">
+          <ListStateFilter
+            label="Contract"
+            :filters="contractStates"
+            store-type="contracts"
+            :disabled="!hasContracts"
+          />
+          <ListSort
+            v-model:sort-by="sortBy"
+            v-model:sort-order="sortOrder"
+            :sorter="sorter"
+            :disabled="!hasContracts"
+          />
+        </div>
       </li>
       <template v-if="filteredContracts.length > 0">
         <ContractListItem

@@ -4,10 +4,18 @@ import { computed, useId } from 'vue'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
+import { type PartyType, partyTypes } from '@/types/party-type'
 
 const store = useDcsDraftStore()
 const uiStore = useTemplateEditorUiStore()
 const { templateType, version } = storeToRefs(store)
+
+const partyType = computed({
+  get: () => store.partyType ?? '',
+  set: (value: PartyType | '') => {
+    store.partyType = value || undefined
+  },
+})
 
 const name = computed({
   get: () => store.name,
@@ -21,9 +29,12 @@ const description = computed({
 })
 const descriptionId = useId()
 const props = defineProps<{
+  partyTypeError?: string
   nameError?: string
   descriptionError?: string
 }>()
+const partyTypeId = useId()
+const partyTypeErrorId = useId()
 const nameErrorId = useId()
 const descriptionErrorId = useId()
 </script>
@@ -59,6 +70,23 @@ const descriptionErrorId = useId()
       </div>
     </fieldset>
 
+    <fieldset class="fieldset border-none p-0">
+      <label :for="partyTypeId" class="fieldset-legend">Party type</label>
+      <select
+        :id="partyTypeId"
+        v-model="partyType"
+        data-testid="template-party-type"
+        class="select w-full"
+        required
+        :disabled="!uiStore.isTemplateEditable"
+        :aria-invalid="!!props.partyTypeError"
+        :aria-describedby="props.partyTypeError ? partyTypeErrorId : undefined"
+      >
+        <option value="" disabled>Select party type</option>
+        <option v-for="option in partyTypes" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+      <p v-if="props.partyTypeError" :id="partyTypeErrorId" class="text-sm text-error">{{ props.partyTypeError }}</p>
+    </fieldset>
     <fieldset class="fieldset border-none p-0">
       <legend class="fieldset-legend">Global Name</legend>
       <label :for="nameId" class="sr-only">Global Name</label>

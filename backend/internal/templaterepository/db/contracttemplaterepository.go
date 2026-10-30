@@ -17,6 +17,7 @@ type ContractTemplate struct {
 	Version      int            `db:"version"`
 	State        string         `db:"state"`
 	TemplateType string         `db:"template_type"`
+	PartyType    string         `db:"party_type"`
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	CreatedBy    string         `db:"created_by"`
@@ -31,6 +32,7 @@ type ContractTemplateMetadata struct {
 	Version      int       `db:"version"`
 	State        string    `db:"state"`
 	TemplateType string    `db:"template_type"`
+	PartyType    string    `db:"party_type"`
 	Name         *string   `db:"name"`
 	Description  *string   `db:"description"`
 	CreatedBy    string    `db:"created_by"`
@@ -58,6 +60,7 @@ type ContractTemplateUpdateData struct {
 	DID          string         `db:"did"`
 	State        string         `db:"state"`
 	TemplateType string         `db:"template_type"`
+	PartyType    string         `db:"party_type"`
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	TemplateData *datatype.JSON `db:"template_data"`
@@ -69,6 +72,7 @@ type ContractTemplateHistory struct {
 	Version      int            `db:"version"`
 	State        string         `db:"state"`
 	TemplateType string         `db:"template_type"`
+	PartyType    string         `db:"party_type"`
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	CreatedBy    string         `db:"created_by"`
@@ -83,6 +87,7 @@ type SearchValues struct {
 	Version      int
 	State        string
 	TemplateType string
+	PartyType    string
 	Name         string
 	Description  string
 	TemplateData string

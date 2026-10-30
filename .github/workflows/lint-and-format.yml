@@ -85,11 +85,10 @@ jobs:
             exit 1
           fi
 
-      - name: Install Goa
-        run: go install goa.design/goa/v3/cmd/goa@v3
-
+      # go run uses the goa version pinned in go.mod, as the Dockerfile does.
+      # "goa@v3" resolves to the newest release, which can need a newer Go.
       - name: Generate Goa code
-        run: goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -117,6 +116,38 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> 💡 **Hint:** If your local commit didn't catch this, make sure you ran \`go mod tidy\` and have \`npm install\` executed in the project root to initialize Husky hooks." >> $GITHUB_STEP_SUMMARY
 
+  # Scan Go code against the Go vulnerability database.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'backend/go.mod'
+          cache: true
+          cache-dependency-path: 'backend/go.sum'
+
+      # gen/ is gitignored; govulncheck must load the same packages as go test.
+      - name: Generate Goa code
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Run govulncheck (pdf-core)
+        working-directory: pdf-core
+        run: govulncheck ./...
+
   go-tests:
     name: Go unit tests (backend + pdf-core)
     runs-on: ubuntu-latest
@@ -133,9 +164,7 @@ jobs:
       # The generated transport is gitignored; tests build against it.
       - name: Generate Goa transport
         working-directory: backend
-        run: |
-          go install goa.design/goa/v3/cmd/goa@v3
-          goa gen digital-contracting-service/design
+        run: go run goa.design/goa/v3/cmd/goa gen digital-contracting-service/design
 
       - name: Backend unit tests
         working-directory: backend

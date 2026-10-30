@@ -907,8 +907,12 @@ def step_then_versions_with_timestamps(context):
 def step_then_user_attribution_per_version(context):
     entries = context.requests_response.json()
     assert isinstance(entries, list) and entries, f"Expected a non-empty history list, got: {entries}"
+    # created_by is the contract's creator on every row; modified_by/modified_at
+    # name the save that replaced each version.
     for entry in entries:
-        assert entry.get("created_by"), f"Expected 'created_by' attribution on every history entry, got: {entry}"
+        assert entry.get("modified_by") and entry.get("modified_at"), (
+            f"Expected 'modified_by'/'modified_at' attribution on every history entry, got: {entry}"
+        )
 
 
 @then("old versions remain accessible")

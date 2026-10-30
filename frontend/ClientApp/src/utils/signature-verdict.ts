@@ -93,6 +93,22 @@ export function signatureStatusIndicator(status: string, activeLabel = 'ACTIVE')
   }
 }
 
+// The live status-list state of the credential the signer presented
+// (DCS-FR-SM-18). Only VALID is green; anything the backend could not establish
+// reads UNKNOWN.
+export function credentialStatusIndicator(state: string | undefined): VerdictIndicator {
+  switch ((state ?? '').trim().toUpperCase()) {
+    case 'VALID':
+      return { label: 'VALID', cls: 'badge-success' }
+    case 'REVOKED':
+      return { label: 'REVOKED', cls: 'badge-error' }
+    case 'SUSPENDED':
+      return { label: 'SUSPENDED', cls: 'badge-warning' }
+    default:
+      return { label: 'UNKNOWN', cls: 'badge-ghost' }
+  }
+}
+
 // DCS-FR-SM-21: the signature level (SES/AES/QES) the signature actually
 // ACHIEVED, recorded from what DSS validated at submit (ADR-20) and never
 // re-derived here. An absent level means the system does not know it, which is

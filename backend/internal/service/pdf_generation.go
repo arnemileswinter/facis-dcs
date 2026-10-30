@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+
+	"digital-contracting-service/internal/base/contractreadpolicy"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
 	"digital-contracting-service/internal/auth"
@@ -104,12 +107,19 @@ func (s *pdfGenerationSrvc) newBundler() *bundleexport.Bundler {
 const bundleZipContentType = "application/zip"
 
 func (s *pdfGenerationSrvc) ExportContractBundle(ctx context.Context, p *pdfgen.ExportContractBundlePayload) (*pdfgen.ExportContractBundleResult, io.ReadCloser, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, nil, err
+	}
+
 	body, err := s.newBundler().ExportContract(ctx, p.Did, bundleexport.ExportContext{
 		ExportedBy: middleware.GetParticipantID(ctx),
 		HolderDID:  middleware.GetHolderDID(ctx),
 		UserRoles:  middleware.GetUserRoles(ctx),
 	})
 	if err != nil {
+		if errors.Is(err, contractreadpolicy.ErrDenied) {
+			return nil, nil, pdfgen.MakeForbidden(err)
+		}
 		if refused, ok := bundleexport.AsRefused(err); ok {
 			return nil, nil, &pdfgen.BundleExportRefusedError{
 				Name:     "refused",
@@ -146,6 +156,10 @@ func (s *pdfGenerationSrvc) ExportTemplateBundle(ctx context.Context, p *pdfgen.
 }
 
 func (s *pdfGenerationSrvc) ExportContractPdf(ctx context.Context, p *pdfgen.ExportContractPdfPayload) (io.ReadCloser, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
 	handler := pdfquery.ExportContractPdfHandler{
 		DB:        s.DB,
 		CRepo:     s.CRepo,
@@ -184,6 +198,10 @@ func (s *pdfGenerationSrvc) ExportTemplatePdf(ctx context.Context, p *pdfgen.Exp
 }
 
 func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.VerifyContractPdfPayload) (*pdfgen.PDFVerifyResult, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
 	handler := pdfquery.VerifyContractPdfHandler{
 		DB:               s.DB,
 		CRepo:            s.CRepo,

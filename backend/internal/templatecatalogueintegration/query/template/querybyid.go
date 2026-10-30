@@ -35,7 +35,7 @@ type GetByIDHandler struct {
 }
 
 const retrieveTemplateByIDStatementTemplate = `
-SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?template_data_string WHERE {
+SELECT (?template_uuid AS ?did) ?name ?description ?version ?state ?template_uuid ?template_type ?party_type ?template_data_string WHERE {
 %s%s%s}
 LIMIT 1
 `
@@ -51,7 +51,7 @@ func (h *GetByIDHandler) Handle(ctx context.Context, qry GetByIDQry) (*templatec
 		return nil, fmt.Errorf("version must be greater than 0")
 	}
 
-	extraTriples := fieldTriple(dcsTemplateTypeIRI, "template_type") + fieldTriple(dcsTemplateDataStringIRI, "template_data_string")
+	extraTriples := fieldTriple(dcsTemplateDataStringIRI, "template_data_string")
 	didFilter := fmt.Sprintf("  FILTER(?template_uuid = \"%s\")\n", sparqlEscapeString(qry.DID))
 	statement := fmt.Sprintf(retrieveTemplateByIDStatementTemplate, coreFieldTriples(), extraTriples, didFilter)
 
@@ -133,6 +133,7 @@ func mapCatalogueDetail(n map[string]interface{}) *templatecatalogueintegration.
 		Name:         ptr.Ref(ptr.StringFromMap(n, "name")),
 		Description:  ptr.Ref(ptr.StringFromMap(n, "description")),
 		TemplateType: ptr.Ref(ptr.StringFromMap(n, "template_type")),
+		PartyType:    ptr.Ref(ptr.StringFromMap(n, "party_type")),
 	}
 }
 

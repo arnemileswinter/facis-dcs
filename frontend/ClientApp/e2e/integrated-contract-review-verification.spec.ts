@@ -193,6 +193,7 @@ test.describe('integrated Contract Review verification', () => {
       updated_at: updatedAt,
       forward_to: 'APPROVAL',
       comments: ['Ready for approval.'],
+      annotations: [],
     })
     await page.waitForTimeout(250)
     expect(submissions).toHaveLength(1)

@@ -574,6 +574,13 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, declaredFields); err != nil {
 		return err
 	}
+
+	// Settlement digests bind contract_data; shared Contract Details must
+	// still agree between the contracts row and dcs:metadata.
+	if err := cwecommand.AssertSharedDetailsConsistent(data.Name, data.Description, data.ExpPolicy, data.ExpNoticePeriod, data.ContractData); err != nil {
+		return err
+	}
+
 	existingRecords, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("could not load existing signatures: %w", err)
@@ -939,6 +946,11 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// version. Checked before anything below mutates or persists, so a contract
 	// the counterparty has not settled leaves prepare with no trace.
 	if err := assertCounterpartiesSettled(ctx, tx, h.Settlements, cmd.DID, h.LocalPeer, data.Responsible, requiredFields); err != nil {
+		return nil, err
+	}
+	// Shared Contract Details on the row must match dcs:metadata inside the
+	// document both enterprises settled.
+	if err := cwecommand.AssertSharedDetailsConsistent(data.Name, data.Description, data.ExpPolicy, data.ExpNoticePeriod, data.ContractData); err != nil {
 		return nil, err
 	}
 

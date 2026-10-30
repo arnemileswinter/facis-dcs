@@ -148,6 +148,7 @@ export async function authorPaymentComponent(
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /Component/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')
@@ -210,6 +211,7 @@ async function authorContractTemplateFrom(
 ): Promise<string> {
   await gotoAs(page, loginAs, 'Template Creator', '/ui/templates/new')
   await page.getByRole('button', { name: /parent for other contracts/ }).click()
+  await page.getByTestId('template-party-type').selectOption('MULTI_PARTY')
   await page.getByRole('group').filter({ hasText: 'Global Name' }).getByRole('textbox').fill(name)
   await page
     .getByRole('group')
@@ -330,30 +332,8 @@ export async function buildDraftContractFixture(browser: Browser): Promise<Draft
   }
 }
 
-/**
- * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
- * a component template with a semantic clause → a contract template composing
- * it → registration → contract derivation → negotiation, review, approval.
- * Returns the approved contract's DID.
- */
-export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
-  const unique = Date.now()
-  const componentName = `SCV Component ${unique}`
-  const contractTemplateName = `SCV Contract ${unique}`
-
-  const componentDid = await test.step('create component template with a semantic clause', () =>
-    authorPaymentComponent(page, loginAs, componentName, true))
-  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
-
-  const contractTemplateDid = await test.step('create contract template from approved component', () =>
-    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
-  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
-  await test.step('register approved contract template', () =>
-    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
-
-  const contractDid = await test.step('create contract from registered template', () =>
-    deriveLocalContract(page, loginAs, contractTemplateName))
-
+/** Fills the required Payment Amount of a DRAFT contract and submits it into negotiation. */
+export async function submitDraftIntoNegotiation(page: Page, loginAs: LoginAs, contractDid: string): Promise<void> {
   await test.step('fill the required Payment Amount and submit into negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/edit/${contractDid}`)
     await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
@@ -382,25 +362,54 @@ export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promi
     const resp = await submitted
     expect(resp.ok(), `contract submit ${resp.status()}: ${await resp.text()}`).toBeTruthy()
   })
+}
+
+/**
+ * Builds a fresh contract and drives it to APPROVED (approved-for-signing):
+ * a component template with a semantic clause → a contract template composing
+ * it → registration → contract derivation → negotiation, review, approval.
+ * Returns the approved contract's DID.
+ */
+export async function buildApprovedContract(page: Page, loginAs: LoginAs): Promise<string> {
+  const unique = Date.now()
+  const componentName = `SCV Component ${unique}`
+  const contractTemplateName = `SCV Contract ${unique}`
+
+  const componentDid = await test.step('create component template with a semantic clause', () =>
+    authorPaymentComponent(page, loginAs, componentName, true))
+  await submitReviewApproveTemplate(page, loginAs, componentDid, componentName)
+
+  const contractTemplateDid = await test.step('create contract template from approved component', () =>
+    authorContractTemplateFrom(page, loginAs, contractTemplateName, componentName))
+  await submitReviewApproveTemplate(page, loginAs, contractTemplateDid, contractTemplateName)
+  await test.step('register approved contract template', () =>
+    registerContractTemplate(page, loginAs, contractTemplateDid, contractTemplateName))
+
+  const contractDid = await test.step('create contract from registered template', () =>
+    deriveLocalContract(page, loginAs, contractTemplateName))
+
+  await submitDraftIntoNegotiation(page, loginAs, contractDid)
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     // Resolve any outstanding decision (Show opens a compare view that disables
     // Submit), then reload so that state clears before submitting.
+    const proposalsTab = page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
-      // a coordinate click cannot land, so the event is dispatched directly.
-      await showBtn.dispatchEvent('click')
+      await showBtn.click()
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
+      await page.getByRole('button', { name: 'Accept', exact: true }).click()
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),
@@ -491,20 +500,22 @@ export async function buildContractPendingApproval(page: Page, loginAs: LoginAs)
 
   await test.step('accept negotiation', async () => {
     await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
+    const proposalsTab = page.getByRole('tab', { name: /proposals/i })
+    if (await proposalsTab.isVisible().catch(() => false)) {
+      await proposalsTab.click()
+    }
     const showBtn = page.getByRole('button', { name: 'Show' }).first()
     if (await showBtn.isVisible().catch(() => false)) {
-      // Off-canvas by design (NegotiateContractView parks the list at -100vw):
-      // a coordinate click cannot land, so the event is dispatched directly.
-      await showBtn.dispatchEvent('click')
+      await showBtn.click()
       const responded = page.waitForResponse(
         (r) => r.url().includes('/contract/respond') && r.request().method() === 'POST' && r.ok(),
       )
-      await page.getByRole('button', { name: 'Accept', exact: true }).dispatchEvent('click')
+      await page.getByRole('button', { name: 'Accept', exact: true }).click()
       await confirmModal(page, 'Confirm')
       await responded
       await gotoAs(page, loginAs, 'Contract Creator', `/ui/contracts/negotiate/${contractDid}`)
     }
-    const submit = page.getByRole('button', { name: 'Submit', exact: true })
+    const submit = page.getByTestId('submit-negotiation')
     await expect(submit).toBeEnabled({ timeout: 30_000 })
     const accepted = page.waitForResponse(
       (r) => r.url().includes('/contract/submit') && r.request().method() === 'POST' && r.ok(),

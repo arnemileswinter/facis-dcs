@@ -22,14 +22,18 @@ type TemplatePolicyAuditMetadata struct {
 }
 
 type PolicyFinding struct {
-	PolicySetID    string `json:"policySetId"`
-	PolicyVersion  string `json:"policyVersion"`
-	RuleID         string `json:"ruleId"`
-	Title          string `json:"title"`
-	Severity       string `json:"severity"`
-	Message        string `json:"message"`
-	Path           string `json:"path,omitempty"`
-	FieldIri       string `json:"fieldIri,omitempty"`
+	PolicySetID   string `json:"policySetId"`
+	PolicyVersion string `json:"policyVersion"`
+	RuleID        string `json:"ruleId"`
+	Title         string `json:"title"`
+	Severity      string `json:"severity"`
+	Message       string `json:"message"`
+	Path          string `json:"path,omitempty"`
+	FieldIri      string `json:"fieldIri,omitempty"`
+	// FocusNode is the SHACL sh:focusNode IRI when this finding came from
+	// hub-shape validation. Kept as structured data — do not re-parse it from
+	// Message (PACM-07 clause reporting).
+	FocusNode      string `json:"focusNode,omitempty"`
 	OntologyTerm   string `json:"ontologyTerm,omitempty"`
 	Requirement    string `json:"requirement,omitempty"`
 	ActualValue    any    `json:"actualValue,omitempty"`

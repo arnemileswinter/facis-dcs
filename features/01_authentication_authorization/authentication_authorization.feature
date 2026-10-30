@@ -14,11 +14,13 @@ Feature: User Authentication & Authorization
     When I try to create a template "Standard NDA" in category "Legal"
     Then the request is denied with an authorization error
 
-  @clean_db
+  @clean_db @REQ-denied-access-audit-AC3 @DCS-FR-CSA-02 @DCS-FR-PACM-04
   Scenario: Multiple failed credential attempts trigger account lockout
-    Given a system service provides an invalid API key
+    Given the access-attempt sequence is remembered
+    And a system service provides an invalid API key
     When I try to search for templates with name "Standard NDA" "20"
     Then the request is denied because of too many failed attempts
+    And new invalid-credential attempts are FAILED and unsuccessful
 
   @clean_db
   Scenario: Locked account cannot authenticate even with valid credential

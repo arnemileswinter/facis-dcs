@@ -53,6 +53,9 @@ func (s *stubAttempts) CountFailedAttemptsByIP(context.Context, *sqlx.Tx, string
 	return s.failed, nil
 }
 func (s *stubAttempts) DeleteOlderThan(context.Context, *sqlx.Tx, time.Time) error { return nil }
+func (s *stubAttempts) ReadPage(context.Context, *sqlx.Tx, *db.AccessAttemptCursor, int) ([]db.AccessAttempt, error) {
+	return nil, nil
+}
 
 type stubLocks struct{ locked bool }
 

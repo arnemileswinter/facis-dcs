@@ -23,11 +23,13 @@ import (
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
 )
 
 type CreateCmd struct {
+	PartyType    string
 	DID          string
 	CreatedBy    string
 	TemplateType contracttemplatetype.ContractTemplateType
@@ -44,6 +46,9 @@ type Creator struct {
 }
 
 func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
+	if _, err := partytype.New(cmd.PartyType); err != nil {
+		return err
+	}
 	normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 	if err != nil {
 		return fmt.Errorf("template data validation failed: %w", err)
@@ -65,6 +70,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 		CreatedBy:    cmd.CreatedBy,
 		State:        contracttemplatestate.Draft.String(),
 		TemplateType: cmd.TemplateType.String(),
+		PartyType:    cmd.PartyType,
 		Name:         cmd.Name,
 		Description:  cmd.Description,
 		TemplateData: cmd.TemplateData,

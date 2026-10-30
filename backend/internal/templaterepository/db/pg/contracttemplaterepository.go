@@ -47,7 +47,7 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 	statement := `
 		WITH source AS (
 			SELECT
-				did, template_type, name, description, created_by, template_data,
+				did, template_type, party_type, name, description, created_by, template_data,
 				CASE
 					WHEN state IN ('REGISTERED', 'PUBLISHED') THEN version + 1
 					ELSE 1
@@ -60,12 +60,12 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 			WHERE did = $2
 		)
 		INSERT INTO contract_templates
-			(did, version, state, template_type, name, description, created_by, created_at, updated_at,
+			(did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
 			 template_data, base_template)
 		SELECT
 			$1,
 			source.new_version,
-			'DRAFT', source.template_type, source.name, source.description, source.created_by, NOW(), NOW(),
+			'DRAFT', source.template_type, source.party_type, source.name, source.description, source.created_by, NOW(), NOW(),
 			source.template_data, source.new_base_template
 		FROM source
 		WHERE source.new_base_template IS NULL
@@ -92,10 +92,10 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Context, tx *sqlx.Tx, did string) error {
 	statement := `
         INSERT INTO contract_templates_history 
-            (did, version, state, template_type, name, description, created_by, created_at, updated_at,
+            (did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
              template_data, base_template)
         SELECT 
-            did, version, state, template_type, name, description, created_by, created_at, updated_at,
+            did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
             template_data, base_template
         FROM contract_templates 
         WHERE did = $1
@@ -107,7 +107,7 @@ func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Cont
 func (r *PostgresContractTemplateRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractTemplateHistory, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type, base_template
+               created_by, created_at, updated_at, template_data, template_type, party_type, base_template
         FROM contract_templates_history WHERE did = $1
     `
 	var ct []db.ContractTemplateHistory
@@ -125,14 +125,14 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 	statement := `
         INSERT INTO contract_templates (
             did, created_by, state, name,
-            description, template_data, template_type, base_template
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            description, template_data, template_type, party_type, base_template
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING created_at
     `
 	var createdAt time.Time
 	err := tx.GetContext(ctx, &createdAt, statement,
 		data.DID, data.CreatedBy, data.State, data.Name,
-		data.Description, data.TemplateData, data.TemplateType, data.DID,
+		data.Description, data.TemplateData, data.TemplateType, data.PartyType, data.DID,
 	)
 	if err != nil {
 		return nil, err
@@ -143,7 +143,7 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplate, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type,
+               created_by, created_at, updated_at, template_data, template_type, party_type,
                base_template
         FROM contract_templates WHERE did = $1
     `
@@ -175,7 +175,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 			ORDER BY base_template, version DESC
 		)
 		SELECT
-			t.did, t.version, t.state, t.template_type, t.name,
+			t.did, t.version, t.state, t.template_type, t.party_type, t.name,
 			t.description, t.created_by, t.created_at, t.updated_at,
 			t.base_template,
 			CASE
@@ -207,7 +207,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 
 func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues, pagination datatype.Pagination) ([]db.ContractTemplateMetadata, error) {
 	query := `
-        SELECT did, version, state, name, template_type, description,
+        SELECT did, version, state, name, template_type, party_type, description,
                created_by, created_at, updated_at, base_template
         FROM contract_templates
     `
@@ -260,7 +260,13 @@ func (r *PostgresContractTemplateRepo) UpdateStateForAllTasks(ctx context.Contex
 	return err
 }
 
+// UpdateState keeps the replaced state as a history entry, so the template
+// provenance lists every lifecycle step (F04). A refused change returns an
+// error and the caller's rollback removes the entry.
 func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
+	if err := r.CreateHistoryEntryForDID(ctx, tx, did); err != nil {
+		return fmt.Errorf("could not create history entry: %w", err)
+	}
 	statement := `
         UPDATE contract_templates ct
         SET state = $2::contract_template_state
@@ -359,7 +365,12 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 	}
 	if len(values.TemplateType) > 0 {
 		conditions += ` template_type = $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.TemplateType+"%")
+		params = append(params, values.TemplateType)
+		paramIndex++
+	}
+	if values.PartyType != "" {
+		conditions += ` party_type = $` + strconv.Itoa(paramIndex) + ` AND`
+		params = append(params, values.PartyType)
 		paramIndex++
 	}
 	if len(values.Name) > 0 {
@@ -413,6 +424,9 @@ func createQuery(data db.ContractTemplateUpdateData) (*string, []interface{}, er
 	if len(data.TemplateType) > 0 {
 		addParam("template_type", data.TemplateType)
 		contentChanged = true
+	}
+	if data.PartyType != "" {
+		addParam("party_type", data.PartyType)
 	}
 	if len(columns) == 0 {
 		return nil, nil, errors.New("no fields to update")

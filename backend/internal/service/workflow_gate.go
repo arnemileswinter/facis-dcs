@@ -23,6 +23,9 @@ func (s *processAuditAndCompliancesrvc) WorkflowGateRun(ctx context.Context, p *
 	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
+	if err := s.authorizeContract(ctx, run.ContractDID); err != nil {
+		return nil, err
+	}
 	return workflowGateRunResponse(run), nil
 }
 

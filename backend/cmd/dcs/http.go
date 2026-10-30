@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,7 @@ import (
 	contractworkflowenginesvr "digital-contracting-service/gen/http/contract_workflow_engine/server"
 	dcstodcssvr "digital-contracting-service/gen/http/dcs_to_dcs/server"
 	didsvr "digital-contracting-service/gen/http/did_service/server"
+	infosvr "digital-contracting-service/gen/http/info/server"
 	keyinventorysvr "digital-contracting-service/gen/http/key_inventory/server"
 	pdfgenerationsvr "digital-contracting-service/gen/http/pdf_generation/server"
 	processauditandcompliancesvr "digital-contracting-service/gen/http/process_audit_and_compliance/server"
@@ -31,6 +34,7 @@ import (
 	signaturemanagementsvr "digital-contracting-service/gen/http/signature_management/server"
 	templatecatalogueintegrationsvr "digital-contracting-service/gen/http/template_catalogue_integration/server"
 	templaterepositorysvr "digital-contracting-service/gen/http/template_repository/server"
+	geninfo "digital-contracting-service/gen/info"
 	keyinventory "digital-contracting-service/gen/key_inventory"
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 	processauditandcompliance "digital-contracting-service/gen/process_audit_and_compliance"
@@ -76,6 +80,10 @@ func (e rawBytesEncoder) Encode(value any) error {
 }
 
 func responseEncoder(ctx context.Context, w http.ResponseWriter) goahttp.Encoder {
+	if ctx.Value(goa.ServiceKey) == processauditandcompliance.ServiceName && ctx.Value(goa.MethodKey) == "audit_report" {
+		// The format query selects report bytes; errors always use JSON.
+		return rawBytesEncoder{fallback: json.NewEncoder(w), w: w}
+	}
 	return rawBytesEncoder{fallback: goahttp.ResponseEncoder(ctx, w), w: w}
 }
 
@@ -140,7 +148,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints,
 	dcsToDcsEndpoints *dcstodcs.Endpoints, pdfGenerationEndpoints *pdfgeneration.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints,
 	signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints,
-	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
+	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, infoEndpoints *geninfo.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
 	var (
@@ -177,6 +185,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		c2paServer                         *c2pasvr.Server
 		semanticHubServer                  *semantichubsvr.Server
 		keyInventoryServer                 *keyinventorysvr.Server
+		infoServer                         *infosvr.Server
 	)
 	{
 		eh := errorHandler(ctx)
@@ -194,11 +203,14 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 		c2paServer = c2pasvr.New(c2paEndpoints, apiMux, dec, enc, eh, ef)
 		semanticHubServer = semantichubsvr.New(semanticHubEndpoints, apiMux, dec, enc, eh, ef)
 		keyInventoryServer = keyinventorysvr.New(keyInventoryEndpoints, apiMux, dec, enc, eh, ef)
+		infoServer = infosvr.New(infoEndpoints, apiMux, dec, enc, eh, ef)
 	}
 
 	// did.json is served at the origin root (did:web well-known path), outside
 	// the API prefix.
 	didsvr.Mount(mux, didServer)
+	infosvr.Mount(mux, infoServer)
+	infosvr.Mount(apiMux, infoServer)
 	// The C2PA manifest store is the public sibling of did.json (ADR-4,
 	// DCS-OR-C2PA-008): an external verifier resolves a contract's provenance
 	// from the manifest URL alone, so the route has to answer at the origin
@@ -224,23 +236,12 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	// Mount frontend static file server (uses base mux, not API mux)
 	mountFrontend(mux)
 
-	// Outer mux: routes /orce/* to the webhook platform, everything else to Goa.
-	outerMux := http.NewServeMux()
-	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
-	// The status list for the credentials this deployment issues (ADR-34). It
-	// sits here rather than in the generated API surface for two reasons: it is
-	// served at the origin root, the way did.json is, so a verifier holding only
-	// a credential can reach it without knowing this deployment's API prefix; and
-	// its media type is the routing signal a verifier uses, which Goa's response
-	// encoder would renegotiate to application/json.
-	outerMux.Handle(provenance.StatusListPath, provenance.StatusListHandler(statusList))
-	outerMux.Handle("/metrics", promhttp.Handler())
-	mountReadinessEndpoint(outerMux)
-	outerMux.Handle("/", mux)
+	outerMux := newOuterMux(webhookPlatform, provenance.StatusListHandler(statusList), mux)
 
 	var handler http.Handler = outerMux
 	handler = middleware.RateLimitAuthenticated(conf.APIRateLimitPerMinute(), handler)
 	handler = reportContentTypeMiddleware(handler)
+	handler = evidenceBodyLimit(handler)
 	handler = service.RequestContextMiddleware(handler)
 	handler = middleware.InjectIP(handler)
 	handler = metricsMiddleware(handler)
@@ -315,21 +316,104 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	}()
 }
 
+// newOuterMux routes /orce/* to the webhook platform, the status list and
+// /readyz to their handlers, and everything else to Goa. It does not serve
+// /metrics: that is on the metrics listener (see serveMetrics).
+func newOuterMux(webhookPlatform, statusList, goaMux http.Handler) *http.ServeMux {
+	outerMux := http.NewServeMux()
+	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
+	// The status list for the credentials this deployment issues (ADR-34). It
+	// sits here rather than in the generated API surface for two reasons: it is
+	// served at the origin root, the way did.json is, so a verifier holding only
+	// a credential can reach it without knowing this deployment's API prefix; and
+	// its media type is the routing signal a verifier uses, which Goa's response
+	// encoder would renegotiate to application/json.
+	outerMux.Handle(provenance.StatusListPath, statusList)
+	mountReadinessEndpoint(outerMux)
+	outerMux.Handle("/", goaMux)
+	return outerMux
+}
+
+const defaultMetricsPort = "9464"
+
+func newMetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	return mux
+}
+
+// serveMetrics serves Prometheus metrics on DCS_METRICS_PORT (default 9464).
+// The chart exposes that port only through a ClusterIP Service, so /metrics
+// stays cluster-internal. A listener failure is logged and does not stop the
+// service: metrics are not needed to serve contracts.
+func serveMetrics(ctx context.Context, wg *sync.WaitGroup) {
+	port := os.Getenv("DCS_METRICS_PORT")
+	if port == "" {
+		port = defaultMetricsPort
+	}
+	srv := &http.Server{Addr: net.JoinHostPort("", port), Handler: newMetricsHandler(), ReadHeaderTimeout: time.Second * 60}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go func() {
+			log.Printf(ctx, "metrics server listening on %q", srv.Addr)
+			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				log.Errorf(ctx, err, "metrics server stopped; /metrics is unavailable")
+			}
+		}()
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf(ctx, "failed to shutdown metrics server: %v", err)
+		}
+	}()
+}
+
 func reportContentTypeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/pac/report") && r.Method == http.MethodGet {
-			switch strings.ToLower(r.URL.Query().Get("format")) {
+			contentType := "application/json"
+			switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
 			case "csv":
-				w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+				contentType = "text/csv; charset=utf-8"
 			case "pdf":
-				w.Header().Set("Content-Type", "application/pdf")
-			default:
-				w.Header().Set("Content-Type", "application/json")
+				contentType = "application/pdf"
 			}
+			w = &reportResponseWriter{ResponseWriter: w, contentType: contentType}
 		}
 		next.ServeHTTP(w, r)
 	})
 }
+
+type reportResponseWriter struct {
+	http.ResponseWriter
+	contentType string
+	written     bool
+}
+
+func (w *reportResponseWriter) WriteHeader(status int) {
+	if w.written {
+		return
+	}
+	contentType := "application/json"
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		contentType = w.contentType
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.ResponseWriter.WriteHeader(status)
+	w.written = status >= http.StatusOK
+}
+
+func (w *reportResponseWriter) Write(data []byte) (int, error) {
+	if !w.written {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *reportResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // errorHandler returns a function that writes and logs the given error.
 // The function also writes and logs the error unique ID so that it's possible
@@ -437,11 +521,6 @@ func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 
 func metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/metrics" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(wrapped, r)
