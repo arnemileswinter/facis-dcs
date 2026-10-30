@@ -25,6 +25,14 @@ type ContractTemplate struct {
 	UpdatedAt    time.Time      `db:"updated_at"`
 	TemplateData *datatype.JSON `db:"template_data"`
 	BaseTemplate *string        `db:"base_template"`
+	SearchableMetadata
+}
+
+// SearchableMetadata is the template metadata searched by DCS-FR-TR-10.
+type SearchableMetadata struct {
+	Jurisdiction     *string `db:"jurisdiction"`
+	Industry         *string `db:"industry"`
+	ComplianceStatus string  `db:"compliance_status"`
 }
 
 type ContractTemplateMetadata struct {
@@ -41,6 +49,7 @@ type ContractTemplateMetadata struct {
 	BaseTemplate *string   `db:"base_template"`
 	Outdated     *bool     `db:"outdated"`
 	LatestDID    *string   `db:"latest_did"`
+	SearchableMetadata
 }
 
 type ContractTemplateProcessData struct {
@@ -64,6 +73,8 @@ type ContractTemplateUpdateData struct {
 	Name         *string        `db:"name"`
 	Description  *string        `db:"description"`
 	TemplateData *datatype.JSON `db:"template_data"`
+	Jurisdiction *string        `db:"jurisdiction"`
+	Industry     *string        `db:"industry"`
 }
 
 type ContractTemplateHistory struct {
@@ -91,6 +102,10 @@ type SearchValues struct {
 	Name         string
 	Description  string
 	TemplateData string
+
+	Jurisdiction     string
+	Industry         string
+	ComplianceStatus string
 }
 
 type ContractTemplatePDFState struct {
@@ -122,6 +137,7 @@ type ContractTemplateRepo interface {
 	InsertProvenanceCredential(ctx context.Context, tx *sqlx.Tx, data TemplateProvenanceCredential) error
 	ReadProvenanceCredentials(ctx context.Context, tx *sqlx.Tx, did string) ([]TemplateProvenanceCredential, error)
 	ReadLatestProvenanceVCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
+	UpdateComplianceStatus(ctx context.Context, tx *sqlx.Tx, did string, status string) error
 }
 
 // TemplateProvenanceCredential is one registered template version's signed

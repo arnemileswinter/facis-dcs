@@ -14,6 +14,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/db"
@@ -84,6 +85,23 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 		return fmt.Errorf("could not update current template state: %w", err)
 	}
 
+	// DCS-FR-TR-10: the template policy audit at approval sets the regulatory compliance status.
+	template, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read template data: %w", err)
+	}
+	findings, err := validation.AuditTemplatePolicies(template.TemplateData, validation.TemplatePolicyAuditMetadata{
+		DID:          template.DID,
+		TemplateType: template.TemplateType,
+		State:        template.State,
+	})
+	if err != nil {
+		return fmt.Errorf("could not audit template policies: %w", err)
+	}
+	if err := h.CTRepo.UpdateComplianceStatus(ctx, tx, cmd.DID, ComplianceStatus(findings)); err != nil {
+		return fmt.Errorf("could not update compliance status: %w", err)
+	}
+
 	evt := templateevents.ApproveEvent{
 		DID:           cmd.DID,
 		Version:       processData.Version,
@@ -99,4 +117,15 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	return tx.Commit()
+}
+
+// ComplianceStatus is NON_COMPLIANT when the template policy audit reports an
+// error, else COMPLIANT.
+func ComplianceStatus(findings []validation.PolicyFinding) string {
+	for _, finding := range findings {
+		if finding.Severity == validation.SeverityError {
+			return "NON_COMPLIANT"
+		}
+	}
+	return "COMPLIANT"
 }

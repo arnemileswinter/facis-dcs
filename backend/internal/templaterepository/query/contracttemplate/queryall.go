@@ -45,6 +45,7 @@ type MetadataItem struct {
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
 	LatestDID    *string
+	db.SearchableMetadata
 }
 
 type ReviewTaskItem struct {
@@ -148,6 +149,8 @@ func (h *GetAllMetadataHandler) Handle(ctx context.Context, query GetAllMetadata
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
 			LatestDID:    data.LatestDID,
+
+			SearchableMetadata: data.SearchableMetadata,
 		}
 		contractTemplatesItems = append(contractTemplatesItems, metadata)
 

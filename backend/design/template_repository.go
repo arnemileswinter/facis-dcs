@@ -17,6 +17,8 @@ var ContractTemplateCreateRequest = Type("ContractTemplateCreateRequest", func()
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
 
 	Required("template_type", "party_type")
 })
@@ -83,6 +85,8 @@ var ContractTemplateUpdateRequest = Type("ContractTemplateUpdateRequest", func()
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
 
 	Required("did", "updated_at")
 })
@@ -109,6 +113,8 @@ var ContractTemplateUpdateManageRequest = Type("ContractTemplateUpdateManageRequ
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
 
 	Required("did", "updated_at")
 })
@@ -137,6 +143,9 @@ var ContractTemplateSearchRequest = Type("ContractTemplateSearchRequest", func()
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
 	Attribute("template_data", String, "Search value for full text search in template data")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 })
 
 var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func() {
@@ -150,6 +159,9 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("party_type", String, "Party classification", func() { Enum(partytype.SingleParty.String(), partytype.MultiParty.String()) })
 	Attribute("name", String, "The name of the contract template")
 	Attribute("description", String, "A description for that template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
@@ -179,6 +191,9 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("created_at", String, "Created at")
 	Attribute("updated_at", String, "Updated at")
 	Attribute("latest_did", String, "The DID of the newest contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version", "party_type")
 })
@@ -300,6 +315,9 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })
@@ -582,7 +600,7 @@ var _ = Service("TemplateRepository", func() {
 	// GET /template/search
 	Method("search", func() {
 		Description("perform filtered searches.")
-		Meta("dcs:requirements", "DCS-IR-TR-02", "DCS-IR-TR-07")
+		Meta("dcs:requirements", "DCS-IR-TR-02", "DCS-IR-TR-07", "DCS-FR-TR-10")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -610,6 +628,9 @@ var _ = Service("TemplateRepository", func() {
 			Param("name")
 			Param("description")
 			Param("template_data")
+			Param("jurisdiction")
+			Param("industry")
+			Param("compliance_status")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

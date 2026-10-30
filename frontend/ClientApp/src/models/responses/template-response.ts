@@ -1,4 +1,4 @@
-import type { PartialContractTemplate } from '../contract-template/contract-template'
+import type { PartialContractTemplate, TemplateSearchableMetadata } from '../contract-template/contract-template'
 import type { ContractTemplateApprovalTask } from '../contract-template/contract-template-approval-task'
 import type { ContractTemplateEvent } from '../contract-template/contract-template-event'
 import type { ContractTemplateResponsible } from '../contract-template/contract-template-responsible'
@@ -30,7 +30,7 @@ export interface ContractTemplateUpdateManageResponse {
   did: string
 }
 
-interface ContractTemplateSearchResponseItem {
+interface ContractTemplateSearchResponseItem extends TemplateSearchableMetadata {
   did: string
   version: string
   state: ContractTemplateState
@@ -66,7 +66,7 @@ export interface ContractTemplateRetrieveResponse {
   approval_tasks: ContractTemplateApprovalTask[]
 }
 
-export interface ContractTemplateRetrieveByIdResponse {
+export interface ContractTemplateRetrieveByIdResponse extends TemplateSearchableMetadata {
   did: string
   version: number
   state: ContractTemplateState

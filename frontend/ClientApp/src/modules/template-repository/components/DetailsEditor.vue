@@ -28,6 +28,8 @@ const description = computed({
   set: (value: string) => store.updateDescription(value),
 })
 const descriptionId = useId()
+const jurisdictionId = useId()
+const industryId = useId()
 const props = defineProps<{
   partyTypeError?: string
   nameError?: string
@@ -120,6 +122,29 @@ const descriptionErrorId = useId()
       <p v-if="props.descriptionError" :id="descriptionErrorId" class="text-sm text-error">
         {{ props.descriptionError }}
       </p>
+    </fieldset>
+
+    <fieldset class="fieldset border-none p-0">
+      <label :for="jurisdictionId" class="fieldset-legend">Jurisdiction</label>
+      <input
+        :id="jurisdictionId"
+        v-model.trim="store.jurisdiction"
+        class="input-bordered input w-full"
+        data-testid="template-jurisdiction"
+        type="text"
+        :disabled="!uiStore.isTemplateEditable"
+      />
+    </fieldset>
+    <fieldset class="fieldset border-none p-0">
+      <label :for="industryId" class="fieldset-legend">Industry</label>
+      <input
+        :id="industryId"
+        v-model.trim="store.industry"
+        class="input-bordered input w-full"
+        data-testid="template-industry"
+        type="text"
+        :disabled="!uiStore.isTemplateEditable"
+      />
     </fieldset>
   </div>
 </template>

@@ -30,6 +30,9 @@ type GetAllMetadataByFilterQry struct {
 	Name         string
 	Description  string
 	TemplateData string
+	Jurisdiction     string
+	Industry         string
+	ComplianceStatus string
 	HolderDID    string
 	Pagination   datatype.Pagination
 	UserRoles    userrole.UserRoles
@@ -46,6 +49,7 @@ type GetAllMetadataByFilterResult struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
+	db.SearchableMetadata
 }
 
 type GetAllMetaDataByFilterHandler struct {
@@ -84,6 +88,10 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		Name:         query.Name,
 		Description:  query.Description,
 		TemplateData: query.TemplateData,
+
+		Jurisdiction:     query.Jurisdiction,
+		Industry:         query.Industry,
+		ComplianceStatus: query.ComplianceStatus,
 	}
 
 	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)
@@ -130,6 +138,8 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			Description:  data.Description,
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
+
+			SearchableMetadata: data.SearchableMetadata,
 		}
 	}
 

@@ -61,6 +61,8 @@ watch(
           description: template.description ?? '',
           templateType: template.template_type,
           partyType: template.party_type,
+          jurisdiction: template.jurisdiction,
+          industry: template.industry,
           state: template.state,
           version: template.version ?? null,
           created_at: template.created_at ?? null,

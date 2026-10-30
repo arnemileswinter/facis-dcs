@@ -26,6 +26,9 @@ interface TemplateDraftState {
   policies: OdrlRule[]
   customMetaData: MetaData[]
   partyType: PartyType | undefined
+  /** DCS-FR-TR-10 searchable metadata. */
+  jurisdiction: string
+  industry: string
   templateType: TemplateTypeValue
   state: ContractTemplateState | undefined
   version: number | null
