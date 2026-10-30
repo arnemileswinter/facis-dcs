@@ -33,7 +33,7 @@ func BuildManualArchiveEntry(contract *db.Contract, storedBy string) (db.Contrac
 	if !archivableStates[contract.State] {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s is %s; only SIGNED, TERMINATED or EXPIRED contracts can be archived", contract.DID, contract.State)
 	}
-	snapshot, err := buildContractSnapshot(contract)
+	snapshot, err := buildContractSnapshot(contract, nil, nil)
 	if err != nil {
 		return db.ContractArchiveEntry{}, err
 	}
