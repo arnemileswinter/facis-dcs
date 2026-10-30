@@ -27,5 +27,4 @@ type AccessAttemptRepo interface {
 	ReadByIP(ctx context.Context, tx *sqlx.Tx, ip string) ([]AccessAttempt, error)
 	CountFailedAttempts(ctx context.Context, tx *sqlx.Tx, userID string, since time.Time) (int, error)
 	CountFailedAttemptsByIP(ctx context.Context, tx *sqlx.Tx, ip string, since time.Time) (int, error)
-	DeleteOlderThan(ctx context.Context, tx *sqlx.Tx, before time.Time) error
 }
