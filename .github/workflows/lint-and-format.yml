@@ -40,6 +40,9 @@ jobs:
       - name: Frontend unit tests (vitest)
         run: npm test
 
+      - name: E2E button labels exist in the frontend
+        run: npm run check:buttons
+
       - name: Write frontend success summary
         if: success()
         run: |

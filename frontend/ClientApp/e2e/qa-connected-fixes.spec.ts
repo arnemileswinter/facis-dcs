@@ -26,8 +26,9 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
     await page.getByRole('button', { name: 'Store evidence', exact: true }).click()
     const bytes = Buffer.from([0, 1, 128, 255, 10, 13, 65])
     const hash = createHash('sha256').update(bytes).digest('hex')
+    const fileName = 'connected-proof.bin'
     await page.getByLabel('Evidence file', { exact: true }).setInputFiles({
-      name: 'connected-proof.bin',
+      name: fileName,
       mimeType: 'application/octet-stream',
       buffer: bytes,
     })
@@ -41,9 +42,10 @@ test('P04 P05 P06 F10 persist archive annotations, exact snapshots, evidence and
     await expect(page.getByText(`SHA-256: ${hash}`)).toBeVisible()
     await expect(page.getByText('Connected QA evidence', { exact: true })).toBeVisible()
     const downloading = page.waitForEvent('download')
-    await page.getByRole('button', { name: 'Download connected-proof.bin' }).click()
+    // The panel labels each download button with the stored file name.
+    await page.getByRole('button', { name: `Download ${fileName}` }).click()
     const download = await downloading
-    expect(download.suggestedFilename()).toBe('connected-proof.bin')
+    expect(download.suggestedFilename()).toBe(fileName)
     const file = await download.path()
     expect(file).not.toBeNull()
     expect(await readFile(file)).toEqual(bytes)
