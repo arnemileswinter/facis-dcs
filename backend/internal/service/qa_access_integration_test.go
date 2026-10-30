@@ -158,9 +158,11 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil || failed != 0 {
 		t.Fatalf("denials counted as credential failures: %d %v", failed, err)
 	}
-	expired := token(userrole.Auditor, time.Now().Add(-time.Hour))
+	// Only a token that is not genuine counts toward the lockout; an expired
+	// one is the normal end of its lifetime (FR-UC-01-4).
+	forged := token(userrole.Auditor, time.Now().Add(time.Hour)) + "x"
 	for range conf.LoginAttemptsThresholdInDuration() {
-		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &expired, Limit: 2, Justification: "QA expired credentials"}, "unauthorized")
+		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &forged, Limit: 2, Justification: "QA forged credentials"}, "unauthorized")
 		total++
 		assertLast(authdb.AccessOutcomeFailed, false, total)
 	}
@@ -181,6 +183,19 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 		t.Fatalf("credential failures did not lock IP: %t %v", locked, err)
 	}
 	jwt := token(userrole.Auditor, time.Now().Add(time.Hour))
+	call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA locked read"}, "unauthorized")
+	total++
+	assertLast(authdb.AccessOutcomeFailed, false, total)
+	tx, err = database.Beginx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := locks.ClearLockout(ctx, tx, "192.0.2.60"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	first := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA read"}, "").(*pac.PACAccessAttempts)
 	total++
 	assertLast(authdb.AccessOutcomeSuccess, true, total)
