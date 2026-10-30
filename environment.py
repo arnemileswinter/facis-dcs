@@ -64,7 +64,8 @@ def cleanup_database(context):
 
 
 def _cleanup_database(cursor):
-	cursor.execute("DELETE FROM access_attempts")
+	# TRUNCATE bypasses the append-only row triggers of the audit tables.
+	cursor.execute("TRUNCATE access_attempts")
 	cursor.execute("DELETE FROM ip_lockouts")
 
 	cursor.execute("DELETE FROM contract_negotiation_task")
@@ -76,6 +77,8 @@ def _cleanup_database(cursor):
 	cursor.execute("DELETE FROM contract_deployments")
 	cursor.execute("DELETE FROM contract_signatures")
 	cursor.execute("DELETE FROM signature_ceremonies")
+	cursor.execute("TRUNCATE contract_archive_evidence")
+	cursor.execute("DELETE FROM contract_peer_terminations")
 	cursor.execute("DELETE FROM contracts")
 
 	cursor.execute("DELETE FROM contract_templates_approval_task")
