@@ -157,6 +157,9 @@ type SignatureRecord struct {
 	// join key back to the ceremony's recorded signer certificate subject for
 	// the cross-ceremony consistency check (ADR-20).
 	CeremonyID *string `db:"ceremony_id"`
+	// IpfsCID and PDFHash name the signed PDF this signature produced.
+	IpfsCID *string `db:"ipfs_cid"`
+	PDFHash *string `db:"pdf_hash"`
 }
 
 type ContractRepo interface {

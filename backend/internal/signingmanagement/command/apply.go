@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -814,11 +815,9 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		jadesSignature:  cmd.JAdESSignature,
 		contentHash:     *ceremony.PinnedContentHash,
 		rendererVersion: *ceremony.PinnedRendererVersion,
-		signedCount:     *ceremony.PinnedSignedCount,
-		vpToken:         derefStr(ceremony.VpToken),
-		kbSDHash:        derefStr(ceremony.KbSdHash),
 		signedAt:        signedAt,
 		contractVersion: *ceremony.PinnedContractVersion,
+		localFields:     localSignatureFields(declaredFields, data.Responsible, h.LocalPeer),
 	}); err != nil {
 		return err
 	}
@@ -1258,16 +1257,16 @@ type finalizeInput struct {
 	jadesSignature  string
 	contentHash     string
 	rendererVersion string
-	signedCount     int
-	vpToken         string
-	kbSDHash        string
 	signedAt        time.Time
 	contractVersion int
+	// localFields are the declared signature fields this instance signs.
+	localFields []string
 }
 
 // finalize persists a completed signature: it stores the signed PDF in IPFS,
 // points the contract at it, records the signature (PAdES hash + JAdES),
-// transitions to SIGNED, and — on the first signature — archives the contract.
+// transitions to SIGNED, and — when the signature completes the signatures
+// this instance holds — archives the contract.
 // In the wallet-driven ceremony the signedPDF and jadesSignature originate from
 // the signatory's wallet/QTSP (the DCS holds no signing key); this is the
 // receive-and-record half the ceremony callback invokes after validating the
@@ -1338,19 +1337,23 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 
-	// The archive entry is created when the contract REACHES SIGNED (first
-	// signature); later multi-signer signatures update the stored artefact
-	// pointer above but never insert a second entry for the same version.
-	if in.signedCount == 0 {
-		credentialHashes := map[string]string{}
-		if in.vpToken != "" {
-			sum := sha256.Sum256([]byte(in.vpToken))
-			credentialHashes["presentation"] = "sha256:" + hex.EncodeToString(sum[:])
+	// The archive entry is created once, when this signature completes the
+	// signatures this instance holds, so it carries all of them (DCS-FR-CSA-08,
+	// DCS-FR-CWE-20).
+	records, err := h.CRepo.LoadSignatures(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not load signatures for archive storage: %w", err)
+	}
+	if signingCompletes(in.localFields, records, in.ceremony.FieldName) {
+		signatures, err := h.archiveSignatures(ctx, tx, records)
+		if err != nil {
+			return err
 		}
-		if in.kbSDHash != "" {
-			credentialHashes["key_binding"] = "sha256:" + strings.TrimPrefix(in.kbSDHash, "sha256:")
+		peerSignatures, err := h.CRepo.ReadPeerSignatureEvidence(ctx, tx, cmd.DID)
+		if err != nil {
+			return fmt.Errorf("could not read peer signatures for archive storage: %w", err)
 		}
-		if err := h.archiveSignedContract(ctx, tx, cmd.DID, cmd.AppliedBy, cwecommand.ArchiveSigningEvidence{Signer: cmd.SignerDID, CredentialType: cmd.CredentialType, CeremonyID: in.ceremony.ID, Field: in.ceremony.FieldName, SignedAt: in.signedAt, PDFCID: cid, PDFHash: signedPDFHash, CredentialHashes: credentialHashes}); err != nil {
+		if err := h.archiveSignedContract(ctx, tx, cmd.DID, cmd.AppliedBy, signatures, peerSignatures); err != nil {
 			return err
 		}
 	}
@@ -1375,13 +1378,13 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 // reached SIGNED (DCS-FR-CWE-20: the archive-entry trigger is gated to
 // SIGNED, not APPROVED), notarizing and RFC-3161-TSA-timestamping it exactly
 // as the former APPROVED-time trigger did.
-func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did string, appliedBy string, signingEvidence cwecommand.ArchiveSigningEvidence) error {
+func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did string, appliedBy string, signatures []cwecommand.ArchiveSigningEvidence, peerSignatures json.RawMessage) error {
 	signedContract, err := h.ArchiveRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return fmt.Errorf("could not read signed contract for archive storage: %w", err)
 	}
 
-	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, appliedBy, signingEvidence)
+	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, appliedBy, signatures, peerSignatures)
 	if err != nil {
 		return fmt.Errorf("could not build archive entry: %w", err)
 	}
@@ -1482,6 +1485,98 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 	}
 
 	return nil
+}
+
+// localSignatureFields returns the declared fields whose signature this
+// instance holds: every field except a counterparty's slot.
+func localSignatureFields(declared []string, responsible *db.Responsible, localPeer string) []string {
+	var local []string
+	for _, field := range declared {
+		if !contractstate.IsRemotePartyField(partyDIDs(responsible), localPeer, field) {
+			local = append(local, field)
+		}
+	}
+	return local
+}
+
+// signingCompletes reports whether the signature just recorded for field is
+// the one that completes the SIGNED signatures in records: every local field
+// is signed and field is one of them. A contract that declares no field
+// completes with its first signature.
+func signingCompletes(localFields []string, records []db.SignatureRecord, field string) bool {
+	signed := map[string]bool{}
+	count := 0
+	for _, rec := range records {
+		if rec.Status != "SIGNED" {
+			continue
+		}
+		count++
+		if rec.FieldName != nil {
+			signed[*rec.FieldName] = true
+		}
+	}
+	if len(localFields) == 0 {
+		return count == 1
+	}
+	if !slices.Contains(localFields, field) {
+		return false
+	}
+	for _, f := range localFields {
+		if !signed[f] {
+			return false
+		}
+	}
+	return true
+}
+
+// archiveSignatures returns the archive evidence of every SIGNED signature in
+// records, with the hashes of the credentials presented at its ceremony. The
+// credentials themselves are not archived.
+func (h *Applier) archiveSignatures(ctx context.Context, tx *sqlx.Tx, records []db.SignatureRecord) ([]cwecommand.ArchiveSigningEvidence, error) {
+	var signatures []cwecommand.ArchiveSigningEvidence
+	for _, rec := range records {
+		if rec.Status != "SIGNED" {
+			continue
+		}
+		signing := cwecommand.ArchiveSigningEvidence{
+			Signer: rec.SignerDID, CredentialType: rec.CredentialType, Field: derefStr(rec.FieldName),
+			PDFCID: derefStr(rec.IpfsCID), PDFHash: derefStr(rec.PDFHash),
+		}
+		if rec.SignedAt != nil {
+			signing.SignedAt = *rec.SignedAt
+		}
+		if rec.CeremonyID != nil {
+			ceremony, err := h.CeremonyRepo.GetCeremonyByID(ctx, tx, *rec.CeremonyID)
+			if err != nil {
+				return nil, fmt.Errorf("could not resolve ceremony %s for archive storage: %w", *rec.CeremonyID, err)
+			}
+			if ceremony != nil {
+				signing.CeremonyID = ceremony.ID
+				signing.CredentialHashes = ceremonyCredentialHashes(ceremony)
+			}
+		}
+		signatures = append(signatures, signing)
+	}
+	return signatures, nil
+}
+
+// ceremonyCredentialHashes hashes the credentials a ceremony presented.
+func ceremonyCredentialHashes(ceremony *db.SignatureCeremony) map[string]string {
+	hashes := map[string]string{}
+	sha := func(value string) string {
+		sum := sha256.Sum256([]byte(value))
+		return "sha256:" + hex.EncodeToString(sum[:])
+	}
+	if v := derefStr(ceremony.VpToken); v != "" {
+		hashes["presentation"] = sha(v)
+	}
+	if v := derefStr(ceremony.KbSdHash); v != "" {
+		hashes["key_binding"] = "sha256:" + strings.TrimPrefix(v, "sha256:")
+	}
+	if v := derefStr(ceremony.PoAVpToken); v != "" {
+		hashes["poa_presentation"] = sha(v)
+	}
+	return hashes
 }
 
 // loadBasePDF returns the PDF the signature covers: the contract's stored
