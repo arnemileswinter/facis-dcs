@@ -40,3 +40,29 @@ func (e PresentationFailedEvent) EventType() string {
 func (e PresentationFailedEvent) GetDID() string {
 	return e.PresentationState
 }
+
+// MachineIdentityChangedEvent is emitted when an administrator creates,
+// changes, deletes or issues a new secret for a machine identity. It records
+// the identity as it is after the change, and who made the change.
+type MachineIdentityChangedEvent struct {
+	Change              eventtype.EventType `json:"-"`
+	IdentityID          string              `json:"identity_id,omitempty"`
+	OAuthClientID       string              `json:"oauth_client_id"`
+	Name                string              `json:"name,omitempty"`
+	ParticipantDID      string              `json:"participant_did,omitempty"`
+	Roles               []string            `json:"roles,omitempty"`
+	Enabled             bool                `json:"enabled"`
+	ActorDID            string              `json:"actor_did"`
+	ActorParticipantDID string              `json:"actor_participant_did"`
+	OccurredAt          time.Time           `json:"occurred_at"`
+}
+
+func (e MachineIdentityChangedEvent) EventType() string {
+	return e.Change.String()
+}
+
+// GetDID keys the audit chain by the OAuth2 client, the identifier the
+// machine caller's own access attempts are logged under.
+func (e MachineIdentityChangedEvent) GetDID() string {
+	return e.OAuthClientID
+}
