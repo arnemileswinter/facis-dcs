@@ -176,15 +176,15 @@ spec:
             - name: tsa-state
               mountPath: /data/tsa-state
             {{- end }}
+          # TCP, not HTTP: "/" is the editor, which is off without an admin
+          # password hash. Node-RED opens the port after it has started the flows.
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: http
             initialDelaySeconds: 30
             periodSeconds: 30
           readinessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 10

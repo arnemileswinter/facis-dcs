@@ -120,13 +120,16 @@ adminFlows:
 flowsFile:
   enabled: true
 
+# Rendered only with flowsFile.enabled false. The import logs in to the admin
+# API, which runs only when ORCE_ADMIN_PASSWORD_HASH (bcrypt of the password
+# below) is set through extraEnv.
 flowImport:
   enabled: true
   auth:
     enabled: true
     tokenUrl: "http://dcs-orce:1880/auth/token"
     username: "admin"
-    password: "xfsc-orce"
+    password: ""
 
 # Synthetic peer identities used only by the ADR-19 BDD scenarios: further
 # Service names in front of the SAME Node-RED pod so the flow can distinguish

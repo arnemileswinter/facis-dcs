@@ -1,6 +1,11 @@
 /**
  * The default settings.js of the ecofacis/xfsc-orce image (2.0.13, /data/settings.js),
- * with one change: rawBodyJSON as httpAdminMiddleware and httpNodeMiddleware.
+ * with these changes:
+ *  - rawBodyJSON as httpAdminMiddleware and httpNodeMiddleware;
+ *  - no httpStatic: it served every file under /data without authentication,
+ *    including the issuer keys in /data/pki;
+ *  - the editor and the admin API run only when ORCE_ADMIN_PASSWORD_HASH holds
+ *    a bcrypt hash; the image's fixed admin password is gone.
  * The chart mounts this file over /data/settings.js. Compare it with the
  * image's file when the image tag changes.
  **/
@@ -32,6 +37,8 @@
  * (Standard Webhooks, the /dcs-dispatch receiver). Every later JSON parser
  * skips the request because it is already parsed.
  */
+const adminPasswordHash = (process.env.ORCE_ADMIN_PASSWORD_HASH || '').trim();
+
 const rawBodyJSON = require('body-parser').json({
     limit: '5mb',
     verify: function (req, res, buf) { req.rawBody = buf; }
@@ -49,7 +56,6 @@ module.exports = {
   
     /** The file containing the flows. If not set, defaults to flows_<hostname>.json **/
     flowFile: "flows.json",
-    httpStatic: '/data',
     /** By default, credentials are encrypted in storage using a generated key. To
      * specify your own secret, set the following property.
      * If you want to disable encryption of credentials, set this property to false.
@@ -89,14 +95,14 @@ module.exports = {
     /** To password protect the Node-RED editor and admin API, the following
      * property can be used. See http://nodered.org/docs/security.html for details.
      */
-    adminAuth: {
+    adminAuth: adminPasswordHash ? {
         type: "credentials",
         users: [{
-            username: "admin",
-            password: "$2b$08$3lqmnQaytcApHuhOF.ZoKOLLhKa.Vqb1PMh9krs4aVldXOwEvwKNK",
+            username: process.env.ORCE_ADMIN_USERNAME || "admin",
+            password: adminPasswordHash,
             permissions: "*"
         }]
-    },
+    } : undefined,
   
     /** The following property can be used to enable HTTPS
      * This property can be either an object, containing both a (private) key
@@ -182,6 +188,8 @@ module.exports = {
      * If set to false, this is disabled.
      */
     //httpAdminRoot: '/admin',
+    /** Without an admin password hash the editor and the admin API are off. */
+    httpAdminRoot: adminPasswordHash ? '/' : false,
   
     /** The following property can be used to add a custom middleware function
      * in front of all admin http routes. For example, to set custom http
