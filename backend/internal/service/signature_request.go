@@ -23,7 +23,9 @@ import (
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/signingmanagement/command"
@@ -313,6 +315,16 @@ func (s *signatureManagementsrvc) SignatureRequestDocument(ctx context.Context, 
 	// refusal with no attributable cause on our end.
 	if err := assertPreparedDocumentDigestConsistent(ceremony); err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
+	}
+	retrieval := smevent.RetrieveForSigningEvent{
+		DID: ceremony.ContractDID, CeremonyID: ceremony.ID, FieldName: ceremony.FieldName,
+		DocumentSHA256: *ceremony.PreparedPDFSHA256, Channel: smevent.ChannelWalletDocument, OccurredAt: time.Now().UTC(),
+	}
+	if ceremony.SignerDID != nil {
+		retrieval.SignerDID = *ceremony.SignerDID
+	}
+	if err := event.CreateInOwnTx(ctx, s.DB, retrieval, componenttype.SignatureManagement); err != nil {
+		return nil, signaturemanagement.MakeInternalError(fmt.Errorf("audit the retrieval of the document to be signed: %w", err))
 	}
 	return io.NopCloser(bytes.NewReader(ceremony.PreparedPDF)), nil
 }

@@ -16,6 +16,7 @@ const (
 	Verify               EventType = "VERIFY_SIGNATURE"
 	RetrieveAll          EventType = "RETRIEVE_ALL_CONTRACTS"
 	RetrieveByID         EventType = "RETRIEVE_CONTRACT_BY_ID"
+	RetrieveForSigning   EventType = "RETRIEVE_CONTRACT_FOR_SIGNING"
 	Revoke               EventType = "REVOKE_SIGNATURE"
 	RevokeFailed         EventType = "REVOKE_SIGNATURE_FAILED"
 	ComplianceValidation EventType = "COMPLIANCE_VALIDATION"
@@ -33,6 +34,7 @@ var validStates = map[EventType]bool{
 	Verify:               true,
 	RetrieveAll:          true,
 	RetrieveByID:         true,
+	RetrieveForSigning:   true,
 	Revoke:               true,
 	RevokeFailed:         true,
 	ComplianceValidation: true,

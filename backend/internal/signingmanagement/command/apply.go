@@ -534,6 +534,13 @@ func (h *Applier) prepareToBeSigned(ctx context.Context, cmd ApplyCmd) ([]byte, 
 	}); err != nil {
 		return nil, fmt.Errorf("pin prepared signature bytes: %w", err)
 	}
+	if err := event.Create(ctx, tx, event2.RetrieveForSigningEvent{
+		DID: cmd.DID, SignerDID: cmd.SignerDID, CeremonyID: prepared.ceremony.ID, FieldName: prepared.ceremony.FieldName,
+		DocumentSHA256: hex.EncodeToString(toBeSignedSum[:]), Channel: event2.ChannelPrepare,
+		RetrievedBy: cmd.AppliedBy, OccurredAt: time.Now().UTC(), HolderDID: cmd.HolderDID, UserRoles: cmd.UserRoles,
+	}, componenttype.SignatureManagement); err != nil {
+		return nil, fmt.Errorf("could not create event: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit prepared signature: %w", err)

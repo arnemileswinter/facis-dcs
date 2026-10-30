@@ -28,6 +28,38 @@ func (e RetrieveByIDEvent) GetDID() string {
 	return e.DID
 }
 
+// RetrieveForSigningEvent is emitted when the document to be signed is handed
+// out (DCS-FR-SM-15). DocumentSHA256 is the digest the signed request object
+// names, so the wallet validates the document it receives against it.
+type RetrieveForSigningEvent struct {
+	DID            string             `json:"did"`
+	SignerDID      string             `json:"signer_did"`
+	CeremonyID     string             `json:"ceremony_id"`
+	FieldName      string             `json:"field_name,omitempty"`
+	DocumentSHA256 string             `json:"document_sha256"`
+	Channel        string             `json:"channel"`
+	RetrievedBy    string             `json:"retrieved_by,omitempty"`
+	OccurredAt     time.Time          `json:"occurred_at"`
+	HolderDID      string             `json:"holder_did,omitempty"`
+	UserRoles      userrole.UserRoles `json:"user_roles,omitempty"`
+}
+
+// Channels of a RetrieveForSigningEvent.
+const (
+	ChannelPrepare        = "PREPARE"
+	ChannelWalletDocument = "WALLET_DOCUMENT"
+)
+
+// EventType implements the Event interface.
+func (e RetrieveForSigningEvent) EventType() string {
+	return eventtype.RetrieveForSigning.String()
+}
+
+// GetDID implements the Event interface.
+func (e RetrieveForSigningEvent) GetDID() string {
+	return e.DID
+}
+
 // RetrieveAllEvent is emitted when contract data is retrieved.
 type RetrieveAllEvent struct {
 	RetrievedBy string             `json:"retrieved_by"`
