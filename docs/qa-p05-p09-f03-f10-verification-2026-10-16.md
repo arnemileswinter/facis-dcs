@@ -18,12 +18,11 @@ F03 also closes indirect disclosure through archive recent actions and audit
 inputs. Saved reports are indivisible: a report containing an unauthorized
 resource, including an erased placeholder, is rejected in full rather than
 silently truncated (`backend/internal/service/pac_contract_access.go:58`).
-P2 follow-up (`audit-report-readable-run`): authorization denial now allows
-selection of the newest older, fully readable run for the same scope/DID.
-Missing keys, integrity, decoding and database errors remain terminal; they do
-not select an older report (`backend/internal/service/pac_audit_run.go:106`).
-Independent PostgreSQL 18 tests with real migrations, keys and encryption
-passed without skips; UI and BDD were not rerun for this follow-up. See the
+When the caller may not read the newest saved report in full, the export
+returns the newest older report for the same scope and DID that the caller may
+read in full. Missing keys, integrity, decoding and database errors stop the
+export; they do not select an older report
+(`backend/internal/service/pac_audit_run.go:106`). See the
 [export guide](user-manual/audit-report-readable-run.md).
 F10 expands contract audit access, not the global audit workstation. Pure
 Auditor/Compliance accounts do not acquire a new general contract-view route;

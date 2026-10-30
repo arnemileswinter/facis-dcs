@@ -1,35 +1,33 @@
-# Berechtigungsnachweis einer Signatur prüfen
+# Check the credential status of a signature
 
-## Nutzen
+## Purpose
 
-Der Signature Compliance Viewer zeigt den aktuellen Status des bei der Signatur
-vorgelegten Vollmachtsnachweises. Bei mehreren Statusangaben reicht eine einzelne
-gültige Angabe nicht aus, um den Nachweis als gültig anzuzeigen.
+The Signature Compliance Viewer shows the current status of the power of
+attorney credential presented at signing. When the credential has several
+status entries, one valid entry is not enough to show it as valid.
 
-## Voraussetzungen und Rollen
+## Roles
 
-Sie benötigen einen angemeldeten, berechtigten Zugang zum Compliance Viewer
-sowie einen dort sichtbaren signierten Vertrag.
+You need an authorized login for the Compliance Viewer and a signed contract
+that the viewer shows.
 
-## Schritte
+## Steps
 
-1. Öffnen Sie den **Signature Compliance Viewer** und wählen Sie den Vertrag aus.
-2. Wechseln Sie zu **Compliance Checks**.
-3. Lesen Sie unter **Signature level detail** für die betreffende Signatur die
-   Spalte **Credential status** und eine gegebenenfalls darunter angezeigte
-   Fehlerbegründung.
+1. Open the **Signature Compliance Viewer** and select the contract.
+2. Open **Compliance Checks**.
+3. Under **Signature level detail**, read the **Credential status** column for
+   the signature and any error reason shown below it.
 
-## Status und Fehlerfälle
+## Status values
 
-- **VALID:** Alle geprüften Statusangaben sind gültig und die Prüfung akzeptiert
-  den Nachweis. Dies ist keine Aussage über sämtliche anderen Signaturprüfungen.
-- **REVOKED:** Der ausgewertete Status weist den Nachweis als widerrufen aus.
-- **SUSPENDED:** Der ausgewertete Status weist den Nachweis als ausgesetzt aus.
-- **UNKNOWN:** Der Status ist nicht sicher bestimmbar, beispielsweise weil eine
-  Statusliste nicht erreichbar ist, der Nachweis fehlt oder die Vertrauensprüfung
-  scheitert. Beachten Sie die angezeigte Begründung; UNKNOWN bestätigt keine
-  Gültigkeit.
+- **VALID:** all status entries are valid and the check accepts the
+  credential. This says nothing about the other signature checks.
+- **REVOKED:** at least one status entry marks the credential as revoked.
+- **SUSPENDED:** at least one status entry marks the credential as suspended,
+  and none marks it as revoked.
+- **UNKNOWN:** the status cannot be determined, for example because a status
+  list cannot be reached, the credential is missing, or the trust check fails.
+  Read the reason shown. UNKNOWN does not confirm validity.
 
-Enthält der Nachweis mehrere unterschiedliche nicht gültige Statusangaben, wird
-die erste davon angezeigt. Eine davor stehende gültige Angabe verdeckt sie
-nicht.
+When several entries are not valid, the viewer shows the most severe one:
+REVOKED, then SUSPENDED, then any other state.

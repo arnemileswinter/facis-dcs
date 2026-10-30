@@ -1,41 +1,38 @@
-# Lesbaren Auditbericht exportieren
+# Export a readable audit report
 
-## Nutzen
+## Purpose
 
-Der Export liefert den neuesten gespeicherten Prüflauf für den gewählten Bereich
-und die gewählte Vertragskennung, den Sie vollständig lesen dürfen. Ein neuerer
-Prüflauf mit fremden, für Sie gesperrten Verträgen blockiert diesen Export nicht.
-Entscheidend sind Ihre aktuellen Leserechte, nicht wer den Prüflauf gestartet hat.
-Der Export verwendet die gespeicherten Prüfergebnisse und führt keine neue
-Prüfung aus.
+The export returns the newest saved audit run for the selected scope and
+contract DID that you may read in full. A newer run that contains contracts you
+may not read does not block the export. Your current read rights decide, not
+the person who started the run. The export uses the saved results and does not
+run a new audit.
 
-## Voraussetzungen und Rollen
+## Roles
 
-- Melden Sie sich als **Auditor** oder **Archive Manager** an. Ohne zusätzliche
-  Auditor-Rolle können Archive Manager nur den Bereich **Archive** exportieren.
-- Für Archive Manager müssen alle im ausgewählten Bericht enthaltenen Verträge
-  lesbar sein. Berichte werden nicht auf einzelne erlaubte Verträge gekürzt.
+- Log in as **Auditor** or **Archive Manager**. Without the Auditor role, an
+  Archive Manager can export the **Archive** scope only.
+- An Archive Manager must be able to read every contract in the selected
+  report. A report is never shortened to the contracts you may read.
 
-## Schritte
+## Steps
 
-1. Öffnen Sie die Auditansicht und gegebenenfalls den Reiter **Compliance Audit**.
-2. Wählen Sie unter **Scope** den Bereich und bei Bedarf unter **DID (optional)**
-   eine Vertragskennung. Tragen Sie unter **Audit justification** eine Begründung ein.
-3. Führen Sie mit **Execute Audit** eine Prüfung aus. Die Oberfläche aktiviert
-   den Download nach einer erfolgreichen Prüfung für die gewählte Auswahl.
-4. Wählen Sie unter **Download report** das Format **JSON**, **CSV** oder **PDF**.
-   Der Download wählt den neuesten vollständig berechtigten gespeicherten Lauf;
-   zwischenzeitliche Prüfungen anderer Personen können die Auswahl beeinflussen.
+1. Open the audit view and, if shown, the **Compliance Audit** tab.
+2. Select the scope under **Scope**. Optionally enter a contract DID under
+   **DID (optional)**. Enter a reason under **Audit justification**.
+3. Click **Execute Audit**. After a successful audit for the current selection,
+   the download becomes available.
+4. Under **Download report**, select **JSON**, **CSV** or **PDF**. The download
+   uses the newest saved run that you may read in full. An audit that another
+   person runs in the meantime can change which run that is.
 
-## Fehlerfälle
+## Errors
 
-- **Download deaktiviert:** Eine Prüfung oder ein Download läuft noch, eine
-  Begründung fehlt oder für die aktuelle Auswahl wurde noch keine erfolgreiche
-  Prüfung ausgeführt.
-- **Audit report could not be generated.:** Der Export ist fehlgeschlagen.
-  Fehlen für alle passenden Berichte ausreichende Rechte, wird kein Teilbericht
-  ausgegeben. Ohne gespeicherten passenden Lauf ist kein Bericht verfügbar.
-- Wurde ein benötigter Entschlüsselungsschlüssel gelöscht, ist der betreffende
-  Bericht nicht mehr verfügbar. Auch beschädigte gespeicherte Daten oder
-  Lesefehler brechen den Export ab. In diesen Fällen wird kein älterer Bericht
-  als Ersatz geliefert.
+- **Download disabled:** an audit or a download is still running, the reason is
+  missing, or no audit has run successfully for the current selection.
+- **Audit report could not be generated.:** the export failed. If you may not
+  read any matching report in full, no partial report is returned. If no
+  matching run is saved, no report is available.
+- If a required decryption key was erased, that report is no longer available.
+  Damaged saved data or read errors also stop the export. In these cases, no
+  older report is returned instead.
