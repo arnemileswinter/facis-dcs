@@ -258,8 +258,11 @@ class ContractService:
         t_did = ContractService._create_approved_template_for_contract(context)
         creator_h = AuthService.get_headers_for_roles(["Contract Creator"])
         peer_did = ContractService._local_peer_did(context)
+        # The negotiation steps respond as "TechVendor Inc". Reads and changes
+        # are scoped to the creating organization and the declared parties.
         create_payload = {
             "template_did": t_did,
+            "parties": [AuthService.DEFAULT_ORGANIZATION, "TechVendor Inc"],
         }
         create_resp = post_json(context, contract_create_url(context), create_payload, headers=creator_h)
         assert create_resp.status_code == 200, create_resp.text
