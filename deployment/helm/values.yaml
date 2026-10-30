@@ -765,6 +765,30 @@ complianceMonitor:
       cpu: 200m
       memory: 256Mi
 
+# ---- Database backup (DCS-NFR-SF-03) ------------------------------------
+# A CronJob dumps the DCS database (DATABASE_URL) to a PersistentVolumeClaim.
+# The schedule is the recovery point objective. Restore, the IPFS snapshot and
+# the erasure obligations of the retention: docs/backup-integration-guide.md.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  # Also the time until an erased contract's keys are gone from every backup
+  # (guide, section 4.1).
+  retentionDays: 14
+  image:
+    repository: postgres
+    # At least the major version of the database server.
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    # Empty: the chart creates <fullname>-db-backup (kept on uninstall).
+    existingClaim: ""
+    size: 10Gi
+    # Set an encrypted StorageClass: a dump holds the wrapped content keys
+    # (guide, section 2.1).
+    storageClassName: ""
+  resources: {}
+
 # ---- Shared supporting services for a resource-constrained peer -------
 # Exposes this instance's stateless services under https://<host>/shared/<name>
 # so a peer that cannot run its own can consume them. Disabled by default: doing

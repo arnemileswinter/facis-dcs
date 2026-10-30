@@ -49,4 +49,14 @@ grep -A4 'startupProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no startup
 grep -q 'kind: PodDisruptionBudget' <<<"$prod" || fail "no PodDisruptionBudget for 3 replicas"
 render "${ACK[@]}" | grep -q 'kind: PodDisruptionBudget' && fail "PodDisruptionBudget for a single replica blocks drains"
 
+# DCS-NFR-SF-03: scheduled database backup in prod and acceptance, off by default.
+for profile in prod acceptance; do
+  backup="$(render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only templates/backup-cronjob.yaml 2>/dev/null || true)"
+  grep -q 'kind: CronJob' <<<"$backup" || fail "values.$profile.yml has no backup CronJob"
+  grep -q 'pg_dump --format=custom --dbname="$DATABASE_URL"' <<<"$backup" || fail "backup does not dump DATABASE_URL"
+  grep -A3 'name: DATABASE_URL' <<<"$backup" | grep -q "name: \"dcs-$profile-db-credentials\"" \
+    || fail "backup does not read the $profile database Secret"
+done
+render "${ACK[@]}" | grep -q 'db-backup' && fail "backup rendered while backup.enabled is false"
+
 echo 'platform hardening render tests passed'

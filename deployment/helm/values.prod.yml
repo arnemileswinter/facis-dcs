@@ -118,3 +118,8 @@ ipfs:
 # existing DSS instead, set dss.url and enabled: false.
 dss:
   enabled: true
+
+# Daily dump of the DCS database (DCS-NFR-SF-03): docs/backup-integration-guide.md.
+# Set persistence.storageClassName to an encrypted class.
+backup:
+  enabled: true
