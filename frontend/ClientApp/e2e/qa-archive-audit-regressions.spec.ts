@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 // HTTP is mocked: these checks prove browser behavior, not backend persistence or authorization.
 const did = 'did:web:example.test:contract:qa'
@@ -14,6 +15,7 @@ async function json(route: Route, body: unknown, status = 200) {
 async function authenticate(page: Page, role: string) {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url')
   const token = `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ sub: 'did:web:auditor.test', exp: Math.floor(Date.now() / 1000) + 3600, roles: [role], ext: { iss: 'did:web:example.test', roles: [role] } })}.unsigned`
+  await withholdUnsignedToken(page)
   await page.addInitScript((token) => {
     localStorage.setItem('token_type', 'Bearer')
     localStorage.setItem('access_token', token)

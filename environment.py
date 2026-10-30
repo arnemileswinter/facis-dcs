@@ -85,12 +85,28 @@ def _cleanup_database(cursor):
 
 
 
+def reset_ip_lockout(context):
+	# The suite sends every request from one address, so a lockout one
+	# scenario provokes (FR-UC-01-4) would refuse every scenario after it.
+	cursor = context.db.cursor()
+	try:
+		cursor.execute("DELETE FROM ip_lockouts")
+		context.db.commit()
+	except Exception:
+		context.db.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
 def before_scenario(context, scenario):
 	if _scenario_has_skip_tag(scenario):
 		scenario.skip('Skipped by scenario tag "@skip"')
 
 	if "clean_db" in scenario.tags:
 		cleanup_database(context)
+	else:
+		reset_ip_lockout(context)
 
 
 def before_all(context):
