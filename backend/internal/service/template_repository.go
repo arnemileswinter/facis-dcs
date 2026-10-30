@@ -74,7 +74,7 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 // ontology-prefix conflict, DCS-FR-TR-03) to bad_request; everything else
 // stays an internal error.
 func mapTemplateCommandError(err error) error {
-	if errors.Is(err, validation.ErrDocumentSchemaConflict) {
+	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -701,7 +701,7 @@ func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepo
 	}
 	did, err := handler.Handle(ctx, cmd)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, mapTemplateCommandError(err)
 	}
 
 	return &templaterepository.ContractTemplateRegisterResponse{
