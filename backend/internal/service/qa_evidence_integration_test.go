@@ -151,7 +151,7 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 			} else {
 				require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 			}
-			auditRequest := httptest.NewRequest(http.MethodPost, "/contract/audit", strings.NewReader(`{"did":"evidence-contract"}`))
+			auditRequest := httptest.NewRequest(http.MethodPost, "/contract/audit", strings.NewReader(`{"did":"evidence-contract","justification":"evidence review"}`))
 			auditRequest.Header.Set("Content-Type", "application/json")
 			auditRequest.Header.Set("Authorization", "Bearer "+token(role, time.Now().Add(time.Hour)))
 			auditResponse := httptest.NewRecorder()

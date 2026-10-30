@@ -432,8 +432,9 @@ var ContractTemplateAuditRequest = Type("ContractTemplateAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
+	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
 
-	Required("did")
+	Required("did", "justification")
 })
 
 var ContractTemplateAuditResponse = Type("ContractTemplateAuditResponse", func() {
@@ -919,6 +920,7 @@ var _ = Service("TemplateRepository", func() {
 		HTTP(func() {
 			GET("/template/audit")
 			Param("did")
+			Param("justification")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

@@ -3,5 +3,7 @@ import type { PACMonitorResponse } from '@/models/responses/pac-non-compliance-r
 
 export interface PACNonComplianceService {
   monitor: () => Promise<PACMonitorResponse>
-  reportIncident: (request: PACIncidentReportRequest) => Promise<void>
+  reportIncident: (request: PACIncidentReportRequest) => Promise<string | undefined>
+  exportCaseFile: (caseId: string, justification: string) => Promise<Blob>
+  exportPartyReport: (did: string) => Promise<Blob>
 }

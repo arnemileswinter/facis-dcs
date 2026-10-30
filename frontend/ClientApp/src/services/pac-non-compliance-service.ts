@@ -9,6 +9,16 @@ export const pacNonComplianceService: PACNonComplianceService = {
   },
 
   async reportIncident(request: PACIncidentReportRequest) {
-    await http.post('/pac/report', request)
+    return http.post<{ case_id?: string }>('/pac/report', request).then((res) => res.data?.case_id)
+  },
+
+  async exportCaseFile(caseId: string, justification: string) {
+    return http
+      .get<Blob>(`/pac/case/${encodeURIComponent(caseId)}`, { params: { justification }, responseType: 'blob' })
+      .then((res) => res.data)
+  },
+
+  async exportPartyReport(did: string) {
+    return http.get<Blob>('/pac/party-report', { params: { did }, responseType: 'blob' }).then((res) => res.data)
   },
 }

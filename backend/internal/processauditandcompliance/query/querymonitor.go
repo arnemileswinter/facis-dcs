@@ -254,6 +254,11 @@ func (h *ComplianceMonitor) Handle(ctx context.Context, query MonitorQry) (*Moni
 		return nil, err
 	}
 	risks = append(risks, deadlineRisks...)
+	sigRisks, err := signatureRisks(ctx, tx, checkedAt)
+	if err != nil {
+		return nil, err
+	}
+	risks = append(risks, sigRisks...)
 
 	denialQuery := `
         SELECT COALESCE(did, '') AS did,

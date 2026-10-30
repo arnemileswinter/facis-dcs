@@ -820,17 +820,58 @@ func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *p
 	}
 
 	handler := qry2.IncidentReporter{DB: s.DB}
-	if err := handler.Handle(ctx, qry2.IncidentReportQry{
+	caseID, err := handler.Handle(ctx, qry2.IncidentReportQry{
 		DID:        did,
 		Findings:   findings,
 		ReportedBy: middleware.GetParticipantID(ctx),
 		HolderDID:  middleware.GetHolderDID(ctx),
 		UserRoles:  middleware.GetUserRoles(ctx),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 
-	return map[string]any{"status": "recorded", "did": did, "findings": len(findings)}, nil
+	return map[string]any{"status": "recorded", "case_id": caseID, "did": did, "findings": len(findings)}, nil
+}
+
+// CaseFile exports the case file of an incident for regulatory review
+// (DCS-FR-PACM-05).
+func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *processauditandcompliance.CaseFilePayload) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.CaseFileExporter{DB: s.DB}
+	content, err := handler.Handle(ctx, qry2.CaseFileQry{
+		CaseID:        p.CaseID,
+		ExportedBy:    middleware.GetParticipantID(ctx),
+		Justification: p.Justification,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+	})
+	if errors.Is(err, qry2.ErrCaseNotFound) {
+		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return content, nil
+}
+
+// PartyReport exports the compliance report of a contract segmented by party
+// (DCS-FR-PACM-07).
+func (s *processAuditAndCompliancesrvc) PartyReport(ctx context.Context, p *processauditandcompliance.PartyReportPayload) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	handler := qry2.PartyReporter{DB: s.DB}
+	content, err := handler.Handle(ctx, qry2.PartyReportQry{DID: p.Did, GeneratedBy: middleware.GetParticipantID(ctx)})
+	if errors.Is(err, qry2.ErrContractNotFound) {
+		return nil, processauditandcompliance.MakeNotFound(err)
+	}
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	return content, nil
 }
 
 // CheckpointHead serves the newest audit-trail checkpoint head. Everything in

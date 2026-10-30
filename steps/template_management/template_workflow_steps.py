@@ -698,7 +698,7 @@ def step_then_deletion_recorded_audit(context):
     assert did, f"No DID in delete response: {body}"
     audit = requests.get(
         template_audit_url(context),
-        params={"did": did},
+        params={"did": did, "justification": "BDD template audit"},
         headers=getattr(context, "headers", {}),
         timeout=context.http_timeout_seconds,
     )

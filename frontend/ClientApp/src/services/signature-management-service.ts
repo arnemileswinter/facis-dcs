@@ -339,8 +339,10 @@ export const signatureManagementService = {
     await http.post('/signature/revoke', { did, signer_did: signerDid, reason })
   },
 
-  async getAudit(did: string): Promise<SignatureAuditEntry[]> {
-    return http.get<SignatureAuditEntry[]>('/signature/audit', { params: { did } }).then((res) => res.data ?? [])
+  async getAudit(did: string, justification: string): Promise<SignatureAuditEntry[]> {
+    return http
+      .get<SignatureAuditEntry[]>('/signature/audit', { params: { did, justification } })
+      .then((res) => res.data ?? [])
   },
 
   /** PACM-07 clause projection: live SHACL findings mapped conservatively to clause @ids. */

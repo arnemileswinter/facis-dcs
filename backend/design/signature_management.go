@@ -242,8 +242,9 @@ var SMContractAuditRequest = Type("SMContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
 
-	Required("did")
+	Required("did", "justification")
 })
 
 var SMContractAuditResponse = Type("SMContractAuditResponse", func() {
@@ -375,6 +376,21 @@ var SMClauseReportSection = Type("SMClauseReportSection", func() {
 	Required("clause_id", "status", "findings", "assessment_run", "applicable_checks", "applicable_checks_status")
 })
 
+var SMClauseReportCredential = Type("SMClauseReportCredential", func() {
+	Description("Credential metadata of one signature over the contract; every clause is covered by the same signatures (DCS-FR-PACM-07)")
+	Attribute("party", String, "Signature field (party DID) the signature covers")
+	Attribute("signer_did", String, "DID of the signer")
+	Attribute("signature_status", String, "SIGNED or REVOKED")
+	Attribute("signed_at", String, "When the signature was applied (RFC3339)")
+	Attribute("achieved_level", String, "Signature level the validated signature achieved")
+	Attribute("required_level", String, "Signature level the contract requires for this party")
+	Attribute("signer_cert_subject", String, "Subject of the signing certificate")
+	Attribute("signer_cert_serial", String, "Serial number of the signing certificate")
+	Attribute("cert_revoked_at", String, "When the CRL check found the signing certificate revoked (RFC3339)")
+	Attribute("poa_organization", String, "Organization the Power of Attorney authorizes")
+	Required("party", "signer_did", "signature_status", "achieved_level", "required_level")
+})
+
 var SMClauseReportResponse = Type("SMClauseReportResponse", func() {
 	Description("Clause-segmented compliance projection for the Compliance Viewer By Clauses tab (DCS-FR-PACM-07)")
 	Attribute("did", String, "Contract DID")
@@ -382,7 +398,8 @@ var SMClauseReportResponse = Type("SMClauseReportResponse", func() {
 	Attribute("scope_note", String, "Human-readable scope / interpretation note")
 	Attribute("clauses", ArrayOf(SMClauseReportSection), "Clause sections from the contract document")
 	Attribute("unassigned_findings", ArrayOf(SMClauseReportFinding), "Findings that could not be attributed to exactly one clause")
-	Required("did", "assessment_run", "clauses", "unassigned_findings")
+	Attribute("credentials", ArrayOf(SMClauseReportCredential), "Credential metadata of the signatures over the contract")
+	Required("did", "assessment_run", "clauses", "unassigned_findings", "credentials")
 })
 
 var SMSignatureRequestStartRequest = Type("SMSignatureRequestStartRequest", func() {
@@ -944,6 +961,7 @@ var _ = Service("SignatureManagement", func() {
 			Response("forbidden", StatusForbidden)
 			GET("/signature/audit")
 			Param("did")
+			Param("justification")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

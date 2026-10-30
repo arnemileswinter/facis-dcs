@@ -92,6 +92,7 @@ test.describe('Audit Action History', () => {
 
     await page.locator('#select-action-history-type').selectOption('contract')
     await page.locator('#input-action-history-did').fill(contractDid)
+    await page.locator('#input-action-history-justification').fill('Action history review')
     await page.getByRole('button', { name: 'View activity history' }).click()
 
     await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible()
@@ -130,6 +131,7 @@ test.describe('Audit Action History', () => {
     await page.getByRole('tab', { name: 'Action History', exact: true }).click()
     await page.locator('#select-action-history-type').selectOption('template')
     await page.locator('#input-action-history-did').fill(templateDid)
+    await page.locator('#input-action-history-justification').fill('Action history review')
     await page.getByRole('button', { name: 'View activity history' }).click()
 
     await expect(page.getByText('Template created', { exact: true })).toBeVisible()

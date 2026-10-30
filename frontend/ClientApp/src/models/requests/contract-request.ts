@@ -145,6 +145,7 @@ export interface ContractTerminateRequest {
 
 export interface ContractAuditRequest {
   did: string
+  justification: string
 }
 
 export interface ContractHistoryRetrieveRequest {

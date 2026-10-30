@@ -139,6 +139,11 @@ it('renders contract evidence alongside the audit trail with block and layout co
   const layout: DcsLayoutNode[] = []
   const wrapper = mount(AuditView, { props: { contract, blocks, layout }, global: { plugins: [pinia] } })
   await flushPromises()
+  expect(mocks.audit).not.toHaveBeenCalled()
+  await wrapper.get('form input').setValue('Dispute review')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(mocks.audit).toHaveBeenCalledWith({ did: contract.did, justification: 'Dispute review' })
   expect(wrapper.findComponent(ContractEvidencePanel).exists()).toBe(true)
   expect(wrapper.text()).toContain('proof.bin')
   const audit = wrapper.findComponent({ name: 'ContractAuditList' })

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, useId, useTemplateRef } from 'vue'
 import ComplianceReportPanel from '@/components/compliance/ComplianceReportPanel.vue'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { pacNonComplianceService } from '@/services/pac-non-compliance-service'
 import {
   type SignatureAuditEntry,
   type SignatureComplianceResult,
@@ -216,10 +217,16 @@ function revocationPending(sig: SignatureViewItem): boolean {
 
 async function loadAudit() {
   if (!selected.value) return
+  const result = await confirmationModal.value?.reveal({
+    message: 'Reading the audit log is recorded with your justification.',
+    editor: { requiredText: true, placeholder: 'Audit justification' },
+  })
+  const justification = result?.data?.trim()
+  if (!result || result.isCanceled || !justification) return
   busy.value = true
   error.value = null
   try {
-    auditEntries.value = await signatureManagementService.getAudit(selected.value.did)
+    auditEntries.value = await signatureManagementService.getAudit(selected.value.did, justification)
   } catch (e: unknown) {
     claimReportedHttpError(e)
     error.value = `Failed to load audit report: ${e instanceof Error ? e.message : String(e)}`
@@ -358,6 +365,18 @@ function reportFilename(ext: string): string {
 function exportJson() {
   const blob = new Blob([JSON.stringify(buildReport(), null, 2)], { type: 'application/json' })
   downloadBlob(blob, reportFilename('json'))
+}
+
+// The party report the server generates (DCS-FR-PACM-07).
+async function downloadServerPartyReport() {
+  if (!selected.value) return
+  error.value = null
+  try {
+    downloadBlob(await pacNonComplianceService.exportPartyReport(selected.value.did), reportFilename('parties.json'))
+  } catch (e: unknown) {
+    claimReportedHttpError(e)
+    error.value = `Failed to export the party report: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 
 function escapeHtml(value: string | number | boolean | null | undefined): string {
@@ -580,6 +599,14 @@ function exportPdf() {
               </button>
               <button class="btn whitespace-nowrap btn-outline btn-sm" :disabled="!canExport" @click="exportPdf">
                 Export PDF
+              </button>
+              <button
+                v-if="canAudit"
+                class="btn whitespace-nowrap btn-outline btn-sm"
+                :disabled="!selected"
+                @click="downloadServerPartyReport"
+              >
+                Export party report
               </button>
             </div>
           </div>

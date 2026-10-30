@@ -30,6 +30,7 @@ import (
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	pacqry "digital-contracting-service/internal/processauditandcompliance/query"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/signingmanagement/command"
 	db "digital-contracting-service/internal/signingmanagement/db"
@@ -720,10 +721,11 @@ func (s *signatureManagementsrvc) Audit(ctx context.Context, req *signaturemanag
 	defer cancel()
 
 	qry := query.GetAuditLogQry{
-		DID:       req.Did,
-		AuditedBy: middleware.GetParticipantID(ctx),
-		HolderDID: middleware.GetHolderDID(ctx),
-		UserRoles: middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		AuditedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
+		Justification: req.Justification,
 	}
 	handler := query.Auditor{
 		DB:           s.DB,
@@ -821,6 +823,10 @@ func (s *signatureManagementsrvc) ClauseReport(ctx context.Context, req *signatu
 		}
 		sections = append(sections, section)
 	}
+	credentials, err := pacqry.ContractCredentials(ctx, s.DB, req.Did)
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	scope := result.ScopeNote
 	return &signaturemanagement.SMClauseReportResponse{
 		Did:                result.DID,
@@ -828,7 +834,27 @@ func (s *signatureManagementsrvc) ClauseReport(ctx context.Context, req *signatu
 		ScopeNote:          &scope,
 		Clauses:            sections,
 		UnassignedFindings: mapClauseReportFindings(result.UnassignedFindings),
+		Credentials:        mapClauseReportCredentials(credentials),
 	}, nil
+}
+
+func mapClauseReportCredentials(in []pacqry.CredentialMetadata) []*signaturemanagement.SMClauseReportCredential {
+	rfc3339 := func(t *time.Time) *string {
+		if t == nil {
+			return nil
+		}
+		s := t.UTC().Format(time.RFC3339)
+		return &s
+	}
+	out := make([]*signaturemanagement.SMClauseReportCredential, 0, len(in))
+	for _, c := range in {
+		out = append(out, &signaturemanagement.SMClauseReportCredential{
+			Party: c.Party, SignerDid: c.SignerDID, SignatureStatus: c.SignatureStatus, SignedAt: rfc3339(c.SignedAt),
+			AchievedLevel: c.AchievedLevel, RequiredLevel: c.RequiredLevel, SignerCertSubject: c.CertSubject,
+			SignerCertSerial: c.CertSerial, CertRevokedAt: rfc3339(c.CertRevokedAt), PoaOrganization: c.PoAOrganization,
+		})
+	}
+	return out
 }
 
 func mapClauseReportFindings(in []query.ClauseReportFinding) []*signaturemanagement.SMClauseReportFinding {

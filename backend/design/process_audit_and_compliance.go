@@ -260,10 +260,11 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 
 	Method("audit_report", func() {
 		Description("Export the latest persisted audit run, including its frozen lifecycle timeline, as JSON, CSV, or PDF. No checks are executed again. Reports containing erased resource content are unavailable.")
-		Meta("dcs:requirements", "DCS-IR-PACM-02")
+		Meta("dcs:requirements", "DCS-IR-PACM-02", "DCS-FR-PACM-05")
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Archive Manager")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
@@ -295,7 +296,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	})
 
 	Method("monitor", func() {
-		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. Technical/contractual conformance only — autonomous legal-conformity assessment (DCS-FR-PACM-03) is descoped per the client decision of 2026-07-26 (ADR-24).")
+		Description("Continuous compliance monitoring sweep: flags contracts pending approval that still have OPEN approval tasks (a missing required approval) and records the sweep in the audit trail. The regulatory rule pack (DCS-FR-PACM-03) runs at the deployment workflow gate (ADR-37).")
 		Meta("dcs:requirements", "DCS-IR-PACM-03")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
@@ -315,7 +316,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 	})
 
 	Method("incident_report", func() {
-		Description("submit non-compliance findings as case records.")
+		Description("submit non-compliance findings as one case; the response carries the case_id of the case file (DCS-FR-PACM-05).")
 		Meta("dcs:requirements", "DCS-IR-PACM-04")
 		Security(JWTAuth, func() {
 			Scope("Compliance Officer")
@@ -337,6 +338,55 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 			Response("internal_error", StatusInternalServerError)
 		})
 		Result(Any)
+	})
+
+	Method("case_file", func() {
+		Description("export the case file of an incident for regulatory review: the reported findings, and the compliance risks, workflow gate runs and event timeline of the linked contract. The export and its justification are recorded in the audit trail.")
+		Meta("dcs:requirements", "DCS-FR-PACM-05")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("case_id", String, "Case ID returned by POST /pac/report")
+			Attribute("justification", String, "Required export justification", func() { MinLength(1) })
+			Required("case_id", "justification")
+		})
+		Result(Bytes)
+		Error("not_found", ErrorResult, "No incident report has this case ID")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/case/{case_id}")
+			Param("justification")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("party_report", func() {
+		Description("export the compliance report of a contract segmented by party. Each party carries its compliance status, a timestamp, its non-conformances and the credential metadata of its signature (level, certificate, PoA). The segmentation by clause is GET /signature/clause-report.")
+		Meta("dcs:requirements", "DCS-FR-PACM-07")
+		Security(JWTAuth, func() {
+			Scope("Compliance Officer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Contract DID")
+			Required("did")
+		})
+		Result(Bytes)
+		Error("not_found", ErrorResult, "Contract not found")
+		Error("internal_error", ErrorResult, "Internal server error")
+		HTTP(func() {
+			GET("/pac/party-report")
+			Param("did")
+			Response(StatusOK)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
 	})
 
 	Method("checkpoint_head", func() {

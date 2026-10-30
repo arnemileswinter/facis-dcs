@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { pacNonComplianceService } from '@/services/pac-non-compliance-service'
+import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import type { PACComplianceRisk } from '@/models/responses/pac-non-compliance-response'
 
@@ -46,6 +47,9 @@ const detail = ref('')
 const incidentSubmitting = ref(false)
 const incidentError = ref<string | null>(null)
 const incidentSuccess = ref(false)
+const caseId = ref<string | null>(null)
+const caseJustification = ref('')
+const caseExporting = ref(false)
 
 const canSubmitIncident = computed(
   () => contractDid.value.trim() !== '' && riskType.value.trim() !== '' && detail.value.trim() !== '',
@@ -56,16 +60,32 @@ const submitIncidentReport = async () => {
   incidentError.value = null
   incidentSuccess.value = false
   try {
-    await pacNonComplianceService.reportIncident({
-      contract_did: contractDid.value.trim(),
-      findings: [{ risk_type: riskType.value.trim(), detail: detail.value.trim() }],
-    })
+    caseId.value =
+      (await pacNonComplianceService.reportIncident({
+        contract_did: contractDid.value.trim(),
+        findings: [{ risk_type: riskType.value.trim(), detail: detail.value.trim() }],
+      })) ?? null
     incidentSuccess.value = true
   } catch (err) {
     claimReportedHttpError(err)
     incidentError.value = err instanceof Error ? err.message : 'Incident report could not be submitted.'
   } finally {
     incidentSubmitting.value = false
+  }
+}
+
+const exportCaseFile = async () => {
+  if (!caseId.value) return
+  caseExporting.value = true
+  incidentError.value = null
+  try {
+    const file = await pacNonComplianceService.exportCaseFile(caseId.value, caseJustification.value.trim())
+    downloadBlob(file, `case-${caseId.value}.json`)
+  } catch (err) {
+    claimReportedHttpError(err)
+    incidentError.value = err instanceof Error ? err.message : 'Case file could not be exported.'
+  } finally {
+    caseExporting.value = false
   }
 }
 </script>
@@ -220,7 +240,17 @@ const submitIncidentReport = async () => {
         role="status"
       >
         Incident report submitted successfully.
+        <span v-if="caseId" data-testid="incident-case-id">Case {{ caseId }}</span>
       </div>
+      <form v-if="caseId" class="mt-3 flex items-end gap-2" @submit.prevent="exportCaseFile">
+        <label class="form-control grow">
+          <span class="label-text mb-1">Case file justification</span>
+          <input v-model="caseJustification" class="input-bordered input input-sm" required />
+        </label>
+        <button type="submit" class="btn btn-sm" :disabled="caseExporting || !caseJustification.trim()">
+          Export case file
+        </button>
+      </form>
     </div>
   </section>
 </template>

@@ -44,8 +44,9 @@ upgrades the same flow toward QES without architectural change.
    for what v1 delivers — a wallet-based AES signature. References to the
    CSC protocol remain, since that protocol is precisely the
    qualified-provider upgrade path.
-6. **DCS-FR-PACM-03 (autonomous system-side legal-conformity assessment) is
-   descoped** (client decision). The technical conformance gates (SHACL hub
+6. **Superseded by [ADR-37](adr-37-regulatory-rule-pack.md).**
+   DCS-FR-PACM-03 (autonomous system-side legal-conformity assessment) was
+   descoped (client decision). The technical conformance gates (SHACL hub
    conformance, policy audits), the alerting mechanism, and Compliance
    Officer / Auditor access to compliance information including check
    initiation remain in the deliverable — they assess technical and
