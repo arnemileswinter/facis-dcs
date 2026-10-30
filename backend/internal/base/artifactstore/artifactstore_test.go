@@ -118,6 +118,7 @@ func (m *memoryCEKRepo) Shred(_ context.Context, scope Scope, shreddedBy, reason
 	now := time.Now().UTC()
 	for _, r := range m.records {
 		if r.ScopeKind == string(scope.Kind) && r.ScopeID == scope.ID && r.ShreddedAt == nil {
+			r.WrappedCEK = nil
 			r.ShreddedAt = &now
 			r.ShreddedBy = &shreddedBy
 			r.ShredReason = &reason
