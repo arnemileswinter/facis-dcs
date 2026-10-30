@@ -80,6 +80,10 @@ func (r *receivedContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ 
 	return nil
 }
 
+func (r *receivedContractRepoFake) UpdatePDFState(context.Context, *sqlx.Tx, string, db.ContractPDFState) error {
+	return nil
+}
+
 // localTaskRepoFake records the review and approval tasks a first receipt opens.
 type localReviewTaskRepoFake struct {
 	db.ReviewTaskRepo
@@ -240,4 +244,30 @@ func TestAReshipRefreshesTheContentWithoutResettingLocalState(t *testing.T) {
 
 	require.Equal(t, contractstate.Negotiation.String(), contracts.row.State)
 	require.Equal(t, datatype.JSON(shippedContract()), *contracts.row.ContractData)
+}
+
+// peerSignedPDF is the shape CarriesPAdESSignature recognises: /Type /Sig with
+// a /ByteRange (same fixture shape as provenance.lifecycle_test).
+var peerSignedPDF = []byte("%PDF-1.7\n12 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite" +
+	" /SubFilter /ETSI.CAdES.detached /ByteRange [0 840 960 1200] /Contents <30820> >>\nendobj\n")
+
+func TestIsSignedArtifactReship(t *testing.T) {
+	require.False(t, isSignedArtifactReship(peerShipCmd()))
+	signed := peerShipCmd()
+	signed.Pdf = peerSignedPDF
+	require.True(t, isSignedArtifactReship(signed))
+	signed.AdoptRevoked = true
+	require.False(t, isSignedArtifactReship(signed))
+}
+
+func TestRollForwardKeepingStatePreservesAcceptedTask(t *testing.T) {
+	tasks := &negotiationTaskRepoFake{rows: []db.NegotiationTaskData{{
+		DID:             taskContractDID,
+		Negotiator:      localPeerDID,
+		ContractVersion: 1,
+		State:           negotiationtaskstate.Accepted.String(),
+	}}}
+	require.NoError(t, tasks.RollForwardKeepingState(context.Background(), nil, taskContractDID, 1, 2))
+	require.Equal(t, 2, tasks.rows[0].ContractVersion)
+	require.Equal(t, negotiationtaskstate.Accepted.String(), tasks.rows[0].State)
 }

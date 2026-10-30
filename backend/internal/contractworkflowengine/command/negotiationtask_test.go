@@ -87,6 +87,15 @@ func (r *negotiationTaskRepoFake) RollForward(_ context.Context, _ *sqlx.Tx, did
 	return nil
 }
 
+func (r *negotiationTaskRepoFake) RollForwardKeepingState(_ context.Context, _ *sqlx.Tx, did string, fromVersion int, toVersion int) error {
+	for i := range r.rows {
+		if r.rows[i].DID == did && r.rows[i].ContractVersion == fromVersion {
+			r.rows[i].ContractVersion = toVersion
+		}
+	}
+	return nil
+}
+
 func (r *negotiationTaskRepoFake) ReadAllByNegotiator(_ context.Context, _ *sqlx.Tx, negotiator string) ([]db.NegotiationTaskData, error) {
 	var out []db.NegotiationTaskData
 	for _, row := range r.rows {
@@ -655,6 +664,8 @@ func TestEveryContractVersionBumpCarriesTheNegotiationTasksForward(t *testing.T)
 		require.Contains(t, calls, "RollForward",
 			"%s bumps the contract version without carrying the negotiation tasks to the new round", file)
 	}
+	require.Contains(t, callsIn(t, "receivepdf.go", "Handle"), "RollForwardKeepingState",
+		"signed-artifact re-ships must carry tasks forward without reopening them")
 	require.NotContains(t, callsIn(t, "negotiate.go", "Handle"), "RollForward")
 }
 

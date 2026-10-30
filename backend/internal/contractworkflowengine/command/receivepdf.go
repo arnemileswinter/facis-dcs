@@ -147,7 +147,12 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// engagement this instance had with the superseded version is owed again
 		// against this one. This carries tasks forward, it never mints a first
 		// one — receiving a document is not engaging with it.
-		if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+		if isSignedArtifactReship(cmd) {
+			// Peer sent an already-signed PDF: bump version, but do not reopen negotiation tasks.
+			if err := h.NTRepo.RollForwardKeepingState(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
+				return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
+			}
+		} else if err := h.NTRepo.RollForward(ctx, tx, cmd.ContractIRI, existing.ContractVersion, data.ContractVersion); err != nil {
 			return fmt.Errorf("could not carry negotiation tasks to the new contract version: %w", err)
 		}
 	} else {
@@ -244,6 +249,13 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	}
 
 	return tx.Commit()
+}
+
+func isSignedArtifactReship(cmd PeerPdfReceiveCmd) bool {
+	if cmd.AdoptRevoked {
+		return false
+	}
+	return provenance.CarriesPAdESSignature(cmd.Pdf)
 }
 
 // parseShippedTemplateProvenance pulls the template DID and version out of the
