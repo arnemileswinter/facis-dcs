@@ -2,12 +2,13 @@ import { config, flushPromises, RouterLinkStub, shallowMount } from '@vue/test-u
 import { createPinia, setActivePinia } from 'pinia'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/stores/auth-store'
+import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import { useContractsStore } from '@/stores/contracts-store'
 import ViewContractView from './ViewContractView.vue'
 import type { Contract } from '@/models/contract/contract'
 
-// DCS-FR-CWE-29: the structure tab shows the hierarchy (parent, children) and the
-// renewal links of a contract.
+// DCS-FR-CWE-29: the structure tab shows the hierarchy (parent, children), the
+// renewal links and the related documents of a contract.
 
 vi.mock('vue-router', async (original) => ({
   ...(await original<typeof import('vue-router')>()),
@@ -27,6 +28,8 @@ vi.mock('@/services/contract-workflow-service', () => ({
         updated_at: '',
         contract_data: { 'dcs:parentContract': { '@id': 'did:test:frame' } },
       }),
+    listEvidence: (did: string) =>
+      Promise.resolve([{ evidence_id: 'e1', did, filename: 'annex-a.pdf', description: 'Price list' }]),
   },
 }))
 
@@ -40,7 +43,7 @@ afterAll(() => {
   config.global.renderStubDefaultSlot = false
 })
 
-it('shows parent, child and renewal links', async () => {
+it('shows parent, child, renewal links and related documents', async () => {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { issuer: 'org', holder: 'user', roles: ['CONTRACT_MANAGER'] }
@@ -51,6 +54,8 @@ it('shows parent, child and renewal links', async () => {
     listed('did:test:previous', { state: 'EXPIRED' }),
     listed('did:test:next', { state: 'DRAFT', renews_contract_did: 'did:test:current' }),
   ]
+
+  useContractEditorUiStore().setActiveTab('structure')
 
   const wrapper = shallowMount(ViewContractView, {
     global: { plugins: [pinia], stubs: { RouterLink: RouterLinkStub } },
@@ -64,4 +69,5 @@ it('shows parent, child and renewal links', async () => {
   expect(wrapper.findComponent({ name: 'ContractStructureTree' }).props('rootDid')).toBe('did:test:current')
   expect(wrapper.get('[data-testid="structure-renews"]').text()).toContain('previous')
   expect(wrapper.get('[data-testid="structure-renewed-by"]').text()).toContain('next')
+  expect(wrapper.get('[data-testid="structure-documents"]').text()).toContain('annex-a.pdf')
 })

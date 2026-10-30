@@ -27,6 +27,7 @@ import { ContractState } from '@/types/contract-state'
 import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
 import { claimReportedHttpError, reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
+import type { ContractEvidence } from '@/models/contract/contract-evidence'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
 const route = useRoute()
@@ -163,6 +164,27 @@ const renewedContract = computed(() => {
   return did ? (contracts.value.find((c) => c.did === did) ?? ({ did, name: did } as Contract)) : null
 })
 const renewals = computed(() => contracts.value.filter((c) => c.renews_contract_did === contract.value?.did))
+
+// Related documents (DCS-FR-CWE-29): the evidence documents stored for this
+// contract, for the roles that may list them.
+const relatedDocuments = ref<ContractEvidence[]>([])
+const canListDocuments = computed(() =>
+  [...contractAuditRoles, 'CONTRACT_CREATOR'].some((role) => authStore.user?.roles?.includes(role)),
+)
+watch(
+  [activeTab, () => contract.value?.did],
+  async ([tab, did]) => {
+    relatedDocuments.value = []
+    if (tab !== 'structure' || !did || !canListDocuments.value) return
+    try {
+      const documents = await contractWorkflowService.listEvidence(did)
+      if (contract.value?.did === did) relatedDocuments.value = documents
+    } catch {
+      // the shared http interceptor already surfaced the server's error
+    }
+  },
+  { immediate: true },
+)
 
 const contractTitle = computed(
   () =>
@@ -449,6 +471,22 @@ const exportBundle = async () => {
                     <p v-else-if="ancestors.length === 0" class="text-sm text-base-content/40">
                       This contract has no parent or child contracts.
                     </p>
+
+                    <ul
+                      v-if="relatedDocuments.length > 0"
+                      :style="{ paddingLeft: `${ancestors.length + 1}rem` }"
+                      class="space-y-1 border-l border-base-300 pl-4"
+                      aria-label="Related documents"
+                      data-testid="structure-documents"
+                    >
+                      <li v-for="document in relatedDocuments" :key="document.evidence_id" class="text-sm">
+                        <span class="text-base-content/60">Document</span>
+                        <span class="ml-2 font-medium">{{ document.filename }}</span>
+                        <span v-if="document.description" class="ml-2 text-base-content/60">
+                          {{ document.description }}
+                        </span>
+                      </li>
+                    </ul>
 
                     <div v-if="renewedContract || renewals.length > 0" class="space-y-1 border-t border-base-300 pt-3">
                       <div
