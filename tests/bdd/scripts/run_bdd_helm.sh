@@ -84,7 +84,10 @@ REPORTS_JUNIT_DIR="$PWD/.reports/junit"
 # A previous local run must not satisfy the fail-closed scenario-count gate
 # below. Behave writes one report per feature, so remove only its generated
 # JUnit XML artifacts before starting the selected suite.
-find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+# The load run keeps them: it follows the suite in the same CI job.
+if [[ "${RUN_MODE:-bdd}" != "load" ]]; then
+  find "$REPORTS_JUNIT_DIR" -maxdepth 1 -type f -name '*.xml' -delete
+fi
 
 # Emits `--resolve <host>:<port>:127.0.0.1` for a URL's host[:port], so
 # *.localhost hostnames the host machine's own resolver may not know (e.g.
@@ -470,7 +473,12 @@ fi
 #   e2e           — the Playwright suite (its own vite servers + the venv-backed
 #                   signing helpers), so the frontend E2E gets the same live
 #                   two-instance stack + DSS forward the BDD suite uses.
-if [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
+#   load          — the k6 load test (tests/load/run_load.py, NFR-PER-01/02).
+if [[ "${RUN_MODE:-bdd}" == "load" ]]; then
+  echo "Running the load test against the deployed stack"
+  cd "$PROJECT_ROOT"
+  python tests/load/run_load.py
+elif [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
   # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed

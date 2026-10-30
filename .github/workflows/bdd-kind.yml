@@ -21,8 +21,9 @@ jobs:
     # gained a full counterparty drive to APPROVED each, and 60 killed it
     # mid-run with the diagnostic dump skipped — a suite that cannot finish
     # reports nothing at all. Raised to leave headroom; the growth itself is
-    # worth reducing rather than absorbing indefinitely.
-    timeout-minutes: 90
+    # worth reducing rather than absorbing indefinitely. The load test after
+    # the suite adds about 10 minutes.
+    timeout-minutes: 100
     concurrency:
       group: bdd-kind-${{ github.ref }}
       cancel-in-progress: true
@@ -94,6 +95,7 @@ jobs:
           version: v0.23.0
 
       - name: Run kind-backed BDD suite
+        id: bdd
         run: |
           set -euo pipefail
           make -C tests/bdd run_bdd_kind_ci \
@@ -103,6 +105,13 @@ jobs:
             DOCKER_BUILD="docker buildx build --load" \
             DCS_BUILD_CACHE="--cache-from type=gha,scope=dcs-image-v2 --cache-to type=gha,mode=max,scope=dcs-image-v2" \
             PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
+
+      # NFR-PER-01/02: k6 against the same stack, with one and then two DCS
+      # replicas. Also runs when scenarios failed, as long as the stack was
+      # deployed. Limits and load level: tests/load/dcs_load.js.
+      - name: Load test (k6)
+        if: ${{ !cancelled() && steps.bdd.outcome != 'skipped' }}
+        run: make -C tests/bdd run_load_kind_once KIND_CLUSTER_NAME=dcs-bdd
 
       - name: Save DSS image to cache
         if: always() && steps.dss-cache.outputs.cache-hit != 'true'
