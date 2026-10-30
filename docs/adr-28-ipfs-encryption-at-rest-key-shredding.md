@@ -111,9 +111,7 @@ the run is sent and sealed.
 The report hash covers the final downloaded plaintext bytes. Its CID names
 the encrypted report envelope in IPFS. Retrieving that artifact requires both
 the existing instance decryption and the PAC envelope decryption. Encryption
-work grows with the number of participating resource scopes. See the
-[P06 implementation note](qa-p06-audit-report-export.md) for the migration and
-the [non-BDD verification and remaining limits](qa-fixes-verification-2026-10-16.md).
+work grows with the number of participating resource scopes.
 
 Two deliberate exclusions:
 

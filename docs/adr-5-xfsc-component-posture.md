@@ -127,9 +127,6 @@ protects the scope list and run identity. Shredding any such key makes the
 whole affected saved run/report unreadable; report export returns 404 without
 selecting an older run. Plaintext JSONB/receipt copies are removed. This
 extends the erasure boundary in [ADR-28](adr-28-ipfs-encryption-at-rest-key-shredding.md).
-Implementation and deferred verification are recorded in the
-[P06 note](qa-p06-audit-report-export.md); no passing test result is claimed
-for this change.
 
 ### Status-list compatibility and publication
 
