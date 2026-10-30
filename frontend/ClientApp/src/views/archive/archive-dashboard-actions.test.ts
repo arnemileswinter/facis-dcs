@@ -75,7 +75,12 @@ describe('archive dashboard actions', () => {
   })
 
   it('archives a contract by DID', async () => {
-    archive.storeContract.mockResolvedValue({ did: signed.did, kind: 'contract', contract_version: 1, content_hash: 'h' })
+    archive.storeContract.mockResolvedValue({
+      did: signed.did,
+      kind: 'contract',
+      contract_version: 1,
+      content_hash: 'h',
+    })
     const wrapper = await mountDashboard()
     await wrapper.get('[data-testid="archive-store-did"]').setValue(signed.did)
     await wrapper.get('[data-testid="archive-store-contract"]').trigger('click')
@@ -89,7 +94,10 @@ describe('archive dashboard actions', () => {
   })
 
   it('offers termination only for a contract that can still end', async () => {
-    archive.retrieve.mockResolvedValue([signed, { ...signed, did: 'did:web:example.com:contract:2', state: 'TERMINATED' }])
+    archive.retrieve.mockResolvedValue([
+      signed,
+      { ...signed, did: 'did:web:example.com:contract:2', state: 'TERMINATED' },
+    ])
     const wrapper = await mountDashboard()
     expect(wrapper.find(`[data-testid="archive-terminate-${signed.did}"]`).exists()).toBe(true)
     expect(wrapper.find('[data-testid="archive-terminate-did:web:example.com:contract:2"]').exists()).toBe(false)

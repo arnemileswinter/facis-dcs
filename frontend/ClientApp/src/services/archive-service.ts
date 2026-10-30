@@ -121,7 +121,9 @@ export const archiveService = {
     did: string,
     evidence: { name: string; media_type: string; content: string; description?: string },
   ): Promise<ArchiveStoreResult> {
-    return http.post<ArchiveStoreResult>('/archive/store', { kind: 'evidence', did, ...evidence }).then((res) => res.data)
+    return http
+      .post<ArchiveStoreResult>('/archive/store', { kind: 'evidence', did, ...evidence })
+      .then((res) => res.data)
   },
 
   async evidence(did: string): Promise<ArchiveEvidenceItem[]> {
