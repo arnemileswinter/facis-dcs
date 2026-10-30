@@ -21,21 +21,21 @@ import (
 )
 
 type GetAllMetadataByFilterQry struct {
-	RetrievedBy  string
-	DID          string
-	Version      int
-	State        *contracttemplatestate.ContractTemplateState
-	TemplateType *contracttemplatetype.ContractTemplateType
-	PartyType    string
-	Name         string
-	Description  string
-	TemplateData string
+	RetrievedBy      string
+	DID              string
+	Version          int
+	State            *contracttemplatestate.ContractTemplateState
+	TemplateType     *contracttemplatetype.ContractTemplateType
+	PartyType        string
+	Name             string
+	Description      string
+	TemplateData     string
 	Jurisdiction     string
 	Industry         string
 	ComplianceStatus string
-	HolderDID    string
-	Pagination   datatype.Pagination
-	UserRoles    userrole.UserRoles
+	HolderDID        string
+	Pagination       datatype.Pagination
+	UserRoles        userrole.UserRoles
 }
 
 type GetAllMetadataByFilterResult struct {

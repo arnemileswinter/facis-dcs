@@ -29,9 +29,9 @@ func TestContractTakesTheTermsTheSLARulesFix(t *testing.T) {
 		return f
 	}
 	raw, err := datatype.NewJSON(map[string]any{
-		"@context": map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#", "odrl": "http://www.w3.org/ns/odrl/2/"},
-		"@id":      base,
-		"@type":    "dcs:ContractTemplate",
+		"@context":     map[string]any{"dcs": "https://w3id.org/facis/dcs/ontology/v1#", "odrl": "http://www.w3.org/ns/odrl/2/"},
+		"@id":          base,
+		"@type":        "dcs:ContractTemplate",
 		"dcs:metadata": map[string]any{"@type": "dcs:TemplateMetadata", "dcs:templateType": "dcs:ContractTemplate"},
 		"dcs:documentStructure": map[string]any{
 			"@type": "dcs:DocumentStructure",
@@ -48,12 +48,12 @@ func TestContractTakesTheTermsTheSLARulesFix(t *testing.T) {
 			field("fee", "xsd:decimal", map[string]any{"dcs:value": map[string]any{"@value": "10", "@type": "xsd:decimal"}}),
 		},
 		"dcs:policies": map[string]any{
-			"@id":   base + "#policy-set-1",
+			"@id":          base + "#policy-set-1",
 			"@type":        "odrl:Offer",
 			"odrl:profile": map[string]any{"@id": "https://w3id.org/facis/dcs/ontology/v1/odrl-profile"},
 			"odrl:obligation": []any{map[string]any{
-				"@type":       "odrl:Duty",
-				"odrl:action": map[string]any{"@id": "dcs:provideCompliantValue"},
+				"@type":         "odrl:Duty",
+				"odrl:action":   map[string]any{"@id": "dcs:provideCompliantValue"},
 				"@id":           base + "#policy-1",
 				"odrl:target":   map[string]any{"@id": base},
 				"odrl:assigner": map[string]any{"@id": base + "#party-https%3A%2F%2Fw3id.org%2Ffacis%2Fdcs%2Ftaxonomy%2Fv1%23role-provider"},
