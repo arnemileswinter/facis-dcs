@@ -6,6 +6,7 @@ import {
   templateComplianceStatuses,
 } from '@/models/contract-template/contract-template'
 import { contractTemplateService } from '@/services/contract-template-service'
+import { type ContractTemplateState, contractTemplateStates } from '@/types/contract-template-state'
 import { type PartyType, partyTypes } from '@/types/party-type'
 import { toProperCase } from '@/utils/string'
 import ListSearch from '../ListSearch.vue'
@@ -19,9 +20,13 @@ const partyType = ref<PartyType | ''>('')
 const partyTypeId = useId()
 const complianceStatus = ref<TemplateComplianceStatus | ''>('')
 const complianceStatusId = useId()
+// DCS-IR-TR-07, DCS-IR-TR-08: the dashboard filters the templates by state.
+const state = ref<ContractTemplateState | ''>('')
+const stateId = useId()
 const filters = computed(() => ({
   party_type: partyType.value || undefined,
   compliance_status: complianceStatus.value || undefined,
+  state: state.value || undefined,
 }))
 const emit = defineEmits<{
   searchResult: [value: PartialContractTemplate[] | null]
@@ -83,6 +88,15 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
         <option value="">All compliance statuses</option>
         <option v-for="status in templateComplianceStatuses" :key="status" :value="status">
           {{ toProperCase(status.replace('_', ' ')) }}
+        </option>
+      </select>
+    </div>
+    <div class="shrink-0 text-sm">
+      <label :for="stateId" class="sr-only">State</label>
+      <select :id="stateId" v-model="state" class="select w-max min-w-44">
+        <option value="">Any state</option>
+        <option v-for="option in contractTemplateStates" :key="option" :value="option">
+          {{ toProperCase(option) }}
         </option>
       </select>
     </div>

@@ -24,5 +24,10 @@ export const useTemplatePermissions = () => {
   // Contract Creator reads the one template it instantiates by its ID.
   const hasTemplateRole = computed(() => isCreator.value || isReviewer.value || isApprover.value || isManager.value)
 
-  return { isCreator, isReviewer, isApprover, isManager, hasTemplateRole }
+  // A Contract Creator verifies the template it uses and reads its provenance.
+  const isContractCreator = computed(() => {
+    return authStore.user?.roles?.includes('CONTRACT_CREATOR') ?? false
+  })
+
+  return { isCreator, isReviewer, isApprover, isManager, hasTemplateRole, isContractCreator }
 }

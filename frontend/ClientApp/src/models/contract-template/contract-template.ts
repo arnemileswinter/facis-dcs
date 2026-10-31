@@ -52,6 +52,15 @@ export function requirableTemplates(
   )
 }
 
+/** DCS-IR-TR-04, DCS-IR-TR-05: a review or approval decision with its comments, or a rejection reason. */
+export interface TemplateReviewNote {
+  kind: 'RETURNED_TO_DRAFT' | 'FORWARDED_TO_APPROVAL' | 'RETURNED_TO_REVIEW' | 'REJECTED' | 'APPROVED'
+  text: string[]
+  /** Holder DID of the person who decided */
+  by?: string
+  created_at: string
+}
+
 export interface ContractTemplate extends TemplateSearchableMetadata, TemplateStructure {
   did: string
   created_by: string
@@ -67,6 +76,7 @@ export interface ContractTemplate extends TemplateSearchableMetadata, TemplateSt
   responsible?: ContractTemplateResponsible
   outdated?: boolean
   latest_did?: string
+  review_notes?: TemplateReviewNote[]
 }
 
 export type PartialContractTemplate = ContractTemplate
