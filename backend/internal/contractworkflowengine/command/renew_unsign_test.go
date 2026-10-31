@@ -231,3 +231,20 @@ func mustJSON(t *testing.T, v any) string {
 	require.NoError(t, err)
 	return string(b)
 }
+
+// DCS-FR-SM-13: a renewal does not inherit the previous term's signing
+// deadline, which has usually passed and would refuse every signature.
+func TestRenewalDropsThePreviousSigningDeadline(t *testing.T) {
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(*signedTermDocument(t), &doc))
+	doc["dcs:signingDeadline"] = map[string]any{"@value": "2020-01-31", "@type": "xsd:date"}
+	withDeadline, err := datatype.NewJSON(doc)
+	require.NoError(t, err)
+
+	renewal, err := unsignRenewedDocument(&withDeadline)
+	require.NoError(t, err)
+
+	var renewed map[string]any
+	require.NoError(t, json.Unmarshal(*renewal, &renewed))
+	require.NotContains(t, renewed, "dcs:signingDeadline")
+}

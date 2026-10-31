@@ -306,6 +306,10 @@ func unsignRenewedDocument(raw *datatype.JSON) (*datatype.JSON, error) {
 		}
 	}
 
+	// The signing deadline belongs to the previous term (DCS-FR-SM-13); the
+	// renewal's parties set their own.
+	delete(doc, "dcs:signingDeadline")
+
 	// Break the seal: the first signature retyped the offered policy set into
 	// the odrl:Agreement those signatures bind. A renewal is a fresh offer of
 	// the same terms, and nobody has accepted it yet.
