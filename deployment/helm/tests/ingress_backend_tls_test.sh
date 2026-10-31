@@ -92,7 +92,7 @@ for n in dcs-digital-contracting-service.dcs.svc dcs-hydra.dcs.svc fc-service.dc
 done
 
 # ---- ingress-nginx (className nginx) -----------------------------------------
-render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" "${FC[@]}" --set ingress.className=nginx >"$TMP/nginx.yaml"
+render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" "${FC[@]}" --set ingress.className=nginx >"$TMP/nginx.yaml"
 summary "$TMP/nginx.yaml" >"$TMP/nginx.txt"
 grep -q '^route dcs-digital-contracting-service 8443$' "$TMP/nginx.txt" || fail "nginx: backend route is not on the TLS proxy port"
 grep -q '^route dcs-hydra 8444$' "$TMP/nginx.txt" || fail "nginx: Hydra route is not on the public TLS port"
@@ -106,7 +106,7 @@ grep -q '^serverstransport' "$TMP/nginx.txt" && fail "nginx: ServersTransport wi
 # ---- no backend TLS controller: plain ports, no TLS annotations --------------
 for args in "--set global.internalTLS.enabled=false --set ingress.className=nginx" "--set ingress.className=haproxy" ""; do
   # shellcheck disable=SC2086
-  render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" "${FC[@]}" $args >"$TMP/plain.yaml"
+  render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" "${FC[@]}" $args >"$TMP/plain.yaml"
   summary "$TMP/plain.yaml" >"$TMP/plain.txt"
   grep -q '^route dcs-digital-contracting-service 8991$' "$TMP/plain.txt" || fail "[$args] backend route is not on the plain port"
   grep -q '^route dcs-hydra 4444$' "$TMP/plain.txt" || fail "[$args] Hydra route is not on the public port"
@@ -117,7 +117,7 @@ render -f "$CHART_DIR/values.bdd.yml" "${CRD[@]}" --set global.internalTLS.enabl
 summary "$TMP/notls.yaml" | grep -q '^env HYDRA_INTERNAL_ISSUER_URL http://dcs-hydra:4444$' \
   || fail "without global.internalTLS the backend does not call the Hydra public port"
 # An empty className with the Traefik CRD selects Traefik, as for the TLSOption.
-render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" "${FC[@]}" "${CRD[@]}" >"$TMP/prodt.yaml"
+render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" "${FC[@]}" "${CRD[@]}" >"$TMP/prodt.yaml"
 summary "$TMP/prodt.yaml" | grep -q '^route dcs-digital-contracting-service 8443$' || fail "empty className with the Traefik CRD: backend route is plain"
 
 echo "ingress_backend_tls_test: OK"

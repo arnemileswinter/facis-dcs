@@ -55,6 +55,13 @@ service:
   swarmNodePort: null
 
 api:
+  # Kubo API.Authorizations (DCS-NFR-SF-02): every RPC call must carry the
+  # bearer token of the Secret <release>-ipfs-api (key token), which the chart
+  # generates on install and keeps on upgrade. The parent chart gives it to the
+  # backend as IPFS_API_TOKEN. The ipfs CLI in the pod needs
+  # --api-auth "bearer:$IPFS_API_TOKEN".
+  auth:
+    enabled: false
   cors:
     enabled: false
     allowOrigins: []

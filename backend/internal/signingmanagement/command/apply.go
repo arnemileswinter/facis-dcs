@@ -817,15 +817,15 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		certGiven, certSurname = certGivenSurname(signerCert)
 	}
 	// The sole-control gate's outcome is a security decision on every
-	// submission, and the callback response alone carries no detail about
-	// what was actually compared — logging it is cheap and turns "why was
-	// this signature accepted/rejected" into real, immediate evidence
-	// instead of needing to reproduce it.
+	// submission, so it is logged. The names are personal data that the log
+	// store keeps past an erasure (DCS-NFR-SEC-13): the line has the ceremony
+	// and the result only.
+	match := namesMatch(pidGiven, pidFamily, certGiven, certSurname)
 	log.Printf(
-		"sole-control name-match: ceremony=%s field=%s requiredLevel=%s nameMatchRequired=%v pid=%q/%q cert=%q/%q rawSignedBy=%q",
-		ceremony.ID, ceremony.FieldName, requiredLevel, nameMatchRequired, pidGiven, pidFamily, certGiven, certSurname, report.SignedBy,
+		"sole-control name-match: ceremony=%s field=%s requiredLevel=%s nameMatchRequired=%v match=%v",
+		ceremony.ID, ceremony.FieldName, requiredLevel, nameMatchRequired, match,
 	)
-	if nameMatchRequired && !namesMatch(pidGiven, pidFamily, certGiven, certSurname) {
+	if nameMatchRequired && !match {
 		return fmt.Errorf("%w: PID %q %q vs. certificate %q %q", ErrCertPIDMismatch, pidGiven, pidFamily, certGiven, certSurname)
 	}
 	// Cross-ceremony consistency: this signatory must use the SAME

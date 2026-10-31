@@ -199,7 +199,10 @@ IPFS_POD="$(wait_for_running_pod "${K8S_NAMESPACE}" \
 # against an EMPTY stdin (producing the well-known empty-file CID
 # Qmb...4Q7Vs-style hash) instead of the intended bytes, rather than a
 # reliable failure.
-export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} --"
+# The Kubo RPC API requires its bearer token (charts/ipfs, api.auth). The
+# wrapper drops the leading "ipfs" of the step's command and runs
+# "ipfs --api-auth bearer:$IPFS_API_TOKEN <rest>" in the container.
+export BDD_IPFS_EXEC="${KUBECTL_BIN} -n ${K8S_NAMESPACE} exec -i ${IPFS_POD} -c ipfs -- sh -c 'shift; exec ipfs --api-auth \"bearer:\$IPFS_API_TOKEN\" \"\$@\"' ipfs-auth"
 
 # Instance B (dcs2, features/17_peer_trust @two-instance): only checked when
 # the caller tells us it exists (DCS_DEPLOYMENT_B set AND actually present in

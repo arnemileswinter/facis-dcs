@@ -157,7 +157,9 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 			auditRequest.Header.Set("Authorization", "Bearer "+token(role, time.Now().Add(time.Hour)))
 			auditResponse := httptest.NewRecorder()
 			mux.ServeHTTP(auditResponse, auditRequest)
-			if allowed {
+			// The audit trail is for the audit roles and the Contract Manager,
+			// not for a machine role (DCS-NFR-BR-05).
+			if allowed && role != userrole.SystemContractManager {
 				require.Equal(t, http.StatusOK, auditResponse.Code, auditResponse.Body.String())
 			} else {
 				require.Equal(t, http.StatusForbidden, auditResponse.Code, auditResponse.Body.String())

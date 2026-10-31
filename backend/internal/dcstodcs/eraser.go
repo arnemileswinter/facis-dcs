@@ -101,8 +101,8 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 // signing, the PDF prepared for signing, the PID claims and presentations of
 // the signing ceremonies, the payload of every JAdES signature over the
 // contract, and the outbox copies of the event bodies that the audit trail
-// erases with the key. The contract keeps its party names for the read
-// policy. Metadata, hashes and signature values stay as evidence.
+// erases with the key. The contract keeps its party names for the
+// read policy. Metadata, hashes and signature values stay as evidence.
 func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
 	statements := []string{
 		`UPDATE contracts SET contract_data = ` + partyNamesOnly + ` WHERE did = $1 AND contract_data IS DISTINCT FROM ` + partyNamesOnly,

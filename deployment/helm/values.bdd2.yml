@@ -158,8 +158,10 @@ nats:
 hydra:
   enabled: true
   config:
-    # In-cluster TLS (global.internalTLS): verified against this release's CA.
-    dsn: "postgres://dcs:dcs@dcs2-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt"
+    # The "hydra" database of this release's PostgreSQL, password from its
+    # Secret, verified against the internal CA (global.internalTLS).
+    coDeployedPostgresql:
+      enabled: true
     dev: true
     selfIssuerURL: "http://dcs-b.localhost:18080"
     loginURL: "http://dcs-b.localhost:18080/digital-contracting-service/ui/"

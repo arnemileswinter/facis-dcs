@@ -35,3 +35,21 @@ it.each<[UserRole, boolean, boolean]>([
   expect(wrapper.findComponent({ name: 'ActionHistoryPanel' }).exists()).toBe(history)
   wrapper.unmount()
 })
+
+// DCS-NFR-SEC-04: the Auditor reads the configuration attestation records of
+// the backend starts, which the PROCESS_AUDIT_AND_COMPLIANCE scope returns.
+it('offers the Auditor the configuration attestation scope', async () => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useAuthStore().user = { issuer: 'org', holder: 'user', roles: ['AUDITOR'] }
+  const wrapper = mount(AuditView, {
+    global: { plugins: [pinia], mocks: { $route: { meta: { name: 'Audit' } } }, stubs: { ActionHistoryPanel: true } },
+  })
+  await flushPromises()
+  const values = wrapper
+    .get('select')
+    .findAll('option')
+    .map((option) => option.attributes('value'))
+  expect(values).toContain('PROCESS_AUDIT_AND_COMPLIANCE')
+  wrapper.unmount()
+})

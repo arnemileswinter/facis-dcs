@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBootstrapReadinessIsUnavailable(t *testing.T) {
@@ -41,6 +42,17 @@ func TestFinalReadinessIsUnauthenticatedAndReady(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "ready\n" {
 		t.Fatalf("body = %q, want ready", got)
+	}
+}
+
+// DCS-NFR-SF-01: an outbox job that hangs makes the liveness probe fail, so
+// Kubernetes restarts the process and another run delivers the outbox.
+func TestLivenessFailsWhileAnOutboxJobIsStuck(t *testing.T) {
+	stuck := func(time.Time) []string { return []string{"outbox-anchoring (running since 2026-10-31T10:00:00Z)"} }
+	rec := httptest.NewRecorder()
+	livenessWith(stuck)(rec, httptest.NewRequest(http.MethodGet, livenessEndpointPath, nil))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "outbox-anchoring") {
+		t.Fatalf("liveness with a stuck job = %d %q, want 503 naming the job", rec.Code, rec.Body.String())
 	}
 }
 

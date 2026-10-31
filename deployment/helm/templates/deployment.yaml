@@ -176,7 +176,9 @@ spec:
             - name: HYDRA_CLIENT_ID
               value: {{ $hydraClient.client_id | quote }}
             - name: HYDRA_CLIENT_SECRET
-              value: {{ $hydraClient.client_secret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  {{- include "hydra.clientSecretKeyRef" (dict "release" .Release.Name "client" $hydraClient) | nindent 18 }}
             - name: HYDRA_REDIRECT_URI
               value: {{ index $hydraClient.redirect_uris 0 | quote }}
             - name: HYDRA_POST_LOGOUT_REDIRECT_URI
@@ -313,6 +315,16 @@ spec:
               {{- else }}
               value: {{ printf "%s/did.json" .Values.pkcs11.provisioning.tokenDir | quote }}
               {{- end }}
+            {{- else if .Values.identity.existingSecret }}
+            # did.json of the HSM key dcs-did, from the operator's Secret.
+            - name: DCS_DID
+              value: {{ printf "%s/did.json" .Values.identity.mountPath | quote }}
+            {{- end }}
+            {{- if .Values.identity.eidas.enforce }}
+            # The DID certificates of this instance and of every peer chain to
+            # the EU trust pool (identity.eidas.enforce).
+            - name: DCS_FORCE_EIDAS_CERT
+              value: "true"
             {{- end }}
             {{- if .Values.federation.trustPdpURL }}
             # ADR-19 federation trust gate. Emitted only when set so a deployment
@@ -340,6 +352,16 @@ spec:
               {{- else }}
               value: {{ include "digital-contracting-service.ipfsMfsBaseURL" . | quote }}
               {{- end }}
+            {{- if .Values.ipfs.apiTokenSecretRef.name }}
+            - name: IPFS_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ipfs.apiTokenSecretRef.name | quote }}
+                  key: {{ .Values.ipfs.apiTokenSecretRef.key | quote }}
+            {{- else if and .Values.ipfs.enabled .Values.ipfs.api.auth.enabled }}
+            # Bearer token of the co-deployed Kubo RPC API (DCS-NFR-SF-02).
+            {{- include "ipfs.apiTokenEnv" . | nindent 12 }}
+            {{- end }}
             # ---- Archive notary / ORCE ---------------------------------------------
             {{- $archiveNotaryBaseURL := .Values.archiveNotary.baseURL | default "" }}
             {{- if and (not $archiveNotaryBaseURL) .Values.orce.enabled }}
@@ -477,7 +499,7 @@ spec:
             - name: hsm-token
               mountPath: {{ .Values.pkcs11.provisioning.tokenDir | quote }}
           {{- end }}
-          {{- if and .Values.identity.enabled .Values.pkcs11.provisioning.publishSecrets }}
+          {{- if or (and .Values.identity.enabled .Values.pkcs11.provisioning.publishSecrets) (and (not .Values.identity.enabled) .Values.identity.existingSecret) }}
             - name: identity
               mountPath: {{ .Values.identity.mountPath | quote }}
               readOnly: true
@@ -578,6 +600,13 @@ spec:
             # start before this secret exists. required would FailedMount →
             # BackOff before the container even starts.
             optional: true
+      {{- else if .Values.identity.existingSecret }}
+        - name: identity
+          secret:
+            secretName: {{ .Values.identity.existingSecret | quote }}
+            items:
+              - key: did.json
+                path: did.json
       {{- end }}
       {{- if .Values.signing.tsaTrustCertSecret }}
         - name: tsa-trust

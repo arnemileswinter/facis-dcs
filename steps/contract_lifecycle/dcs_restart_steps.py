@@ -13,7 +13,7 @@ import subprocess
 import time
 
 import requests
-from behave import when
+from behave import then, when
 
 from steps.support.services.contract_service import ContractService
 
@@ -33,19 +33,63 @@ def _backend_pods(kubectl, namespace, release):
 
 @when("the DCS deployment restarts")
 def step_dcs_restarts(context):
+    _replace_backend_pods(context, ["rollout", "restart", f"deployment/{_deployment()}"])
+
+
+@when('the creator submits contract "{name}" for review and the DCS pod is killed at once')
+def step_submit_then_kill(context, name):
+    # DRAFT -> NEGOTIATION -> SUBMITTED; the outbox events of the submit are
+    # written, and the pod goes before its jobs publish and anchor them.
+    ContractService._prepare_contract_under_review(context, name)
+    release = os.getenv("HELM_RELEASE", "dcs")
+    pods = sorted(_backend_pods(os.getenv("KUBECTL_BIN", "kubectl"), os.getenv("K8S_NAMESPACE", "dcs-bdd"), release))
+    _replace_backend_pods(context, ["delete", "pod", "--grace-period=0", "--force", "--wait=false", *pods])
+
+
+@then('every outbox event of contract "{name}" is published and anchored')
+def step_outbox_delivered(context, name):
+    did, _ = ContractService._contract_data(context, name)
+    deadline = time.monotonic() + 240
+    while True:
+        cursor = context.db.cursor()
+        cursor.execute(
+            "SELECT count(*), count(*) FILTER (WHERE NOT published OR NOT processed) FROM outbox_events WHERE did = %s",
+            (did,),
+        )
+        total, pending = cursor.fetchone()
+        cursor.close()
+        if total > 0 and pending == 0:
+            return
+        assert time.monotonic() < deadline, (
+            f"{pending} of {total} outbox events of contract {name!r} ({did}) are not published and anchored after the kill"
+        )
+        time.sleep(3)
+
+
+def _deployment():
+    return os.getenv("DCS_DEPLOYMENT", "dcs-digital-contracting-service")
+
+
+def _replace_backend_pods(context, kubectl_args):
+    """Runs kubectl_args, which replace the backend pods, and waits until new
+    pods serve the API and the harness forwards reach them."""
     namespace = os.getenv("K8S_NAMESPACE", "dcs-bdd")
-    deployment = os.getenv("DCS_DEPLOYMENT", "dcs-digital-contracting-service")
+    deployment = _deployment()
     release = os.getenv("HELM_RELEASE", "dcs")
     kubectl = os.getenv("KUBECTL_BIN", "kubectl")
 
     before = _backend_pods(kubectl, namespace, release)
     restarted = subprocess.run(
-        [kubectl, "-n", namespace, "rollout", "restart", f"deployment/{deployment}"],
-        capture_output=True, text=True, timeout=30,
+        [kubectl, "-n", namespace, *kubectl_args],
+        capture_output=True, text=True, timeout=60,
     )
     assert restarted.returncode == 0, (
-        f"Could not restart DCS deployment {deployment!r}: {restarted.stderr}"
+        f"kubectl {' '.join(kubectl_args)} failed for DCS deployment {deployment!r}: {restarted.stderr}"
     )
+    deadline = time.monotonic() + 120
+    while not (_backend_pods(kubectl, namespace, release) - before):
+        assert time.monotonic() < deadline, f"No new DCS pod replaced {sorted(before)}"
+        time.sleep(2)
     ready = subprocess.run(
         [kubectl, "-n", namespace, "rollout", "status", f"deployment/{deployment}", "--timeout=300s"],
         capture_output=True, text=True, timeout=310,

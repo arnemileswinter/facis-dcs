@@ -622,6 +622,10 @@ Two trust configurations follow from that:
 ### Hydra
 - Enable `hydra.enabled` and set `hydra.config.selfIssuerURL` to the public issuer URL
 - Create a Secret with a high-entropy system secret (`openssl rand -hex 32`, key `secretsSystem`) and set `hydra.secrets.systemSecretRef.name`. Outside dev mode the chart refuses to render without it.
+- Persistent state (DCS-NFR-PER-03, DCS-NFR-SF-01): Hydra keeps its clients, signing keys and sessions in PostgreSQL, in a database of its own. `hydra.config.dsnSecretRef` names a Secret key with the whole DSN (`postgres://<user>:<password>@<host>:5432/hydra?sslmode=verify-full`); `hydra.config.coDeployedPostgresql.enabled` uses the `hydra` database of the co-deployed PostgreSQL (list `hydra` in `postgresql.additionalDatabases`, the default) with the password from its Secret. Outside dev mode the chart refuses `dsn: memory`, and `hydra.replicaCount` above 1 needs a persistent DSN. `values.prod.yml` runs 2 replicas.
+- Clients: every Hydra pod registers `hydra.clients` through its admin API on loopback when it starts (upsert by `client_id`), and the pod is ready only when they exist. A restart or a new replica therefore has every client, without a Helm hook.
+- Client secrets (DCS-NFR-SEC-12): `hydra.clients[].client_secretSecretRef` (`name`, `key`) names an existing Secret; an inline `client_secret` goes into the chart Secret `<release>-hydra-clients` (key: the `client_id`). The backend (`HYDRA_CLIENT_SECRET`) and the registration read it through `secretKeyRef`; no pod spec holds it.
+- Admin API (DCS-NFR-SEC-03): it has no authentication of its own and accepts logins and consents with any roles. With `global.internalTLS` the Service offers it only on the TLS proxy (port 8443), and the NetworkPolicy admits only the backend ("Network policies").
 - Hydra encrypts stored keys with the system secret and does not re-encrypt existing data. For an existing Hydra with a persistent database, set the Secret value to `<new>,<old>`: Hydra encrypts with the first value and decrypts with all of them. The old value is the previous `hydra.secrets.system`, or `<release>-hydra-system-secret-change-me` if none was set.
 - Access-token lifetime (DCS-IR-CI-09, DCS-NFR-BR-06): `hydra.config.accessTokenTTL` (`5m` in `values.prod.yml` and `values.acceptance.yml`; empty keeps the Hydra default of 1h). A revoked credential ends the session at the next token refresh, so this is the longest time an access token issued before the revocation stays valid.
 - Register `dcs-client` redirect URIs via `hydra.clients` (see `values.dev.yml`):
@@ -638,6 +642,20 @@ Two trust configurations follow from that:
 ### Metrics
 - The backend serves Prometheus `/metrics` on `service.metricsPort` (default 9464), not on the API port. The port has its own ClusterIP Service `<fullname>-metrics`, which `service.type` does not change. Do not route it through an ingress or load balancer.
 - `http_requests_total` and `http_request_duration_seconds` carry the labels `method` (a standard HTTP method, else `OTHER`), `path` (the route pattern, for example `/contract/{did}`; `/` when no route matched) and `status`, so unknown paths add no series.
+- Alerts (DCS-NFR-SEC-11): where the Prometheus Operator CRDs exist (or `monitoring.enabled`), the chart writes the PrometheusRule and the ServiceMonitor whose series the rules evaluate. Both carry `alerts.labels`; empty, that is `release: <release>` with `monitoring.enabled` (the co-deployed kube-prometheus-stack) and `release: prometheus` otherwise. Set it to the `ruleSelector` and `serviceMonitorSelector` of your Prometheus. `DCSBackendDown` also fires when no backend pod is left (`absent(up{...})`); `DCSBackupStale` and `DCSBackupNeverSucceeded` fire when no backup succeeded for 26 hours (needs kube-state-metrics).
+
+### Network policies
+- `networkPolicy.enabled` (on by default) writes NetworkPolicies for the pods of the release (`templates/networkpolicy.yaml`). They take effect only on a cluster whose CNI enforces NetworkPolicy (Calico, Cilium, kindnet from kind 0.24, ...); that CNI is a prerequisite of a production deployment (DCS-NFR-SEC-03, DCS-NFR-SEC-14, DCS-NFR-SF-02).
+- Every pod the chart owns is under a default deny for ingress. The policies admit:
+  - backend API (`http`, `https`): every source. It is the public API behind the ingress, called by peers and ORCE, and every route authenticates. `/metrics`: `networkPolicy.metricsFrom` (default: pods labelled `app.kubernetes.io/name: prometheus` in any namespace).
+  - Hydra public API: every source. Hydra admin API (`admin`, `https`): the backend only.
+  - IPFS RPC API and gateway: the backend only; the swarm port: every source. The RPC API also requires a bearer token (`ipfs.api.auth`, below).
+  - PostgreSQL: the backend, Hydra, the backup and the compliance monitor. NATS and pdf-core: the backend.
+  - ORCE, DSS and the Federated Catalogue stack (fc-service, Keycloak, portal): every source, because the ingress routes them, peers and the second BDD release call them, and they authenticate their callers. Fuseki: fc-service; the catalogue PostgreSQL: fc-service and Keycloak. Loki: its own policy (push from the collector, query from `logging.queryFrom`).
+- Kubelet probes come from the node, which a NetworkPolicy does not block. Where a CNI blocks them, add the node CIDR as an `ipBlock` to `networkPolicy.extraFrom`; it is added to every restricted rule.
+- Port-forwards (`kubectl port-forward`, used by the BDD harness) and `kubectl exec` do not pass through NetworkPolicies.
+- The dev profiles set `networkPolicy.enabled: false`: the dev backend runs on the host and reaches the services through NodePorts.
+- Kubo RPC token (DCS-NFR-SF-02): with `ipfs.api.auth.enabled` (on by default) the co-deployed Kubo accepts RPC calls only with the bearer token of the Secret `<release>-ipfs-api` (key `token`, random on install, kept on upgrade; Kubo `API.Authorizations`). The backend gets it as `IPFS_API_TOKEN`. For a Kubo outside the release, set `ipfs.apiTokenSecretRef`. The `ipfs` CLI in the IPFS pod needs `--api-auth "bearer:$IPFS_API_TOKEN"`.
 
 ### Keycloak (Federated Catalogue only)
 - FC integration uses `fcKeycloak.realmURL` / `FC_KEYCLOAK_REALM_URL`
@@ -654,7 +672,7 @@ Two trust configurations follow from that:
 - Outbound TLS (DCS-IR-CI-01): every HTTPS client of the backend requires TLS 1.3, except the download of the EU national trusted lists and the RFC 3161 time-stamp requests, which accept TLS 1.2 because not all member-state servers and TSAs offer TLS 1.3; both responses are signed, and the backend verifies the signature of each time-stamp token and of each trusted list ([ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §4). PostgreSQL and NATS clients connect with the driver defaults; the co-deployed servers accept TLS 1.3 only, and an external database server sets its own minimum.
 - HTTPS redirect and HSTS (DCS-IR-CI-03): when `route.publicBaseURL` is `https://`, the backend answers a request that the proxy received over plain HTTP (`X-Forwarded-Proto: http`) with a redirect to HTTPS, and sends `Strict-Transport-Security` on HTTPS responses.
 - PostgreSQL: put `sslmode=verify-full` (with `sslrootcert`) in the `DATABASE_URL` of the external database. `database.sslmode` sets the mode of a URL the chart derives.
-- In-cluster TLS (DCS-NFR-SEC-14, `global.internalTLS`, on by default). The chart generates a CA on install (Secret `<release>-internal-ca`, kept on upgrade, ECDSA P-256) and a server certificate for the co-deployed services (`<release>-internal-tls`). The co-deployed PostgreSQL accepts TCP connections only with TLS 1.3 (`hostssl`), and the derived `DATABASE_URL` uses `sslmode=verify-full`. NATS requires TLS 1.3, and the derived `NATS_URL` is `tls://`. IPFS RPC, pdf-core, DSS and ORCE serve plain HTTP only: a TLS proxy container in each pod serves TLS 1.3 on port 8443, and the backend calls it there. Their plain ports stay for probes, ingress routes and port-forwards. The backend pod and the Hydra pod have the same TLS proxy: in-cluster callers reach the backend API (ORCE callbacks, `DCS_URL`) and the Hydra admin API (the backend's `HYDRA_ADMIN_URL`, the client registration job) on port 8443. The backend calls the Hydra public API (OIDC discovery, token) on port 8444 of the Hydra pod (`HYDRA_INTERNAL_ISSUER_URL`). ORCE trusts the CA (`NODE_EXTRA_CA_CERTS`). The certificate CRL distribution point that the provisioning job writes stays an `http://` URL of the backend service (RFC 5280; the CRL is signed; [ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §5). The backend, the backup and the compliance monitor trust the CA (`SSL_CERT_DIR`, `sslrootcert`). Another client of the co-deployed PostgreSQL, for example Hydra, needs `sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt` in its DSN; Hydra mounts the CA there. URLs set in values (`signing.tsaURL`, `auditExecutor.url`, `federation.trustPdpURL`, ...) are used as given. The BDD and e2e kind stacks (`values.bdd.yml`, `values.bdd2.yml`) run with it on. Instance B calls the ORCE and DSS it shares with instance A on their plain ports, because they belong to another release with another CA. The dev profiles set `global.internalTLS.enabled: false`, because the dev backend runs on the host and reaches the services through NodePorts.
+- In-cluster TLS (DCS-NFR-SEC-14, `global.internalTLS`, on by default). The chart generates a CA on install (Secret `<release>-internal-ca`, kept on upgrade, ECDSA P-256) and a server certificate for the co-deployed services (`<release>-internal-tls`). The co-deployed PostgreSQL accepts TCP connections only with TLS 1.3 (`hostssl`), and the derived `DATABASE_URL` uses `sslmode=verify-full`. NATS requires TLS 1.3, and the derived `NATS_URL` is `tls://`. IPFS RPC, pdf-core, DSS and ORCE serve plain HTTP only: a TLS proxy container in each pod serves TLS 1.3 on port 8443, and the backend calls it there. Their plain ports stay for probes, ingress routes and port-forwards, except the IPFS RPC API and the Hydra admin API: their Services offer only the TLS port, and the NetworkPolicies admit only the backend ("Network policies"). The backend pod and the Hydra pod have the same TLS proxy: in-cluster callers reach the backend API (ORCE callbacks, `DCS_URL`) and the Hydra admin API (the backend's `HYDRA_ADMIN_URL`) on port 8443. The backend calls the Hydra public API (OIDC discovery, token) on port 8444 of the Hydra pod (`HYDRA_INTERNAL_ISSUER_URL`). ORCE trusts the CA (`NODE_EXTRA_CA_CERTS`). The certificate CRL distribution point that the provisioning job writes stays an `http://` URL of the backend service (RFC 5280; the CRL is signed; [ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §5). The backend, the backup and the compliance monitor trust the CA (`SSL_CERT_DIR`, `sslrootcert`). Another client of the co-deployed PostgreSQL, for example Hydra, needs `sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt` in its DSN; Hydra mounts the CA there. URLs set in values (`signing.tsaURL`, `auditExecutor.url`, `federation.trustPdpURL`, ...) are used as given. The BDD and e2e kind stacks (`values.bdd.yml`, `values.bdd2.yml`) run with it on. Instance B calls the ORCE and DSS it shares with instance A on their plain ports, because they belong to another release with another CA. The dev profiles set `global.internalTLS.enabled: false`, because the dev backend runs on the host and reaches the services through NodePorts.
 - Ingress to the pods (DCS-NFR-SEC-01, DCS-NFR-SEC-14). With `global.internalTLS` on, the ingress routes go to the TLS proxies: the backend on port 8443, the Hydra public API on port 8444 (`hydra.service.publicTLSPort`; port 8443 of the Hydra pod stays the admin API) and the Federated Catalogue on port 8443. The controller verifies the proxies against the internal CA, under the name `<fullname>.<namespace>.svc`, which the one internal certificate carries next to the names of Hydra and `fc-service`. `ingress.className` selects the controller, as for the TLS 1.3 option:
   - `traefik`, or empty when the Traefik `ServersTransport` CRD exists: the chart writes a `ServersTransport` `<release>-internal-tls` with the CA of `<release>-internal-tls` as `rootCAs`, and the backend, Hydra and `fc-service` Services name it (`traefik.ingress.kubernetes.io/service.serverstransport`). Traefik uses HTTPS for these routes because the Service ports are named `https` and `https-public`. The BDD and e2e kind stacks run this way.
   - `nginx` (ingress-nginx): the ingress carries `backend-protocol: "HTTPS"`, `proxy-ssl-secret: <namespace>/<release>-internal-tls`, `proxy-ssl-verify: "on"`, `proxy-ssl-name` and `proxy-ssl-protocols: "TLSv1.3"`.
@@ -672,23 +690,55 @@ Two trust configurations follow from that:
 ### Logs (DCS-NFR-SEC-09)
 - `logging.enabled` (on in `values.prod.yml` and `values.acceptance.yml`) co-deploys Loki and a collector (Grafana Alloy). The collector reads the logs of every pod in the release namespace through the Kubernetes API (a namespaced Role, no node access) and pushes them to Loki over TLS.
 - Retention: `logging.retention` (default `2160h`, 90 days). The Loki compactor deletes older lines. Set `logging.loki.persistence.storageClassName` to an encrypted class.
-- Access: Loki has no ingress and no authentication of its own. A NetworkPolicy lets only the collector and the pods in `logging.queryFrom` (default: Grafana in the same namespace) connect. The chart writes a Grafana data source ConfigMap (label `grafana_datasource: "1"`) that the Grafana of `monitoring.enabled` loads; Grafana requires a login. For a Grafana in another namespace, add its namespace to `logging.queryFrom` and load the data source there.
+- Access: Loki has no ingress and no authentication of its own, and listens on loopback only. A gateway in the Loki pod serves TLS 1.3 and admits pushes (`/loki/api/v1/push`) on port 3101 and the query APIs on port 3100; every other API, the delete API included, answers 403. A NetworkPolicy lets only the collector connect to 3101 and only the pods in `logging.queryFrom` (default: Grafana in the same namespace) to 3100. The chart writes a Grafana data source ConfigMap (label `grafana_datasource: "1"`) that the Grafana of `monitoring.enabled` loads; Grafana requires a login. For a Grafana in another namespace, add its namespace to `logging.queryFrom` and load the data source there.
+- A production deployment needs a Grafana to read the logs: `monitoring.enabled`, or a Grafana the operator runs and adds to `logging.queryFrom`. `values.prod.yml` co-deploys none.
 - The audit trail is not in Loki: it stays in the database (`audit_trail_log`, hash-chained, anchored by checkpoints) without expiry and is part of the database backup.
 
-### Values
-Override the following at minimum:
+### Production prerequisites
+
+`values.prod.yml` and `values.acceptance.yml` are skeletons: hostnames (`dcs.example.org`), the registry and the Secrets are the operator's. A release with a real HSM (`pkcs11.provisioning.enabled=false`) or a Hydra outside dev mode does not render until the values below are set; the chart error names each missing one (`templates/prerequisites.yaml`), instead of a backend that crash-loops. `deployment/argocd/application.yaml` shows them filled for acceptance.
+
+Values (production and acceptance):
+
+| Value | Why |
+|---|---|
+| `federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary: true` | A remote Federated Catalogue: its service account has `ADMIN_ALL`, so it is safe only inside one trusted administrative boundary ([ADR-18](../docs/adr-18-fc-catalogue-single-service-account.md)). Without it the chart refuses to render. |
+| `signing.issuerDID` (or `signing.issuerDIDSecretRef`) | The DID of this instance (`ISSUER_DID`), `did:web:<host>`. |
+| `signing.tsaURL` | The RFC 3161 timestamp authority (`TSA_URL`). The backend does not start without it. A deployment without its own TSA can use the ORCE TSA (`orce.enabled`, `http://<release>-orce:1880/tsa/`); `signing.tsaTrustCertSecret` then names the Secret with its certificate (key `tsa-cert.pem`). |
+| `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`). `values.prod.yml` co-deploys none. |
+| `oid4vp.trust.enabled: true`, `oid4vp.trust.existingConfigMap` | The trusted credential issuers ("Credential issuers", "The trust document"). |
+| `configIntegrity.pins.oid4vp-trust-data` | The SHA-256 of that trust document (`sha256sum` of the ConfigMap key); the backend refuses to start when the ConfigMap differs (DCS-NFR-SEC-04). |
+| `hydra.clients` | The login client of the backend (`dcs-client`, redirect URIs under `route.publicBaseURL`); both profiles carry it with `client_secretSecretRef`. |
+| `hydra.config.dsnSecretRef` | The DSN of the Hydra database ("Hydra"); both profiles carry it. |
+| `identity.existingSecret` (real HSM) or `identity.enabled: true` (SoftHSM2, acceptance) | `did.json` of the HSM key `dcs-did` (`DCS_DID`). With a real HSM, create it with `gendid` against that HSM: `PKCS11_MODULE_PATH=... PKCS11_TOKEN_LABEL=... PKCS11_PIN=... gendid -did did:web:dcs.example.org -endpoint https://dcs.example.org/digital-contracting-service/api -out did.json` (the tool is in the DCS image at `/app/gendid`), then `kubectl create secret generic dcs-prod-did --from-file=did.json`. |
+| `pkcs11.modulePath`, `pkcs11.tokenLabel` (real HSM) | The PKCS#11 module, mounted into the pod (`volumes`, `volumeMounts`), and the token. |
+| `signing.issuerX5ChainPath` (real HSM) | The certificate chain of the HSM key `dcs-c2pa`, mounted into the pod. |
+| `identity.eidas.enforce` (optional) | Builds the EU trust pool and requires the DID certificates of this instance and of every peer to chain to a qualified trust service (`DCS_FORCE_EIDAS_CERT`). It needs a qualified certificate for the DID of this instance; off by default ([ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §4). |
+| `image.repository`, `image.tag`, `pdfCore.image.*` | The images, pinned by tag and digest. |
+| `ingress.hosts`, `ingress.tls`, `route.publicBaseURL`, the Hydra URLs | Your hostname instead of `dcs.example.org`. |
+
+Secrets the profiles reference (create them before install; `values.acceptance.yml` uses the prefix `dcs-acceptance-`):
+
+| Secret | Keys |
+|---|---|
+| `dcs-prod-db-credentials` | `DATABASE_URL` (`postgres://...?sslmode=verify-full`) |
+| `dcs-prod-hydra-secrets` | `secretsSystem` (`openssl rand -hex 32`), `dsn` (the Hydra database), `dcs-client-secret` |
+| `dcs-prod-hsm-pin` | `PKCS11_PIN` |
+| `dcs-prod-fc-credentials` | `FEDERATED_CATALOGUE_API_URL`, `FEDERATED_CATALOGUE_CLIENT_SECRET` |
+| `dcs-prod-ipfs-credentials` | `IPFS_MFS_BASE_URL` (the Kubo RPC URL, for example `https://<release>-ipfs:8443`) |
+| `dcs-prod-tls` | `tls.crt`, `tls.key` (type `kubernetes.io/tls`, the ingress certificate) |
+| `dcs-prod-did` (`identity.existingSecret`) | `did.json` |
+| the NATS Secret of `messaging.secretRef` | `NATS_URL` |
+
+The chart generates the other credentials (the internal CA and certificate, the PostgreSQL password of a co-deployed server, the Kubo API token, the SoftHSM2 PIN) and keeps them on upgrade.
+
+A production cluster also needs a CNI that enforces NetworkPolicy ("Network policies") and a Grafana for the logs ("Logs").
+
+Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back. The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
+
+Other values for every profile:
 
 ```yaml
-hydra:
-  enabled: true
-  config:
-    selfIssuerURL: "https://hydra.example.com"
-  clients:
-    - client_id: dcs-client
-      client_secret: "<secret>"
-      redirect_uris: ["https://example.com/dcs/api/auth/callback"]
-      post_logout_redirect_uris: ["https://example.com/dcs/api/auth/logout-complete"]
-
 fcKeycloak:
   realmURL: "https://keycloak.example.com/realms/gaia-x"
 

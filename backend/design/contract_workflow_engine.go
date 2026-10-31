@@ -1890,10 +1890,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Description("retrieve the audit trail (event log and policy trail) for a contract.")
 		Meta("dcs:requirements", "DCS-IR-CWE-12", "DCS-IR-CWE-13")
 
+		// No machine role: an audit trail is read by the audit roles and the
+		// manager of the contract (DCS-NFR-BR-05, least privilege).
 		Security(JWTAuth, func() {
 			Scope("Auditor")
 			Scope("Contract Manager")
-			Scope("Sys. Contract Manager")
 			Scope("Compliance Officer")
 		})
 

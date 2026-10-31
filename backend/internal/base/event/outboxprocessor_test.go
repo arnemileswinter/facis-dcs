@@ -2,12 +2,38 @@ package event
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 )
+
+// DCS-NFR-SF-01: an event that cannot be published stops the batch, so no
+// later event goes out ahead of it; the next run starts with it again.
+func TestPublishingStopsAtTheFirstFailedEvent(t *testing.T) {
+	events := []datatype.OutboxEvent{{ID: 1, EventType: "a"}, {ID: 2, EventType: "b"}, {ID: 3, EventType: "c"}}
+	var sent []string
+	var marked []int64
+	err := publishInOrder(events, func(_, eventType string, _ json.RawMessage) error {
+		if eventType == "b" {
+			return errors.New("no connection")
+		}
+		sent = append(sent, eventType)
+		return nil
+	}, func(id int64) error {
+		marked = append(marked, id)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0] != "a" || len(marked) != 1 || marked[0] != 1 {
+		t.Fatalf("sent %v, marked %v; want only the event before the failed one", sent, marked)
+	}
+}
 
 // shreddedKeys is a CEK repository whose every scope has already been
 // destroyed, which is what Encrypt meets for a contract erased while one of its

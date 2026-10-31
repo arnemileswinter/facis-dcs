@@ -18,6 +18,17 @@ spec:
       {{- if and (eq .Values.service.type "NodePort") .Values.service.publicNodePort }}
       nodePort: {{ .Values.service.publicNodePort }}
       {{- end }}
+    {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+    # The admin API has no authentication of its own. With in-cluster TLS the
+    # Service offers it only on the TLS proxy (https), which the NetworkPolicy
+    # of the parent chart opens to the backend only (DCS-NFR-SEC-03).
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    # The ingress reaches the public API over TLS 1.3 here.
+    - name: https-public
+      port: {{ .Values.service.publicTLSPort }}
+      targetPort: https-public
+      protocol: TCP
+    {{- else }}
     - name: admin
       port: {{ .Values.service.adminPort }}
       targetPort: admin
@@ -25,13 +36,6 @@ spec:
       {{- if and (eq .Values.service.type "NodePort") .Values.service.adminNodePort }}
       nodePort: {{ .Values.service.adminNodePort }}
       {{- end }}
-    {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
-    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
-    # The ingress reaches the public API over TLS 1.3 here.
-    - name: https-public
-      port: {{ .Values.service.publicTLSPort }}
-      targetPort: https-public
-      protocol: TCP
     {{- end }}
   selector:
     app.kubernetes.io/name: hydra

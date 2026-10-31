@@ -1,6 +1,7 @@
 import {
   ArchiveBoxIcon,
   ArrowsRightLeftIcon,
+  BellAlertIcon,
   CheckCircleIcon,
   CircleStackIcon,
   ClipboardDocumentListIcon,
@@ -36,6 +37,7 @@ import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
 import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
 import LockoutAdminView from '@/views/admin/LockoutAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
+import WebhookAdminView from '@/views/admin/WebhookAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import ArchiveDetailView from '@/views/archive/ArchiveDetailView.vue'
 import AuditView from '@/views/audit/AuditView.vue'
@@ -108,6 +110,7 @@ const ROUTES = {
   },
   ADMIN: {
     TARGETS: 'admin.targets',
+    WEBHOOKS: 'admin.webhooks',
     SYSTEM_USERS: 'admin.system-users',
     KEY_INVENTORY: 'admin.key-inventory',
     LOCKOUTS: 'admin.lockouts',
@@ -482,6 +485,19 @@ const routes: RouteRecordRaw[] = [
       icon: ServerStackIcon,
       requiresAuth: true,
       title: 'DCS - Target Systems',
+      order: 11,
+      roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
+    },
+  },
+  {
+    path: '/admin/webhooks',
+    name: ROUTES.ADMIN.WEBHOOKS,
+    component: WebhookAdminView,
+    meta: {
+      name: 'Webhooks',
+      icon: BellAlertIcon,
+      requiresAuth: true,
+      title: 'DCS - Webhooks',
       order: 11,
       roles: ['SYSTEM_ADMINISTRATOR', 'INTEGRATION_MANAGER'],
     },

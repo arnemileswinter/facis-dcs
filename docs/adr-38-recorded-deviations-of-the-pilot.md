@@ -109,7 +109,8 @@ enveloped signature of each list and reads only the signed content
 Peer trust is decided by the federation trust gate (ADR-19: the agreement
 credential and the trust policy the operator configures in ORCE) with the
 peer issuers anchored per ADR-35. The EU trust pool is an additional eIDAS
-check that `DCS_FORCE_EIDAS_CERT=true` turns on: the backend then builds the
+check that `DCS_FORCE_EIDAS_CERT=true` (chart value `identity.eidas.enforce`,
+off by default) turns on: the backend then builds the
 pool at startup, checks the DID certificate of each peer and of this
 instance against it (chain to a qualified trust service provider and the
 QcCompliance statement), and needs outbound HTTPS to the EU trusted-list

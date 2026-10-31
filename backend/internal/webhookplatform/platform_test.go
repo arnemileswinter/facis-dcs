@@ -79,6 +79,9 @@ var testCallers = map[string]Caller{
 	"template-a": {HolderDID: "user-t", ParticipantDID: orgA,
 		Roles: []string{"Template Manager", "Contract Manager"}},
 	"no-org": {HolderDID: "user-x", Roles: []string{"Integration Manager"}},
+	// A machine identity: HolderDID is its client_id (middleware/oidc.go).
+	"orce-a":        {HolderDID: "dcs-orce-integration", ParticipantDID: orgA, Roles: []string{"Sys. Integration Manager"}},
+	"orce-notary-a": {HolderDID: "dcs-orce-notary", ParticipantDID: orgA, Roles: []string{"Sys. Auditor"}},
 }
 
 func newTestPlatform(subs Subscriptions) *Platform {
@@ -158,6 +161,32 @@ func TestOwnerSubscribesListsAndDeletes(t *testing.T) {
 	}
 	if len(subs.subs) != 1 {
 		t.Fatalf("subscription is still stored after DELETE: %+v", subs.subs)
+	}
+}
+
+// DCS-NFR-SQ-08: an integration manages the subscriptions of its organization
+// with a machine credential of the role Sys. Integration Manager. Another
+// machine role does not.
+func TestMachineIntegrationManagesItsSubscriptions(t *testing.T) {
+	subs := &fakeSubscriptions{}
+	p := newTestPlatform(subs)
+
+	id, _ := subscribe(t, p, "orce-a")
+	if got := subs.subs[0]; got.OwnerDID != orgA || got.CreatedBy != "dcs-orce-integration" {
+		t.Fatalf("stored subscription = %+v, want owner %s, creator dcs-orce-integration", got, orgA)
+	}
+	if listed := list(t, p, "manager-a"); len(listed) != 1 || listed[0]["id"] != id {
+		t.Fatalf("the organization's Integration Manager does not see the machine's subscription: %v", listed)
+	}
+	if rec := do(t, p, http.MethodGet, "/deliveries", "orce-a", ""); rec.Code != http.StatusOK {
+		t.Fatalf("GET /deliveries as the machine integration = %d, want 200", rec.Code)
+	}
+	if rec := do(t, p, http.MethodPost, "/webhooks", "orce-notary-a",
+		`{"event":"template.updated","callback_url":"https://x.example/hook"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /webhooks as Sys. Auditor = %d, want 403", rec.Code)
+	}
+	if rec := do(t, p, http.MethodDelete, "/webhooks/"+id, "orce-a", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE as the machine integration = %d, want 204", rec.Code)
 	}
 }
 

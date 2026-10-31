@@ -23,30 +23,35 @@ const readRate = Number(__ENV.READ_RATE || 20);
 const writeRate = Number(__ENV.WRITE_RATE || 2);
 const duration = __ENV.DURATION || '60s';
 
-export const options = {
-  scenarios: {
-    read: {
-      executor: 'constant-arrival-rate',
-      exec: 'read',
-      rate: readRate,
-      timeUnit: '1s',
-      duration,
-      preAllocatedVUs: 20,
-      maxVUs: 100,
-    },
-    write: {
-      executor: 'constant-arrival-rate',
-      exec: 'write',
-      rate: writeRate,
-      timeUnit: '1s',
-      duration,
-      preAllocatedVUs: 10,
-      maxVUs: 50,
-    },
+const scenarios = {
+  read: {
+    executor: 'constant-arrival-rate',
+    exec: 'read',
+    rate: readRate,
+    timeUnit: '1s',
+    duration,
+    preAllocatedVUs: 20,
+    maxVUs: Number(__ENV.MAX_VUS || 100),
   },
+};
+// WRITE_RATE=0 (the capacity steps of run_load.py) runs reads only.
+if (writeRate > 0) {
+  scenarios.write = {
+    executor: 'constant-arrival-rate',
+    exec: 'write',
+    rate: writeRate,
+    timeUnit: '1s',
+    duration,
+    preAllocatedVUs: 10,
+    maxVUs: 50,
+  };
+}
+
+export const options = {
+  scenarios,
   thresholds: {
     'http_req_duration{kind:read}': ['p(95)<500', 'p(99)<1500'],
-    'http_req_duration{kind:write}': ['p(95)<2000'],
+    ...(writeRate > 0 ? { 'http_req_duration{kind:write}': ['p(95)<2000'] } : {}),
     http_req_failed: ['rate<0.01'],
     dropped_iterations: ['count<1'],
   },

@@ -172,9 +172,10 @@ ingress:
 hydra:
   enabled: true
   config:
-    # In-cluster TLS (global.internalTLS): Hydra verifies the co-deployed
-    # PostgreSQL against the internal CA the chart mounts at this path.
-    dsn: "postgres://dcs:dcs@dcs-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt"
+    # The "hydra" database of this release's PostgreSQL, password from its
+    # Secret, verified against the internal CA (global.internalTLS).
+    coDeployedPostgresql:
+      enabled: true
     dev: true
     selfIssuerURL: "http://localhost:18080"
     loginURL: "http://localhost:18080/digital-contracting-service/ui/"
@@ -421,29 +422,46 @@ orce:
     - name: DCS_TARGET_CLIENT_ID
       value: "dcs-orce-target"
     - name: DCS_TARGET_CLIENT_SECRET
-      value: "dcs-orce-target-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-target
     # Machine identities for the system-user flows (ADR-16/ADR-17): a plain
     # OAuth2 client credentials grant against this deployment's Hydra, one
     # client per capability. No wallet, no alg:none, no shared credential.
+    # The client secrets come from the Secret of hydra.clients
+    # (<release>-hydra-clients, key client_id).
     # Port 8444 is the TLS proxy of the Hydra public API (global.internalTLS).
     - name: HYDRA_TOKEN_URL
       value: "https://dcs-hydra:8444/oauth2/token"
     - name: ORCE_NOTARY_CLIENT_ID
       value: "dcs-orce-notary"
     - name: ORCE_NOTARY_CLIENT_SECRET
-      value: "dcs-orce-notary-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-notary
     - name: ORCE_CREATOR_CLIENT_ID
       value: "dcs-orce-creator"
     - name: ORCE_CREATOR_CLIENT_SECRET
-      value: "dcs-orce-creator-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-creator
     - name: ORCE_MANAGER_CLIENT_ID
       value: "dcs-orce-manager"
     - name: ORCE_MANAGER_CLIENT_SECRET
-      value: "dcs-orce-manager-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-manager
     - name: ORCE_SIGNER_CLIENT_ID
       value: "dcs-orce-signer"
     - name: ORCE_SIGNER_CLIENT_SECRET
-      value: "dcs-orce-signer-secret"
+      valueFrom:
+        secretKeyRef:
+          name: dcs-hydra-clients
+          key: dcs-orce-signer
   ingress:
     enabled: true
     hosts:

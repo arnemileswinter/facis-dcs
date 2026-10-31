@@ -1,6 +1,7 @@
 {{- if .Values.backup.enabled -}}
 {{- $name := printf "%s-db-backup" (include "digital-contracting-service.fullname" .) -}}
 {{- $claim := .Values.backup.persistence.existingClaim | default $name -}}
+{{- $hydraDB := and .Values.hydra.enabled (not (include "hydra.inMemory" (dict "Values" .Values.hydra))) -}}
 # Scheduled dump of the DCS database (DCS-NFR-SF-03). The dcs database holds the
 # only copy of the wrapped content keys, so it is the backup that decides
 # whether the archive can be restored: docs/backup-integration-guide.md. Each run
@@ -70,16 +71,28 @@ spec:
                 {{- include "digital-contracting-service.databaseEnv" . | nindent 16 }}
                 - name: RETENTION_DAYS
                   value: {{ .Values.backup.retentionDays | quote }}
+                {{- if $hydraDB }}
+                # The Hydra database: the OAuth2 clients, the issued machine
+                # credentials (ADR-27) and the signing keys.
+                {{- include "hydra.dsnEnv" (dict "name" "HYDRA_DSN" "release" .Release.Name "config" .Values.hydra.config "tls" .Values.global.internalTLS.enabled) | nindent 16 }}
+                {{- end }}
               command:
                 - /bin/sh
                 - -c
                 - |
                   set -eu
-                  file="/backup/dcs-$(date -u +%Y%m%dT%H%M%SZ).dump"
-                  pg_dump --format=custom --dbname="$DATABASE_URL" --file="$file.partial"
-                  mv "$file.partial" "$file"
-                  echo "wrote $file ($(wc -c < "$file") bytes)"
-                  find /backup -name 'dcs-*.dump' -mtime +"$RETENTION_DAYS" -print -delete
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  dump() {
+                    file="/backup/$1-$stamp.dump"
+                    pg_dump --format=custom --dbname="$2" --file="$file.partial"
+                    mv "$file.partial" "$file"
+                    echo "wrote $file ($(wc -c < "$file") bytes)"
+                  }
+                  dump dcs "$DATABASE_URL"
+                  {{- if $hydraDB }}
+                  dump hydra "$HYDRA_DSN"
+                  {{- end }}
+                  find /backup \( -name 'dcs-*.dump' -o -name 'hydra-*.dump' \) -mtime +"$RETENTION_DAYS" -print -delete
               {{- with .Values.backup.resources }}
               resources:
                 {{- toYaml . | nindent 16 }}

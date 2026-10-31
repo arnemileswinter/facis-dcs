@@ -360,7 +360,7 @@ func main() {
 	if mfsBaseURL == "" {
 		log.Fatalf(ctx, nil, "IPFS configuration missing: the IPFS_MFS_BASE_URL environment variable must be specified")
 	}
-	ipfsAPIClient := ipfs.NewClient(mfsBaseURL)
+	ipfsAPIClient := ipfs.NewClient(mfsBaseURL).WithBearerToken(os.Getenv("IPFS_API_TOKEN"))
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
 	lockRepo := &pg.PostgresLockoutRepo{}

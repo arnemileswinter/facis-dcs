@@ -101,6 +101,25 @@ func TestErrorFormatterRefusalNilFindings(t *testing.T) {
 	}
 }
 
+// The Webhooks view calls the webhook platform under the API path, which the
+// ingress routes to the backend; /orce/ on the root stays for ORCE
+// (DCS-NFR-SQ-08).
+func TestWebhookPlatformIsUnderTheAPIPath(t *testing.T) {
+	t.Setenv("DCS_API_PATH", "/digital-contracting-service/api")
+	platform := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("platform " + r.URL.Path)) })
+	mux := newOuterMux(platform, http.NotFoundHandler(), http.NotFoundHandler())
+	for path, want := range map[string]string{
+		"/digital-contracting-service/api/orce/webhooks": "platform /webhooks",
+		"/orce/webhooks": "platform /webhooks",
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Body.String() != want {
+			t.Errorf("GET %s = %d %q, want %q", path, rec.Code, rec.Body.String(), want)
+		}
+	}
+}
+
 // TestMetricsOnlyOnMetricsListener: the public handler chain must not serve
 // /metrics; the metrics listener must.
 func TestMetricsOnlyOnMetricsListener(t *testing.T) {
