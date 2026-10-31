@@ -218,9 +218,8 @@ const bulkArchive = () =>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div v-if="loading" class="pl-4" role="status" aria-live="polite">Loading contracts...</div>
-    <div v-else-if="error" class="pl-4" role="status" aria-live="assertive">{{ error }}</div>
-    <ul v-else class="list flex-1 overflow-y-auto">
+    <!-- The search, filter and sort controls stay mounted while a filter or sort reloads the page. -->
+    <ul class="list flex-1 overflow-y-auto">
       <li class="flex flex-wrap items-center gap-3 px-4 py-2 tracking-wide [&>.join]:m-0">
         <ContractListSearch
           ref="list-search"
@@ -243,52 +242,58 @@ const bulkArchive = () =>
           />
         </div>
       </li>
-      <li v-if="listOutdated" class="px-4" data-testid="contracts-outdated">
-        <div role="status" class="alert alert-info">
-          Contracts changed since this list was loaded.
-          <button class="btn btn-sm" @click="reloadList">Reload</button>
-        </div>
+      <li v-if="loading" class="pl-4"><span role="status" aria-live="polite">Loading contracts...</span></li>
+      <li v-else-if="error" class="pl-4">
+        <span role="status" aria-live="assertive">{{ error }}</span>
       </li>
-      <li
-        v-if="selectedContracts.length > 0"
-        class="flex flex-wrap items-center gap-2 px-4"
-        data-testid="contracts-bulk-actions"
-      >
-        <span class="text-sm">{{ selectedContracts.length }} selected</span>
-        <button v-if="isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkRenew">Renew selected</button>
-        <button v-if="isManager" class="btn btn-sm btn-error" :disabled="bulkRunning" @click="bulkTerminate">
-          Terminate selected
-        </button>
-        <button v-if="isApprover || isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkPublish">
-          Register selected in catalogue
-        </button>
-        <button v-if="isArchiveManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkArchive">
-          Archive selected
-        </button>
-        <button class="btn btn-ghost btn-sm" :disabled="bulkRunning" @click="selectedDids = new Set()">
-          Clear selection
-        </button>
-      </li>
-      <template v-if="contracts.length > 0">
-        <ContractListItem
-          v-for="contract in contracts"
-          :key="`${contract.did}|${contract.contract_version}`"
-          :contract="contract"
-          :selected="canBulk ? selectedDids.has(contract.did) : undefined"
-          @update:selected="setSelected(contract.did, $event)"
-        />
+      <template v-else>
+        <li v-if="listOutdated" class="px-4" data-testid="contracts-outdated">
+          <div role="status" class="alert alert-info">
+            Contracts changed since this list was loaded.
+            <button class="btn btn-sm" @click="reloadList">Reload</button>
+          </div>
+        </li>
+        <li
+          v-if="selectedContracts.length > 0"
+          class="flex flex-wrap items-center gap-2 px-4"
+          data-testid="contracts-bulk-actions"
+        >
+          <span class="text-sm">{{ selectedContracts.length }} selected</span>
+          <button v-if="isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkRenew">Renew selected</button>
+          <button v-if="isManager" class="btn btn-sm btn-error" :disabled="bulkRunning" @click="bulkTerminate">
+            Terminate selected
+          </button>
+          <button v-if="isApprover || isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkPublish">
+            Register selected in catalogue
+          </button>
+          <button v-if="isArchiveManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkArchive">
+            Archive selected
+          </button>
+          <button class="btn btn-ghost btn-sm" :disabled="bulkRunning" @click="selectedDids = new Set()">
+            Clear selection
+          </button>
+        </li>
+        <template v-if="contracts.length > 0">
+          <ContractListItem
+            v-for="contract in contracts"
+            :key="`${contract.did}|${contract.contract_version}`"
+            :contract="contract"
+            :selected="canBulk ? selectedDids.has(contract.did) : undefined"
+            @update:selected="setSelected(contract.did, $event)"
+          />
+        </template>
+        <li v-else-if="isRepositoryEmpty" class="flex flex-col items-start gap-2 px-4 py-8">
+          <p class="font-semibold">No contracts yet.</p>
+          <p class="max-w-prose text-sm text-base-content/70">
+            Contracts are created from templates that are approved and registered in the Template Catalogue, then move
+            through negotiation, review, approval and signing. Start by creating one from a registered template.
+          </p>
+          <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-sm btn-primary">
+            New Contract
+          </RouterLink>
+        </li>
+        <li v-else class="px-4">No contracts found.</li>
       </template>
-      <li v-else-if="isRepositoryEmpty" class="flex flex-col items-start gap-2 px-4 py-8">
-        <p class="font-semibold">No contracts yet.</p>
-        <p class="max-w-prose text-sm text-base-content/70">
-          Contracts are created from templates that are approved and registered in the Template Catalogue, then move
-          through negotiation, review, approval and signing. Start by creating one from a registered template.
-        </p>
-        <RouterLink v-if="isCreator" :to="{ name: ROUTES.CONTRACTS.NEW }" class="btn mt-1 btn-sm btn-primary">
-          New Contract
-        </RouterLink>
-      </li>
-      <li v-else class="px-4">No contracts found.</li>
     </ul>
     <div
       class="mt-2 flex w-full shrink-0 flex-nowrap items-center gap-3 border-t border-base-content/10 bg-base-100 px-4 py-4"
