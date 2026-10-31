@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -24,13 +25,26 @@ type SyncFail struct {
 }
 
 // PDFDelivery is the contract PDF revision — contract state and stored PDF
-// CID — that one counterparty peer last accepted or refused as a signing
-// conflict.
+// CID — that one counterparty peer last accepted, or refused because its copy
+// is closed.
 type PDFDelivery struct {
 	DID           string `db:"did"`
 	PeerDID       string `db:"peer_did"`
 	ContractState string `db:"contract_state"`
 	PDFCID        string `db:"pdf_cid"`
+}
+
+// PeersHoldingCopy returns the parties that hold a copy of the contract: the
+// origin this instance received it from, and every peer a revision was
+// delivered to. A termination notice or an erase request goes only to them.
+func PeersHoldingCopy(parties []string, origin string, deliveries []PDFDelivery) []string {
+	var holders []string
+	for _, party := range parties {
+		if party == origin || slices.ContainsFunc(deliveries, func(d PDFDelivery) bool { return d.PeerDID == party }) {
+			holders = append(holders, party)
+		}
+	}
+	return holders
 }
 
 // SyncSignature is the origin peer's JAdES signature over a synced

@@ -7,6 +7,7 @@ import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
 import AuditView from '@contract-workflow-engine/components/AuditView.vue'
 import ContractDetailsEditor from '@contract-workflow-engine/components/ContractDetailsEditor.vue'
+import ContractHistoryDiffView from '@contract-workflow-engine/components/ContractHistoryDiffView.vue'
 import ContractLifecycleHistory from '@contract-workflow-engine/components/ContractLifecycleHistory.vue'
 import ContractStructureTree from '@contract-workflow-engine/components/ContractStructureTree.vue'
 import { useContractDataPreprocess } from '@contract-workflow-engine/composables/useContractDataPreprocess'
@@ -81,14 +82,26 @@ const isAuditingAuthorized = computed(
   () => contractAuditRoles.some((role) => authStore.user?.roles?.includes(role)) ?? false,
 )
 
+// The contract roles hold the list, history and lifecycle reads. Auditor and
+// Compliance Officer open the contract for its details, content and audit
+// trail with the evidence (DCS-IR-CWE-12) and hold none of these reads.
+const contractReadRoles: readonly UserRole[] = [
+  'CONTRACT_CREATOR',
+  'CONTRACT_NEGOTIATOR',
+  'CONTRACT_REVIEWER',
+  'CONTRACT_APPROVER',
+  'CONTRACT_MANAGER',
+  'CONTRACT_OBSERVER',
+]
+const canReadHistory = computed(() => contractReadRoles.some((role) => authStore.user?.roles?.includes(role)))
+
 // Proposals belong on Negotiate — View is read-only and must not expose them.
 const tabs = computed(() =>
   contractEditorUiStore.availableTabs(contract.value?.state ?? ContractState.draft, [
     'details',
     'content',
     'audit',
-    'history',
-    'structure',
+    ...(canReadHistory.value ? (['diff', 'history', 'structure'] as const) : []),
   ]),
 )
 
@@ -175,7 +188,10 @@ watch(
   [activeTab, () => contract.value?.did],
   async ([tab, did]) => {
     relatedDocuments.value = []
-    if (tab !== 'structure' || !did || !canListDocuments.value) return
+    if (tab !== 'structure' || !did) return
+    // Children and renewals can be created after the list was loaded.
+    if (canReadHistory.value) void contractsStore.loadContracts()
+    if (!canListDocuments.value) return
     try {
       const documents = await contractWorkflowService.listEvidence(did)
       if (contract.value?.did === did) relatedDocuments.value = documents
@@ -202,7 +218,7 @@ const reloadContract = () => {
 
 onMounted(() => {
   templateEditorUiStore.reset({ workflow: 'contract', isTemplateEditable: false })
-  if (contracts.value.length === 0) void contractsStore.loadContracts()
+  if (canReadHistory.value && contracts.value.length === 0) void contractsStore.loadContracts()
 })
 
 onUnmounted(() => {
@@ -417,7 +433,15 @@ const exportBundle = async () => {
                 </div>
               </template>
 
-              <div v-show="activeTab === 'history'">
+              <div v-if="canReadHistory" v-show="activeTab === 'diff'">
+                <ContractHistoryDiffView
+                  :contract-did="contract.did"
+                  :contract-state="contract.state"
+                  :current-contract-data="contract.contract_data"
+                />
+              </div>
+
+              <div v-if="canReadHistory" v-show="activeTab === 'history'">
                 <div class="card border border-base-300 bg-base-100 shadow-sm">
                   <div class="card-body">
                     <h2 class="card-title text-sm">Lifecycle History</h2>

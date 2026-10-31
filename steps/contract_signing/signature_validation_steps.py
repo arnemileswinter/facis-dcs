@@ -147,15 +147,24 @@ def step_then_validation_has_dss_indication(context):
         f"Expected 200, got {context.requests_response.status_code}: {context.requests_response.text}"
     )
     body = context.requests_response.json()
-    indication = (body.get("dss") or {}).get("indication")
-    # ETSI EN 319 102-1 main indications.
-    assert indication in {"TOTAL-PASSED", "TOTAL-FAILED", "INDETERMINATE", "PASSED", "FAILED"}, (
-        f"Expected an EU DSS report with an ETSI indication, got: {body}"
+    dss = body.get("dss") or {}
+    indication = dss.get("indication")
+    sub_indication = dss.get("sub_indication") or ""
+    # The deployed DSS trusts the EU LOTL only, and the test wallet's signing CA
+    # is on no trusted list, so DSS cannot reach TOTAL-PASSED here: it reports
+    # INDETERMINATE for the missing trust chain. The AES acceptance bar
+    # (dss.Report.AssertValidAES) is what the signature must pass: no failed
+    # indication, no cryptographic sub-indication, a signing certificate.
+    trust_gaps = {"NO_CERTIFICATE_CHAIN_FOUND", "NO_POE", "OUT_OF_BOUNDS_NO_POE", "OUT_OF_BOUNDS_NOT_REVOKED", "TRY_LATER"}
+    assert indication == "TOTAL-PASSED" or (indication == "INDETERMINATE" and sub_indication in trust_gaps), (
+        f"Expected the EU DSS report to pass the signature or withhold only the trust chain, got: {dss}"
     )
+    assert dss.get("signed_by"), f"Expected the EU DSS report to name the signing certificate, got: {dss}"
     findings = body.get("findings") or []
-    assert any(f"indication={indication}" in f for f in findings), (
-        f"Expected a finding naming the DSS indication {indication}, got: {findings}"
-    )
+    assert any(
+        f.startswith("EU DSS reports no integrity or cryptographic failure") and f"indication={indication}" in f
+        for f in findings
+    ), f"Expected the passing DSS finding naming indication {indication}, got: {findings}"
 
 
 @then('the compliance check for contract "{name}" reports that all checks passed')

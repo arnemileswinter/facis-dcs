@@ -4,6 +4,12 @@ import (
 	. "goa.design/goa/v3/dsl"
 )
 
+// The did:web challenge every peer request carries (ADR-13).
+const (
+	peerChallengeDoc          = "The peer challenge the sender signed: <op>|<contract_iri>|dcs-peer-v1|POST <route>|<from_did>|<to_did>|<iat unix seconds>|<nonce>|<sha256 hex of the request body field, or empty>. The receiver refuses a challenge for another operation, contract, sender, receiver or body, one whose iat is more than 120 seconds away from its clock, and one whose nonce it already accepted"
+	peerChallengeSignatureDoc = "ECDSA P-256 signature (SHA-256, ASN.1 DER) of secret_value by a key the sender's did:web document publishes for authentication"
+)
+
 var DCSToDCSEphemeralPublicKey = Type("DCSToDCSEphemeralPublicKey", func() {
 	Description("The sender's ephemeral P-256 public key of an ECDH-ES+A256KW CEK wrap, as a JWK")
 
@@ -55,8 +61,8 @@ var DCSToDCSPinnedShapes = Type("DCSToDCSPinnedShapes", func() {
 var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 	Description("A contract PDF shipped to the counterparty (ADR-13). The PDF is the wire format: it carries the machine-readable JSON-LD, the C2PA provenance chain, and any signatures. A bare PDF is a proposal (offer or negotiation counter); a PDF accompanied by a JAdES is a signature (acceptance).")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the peer shipping the PDF")
 	Attribute("contract_iri", String, "IRI of the contract the PDF represents")
@@ -74,8 +80,8 @@ var DCSToDCSContractPdfRequest = Type("DCSToDCSContractPdfRequest", func() {
 var DCSToDCSContractSettlementRequest = Type("DCSToDCSContractSettlementRequest", func() {
 	Description("The counterparty's evidence that it reached its own settled state (NEGOTIATION -> SUBMITTED) on a named version of the contract document. Shipped over the same channel and authenticated the same way as a contract PDF; the receiver holds it as the locally-verifiable proof that the peer agreed to the document, which signing requires. No contract content travels — the artifact binds the document by digest.")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the peer that settled")
 	Attribute("contract_iri", String, "IRI of the contract that was settled")
@@ -95,8 +101,8 @@ var DCSToDCSContractSettlementResponse = Type("DCSToDCSContractSettlementRespons
 var DCSToDCSSettlementWithdrawalRequest = Type("DCSToDCSSettlementWithdrawalRequest", func() {
 	Description("The counterparty taking back a settlement it previously shipped: it reopened its negotiation round (a reviewer sent the submission back, or an approver rejected it) and no longer agrees to the document version it named. Shipped over the same channel and authenticated the same way as the settlement itself. The receiver drops the settlement it holds from that peer, so its signing gate stops treating a withdrawn agreement as evidence.")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the peer withdrawing its settlement")
 	Attribute("contract_iri", String, "IRI of the contract whose settlement is withdrawn")
@@ -117,8 +123,8 @@ var DCSToDCSSettlementWithdrawalResponse = Type("DCSToDCSSettlementWithdrawalRes
 var DCSToDCSNegotiationMessageRequest = Type("DCSToDCSNegotiationMessageRequest", func() {
 	Description("One negotiation message (Proposal, Accept or Reject) shipped to a peer DCS. Authenticated with the same did:web challenge-response as post_pdf. The receiver persists the domain fact and acknowledges; acknowledgment means received-and-stored, not accepted as a contract change. Retries re-send the same message_id so receipt is idempotent.")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the peer shipping the message")
 	Attribute("contract_iri", String, "IRI of the contract the negotiation belongs to")
@@ -148,8 +154,8 @@ var DCSToDCSNegotiationMessageResponse = Type("DCSToDCSNegotiationMessageRespons
 var DCSToDCSContractEraseRequest = Type("DCSToDCSContractEraseRequest", func() {
 	Description("A counterparty's request to shred this instance's wrapped CEKs for a contract (DCS-NFR-COMP-03, DCS-NFR-SEC-13): erasure of a federated contract completes only when both instances have destroyed their key records. Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the peer requesting the erasure")
 	Attribute("contract_iri", String, "IRI of the contract whose wrapped CEKs are to be shredded")
@@ -168,8 +174,8 @@ var DCSToDCSContractEraseResponse = Type("DCSToDCSContractEraseResponse", func()
 var DCSToDCSContractTerminateRequest = Type("DCSToDCSContractTerminateRequest", func() {
 	Description("A counterparty's notice that it terminated a contract both instances hold (DCS-NFR-BR-06). Authenticated with the body-level did:web challenge-response; the signed secret_value names the contract.")
 
-	Attribute("secret_value", String, "Secret value: \"terminate|<contract_iri>|<nonce>\"")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the terminating peer")
 	Attribute("contract_iri", String, "IRI of the terminated contract")
@@ -209,8 +215,8 @@ var DCSToDCSSyncProvenanceResponse = Type("DCSToDCSSyncProvenanceResponse", func
 var DCSToDCSContractInfoRequest = Type("DCSToDCSContractInfoRequest", func() {
 	Description("A counterparty DCS asking for the current information of a contract it is a party of (DCS-IR-SI-06). Authenticated with the same body-level did:web challenge-response the PDF ship uses.")
 
-	Attribute("secret_value", String, "Secret value")
-	Attribute("secret_hash", Bytes, "Secret hash")
+	Attribute("secret_value", String, peerChallengeDoc)
+	Attribute("secret_hash", Bytes, peerChallengeSignatureDoc)
 
 	Attribute("from_peer_did", String, "The did of the requesting peer")
 	Attribute("contract_iri", String, "IRI of the contract")
@@ -241,6 +247,7 @@ var _ = Service("DcsToDcs", func() {
 
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("conflict", ErrorResult, "The shipped PDF does not extend the signed revision the receiver holds (ADR-38 §2). The receiver keeps its copy; the sender does not ship this copy again.")
+		Error("gone", ErrorResult, "The receiver's copy is TERMINATED, EXPIRED or WITHDRAWN and takes no further ship. The receiver keeps its copy; the sender does not ship this copy again.")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -248,6 +255,7 @@ var _ = Service("DcsToDcs", func() {
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("conflict", StatusConflict)
+			Response("gone", StatusGone)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -304,18 +312,20 @@ var _ = Service("DcsToDcs", func() {
 	})
 
 	Method("erase", func() {
-		Description("Shred this instance's wrapped CEKs for a contract on request of the authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13). The requester is verified via the same did:web challenge-response signature as post_pdf and must be a party of the contract. All CEK records of the contract scope are marked destroyed (never hard-deleted — the shredded row is the destruction record) and a KEY_SHREDDED audit event is written. Idempotent: repeating the request against an already-shredded contract confirms again.")
+		Description("Shred this instance's wrapped CEKs for a contract on request of the authenticated counterparty (DCS-NFR-COMP-03, DCS-NFR-SEC-13). The requester passes the same did:web challenge-response and ADR-19 federation trust gate as post_pdf and must be a party of the contract. The local copy must be TERMINATED, EXPIRED, REVOKED, REJECTED or WITHDRAWN, and no live archive entry of it may be under retention; otherwise the request is refused with bad_request and the requester retries later. All CEK records of the contract scope are marked destroyed (never hard-deleted — the shredded row is the destruction record) and a KEY_SHREDDED audit event is written. Idempotent: repeating the request against an already-shredded contract confirms again.")
 
 		Payload(DCSToDCSContractEraseRequest)
 		Result(DCSToDCSContractEraseResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "This instance holds no copy of the contract that is shared with the requesting peer. The requester does not send the request again.")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/peer/contracts/erase")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -341,25 +351,27 @@ var _ = Service("DcsToDcs", func() {
 	})
 
 	Method("terminate", func() {
-		Description("Terminate this instance's copy of a contract on notice of the authenticated counterparty (DCS-NFR-BR-06). The requester is verified via the did:web challenge-response signature and must be a party of the contract. The local copy moves to TERMINATED through the same transition table as a local termination, which closes its open tasks. Idempotent: a notice for an already terminated contract confirms again.")
+		Description("Terminate this instance's copy of a contract on notice of the authenticated counterparty (DCS-NFR-BR-06). The requester passes the did:web challenge-response and the ADR-19 federation trust gate and must be a party of the contract. The challenge binds the termination reason. The local copy moves to TERMINATED through the same transition table as a local termination, which closes its open tasks. Idempotent: a notice for an already terminated contract confirms again.")
 		Meta("dcs:requirements", "DCS-NFR-BR-06")
 
 		Payload(DCSToDCSContractTerminateRequest)
 		Result(DCSToDCSContractTerminateResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "This instance holds no copy of the contract that is shared with the requesting peer. The requester does not send the notice again.")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/peer/contracts/terminate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
 
 	Method("get_provenance", func() {
-		Description("Return the stored JAdES provenance artifact for a contract this instance received from a peer (DCS-FR-SM-02): the sender's baseline-B compact JWS over the contract, verified at receipt and persisted for independent re-verification. JWT-secured — read by local users inspecting a received contract's cross-instance provenance.")
+		Description("Return the stored JAdES provenance artifact for a contract this instance received from a peer (DCS-FR-SM-02): the sender's baseline-B compact JWS over the contract, verified at receipt and persisted for independent re-verification. JWT-secured — read by local users inspecting a received contract's cross-instance provenance. The caller must be allowed to read the contract (DCS-FR-CWE-07); a contract the caller may not read answers not_found, like one without provenance.")
 
 		Security(JWTAuth, func() {
 			Scope("Contract Creator")
@@ -383,7 +395,7 @@ var _ = Service("DcsToDcs", func() {
 		Result(DCSToDCSSyncProvenanceResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
-		Error("not_found", ErrorResult, "No sync provenance stored for this contract")
+		Error("not_found", ErrorResult, "No sync provenance stored for this contract, or the caller may not read the contract")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {

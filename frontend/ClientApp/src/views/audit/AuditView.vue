@@ -10,6 +10,7 @@ import { downloadBlob as saveBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 import ActionHistoryPanel from '@/views/audit/ActionHistoryPanel.vue'
 import AccessAttempts from './AccessAttempts.vue'
+import CheckpointProofPanel from './CheckpointProofPanel.vue'
 import type { AuditReportFormat, AuditScope } from '@/models/requests/auditing-request'
 import type { AuditFinding } from '@/models/responses/auditing-response'
 
@@ -55,6 +56,11 @@ const canSeeActionHistory = computed(
   () => !!authStore.user?.roles.some((role) => role === 'AUDITOR' || role === 'COMPLIANCE_OFFICER'),
 )
 const showAuditTabList = computed(() => canSeeComplianceAudit.value && canSeeActionHistory.value)
+// DCS-FR-PACM-05: the Compliance Officer exports the latest audit report of the
+// contracts and the archive it may read; it does not run audits.
+const canExportReportOnly = computed(
+  () => !canSeeComplianceAudit.value && !!authStore.user?.roles.includes('COMPLIANCE_OFFICER'),
+)
 
 watch(
   [canSeeComplianceAudit, canSeeActionHistory],
@@ -94,6 +100,9 @@ const allScopeOptions: { value: AuditScope; label: string }[] = [
 ]
 const scopeOptions = computed(() =>
   isArchiveManagerOnly.value ? allScopeOptions.filter((scope) => scope.value === 'archive') : allScopeOptions,
+)
+const reportOnlyScopeOptions = allScopeOptions.filter(
+  (scope) => scope.value === 'contracts' || scope.value === 'archive',
 )
 watch(
   isArchiveManagerOnly,
@@ -563,7 +572,50 @@ function formatDateTime(value?: string): string {
   </div>
 
   <section v-if="activeTab === 'action-history' && canSeeActionHistory" class="space-y-4 px-4 pb-8">
-    <ActionHistoryPanel />
+    <section
+      v-if="canExportReportOnly"
+      class="space-y-3 rounded-box border border-base-content/10 bg-base-100 p-4"
+      data-testid="audit-report-export"
+    >
+      <h3 class="font-bold">Audit report</h3>
+      <p class="text-sm opacity-70">Export the latest audit run of the contracts or the archive.</p>
+      <div class="grid min-w-0 gap-3 sm:grid-cols-3">
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">Scope</span>
+          <select id="select-report-scope" v-model="selectedScope" class="select-bordered select w-full rounded-box">
+            <option v-for="scope in reportOnlyScopeOptions" :key="scope.value" :value="scope.value">
+              {{ scope.label }}
+            </option>
+          </select>
+        </label>
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">DID (optional)</span>
+          <input id="input-report-did" v-model="didFilter" class="input-bordered input w-full rounded-box" />
+        </label>
+        <label class="form-control flex min-w-0 flex-col">
+          <span class="label-text mb-1">Report justification</span>
+          <input
+            id="input-report-justification"
+            v-model="justification"
+            class="input-bordered input w-full rounded-box"
+          />
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="format in ['json', 'csv', 'pdf'] as const"
+          :key="format"
+          class="btn rounded-box btn-outline btn-sm"
+          :disabled="reportLoading || !justification.trim()"
+          :data-testid="`audit-report-export-${format}`"
+          @click="generateReport(format)"
+        >
+          {{ format.toUpperCase() }}
+        </button>
+      </div>
+      <p v-if="reportError" role="alert" class="text-sm text-error">{{ reportError }}</p>
+    </section>
+    <ActionHistoryPanel :initial-did="didFilter" />
   </section>
 
   <section v-if="activeTab === 'compliance' && canSeeComplianceAudit" class="space-y-4 px-4">
@@ -971,6 +1023,7 @@ function formatDateTime(value?: string): string {
         </div>
       </aside>
     </div>
+    <CheckpointProofPanel v-if="isAuditor" />
     <AccessAttempts />
   </section>
 </template>

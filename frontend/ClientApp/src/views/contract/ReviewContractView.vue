@@ -113,6 +113,10 @@ watch(
           if (route.params.did !== id) return
           contract.value = loaded
           applyContractDataToDraft(contract.value?.contract_data)
+          // The audit trail records that the reviewer opened the submitted contract (DCS-IR-CWE-04).
+          if (isReviewer.value && loaded?.state === ContractState.submitted) {
+            void contractWorkflowService.review({ did: id }).catch(() => undefined)
+          }
         }
       } catch (err: unknown) {
         reportActionError(err, 'Load contract review')

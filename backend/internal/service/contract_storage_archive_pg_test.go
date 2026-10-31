@@ -73,6 +73,9 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	require.Len(t, retrieved, 1)
 	require.Equal(t, archiveManager, retrieved[0]["retrieved_by"])
 	require.Equal(t, []any{"did:web:dcs.example:contract:a"}, retrieved[0]["contract_dids"])
+	// DCS-FR-CWE-21: the retrieval names the holder and the roles, not only the organization.
+	require.Equal(t, archiveManager, retrieved[0]["holder_did"])
+	require.Contains(t, retrieved[0], "user_roles")
 
 	did := "did:web:dcs.example:contract:a"
 	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{Did: &did})
@@ -81,6 +84,8 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	require.Len(t, searched, 1)
 	require.Equal(t, []any{did}, searched[0]["contract_dids"])
 	require.Equal(t, map[string]any{"did": did}, searched[0]["criteria"])
+	require.Equal(t, archiveManager, searched[0]["holder_did"])
+	require.Contains(t, searched[0], "user_roles")
 }
 
 // DCS-FR-CSA-10: the archive search filters by jurisdiction, and the audit
@@ -114,9 +119,12 @@ func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {
 	bad := "not-a-date"
 	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{ValidFrom: &bad})
 	require.Error(t, err)
+	unknownState := "PENDING"
+	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{State: &unknownState})
+	require.Equal(t, "bad_request", errorName(err), "an unknown state filter is a client error")
 
 	failed := archiveEvents(t, db, "ARCHIVE_OPERATION_FAILED")
-	require.Len(t, failed, 2)
+	require.Len(t, failed, 3)
 	require.Equal(t, "delete", failed[0]["operation"])
 	require.Equal(t, "did:web:dcs.example:contract:none", failed[0]["did"])
 	require.Equal(t, archiveManager, failed[0]["actor"])
@@ -239,6 +247,7 @@ func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
 	require.NoError(t, err)
+	seedLocalSignature(t, db, did)
 	svc := archiveTestService(t, db)
 	artifacts := newMemoryArtifacts()
 	svc.Artifacts = artifacts
@@ -287,6 +296,7 @@ func TestArchiveManagerStoreNotarizesAndTimestampsTheEntry(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
 	require.NoError(t, err)
+	seedLocalSignature(t, db, did)
 	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 	notary := &stubArchiveNotary{}
@@ -363,9 +373,16 @@ func TestEvidenceNeedsALiveArchiveEntry(t *testing.T) {
 	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 	name, mediaType := "note.txt", "text/plain"
+	did := "did:web:dcs.example:contract:unarchived"
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version) VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'SIGNED', 'did:web:tpl', 1)`, did)
+	require.NoError(t, err)
 
-	_, err := svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
-		Kind: "evidence", Did: "did:web:dcs.example:contract:none", Name: &name, MediaType: &mediaType, Content: []byte("x"),
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
+		Kind: "evidence", Did: did, Name: &name, MediaType: &mediaType, Content: []byte("x"),
 	})
 	require.ErrorContains(t, err, "no live archive entry")
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
+		Kind: "evidence", Did: "did:web:dcs.example:contract:none", Name: &name, MediaType: &mediaType, Content: []byte("x"),
+	})
+	require.Equal(t, "not_found", errorName(err))
 }

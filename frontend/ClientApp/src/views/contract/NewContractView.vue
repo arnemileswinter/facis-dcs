@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { isAxiosError } from 'axios'
 import { storeToRefs } from 'pinia'
-import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, type Ref, ref, useId, useTemplateRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { useScrollStore } from '@core/store/scroll'
@@ -28,6 +28,7 @@ import {
 } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 import { useContractContentValuesStore } from '@contract-workflow-engine/store/contractContentValuesStore'
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import ParticipantSelectionDialog from '@/components/ParticipantSelectionDialog.vue'
 import { ROUTES } from '@/router/router'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
@@ -273,10 +274,35 @@ const updateContract = async () => {
   }
 }
 
+const confirmationDialog = useTemplateRef<InstanceType<typeof ConfirmationModal>>('confirmation-dialog')
+
+// The editor state as last loaded or saved; a different snapshot means unsaved edits.
+const savedSnapshot = ref('')
+function editorSnapshot(): string {
+  const current = contract.value
+  return JSON.stringify([
+    current?.name,
+    current?.description,
+    current?.start_date,
+    current?.exp_date,
+    current?.exp_policy,
+    currentExpNoticePeriod(),
+    buildCurrentContractData(),
+  ])
+}
+
 // Rollback (DCS-FR-CWE-08): a saved version becomes the content of a new
-// version; the version it replaces stays in the history.
+// version; the version it replaces stays in the history. Every versioned field
+// comes back, and unsaved edits are discarded only after confirmation.
 const restoreVersion = async (item: ContractHistoryItem) => {
   if (!contract.value || !isContractMutable.value) return
+  if (editorSnapshot() !== savedSnapshot.value) {
+    const result = await confirmationDialog.value?.reveal({
+      message: 'Restoring this version discards your unsaved edits.',
+      confirmLabel: 'Restore',
+    })
+    if (!result || result.isCanceled) return
+  }
   isSubmitting.value = true
   try {
     await contractWorkflowService.update({
@@ -284,10 +310,15 @@ const restoreVersion = async (item: ContractHistoryItem) => {
       updated_at: contract.value.updated_at,
       name: item.name,
       description: item.description,
+      start_date: item.start_date,
+      exp_date: item.exp_date,
+      exp_policy: item.exp_policy,
+      exp_notice_period: item.exp_notice_period,
       contract_data: item.contract_data,
     })
     contract.value = await contractWorkflowService.retrieveById({ did: contract.value.did })
     applyContractDataToDraft(contract.value?.contract_data)
+    savedSnapshot.value = editorSnapshot()
   } catch (error) {
     reportActionError(error, 'Restore version')
   } finally {
@@ -324,6 +355,7 @@ watch(
           contract.value = await contractWorkflowService.retrieveById({ did: id })
           applyContractDataToDraft(contract.value?.contract_data)
           selectedParentContractDid.value = contract.value?.contract_data?.['dcs:parentContract']?.['@id'] ?? null
+          savedSnapshot.value = editorSnapshot()
           templateEditorUiStore.setTemplateEditable(isEditableContractState(contract.value?.state))
         }
       } catch (err: unknown) {
@@ -658,5 +690,6 @@ onBeforeRouteLeave(() => {
         </button>
       </div>
     </div>
+    <ConfirmationModal ref="confirmation-dialog" />
   </div>
 </template>

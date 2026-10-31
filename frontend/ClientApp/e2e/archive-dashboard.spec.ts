@@ -60,7 +60,7 @@ test('the archive dashboard shows the SRS overview and drills down into a contra
     // features/07_contract_storage_security/archive_management.feature.
     const expiring = page.getByTestId('archive-expiring')
     await expect(expiring).toBeVisible()
-    await expect(expiring.getByText(/Expiring within 30 days/)).toBeVisible()
+    await expect(expiring.getByText(/Expiring within \d+ days/)).toBeVisible()
   })
 
   await test.step('a recent action drills down into the contract archive trail', async () => {

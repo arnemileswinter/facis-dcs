@@ -97,9 +97,35 @@ func TestArchivedSectionsAreReadableOnlyByTheirParties(t *testing.T) {
 	require.NoError(t, db.Select(&sectionCIDs, `SELECT content_cid FROM contract_archive_sections WHERE did = $1`, did))
 	snapshots := &recordingSnapshotStore{}
 	svc.SnapshotStore, svc.Eraser = snapshots, noopEraser{}
+	_, err = db.Exec(`UPDATE contracts SET state = 'TERMINATED' WHERE did = $1`, did)
+	require.NoError(t, err)
 	_, err = svc.Delete(archiveManagerContext(), &contractstoragearchive.DeletePayload{Did: did, Justification: "retention ended"})
 	require.NoError(t, err)
 	require.Subset(t, snapshots.deleted, sectionCIDs)
+}
+
+// DCS-FR-CSA-26: a section is archived into the archived version it is
+// taken from, not always into the latest one.
+func TestSectionIsArchivedIntoTheGivenVersion(t *testing.T) {
+	db := pgtest.Open(t)
+	did := "did:web:dcs.example:contract:versions"
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data, contract_version)
+		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'SIGNED', 'did:web:tpl', 1, $2, 2)`, did, sectionedContract)
+	require.NoError(t, err)
+	for version, data := range map[int]string{1: sectionedContract, 2: `{"dcs:parties":[{"dcs:legalName":"Org B"}]}`} {
+		_, err = db.Exec(`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence)
+			VALUES ($1::text, $2, 'did:web:creator', jsonb_build_object('contract_data', $3::jsonb), 'sha256:`+zeroHash+`', 'bafy', '{"source":"test","snapshot_hash_algorithm":"SHA-256"}')`, did, version, data)
+		require.NoError(t, err)
+	}
+	svc := archiveTestService(t, db)
+	svc.Artifacts = newMemoryArtifacts()
+	section, first := "urn:c#payment", 1
+
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "section", Did: did, SectionID: &section, Parties: []string{"Org B"}})
+	require.ErrorContains(t, err, "version 2", "without a version the latest archived version is used")
+	res, err := svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "section", Did: did, SectionID: &section, Parties: []string{"Org B"}, ContractVersion: &first})
+	require.NoError(t, err)
+	require.Equal(t, 1, *res.ContractVersion)
 }
 
 type noopEraser struct{}

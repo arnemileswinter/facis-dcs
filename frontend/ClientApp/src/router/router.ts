@@ -8,6 +8,7 @@ import {
   EyeIcon,
   KeyIcon,
   LockClosedIcon,
+  LockOpenIcon,
   PencilSquareIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -33,6 +34,7 @@ import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
 import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
 import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
+import LockoutAdminView from '@/views/admin/LockoutAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import ArchiveDetailView from '@/views/archive/ArchiveDetailView.vue'
@@ -108,6 +110,7 @@ const ROUTES = {
     TARGETS: 'admin.targets',
     SYSTEM_USERS: 'admin.system-users',
     KEY_INVENTORY: 'admin.key-inventory',
+    LOCKOUTS: 'admin.lockouts',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -293,7 +296,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       title: 'DCS - Archived contract',
       requiresAuth: true,
-      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
+      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'AUDITOR', 'COMPLIANCE_OFFICER'],
     },
   },
   {
@@ -306,7 +309,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Archive Dashboard',
       order: 6,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'COMPLIANCE_OFFICER'],
     },
   },
   {
@@ -369,6 +372,9 @@ const routes: RouteRecordRaw[] = [
         'CONTRACT_APPROVER',
         'CONTRACT_MANAGER',
         'CONTRACT_OBSERVER',
+        // Read-only inspection with the stored evidence (DCS-IR-CWE-12).
+        'AUDITOR',
+        'COMPLIANCE_OFFICER',
       ],
     },
   },
@@ -507,6 +513,19 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/admin/lockouts',
+    name: ROUTES.ADMIN.LOCKOUTS,
+    component: LockoutAdminView,
+    meta: {
+      name: 'Lockouts',
+      icon: LockOpenIcon,
+      requiresAuth: true,
+      title: 'DCS - Lockouts',
+      order: 14,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
     path: '/non-compliance',
     name: ROUTES.NON_COMPLIANCE.INVESTIGATION,
     component: NonComplianceInvestigationView,
@@ -516,7 +535,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Non-Compliance Investigation',
       order: 9,
-      roles: ['COMPLIANCE_OFFICER'],
+      roles: ['COMPLIANCE_OFFICER', 'AUDITOR'],
     },
   },
   {

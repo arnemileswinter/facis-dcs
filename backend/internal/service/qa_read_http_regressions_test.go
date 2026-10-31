@@ -52,7 +52,7 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	repo := &cwepg.PostgresContractRepo{}
 	reader := base.AuditTrailReader{Artifacts: store, ARepo: &basepg.PostgresAuditTrailRepository{}}
 	validator, token := qaSignedTokens(t)
-	authentication := auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	authentication := auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	for _, f := range []struct{ did, owner, data string }{
 		{"own", "did:example:participant", `{}`},
 		{"party", "other", `{"dcs:parties":[{"dcs:legalName":"did:example:participant"}]}`},

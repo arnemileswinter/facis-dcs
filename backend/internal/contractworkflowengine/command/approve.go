@@ -139,7 +139,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	if !existOpenTasks {
-		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Approved.String())
+		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Approved.String())
 		if err != nil {
 			return fmt.Errorf("could not update current template state: %w", err)
 		}

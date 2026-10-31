@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -24,6 +25,10 @@ import (
 
 	"github.com/jmoiron/sqlx"
 )
+
+// ErrTerminationReasonRequired is returned when a termination names no
+// reason (DCS-FR-CWE-12). It is mapped to 400.
+var ErrTerminationReasonRequired = errors.New("a termination needs a reason")
 
 type TerminateCmd struct {
 	DID          string             `json:"did"`
@@ -47,6 +52,10 @@ type Terminator struct {
 }
 
 func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
+	cmd.Reason = strings.TrimSpace(cmd.Reason)
+	if cmd.Reason == "" {
+		return ErrTerminationReasonRequired
+	}
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -87,15 +96,22 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 	if err != nil {
 		return err
 	}
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Terminated.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Terminated.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 	occurredAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	// A concurrent termination that committed first holds the row. The
+	// insert then adds nothing, and this one is refused as a transition from
+	// TERMINATED.
+	recorded, err := tx.ExecContext(ctx, `
 		INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
-		VALUES ($1, $2, $3, $4, $5)`, cmd.DID, cmd.Reason, occurredAt, cmd.TerminatedBy, role); err != nil {
+		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (did) DO NOTHING`, cmd.DID, cmd.Reason, occurredAt, cmd.TerminatedBy, role)
+	if err != nil {
 		return fmt.Errorf("could not record the termination: %w", err)
+	}
+	if rows, err := recorded.RowsAffected(); err != nil || rows == 0 {
+		return fmt.Errorf("%w: contract %s is already terminated", contractstate.ErrInvalidTransition, cmd.DID)
 	}
 
 	if err := closeOpenTasks(ctx, tx, cmd.DID); err != nil {
@@ -153,7 +169,9 @@ func initiatingRole(cmd TerminateCmd, localPeer string) (string, error) {
 }
 
 // queuePeerTerminations records one termination notice per party instance
-// other than this one; dcstodcs.TerminationNotifier delivers them.
+// other than this one that holds a copy of the contract;
+// dcstodcs.TerminationNotifier delivers them. A party that never received
+// the contract gets no notice.
 func (h *Terminator) queuePeerTerminations(ctx context.Context, tx *sqlx.Tx, did, reason, localPeer string) error {
 	contract, err := h.CRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
@@ -162,7 +180,11 @@ func (h *Terminator) queuePeerTerminations(ctx context.Context, tx *sqlx.Tx, did
 	if contract.Responsible == nil {
 		return nil
 	}
-	for _, party := range contract.Responsible.GetParties() {
+	deliveries, err := h.SRepo.GetPDFDeliveries(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read the peers that received contract %s: %w", did, err)
+	}
+	for _, party := range db2.PeersHoldingCopy(contract.Responsible.GetParties(), contract.Origin, deliveries) {
 		if party == localPeer {
 			continue
 		}

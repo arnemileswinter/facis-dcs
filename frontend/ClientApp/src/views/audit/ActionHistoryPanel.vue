@@ -9,8 +9,11 @@ import type { ContractTemplateAuditResponse } from '@/models/responses/template-
 
 type DocumentType = 'contract' | 'template'
 
+// A drill-down (for example from a compliance risk) opens the panel on its DID.
+const props = defineProps<{ initialDid?: string }>()
+
 const documentType = ref<DocumentType>('contract')
-const documentDid = ref('')
+const documentDid = ref(props.initialDid ?? '')
 const justification = ref('')
 const loading = ref(false)
 const loadError = ref('')

@@ -91,9 +91,21 @@ var SMContractSignatureEnvelope = Type("SMContractSignatureEnvelope", func() {
 	Required("contract_did", "signer_did", "credential_type", "status")
 })
 
+var SMSignatureFieldStatus = Type("SMSignatureFieldStatus", func() {
+	Description("Signing status of one declared signature field (DCS-FR-SM-07, DCS-FR-SM-24)")
+	Attribute("field_name", String, "Declared signature field (dcs:signatoryName)")
+	Attribute("status", String, "SIGNED or UNSIGNED")
+	Attribute("remote", Boolean, "True when the field belongs to a counterparty that signs on its own instance")
+	Attribute("signer_did", String, "DID of the signer, when signed on this instance")
+	Attribute("signed_at", String, "ISO-8601 timestamp of the signature, when known")
+
+	Required("field_name", "status", "remote")
+})
+
 var SMContractRetrieveByIDResponse = Type("SMContractRetrieveByIDResponse", func() {
 	Attribute("contract", SMContractItem, "The contract")
-	Attribute("signature_envelope", SMContractSignatureEnvelope, "The latest signature envelope; absent for an APPROVED-unsigned contract that has no signature yet")
+	Attribute("signature_envelope", SMContractSignatureEnvelope, "The most recent signature record of any status; absent for an APPROVED-unsigned contract that has no signature yet")
+	Attribute("signature_fields", ArrayOf(SMSignatureFieldStatus), "Signing status of every signature field the contract declares")
 
 	Required("contract")
 })
@@ -242,7 +254,7 @@ var SMContractAuditRequest = Type("SMContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
+	Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 
 	Required("did", "justification")
 })
@@ -444,6 +456,9 @@ var SMSignatureRequestStatusResponse = Type("SMSignatureRequestStatusResponse", 
 	Attribute("signer_did", String, "DID of the signer resolved from the presented PID, once verified")
 	Attribute("expires_at", String, "ISO-8601 timestamp when the ceremony expires")
 	Attribute("signed_at", String, "ISO-8601 timestamp when a signature submitted for this ceremony was accepted; absent until then")
+	Attribute("request_expires_at", String, "ISO-8601 timestamp when the published signing request expires; absent until a request is published")
+	Attribute("refusal_code", String, "Error code of the last refused wallet response for this ceremony")
+	Attribute("refusal", String, "Reason of the last refused wallet response for this ceremony")
 
 	Required("ceremony_id", "status")
 })
@@ -623,11 +638,15 @@ var _ = Service("SignatureManagement", func() {
 		Error("bad_request", ErrorResult, "Bad request")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/prepare")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
 			Response("counterparty_not_settled", StatusBadRequest)
@@ -655,11 +674,15 @@ var _ = Service("SignatureManagement", func() {
 		Error("cert_pid_mismatch", ErrorResult, "The signing certificate does not identify the ceremony's verified signatory (sole control)")
 		Error("jades_invalid", ErrorResult, "The submitted JAdES signature is invalid")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/submit")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("ceremony_required", StatusUnprocessableEntity)
 			Response("counterparty_not_settled", StatusBadRequest)
@@ -685,11 +708,15 @@ var _ = Service("SignatureManagement", func() {
 		Result(SMSignatureRequestStartResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
+		Error("not_found", ErrorResult, "Contract not found")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/request")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
 		})
@@ -739,11 +766,13 @@ var _ = Service("SignatureManagement", func() {
 		Error("not_found", ErrorResult, "Ceremony not found")
 		Error("ceremony_required", ErrorResult, "No completed PID presentation ceremony exists for this signer and contract")
 		Error("counterparty_not_settled", ErrorResult, "No verified settlement from the counterparty is held for the version about to be signed — the contract is waiting for the counterparty, not for this signer")
+		Error("forbidden", ErrorResult, "The caller may not read the contract or did not start the ceremony")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/signature/request/{ceremony_id}/publish")
 			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
 			Response("bad_request", StatusBadRequest)
 			Response("not_found", StatusNotFound)
 			Response("ceremony_required", StatusUnprocessableEntity)
