@@ -284,11 +284,8 @@ func main() {
 		log.Fatalf(ctx, err, "Could not read did document")
 	}
 
-	// The EU trust pool, built from the XAdES-verified EU trusted lists, is
-	// what the DID certificate of each peer is checked against
-	// (identity.EUTrustPoolEnabled).
 	var euTrustPool *identity.EUTrustPool
-	if identity.EUTrustPoolEnabled() {
+	if base.GetEnvOrDefault("DCS_FORCE_EIDAS_CERT", false) {
 		log.Printf(ctx, "Start building EU trust pool")
 		trustPool := identity.NewEUTrustPool()
 		if err := trustPool.Refresh(ctx); err != nil {
@@ -301,20 +298,9 @@ func main() {
 		go trustPool.StartAutoRefresh(ctx, identity.DefaultRefreshInterval)
 
 		euTrustPool = trustPool
-	} else {
-		log.Printf(ctx, "WARNING: the EU trust pool is off (DCS_EU_TRUST_POOL=false or a dev stack): peer DID certificates are checked for hostname and key only, not against the EU trusted lists")
 	}
 
-	// This instance's own DID certificate must be an eIDAS qualified
-	// certificate only when DCS_FORCE_EIDAS_CERT=true.
-	var ownCertificatePool *identity.EUTrustPool
-	if base.GetEnvOrDefault("DCS_FORCE_EIDAS_CERT", false) {
-		if euTrustPool == nil {
-			log.Fatalf(ctx, nil, "DCS_FORCE_EIDAS_CERT=true needs the EU trust pool, which DCS_EU_TRUST_POOL=false turns off")
-		}
-		ownCertificatePool = euTrustPool
-	}
-	err = didDocument.VerifyEIDASCertificate(ownCertificatePool)
+	err = didDocument.VerifyEIDASCertificate(euTrustPool)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not verify certificate")
 	}
@@ -890,7 +876,7 @@ func main() {
 		}
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
-		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, ownCertificatePool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
+		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
 		// The credentials this instance issued verify against its own published

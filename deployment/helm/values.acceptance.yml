@@ -89,13 +89,6 @@ pkcs11:
     name: dcs-acceptance-hsm-pin
     key: PKCS11_PIN
 
-# The DID certificates of this profile come from the provisioning CA, not from
-# a qualified trust service provider. So peers are not checked against the EU
-# trusted lists here; prod checks them (DCS_EU_TRUST_POOL, deployment/README.md).
-extraEnv:
-  - name: DCS_EU_TRUST_POOL
-    value: "false"
-
 federatedCatalogue:
   enabled: true
   apiURL: ""

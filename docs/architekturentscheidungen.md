@@ -244,13 +244,10 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
   überschreibbar per `DCS_LOTL_OJ_CERTS_FILE` und `DCS_LOTL_OJ_URL`), die
   jeder nationalen Liste gegen die Zertifikate, die die LOTL für sie nennt;
   eine Liste ohne gültige Signatur fließt nicht in den Pool ein. Selbstsignierte Zertifikate aus der übermittelten Kette werden nie als
-  Trust-Anchor akzeptiert. Der Pool wird beim Start gebaut, und das
-  DID-Zertifikat jedes Peers wird gegen ihn geprüft (Kette und
-  QCStatements). `DCS_EU_TRUST_POOL=false` schaltet das ab; ein Stack mit
-  `DCS_ALLOW_DEV_TRUST=true` hat es ohne `DCS_EU_TRUST_POOL=true` aus. Dann
-  bleiben nur Hostname- und JWK-Abgleich — das ist keine eIDAS-Validierung.
-  Das eigene DID-Zertifikat wird nur bei `DCS_FORCE_EIDAS_CERT=true` gegen
-  den Pool geprüft. **Warum:** QCStatements sind eine
+  Trust-Anchor akzeptiert. Der Pool wird nur bei gesetztem
+  `DCS_FORCE_EIDAS_CERT` gebaut; ohne ihn entfallen Kettenprüfung UND
+  QCStatements-Prüfung, es bleiben Hostname- und JWK-Abgleich — das ist keine
+  eIDAS-Validierung. **Warum:** QCStatements sind eine
   Selbstdeklaration des Ausstellers; rechtlich tragfähig wird die Prüfung
   erst mit den EU Trusted Lists als Anker.
 - **Was gilt:** did:web-Auflösung folgt der Methodenspezifikation exakt:

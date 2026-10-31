@@ -98,19 +98,6 @@ type EUTrustPool struct {
 	lastErrs    []error
 }
 
-// EUTrustPoolEnabled reports whether the instance builds the EU trust pool
-// and checks the DID certificate of each peer against it: chain to a
-// qualified trust service provider and the QcCompliance statement
-// (DCS-IR-SI-06). DCS_EU_TRUST_POOL sets it. When it is not set, it is on,
-// except on a stack that declares itself a development or test stack with
-// DCS_ALLOW_DEV_TRUST=true: there the DID certificates come from a dev CA.
-func EUTrustPoolEnabled() bool {
-	if v := strings.TrimSpace(os.Getenv("DCS_EU_TRUST_POOL")); v != "" {
-		return strings.EqualFold(v, "true")
-	}
-	return !strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true")
-}
-
 // NewEUTrustPool creates an empty, not yet populated trust pool.
 // Call Refresh before first use.
 func NewEUTrustPool() *EUTrustPool {
