@@ -127,6 +127,7 @@ const approve = async () => {
     const confirmationResult = await confirmationDialog.value?.reveal({
       message: 'Confirm approval',
       editor: { requiredText: false, placeholder: 'Comment (optional)' },
+      confirmLabel: 'Confirm',
     })
     if (confirmationResult?.isCanceled) return
     const comment = confirmationResult?.data?.trim()

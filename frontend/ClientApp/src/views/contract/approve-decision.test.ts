@@ -19,9 +19,15 @@ vi.mock('@/services/contract-workflow-service', () => ({
   contractWorkflowService: { retrieveById: mocks.retrieve, approve: mocks.approve, submit: mocks.submit },
 }))
 
+const revealed = vi.hoisted(() => ({ options: [] as unknown[] }))
 const ConfirmationModalStub = defineComponent({
   setup(_, { expose }) {
-    expose({ reveal: () => Promise.resolve({ isCanceled: false, data: ' clause 4 checked ' }) })
+    expose({
+      reveal: (options: unknown) => {
+        revealed.options.push(options)
+        return Promise.resolve({ isCanceled: false, data: ' clause 4 checked ' })
+      },
+    })
     return () => null
   },
 })
@@ -72,6 +78,8 @@ it('sends the approver comment with the approval', async () => {
     updated_at: '2026-10-30T12:00:00Z',
     decision_notes: ['clause 4 checked'],
   })
+  // The optional comment does not turn the approval decision into a "Submit".
+  expect(revealed.options.at(-1)).toMatchObject({ confirmLabel: 'Confirm' })
   wrapper.unmount()
 })
 
