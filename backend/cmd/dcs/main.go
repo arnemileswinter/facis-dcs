@@ -645,6 +645,9 @@ func main() {
 		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
+		// A terminated, expired or revoked contract is withdrawn from the
+		// catalogue (DCS-FR-CWE-23).
+		(&cwecommand.CatalogueWithdrawer{DB: db, FCClient: templateCatalogueClient}).Start(ctx, time.Minute)
 	}
 
 	// Initialize the webhook platform (ORCE integration).

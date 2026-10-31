@@ -858,6 +858,25 @@ func (e CataloguePublishEvent) GetDID() string {
 	return e.DID
 }
 
+// CatalogueWithdrawEvent is emitted when a contract's catalogue entry is
+// revoked (DCS-IR-CWE-10, DCS-FR-CWE-23).
+type CatalogueWithdrawEvent struct {
+	DID        string    `json:"did"`
+	AssetHash  string    `json:"asset_hash"`
+	State      string    `json:"state"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e CatalogueWithdrawEvent) EventType() string {
+	return eventtype.WithdrawCatalogue.String()
+}
+
+// GetDID implements the Event interface.
+func (e CatalogueWithdrawEvent) GetDID() string {
+	return e.DID
+}
+
 // RenewEvent is emitted on the newly created renewal contract when it is
 // derived from an existing (original) contract (DCS-FR-CWE-11/22,
 // DCS-FR-CSA-15). The original contract is not mutated and does not receive
