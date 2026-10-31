@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -82,9 +83,19 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 		return err
 	}
 
+	role, err := initiatingRole(cmd, localPeer)
+	if err != nil {
+		return err
+	}
 	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Terminated.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
+	}
+	occurredAt := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
+		VALUES ($1, $2, $3, $4, $5)`, cmd.DID, cmd.Reason, occurredAt, cmd.TerminatedBy, role); err != nil {
+		return fmt.Errorf("could not record the termination: %w", err)
 	}
 
 	if err := closeOpenTasks(ctx, tx, cmd.DID); err != nil {
@@ -100,7 +111,6 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 		}
 	}
 
-	occurredAt := time.Now().UTC()
 	evt := contractevents.TerminateEvent{
 		DID:             cmd.DID,
 		ContractVersion: processData.ContractVersion,
@@ -119,6 +129,27 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 	}
 
 	return tx.Commit()
+}
+
+// CounterpartyTerminationRole is the initiating role of a termination that a
+// counterparty instance notified.
+const CounterpartyTerminationRole = "Counterparty"
+
+// terminationRoles are the roles that may terminate a contract, in the order
+// the initiating role is chosen from the caller's roles.
+var terminationRoles = []userrole.UserRole{userrole.ContractManager, userrole.SystemContractManager, userrole.ArchiveManager}
+
+// initiatingRole is the role recorded with a termination (DCS-FR-CSA-16).
+func initiatingRole(cmd TerminateCmd, localPeer string) (string, error) {
+	if cmd.CauserDID != localPeer {
+		return CounterpartyTerminationRole, nil
+	}
+	for _, role := range terminationRoles {
+		if slices.Contains(cmd.UserRoles, role) {
+			return role.String(), nil
+		}
+	}
+	return "", fmt.Errorf("terminating a contract needs one of the roles %v", terminationRoles)
 }
 
 // queuePeerTerminations records one termination notice per party instance

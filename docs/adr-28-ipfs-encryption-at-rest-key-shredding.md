@@ -72,7 +72,21 @@ Concretely:
   change requests and drafts, the archive entry's `contract_snapshot` (the
   only change the archive trigger permits, and only once the scope is
   shredded; `content_hash` stays as evidence) and the payload pinned for
-  signing. Key creation and
+  signing. The same transaction erases the other copies of the content and
+  of the signers' personal data: the prepared PDF, PID claims and
+  presentations of the signing ceremonies; the payload of every JAdES
+  signature over the contract (`contract_signatures`,
+  `contract_sync_signatures`), which becomes a detached JWS
+  (RFC 7515 Appendix F) whose protected header and signature value stay as
+  evidence; and the outbox copy of every event body that the audit trail
+  encrypts under the contract's key, replaced by the erased marker. The audit
+  chain hashes the stored IPFS entry, not the outbox row, so this change
+  breaks no chain or checkpoint proof; the erasure records and the bodies of
+  other scopes keep their outbox copy, as they keep their audit body.
+  `contracts.contract_data` keeps one thing: the `dcs:legalName` of each
+  `dcs:parties` node. These organization names are what the contract read
+  policy authorizes on, so the named parties keep read access to the erased
+  contract's metadata, erasure status and audit trail. Key creation and
   shredding are serialized per scope, and a shredded scope is final: neither
   a local write nor a peer-shipped wrapped copy ever creates a new CEK for
   it. A peer erase call

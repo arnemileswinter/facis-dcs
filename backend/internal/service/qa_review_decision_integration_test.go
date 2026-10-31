@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -15,7 +16,7 @@ import (
 // DCS-FR-CWE-15: rejection returns the contract to draft status. The rejected
 // contract accepts edits like a draft.
 func TestQARejectedContractIsEditablePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)
@@ -36,7 +37,7 @@ func TestQARejectedContractIsEditablePostgres(t *testing.T) {
 // An edit of a rejected contract follows the resubmission rule: a version a
 // signature stands behind is not rewritten.
 func TestQARejectedContractEditKeepsTheSettlementGatePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)

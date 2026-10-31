@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	cwe "digital-contracting-service/gen/contract_workflow_engine"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -19,7 +20,7 @@ import (
 // The service has no gate configured here, so a call that reached the gate
 // would fail as BLOCKED instead.
 func TestQADeployRefusesIncompleteSigningBeforeTheGatePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncdb "digital-contracting-service/internal/dcstodcs/db"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -16,7 +17,7 @@ import (
 // completed. The counterparty signature that arrives afterwards is added to
 // that archive entry, and the archive trigger permits only that append.
 func TestQAPeerSignatureArrivingAfterArchiveIsAddedToTheEntryPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	const did = "did:web:dcs-a.localhost:contract:archived"
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data)
 		VALUES ($1,'','Org A','SIGNED','tpl',1,'{}')`, did)

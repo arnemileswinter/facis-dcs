@@ -106,6 +106,11 @@ type ContractMetadata struct {
 	ParentContractDID    *string      `db:"parent_contract_did"`
 	// RenewsContractDID is the contract this one renews (dcs:renewsContract).
 	RenewsContractDID *string `db:"renews_contract_did"`
+	// The termination record of a terminated archived contract
+	// (DCS-FR-CSA-16); nil for any other contract.
+	TerminationReason *string    `db:"termination_reason"`
+	TerminatedAt      *time.Time `db:"terminated_at"`
+	TerminationRole   *string    `db:"termination_role"`
 	// The registered target system this contract deploys to (ADR-25), resolved
 	// to its name so the destination is readable without a second lookup.
 	TargetID   *string `db:"target_id"`

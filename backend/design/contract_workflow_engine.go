@@ -200,6 +200,9 @@ var ContractItem = Type("ContractItem", func() {
 	Attribute("evidence", Any, "Archive evidence blob (only populated for archived contracts), including a deployment sub-object with correlation_id/payload_hash/receipt_hash/tsa_token/activated_at (DCS-FR-SM-10, DCS-FR-SM-12)")
 	Attribute("archive_summary", String, "Archive annotation summary (only populated for archived contracts; DCS-FR-CSA-11)")
 	Attribute("archive_tags", ArrayOf(String), "Archive annotation tags (only populated for archived contracts; DCS-FR-CSA-11)")
+	Attribute("termination_reason", String, "Recorded termination reason (only populated for terminated archived contracts; DCS-FR-CSA-16)")
+	Attribute("terminated_at", String, "Effective date of the termination, RFC3339 (only populated for terminated archived contracts; DCS-FR-CSA-16)")
+	Attribute("termination_role", String, "Role that initiated the termination, or Counterparty for a termination a counterparty instance notified (only populated for terminated archived contracts; DCS-FR-CSA-16)")
 
 	Required("did", "state", "created_by", "created_at", "updated_at", "contract_version", "template_did", "template_version")
 })

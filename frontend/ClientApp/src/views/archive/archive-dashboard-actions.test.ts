@@ -102,4 +102,22 @@ describe('archive dashboard actions', () => {
     expect(wrapper.find(`[data-testid="archive-terminate-${signed.did}"]`).exists()).toBe(true)
     expect(wrapper.find('[data-testid="archive-terminate-did:web:example.com:contract:2"]').exists()).toBe(false)
   })
+
+  it('shows the termination reason, date and initiating role of a terminated contract (DCS-FR-CSA-16)', async () => {
+    const terminated = {
+      ...signed,
+      did: 'did:web:example.com:contract:3',
+      state: 'TERMINATED',
+      termination_reason: 'breach of the SLA',
+      terminated_at: '2026-10-20T08:00:00Z',
+      termination_role: 'Archive Manager',
+    }
+    archive.retrieve.mockResolvedValue([signed, terminated])
+    const wrapper = await mountDashboard()
+    const record = wrapper.get(`[data-testid="archive-termination-${terminated.did}"]`).text()
+    expect(record).toContain(new Date(terminated.terminated_at).toLocaleString())
+    expect(record).toContain('by Archive Manager')
+    expect(record).toContain('Reason: breach of the SLA')
+    expect(wrapper.find(`[data-testid="archive-termination-${signed.did}"]`).exists()).toBe(false)
+  })
 })

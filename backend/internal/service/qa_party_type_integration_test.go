@@ -13,6 +13,7 @@ import (
 
 	server "digital-contracting-service/gen/http/template_repository/server"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/pgtest"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/db"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestQAPartyTypePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	tx, err := database.BeginTxx(ctx, nil)
 	require.NoError(t, err)
@@ -89,7 +90,7 @@ func TestQAPartyTypeCreateValidation(t *testing.T) {
 }
 
 func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	repo := &pg.PostgresContractTemplateRepo{}
 	tx, err := database.BeginTxx(ctx, nil)
@@ -121,7 +122,7 @@ func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
 }
 
 func TestQAPartyTypeCatalogueImport(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	for _, value := range []string{"SINGLE_PARTY", "MULTI_PARTY", "", "invalid"} {
 		t.Run(value, func(t *testing.T) {
 			source := "source-" + value

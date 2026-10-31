@@ -20,6 +20,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
+	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -47,12 +48,15 @@ type contractStorageArchivesrvc struct {
 	Keys          artifactstore.CEKRepository
 	ERepo         dcstodcsdb.EraseRepository
 	Artifacts     archiveArtifacts
+	ArchiveNotary cwecommand.ArchiveNotary
+	ArchiveTSA    cwecommand.ArchiveTimestampIssuer
 	auth.JWTAuthenticator
 }
 
 // NewContractStorageArchive returns the ContractStorageArchive service implementation.
 func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo db.ContractRepo, didDocument identity.DIDDocument, auditTrailReader base.AuditTrailReader, snapshotStore archiveSnapshotStore,
-	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository) contractstoragearchive.Service {
+	eraser contractEraser, keys artifactstore.CEKRepository, eraseRepo dcstodcsdb.EraseRepository,
+	archiveNotary cwecommand.ArchiveNotary, archiveTSA cwecommand.ArchiveTimestampIssuer) contractstoragearchive.Service {
 	svc := &contractStorageArchivesrvc{
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
@@ -63,6 +67,8 @@ func NewContractStorageArchive(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, cRepo
 		Eraser:           eraser,
 		Keys:             keys,
 		ERepo:            eraseRepo,
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
 	}
 	if auditTrailReader.Artifacts != nil {
 		svc.Artifacts = auditTrailReader.Artifacts
@@ -192,7 +198,8 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	}
 	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
 	var evidenceCIDs []string
-	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1`, p.Did); err != nil {
+	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1
+		UNION SELECT content_cid FROM contract_archive_sections WHERE did = $1`, p.Did); err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 	snapshotCIDs = append(snapshotCIDs, evidenceCIDs...)
@@ -540,23 +547,34 @@ func toArchiveContractItem(item db.ContractMetadata) *contractstoragearchive.Con
 	}
 
 	return &contractstoragearchive.ContractItem{
-		Did:             item.DID,
-		ContractVersion: item.ContractVersion,
-		State:           item.State,
-		Name:            item.Name,
-		Description:     item.Description,
-		CreatedBy:       item.CreatedBy,
-		CreatedAt:       item.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       item.UpdatedAt.Format(time.RFC3339),
-		StartDate:       startDate,
-		ExpDate:         expDate,
-		ExpPolicy:       expPolicy,
-		ExpNoticePeriod: item.ExpNoticePeriod,
-		Responsible:     item.Responsible,
-		Evidence:        archiveEvidenceValue(item.Evidence),
-		ArchiveSummary:  item.ArchiveSummary,
-		ArchiveTags:     decodeArchiveTags(item.ArchiveTags),
+		Did:               item.DID,
+		ContractVersion:   item.ContractVersion,
+		State:             item.State,
+		Name:              item.Name,
+		Description:       item.Description,
+		CreatedBy:         item.CreatedBy,
+		CreatedAt:         item.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
+		StartDate:         startDate,
+		ExpDate:           expDate,
+		ExpPolicy:         expPolicy,
+		ExpNoticePeriod:   item.ExpNoticePeriod,
+		Responsible:       item.Responsible,
+		Evidence:          archiveEvidenceValue(item.Evidence),
+		ArchiveSummary:    item.ArchiveSummary,
+		ArchiveTags:       decodeArchiveTags(item.ArchiveTags),
+		TerminationReason: item.TerminationReason,
+		TerminatedAt:      formatOptionalTimePtr(item.TerminatedAt),
+		TerminationRole:   item.TerminationRole,
 	}
+}
+
+func formatOptionalTimePtr(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := value.UTC().Format(time.RFC3339)
+	return &formatted
 }
 
 // generateArchiveSummary derives the automatic half of DCS-FR-CSA-11 from

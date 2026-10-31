@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -15,7 +17,7 @@ import (
 // DCS-FR-CWE-23: termination removes the contract from active workflows. Open
 // tasks go; decided tasks stay as the record of the decision.
 func TestQATerminateClosesOpenTasksPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)
@@ -30,6 +32,7 @@ func TestQATerminateClosesOpenTasksPostgres(t *testing.T) {
 	handler := command.Terminator{DB: database, CRepo: &cwepg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}, DIDDocument: *document}
 	require.NoError(t, handler.Handle(context.Background(), command.TerminateCmd{
 		DID: "c1", TerminatedBy: "Org A", Reason: "ended", UpdatedAt: time.Now().Add(time.Hour), CauserDID: peer,
+		UserRoles: userrole.UserRoles{userrole.ContractManager},
 	}))
 
 	var open, decided int

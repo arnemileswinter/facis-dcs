@@ -18,12 +18,13 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/processauditandcompliance/auditexecutor"
 )
 
 func TestQAAuditReportPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

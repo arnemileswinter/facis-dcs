@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
 	contractstoragearchive "digital-contracting-service/gen/contract_storage_archive"
 	"digital-contracting-service/internal/base/artifactstore"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/tsa"
+	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/db/pg"
+	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
 )
 
@@ -144,6 +149,45 @@ func TestTerminatedContractStaysInTheArchiveReadOnly(t *testing.T) {
 	require.ErrorContains(t, err, "immutable")
 }
 
+// DCS-FR-CSA-16: the archive item of a terminated contract carries the
+// recorded termination reason, the effective date and the initiating role. A
+// termination a counterparty instance notified names the Counterparty.
+func TestTerminatedArchiveItemCarriesReasonDateAndRole(t *testing.T) {
+	db := pgtest.Open(t)
+	byManager, byPeer := "did:web:dcs.example:contract:ended-here", "did:web:dcs.example:contract:ended-there"
+	seedArchivedContract(t, db, byManager, "SIGNED")
+	seedArchivedContract(t, db, byPeer, "SIGNED")
+	svc := archiveTestService(t, db)
+	local, err := svc.DIDDocument.GetID()
+	require.NoError(t, err)
+	handler := cwecommand.Terminator{DB: db, CRepo: &pg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}, DIDDocument: svc.DIDDocument}
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, handler.Handle(context.Background(), cwecommand.TerminateCmd{
+		DID: byManager, TerminatedBy: archiveManager, Reason: "breach of the SLA", UpdatedAt: later, CauserDID: local,
+		UserRoles: userrole.UserRoles{userrole.ContractObserver, userrole.ArchiveManager},
+	}))
+	require.NoError(t, handler.Handle(context.Background(), cwecommand.TerminateCmd{
+		DID: byPeer, TerminatedBy: "did:web:peer.example", Reason: "insolvency", UpdatedAt: later, CauserDID: "did:web:peer.example",
+	}))
+
+	res, err := svc.Retrieve(archiveManagerContext(), &contractstoragearchive.ArchiveRetrieveRequest{})
+	require.NoError(t, err)
+	items := map[string]*contractstoragearchive.ContractItem{}
+	for _, item := range res.Contracts {
+		items[item.Did] = item
+	}
+	require.Len(t, items, 2)
+	for did, want := range map[string][2]string{byManager: {"breach of the SLA", "Archive Manager"}, byPeer: {"insolvency", "Counterparty"}} {
+		item := items[did]
+		require.Equal(t, "TERMINATED", item.State)
+		require.Equal(t, want[0], *item.TerminationReason)
+		require.Equal(t, want[1], *item.TerminationRole)
+		effective, err := time.Parse(time.RFC3339, *item.TerminatedAt)
+		require.NoError(t, err)
+		require.WithinDuration(t, time.Now(), effective, time.Minute)
+	}
+}
+
 // memoryArtifacts stands in for the encrypting IPFS store.
 type memoryArtifacts struct {
 	blobs    map[string][]byte
@@ -194,6 +238,58 @@ func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
 
 	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "contract", Did: did})
 	require.ErrorContains(t, err, "already archived")
+}
+
+type stubArchiveNotary struct {
+	payload cwecommand.ArchiveNotaryPayload
+}
+
+func (n *stubArchiveNotary) NotarizeArchiveEntry(_ context.Context, payload cwecommand.ArchiveNotaryPayload) (*cwecommand.ArchiveNotaryReceipt, error) {
+	n.payload = payload
+	return &cwecommand.ArchiveNotaryReceipt{ReceiptType: "ARCHIVE_NOTARY_RECEIPT", ArchiveEntryID: payload.ArchiveEntryID, EventHash: "sha256:" + zeroHash}, nil
+}
+
+type stubArchiveTSA struct{}
+
+func (stubArchiveTSA) Enabled() bool { return true }
+func (stubArchiveTSA) TimestampBytes(context.Context, []byte) (*tsa.Receipt, error) {
+	return &tsa.Receipt{Token: "tsa-token", TokenEncoding: "base64", HashAlgorithm: "SHA-256", MessageImprint: "imprint"}, nil
+}
+
+// A contract the Archive Manager stores gets the notary receipt and the TSA
+// receipt the signing workflow gives its archive entry, so the evidence
+// compliance check passes.
+func TestArchiveManagerStoreNotarizesAndTimestampsTheEntry(t *testing.T) {
+	db := pgtest.Open(t)
+	did := "did:web:dcs.example:contract:notarized"
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
+		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
+	require.NoError(t, err)
+	svc := archiveTestService(t, db)
+	svc.Artifacts = newMemoryArtifacts()
+	notary := &stubArchiveNotary{}
+	svc.ArchiveNotary, svc.ArchiveTSA = notary, stubArchiveTSA{}
+
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{Kind: "contract", Did: did})
+	require.NoError(t, err)
+	require.Equal(t, did+"#1", notary.payload.ArchiveEntryID)
+
+	var token string
+	require.NoError(t, db.Get(&token, `SELECT tsa_receipt->>'token' FROM contract_archive_entries WHERE did = $1`, did))
+	require.Equal(t, "tsa-token", token)
+	stored := archiveEvents(t, db, "STORE_ARCHIVED_CONTRACT")
+	require.Len(t, stored, 1)
+	require.Equal(t, "sha256:"+zeroHash, stored[0]["notary_receipt"].(map[string]any)["eventHash"])
+	require.Equal(t, "tsa-token", stored[0]["tsa_receipt"].(map[string]any)["token"])
+
+	items, err := svc.Compliance(archiveManagerContext(), &contractstoragearchive.CompliancePayload{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	for _, check := range items[0].Checks {
+		if check.Rule == "evidence_completeness" {
+			require.True(t, check.Passed, "evidence check: %v", check.Reason)
+		}
+	}
 }
 
 func TestArchiveManagerCannotArchiveAContractInWork(t *testing.T) {

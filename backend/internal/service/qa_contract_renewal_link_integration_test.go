@@ -8,13 +8,14 @@ import (
 
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
 
 // DCS-FR-CWE-29: the contract list names the contract a renewal renews, so the
 // structure view can link both ways.
 func TestQAContractListNamesTheRenewedContractPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data) VALUES
 		('old','','Org A','EXPIRED','tpl',1,'{}'),
 		('new','','Org A','DRAFT','tpl',1,'{"dcs:renewsContract":{"@id":"https://dcs.example/contract/old","dcs:version":1}}')`)

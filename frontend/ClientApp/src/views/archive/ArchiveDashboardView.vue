@@ -595,6 +595,14 @@ function shortDid(did: string): string {
                   </td>
                   <td>
                     <span class="badge badge-ghost badge-sm">{{ entry.state }}</span>
+                    <div
+                      v-if="entry.terminated_at"
+                      class="mt-1 text-xs wrap-anywhere"
+                      :data-testid="`archive-termination-${entry.did}`"
+                    >
+                      Terminated {{ formatTimestamp(entry.terminated_at) }} by {{ entry.termination_role }}
+                      <div v-if="entry.termination_reason">Reason: {{ entry.termination_reason }}</div>
+                    </div>
                   </td>
                   <td :data-testid="`archive-annotation-${entry.did}`">
                     <div

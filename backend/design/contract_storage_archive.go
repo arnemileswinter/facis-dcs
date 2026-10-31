@@ -116,6 +116,7 @@ var ArchiveStoreResponse = Type("ArchiveStoreResponse", func() {
 	Attribute("kind", String, "What was stored: contract or evidence")
 	Attribute("contract_version", Int, "The archived contract version (kind=contract)")
 	Attribute("evidence_id", String, "Identifier of the stored evidence document (kind=evidence)")
+	Attribute("section_id", String, "The archived section (kind=section)")
 	Attribute("content_hash", String, "SHA-256 hash of the stored snapshot or evidence content")
 
 	Required("did", "kind", "content_hash")
@@ -136,6 +137,22 @@ var ArchiveEvidenceItem = Type("ArchiveEvidenceItem", func() {
 	Attribute("content", Bytes, "The document content; absent when the contract's keys are shredded")
 
 	Required("id", "did", "name", "media_type", "content_hash", "size_bytes", "stored_by", "stored_at")
+})
+
+var ArchiveSectionItem = Type("ArchiveSectionItem", func() {
+	Description("A contract section archived for the parties assigned to it (DCS-FR-CSA-26), linked to the archive entry of its contract version")
+
+	Attribute("id", String, "Section archive identifier")
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("contract_version", Int, "The archived contract version the section belongs to")
+	Attribute("section_id", String, "The @id of the section or clause block in the contract document")
+	Attribute("parties", ArrayOf(String), "The organizations that may read the section")
+	Attribute("content_hash", String, "SHA-256 hash of the archived section")
+	Attribute("stored_by", String, "Who archived the section")
+	Attribute("stored_at", String, "When the section was archived (RFC3339)")
+	Attribute("content", Any, "The archived section block; absent when the contract's keys are shredded")
+
+	Required("id", "did", "contract_version", "section_id", "parties", "content_hash", "stored_by", "stored_at")
 })
 
 var ArchiveComplianceCheck = Type("ArchiveComplianceCheck", func() {
@@ -245,15 +262,15 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("store", func() {
-		Description("Store a contract or an evidence document in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25). kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
-		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06", "DCS-FR-CSA-25")
+		Description("Store a contract, an evidence document or a contract section in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25, DCS-FR-CSA-26). kind=section archives one section or clause block of the latest archived version for the parties assigned to it; each party must be able to read the contract, and only these parties, the Auditor and the system roles read the section. kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. The entry gets the archive notary receipt and the RFC 3161 TSA receipt that the signing workflow gives its archive entry. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
+		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06", "DCS-FR-CSA-25", "DCS-FR-CSA-26")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
 			Attribute("kind", String, "What to store", func() {
-				Enum("contract", "evidence")
+				Enum("contract", "evidence", "section")
 			})
 			Attribute("did", String, "Decentralized Identifier of the contract to archive, or of the archived contract the evidence belongs to")
 			Attribute("name", String, "Evidence document name (kind=evidence)")
@@ -262,6 +279,8 @@ var _ = Service("ContractStorageArchive", func() {
 			Attribute("content", Bytes, "Evidence document content (kind=evidence)", func() {
 				MaxLength(10 << 20)
 			})
+			Attribute("section_id", String, "The @id of the section or clause block to archive (kind=section)")
+			Attribute("parties", ArrayOf(String), "The organizations assigned to the section, who may read it (kind=section)")
 			Required("kind", "did")
 		})
 		Result(ArchiveStoreResponse)
@@ -299,6 +318,39 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("sections", func() {
+		Description("List the archived sections of a contract (DCS-FR-CSA-26) that the caller's organization is assigned to, with their content. The Auditor and the system roles read every section. A request for one section the caller is not assigned to is refused. The read is recorded in the archive audit log.")
+		Meta("dcs:requirements", "DCS-FR-CSA-26", "DCS-FR-CSA-18")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Contract Observer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Decentralized Identifier of the archived contract")
+			Attribute("section_id", String, "Only this section")
+			Required("did")
+		})
+		Result(ArrayOfRequired(ArchiveSectionItem))
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/sections")
+			Param("did")
+			Param("section_id")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})

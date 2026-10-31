@@ -366,9 +366,12 @@ type RetrieveAllEvent struct {
 // RetrieveArchivedEvent is emitted when archive data is retrieved. It names
 // every archived contract the caller received (DCS-FR-CSA-18).
 type RetrieveArchivedEvent struct {
-	RetrievedBy  string    `json:"retrieved_by"`
-	ContractDIDs []string  `json:"contract_dids"`
-	OccurredAt   time.Time `json:"occurred_at"`
+	RetrievedBy  string   `json:"retrieved_by"`
+	ContractDIDs []string `json:"contract_dids"`
+	// SectionIDs names the archived sections the caller received
+	// (DCS-FR-CSA-26); empty for a read of whole contracts.
+	SectionIDs []string  `json:"section_ids,omitempty"`
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 // SearchArchivedEvent is emitted when the archive is searched. It names the
@@ -434,6 +437,28 @@ func (e StoreArchiveEvidenceEvent) EventType() string {
 
 // GetDID implements [event.Event].
 func (e StoreArchiveEvidenceEvent) GetDID() string {
+	return e.DID
+}
+
+// StoreArchiveSectionEvent is emitted when an Archive Manager archives a
+// contract section for the parties assigned to it (DCS-FR-CSA-26).
+type StoreArchiveSectionEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion int       `json:"contract_version"`
+	SectionID       string    `json:"section_id"`
+	Parties         []string  `json:"parties"`
+	StoredBy        string    `json:"stored_by"`
+	ContentHash     string    `json:"content_hash"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreArchiveSectionEvent) EventType() string {
+	return eventtype.StoreArchiveSection.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreArchiveSectionEvent) GetDID() string {
 	return e.DID
 }
 

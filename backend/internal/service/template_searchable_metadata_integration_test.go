@@ -9,6 +9,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/command"
@@ -20,7 +21,7 @@ import (
 // DCS-FR-TR-10: templates are searchable by jurisdiction, industry and the
 // regulatory compliance status the policy audit sets at approval.
 func TestTemplateSearchableMetadataPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})

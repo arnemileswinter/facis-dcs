@@ -6,12 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/templaterepository/db"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
 func TestQATemplateHistoryRecordsStateChangesPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	tx, err := database.BeginTxx(ctx, nil)
 	require.NoError(t, err)

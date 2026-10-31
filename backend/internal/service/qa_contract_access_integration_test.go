@@ -27,6 +27,7 @@ import (
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
@@ -35,7 +36,7 @@ import (
 )
 
 func TestQAContractReadScopePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"
 	repo := &cwepg.PostgresContractRepo{}
@@ -185,7 +186,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 }
 
 func TestQAArchiveDetailPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

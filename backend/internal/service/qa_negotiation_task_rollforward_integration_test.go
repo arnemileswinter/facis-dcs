@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
@@ -13,7 +14,7 @@ import (
 // A signed PDF from the peer bumps the version without reopening accepted
 // negotiation tasks; a new negotiation round reopens them.
 func TestQANegotiationTaskRollForwardPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version) VALUES ('signed','','Org A','SIGNED','tpl',1)`)
 	require.NoError(t, err)

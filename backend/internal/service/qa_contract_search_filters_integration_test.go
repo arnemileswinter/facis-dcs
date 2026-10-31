@@ -8,6 +8,7 @@ import (
 
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
+	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
@@ -15,7 +16,7 @@ import (
 // DCS-IR-CWE-07 and DCS-FR-CWE-13: contract search filters by party, template
 // and jurisdiction.
 func TestQAContractSearchFiltersByPartyTemplateAndJurisdictionPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	_, err := database.Exec(`
 		INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,responsible,contract_data) VALUES
 		('de','','Org A','DRAFT','tpl-1',1,'{"creator":"did:web:a","counterparty":"did:web:b"}',
