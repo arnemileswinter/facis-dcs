@@ -32,7 +32,7 @@ const activeTab = ref<AuditPageTab>('compliance')
 const route = useRoute()
 if (
   typeof route.query.scope === 'string' &&
-  ['templates', 'contracts', 'archive', 'signatures'].includes(route.query.scope)
+  ['templates', 'contracts', 'archive', 'signatures', 'PROCESS_AUDIT_AND_COMPLIANCE'].includes(route.query.scope)
 ) {
   selectedScope.value = route.query.scope as AuditScope
 }
@@ -91,6 +91,7 @@ const allScopeOptions: { value: AuditScope; label: string }[] = [
   { value: 'contracts', label: 'Contracts' },
   { value: 'signatures', label: 'Signatures' },
   { value: 'archive', label: 'Archive' },
+  { value: 'PROCESS_AUDIT_AND_COMPLIANCE', label: 'Configuration and compliance' },
 ]
 const scopeOptions = computed(() =>
   isArchiveManagerOnly.value ? allScopeOptions.filter((scope) => scope.value === 'archive') : allScopeOptions,
