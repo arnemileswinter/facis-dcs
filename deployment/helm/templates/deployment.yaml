@@ -229,6 +229,10 @@ spec:
               value: {{ .Values.service.metricsPort | quote }}
             - name: DCS_UI_PATH
               value: {{ include "digital-contracting-service.uiPath" . | quote }}
+            {{- if gt (int .Values.archive.retentionYears) 0 }}
+            - name: DCS_ARCHIVE_RETENTION_YEARS
+              value: {{ .Values.archive.retentionYears | quote }}
+            {{- end }}
             {{- if .Values.route.publicBaseURL }}
             - name: DCS_PUBLIC_BASE_URL
               value: {{ .Values.route.publicBaseURL | quote }}

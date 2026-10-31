@@ -51,6 +51,15 @@ done
 render -f "$CHART_DIR/values.bdd.yml" --show-only charts/hydra/templates/deployment.yaml | grep -q TTL_ACCESS_TOKEN \
   && fail "access-token TTL set without hydra.config.accessTokenTTL"
 
+# DCS-FR-CSA-14 / DCS-FR-CSA-19: archive retention policy of 10 years in prod
+# and acceptance; none by default.
+for profile in prod acceptance; do
+  render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only templates/deployment.yaml \
+    | grep -A1 'name: DCS_ARCHIVE_RETENTION_YEARS$' | grep -q 'value: "10"' || fail "values.$profile.yml: no 10-year archive retention"
+done
+render "${ACK[@]}" --show-only templates/deployment.yaml | grep -q DCS_ARCHIVE_RETENTION_YEARS \
+  && fail "archive retention set without archive.retentionYears"
+
 # DCS-NFR-PER-03: liveness probe and, with more than one replica, a PodDisruptionBudget.
 prod="$(render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}")"
 grep -A4 'livenessProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no liveness probe on /livez"

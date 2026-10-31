@@ -124,6 +124,12 @@ affinity: {}
 extraEnv: []
 extraEnvFrom: []
 
+# Retention policy of archived contracts (DCS-FR-CSA-14, DCS-FR-CSA-19), in
+# years: DCS_ARCHIVE_RETENTION_YEARS. An archive entry cannot be deleted before
+# its retention ends. 0 sets no retention policy.
+archive:
+  retentionYears: 0
+
 # Archive notary / ORCE integration
 archiveNotary:
   baseURL: ""

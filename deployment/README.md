@@ -550,6 +550,8 @@ dev or CI stack only.
 
 Backup and restore procedures — including how backup retention interacts with GDPR key-shredding erasure — are specified in the [backup integration guide](../docs/backup-integration-guide.md).
 
+Archive retention (DCS-FR-CSA-14, DCS-FR-CSA-19): `archive.retentionYears` sets `DCS_ARCHIVE_RETENTION_YEARS` (10 in `values.prod.yml` and `values.acceptance.yml`; 0, the default, sets no retention policy). An archive entry cannot be deleted before its retention ends.
+
 ### Signing keys (PKCS#11) and the C2PA x5chain
 
 Every DCS private key lives in a PKCS#11 token (DCS-IR-HI-01). For dev, staging

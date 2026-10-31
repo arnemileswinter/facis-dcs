@@ -122,6 +122,10 @@ ipfs:
 dss:
   enabled: true
 
+# Retention policy of archived contracts (DCS-FR-CSA-14, DCS-FR-CSA-19).
+archive:
+  retentionYears: 10
+
 # Daily dump of the DCS database (DCS-NFR-SF-03): docs/backup-integration-guide.md.
 # Set persistence.storageClassName to an encrypted class.
 backup:
