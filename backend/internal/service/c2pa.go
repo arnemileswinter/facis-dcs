@@ -45,9 +45,9 @@ func NewC2PAService(
 	}
 }
 
-// GetManifest returns the raw C2PA JUMBF manifest store of the stored contract
-// PDF (Content-Type application/c2pa), or — when ?history=true — a parsed JSON
-// enumeration of the manifest chain.
+// GetManifest returns the raw C2PA JUMBF manifest store of the stored PDF of a
+// signed contract (Content-Type application/c2pa), or — when ?history=true — a
+// parsed JSON enumeration of the manifest chain.
 //
 // The endpoint is public, so it never waits for a regeneration in flight: it
 // serves the stored PDF as it stands and answers not found when there is none.
@@ -98,6 +98,13 @@ func (s *c2paSrvc) storedPDF(ctx context.Context, did string) ([]byte, error) {
 	}
 	if state.IPFSCID == "" {
 		return nil, fmt.Errorf("contract %s has no stored PDF: not found", did)
+	}
+	// The manifest of a contract that is not signed names its drafts and
+	// negotiation states and their reasons. It is served to anyone only once the
+	// contract is signed; before that its parties read the chain through the
+	// authenticated GET /signature/provenance/{did} (UC-IF-32).
+	if !state.Signed {
+		return nil, fmt.Errorf("contract %s is not signed: not found", did)
 	}
 	return s.Artifacts.Get(ctx, artifactstore.ContractScope(did), state.IPFSCID)
 }
