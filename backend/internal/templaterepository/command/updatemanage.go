@@ -126,19 +126,25 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not update template data: %w", err)
 	}
+	updated, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read template data: %w", err)
+	}
 
 	evt := templateevents.UpdateManageEvent{
-		DID:             cmd.DID,
-		OldName:         oldData.Name,
-		NewName:         cmd.Name,
-		OldDescription:  oldData.Description,
-		NewDescription:  cmd.Description,
-		OldTemplateData: oldData.TemplateData,
-		NewTemplateData: cmd.TemplateData,
-		UpdatedBy:       cmd.UpdatedBy,
-		OccurredAt:      time.Now().UTC(),
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
+		DID:               cmd.DID,
+		OldName:           oldData.Name,
+		NewName:           cmd.Name,
+		OldDescription:    oldData.Description,
+		NewDescription:    cmd.Description,
+		OldTemplateData:   oldData.TemplateData,
+		NewTemplateData:   cmd.TemplateData,
+		OldClassification: classification(oldData),
+		NewClassification: classification(updated),
+		UpdatedBy:         cmd.UpdatedBy,
+		OccurredAt:        time.Now().UTC(),
+		HolderDID:         cmd.HolderDID,
+		UserRoles:         cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {

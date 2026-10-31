@@ -478,6 +478,12 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 			TemplateData: item.TemplateData,
 			TemplateType: item.TemplateType.String(),
 			PartyType:    item.PartyType,
+
+			Jurisdiction:      item.Jurisdiction,
+			Industry:          item.Industry,
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 

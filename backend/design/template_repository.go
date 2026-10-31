@@ -291,6 +291,11 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction of the revision (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry of the revision (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Compliance status of the revision (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the revision (DCS-FR-TR-02)")
+	Attribute("required_templates", ArrayOf(String), "Templates the revision required (DCS-FR-TR-23)")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })

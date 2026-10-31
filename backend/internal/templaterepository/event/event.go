@@ -149,19 +149,32 @@ func (e VerifyEvent) GetDID() string {
 	return e.DID
 }
 
+// Classification is the classification and the structure of a template
+// revision (DCS-FR-TR-05, DCS-FR-TR-21).
+type Classification struct {
+	TemplateType      string   `json:"template_type"`
+	PartyType         string   `json:"party_type"`
+	Jurisdiction      *string  `json:"jurisdiction,omitempty"`
+	Industry          *string  `json:"industry,omitempty"`
+	TemplateLevel     string   `json:"template_level"`
+	RequiredTemplates []string `json:"required_templates"`
+}
+
 // UpdateEvent is emitted when template data is updated.
 type UpdateEvent struct {
-	DID             string             `json:"did"`
-	UpdatedBy       string             `json:"updated_by"`
-	OldName         *string            `json:"old_name,omitempty"`
-	NewName         *string            `json:"new_name,omitempty"`
-	OldDescription  *string            `json:"old_description,omitempty"`
-	NewDescription  *string            `json:"new_description,omitempty"`
-	OldTemplateData *datatype.JSON     `json:"old_template_data,omitempty"`
-	NewTemplateData *datatype.JSON     `json:"new_template_data,omitempty"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	HolderDID       string             `json:"holder_did"`
-	UserRoles       userrole.UserRoles `json:"user_roles"`
+	DID               string             `json:"did"`
+	UpdatedBy         string             `json:"updated_by"`
+	OldName           *string            `json:"old_name,omitempty"`
+	NewName           *string            `json:"new_name,omitempty"`
+	OldDescription    *string            `json:"old_description,omitempty"`
+	NewDescription    *string            `json:"new_description,omitempty"`
+	OldTemplateData   *datatype.JSON     `json:"old_template_data,omitempty"`
+	NewTemplateData   *datatype.JSON     `json:"new_template_data,omitempty"`
+	OldClassification Classification     `json:"old_classification"`
+	NewClassification Classification     `json:"new_classification"`
+	OccurredAt        time.Time          `json:"occurred_at"`
+	HolderDID         string             `json:"holder_did"`
+	UserRoles         userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.
@@ -176,17 +189,19 @@ func (e UpdateEvent) GetDID() string {
 
 // UpdateManageEvent is emitted when template data is updated.
 type UpdateManageEvent struct {
-	DID             string             `json:"did"`
-	UpdatedBy       string             `json:"updated_by"`
-	OldName         *string            `json:"old_name,omitempty"`
-	NewName         *string            `json:"new_name,omitempty"`
-	OldDescription  *string            `json:"old_description,omitempty"`
-	NewDescription  *string            `json:"new_description,omitempty"`
-	OldTemplateData *datatype.JSON     `json:"old_template_data,omitempty"`
-	NewTemplateData *datatype.JSON     `json:"new_template_data,omitempty"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	HolderDID       string             `json:"holder_did"`
-	UserRoles       userrole.UserRoles `json:"user_roles"`
+	DID               string             `json:"did"`
+	UpdatedBy         string             `json:"updated_by"`
+	OldName           *string            `json:"old_name,omitempty"`
+	NewName           *string            `json:"new_name,omitempty"`
+	OldDescription    *string            `json:"old_description,omitempty"`
+	NewDescription    *string            `json:"new_description,omitempty"`
+	OldTemplateData   *datatype.JSON     `json:"old_template_data,omitempty"`
+	NewTemplateData   *datatype.JSON     `json:"new_template_data,omitempty"`
+	OldClassification Classification     `json:"old_classification"`
+	NewClassification Classification     `json:"new_classification"`
+	OccurredAt        time.Time          `json:"occurred_at"`
+	HolderDID         string             `json:"holder_did"`
+	UserRoles         userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.

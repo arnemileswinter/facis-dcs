@@ -145,19 +145,25 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not update template data: %w", err)
 	}
+	updated, err := h.CTRepo.ReadDataByID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not read template data: %w", err)
+	}
 
 	evt := templateevents.UpdateEvent{
-		DID:             cmd.DID,
-		OldName:         oldData.Name,
-		NewName:         cmd.Name,
-		OldDescription:  oldData.Description,
-		NewDescription:  cmd.Description,
-		OldTemplateData: oldData.TemplateData,
-		NewTemplateData: cmd.TemplateData,
-		UpdatedBy:       cmd.UpdatedBy,
-		OccurredAt:      time.Now().UTC(),
-		HolderDID:       cmd.HolderDID,
-		UserRoles:       cmd.UserRoles,
+		DID:               cmd.DID,
+		OldName:           oldData.Name,
+		NewName:           cmd.Name,
+		OldDescription:    oldData.Description,
+		NewDescription:    cmd.Description,
+		OldTemplateData:   oldData.TemplateData,
+		NewTemplateData:   cmd.TemplateData,
+		OldClassification: classification(oldData),
+		NewClassification: classification(updated),
+		UpdatedBy:         cmd.UpdatedBy,
+		OccurredAt:        time.Now().UTC(),
+		HolderDID:         cmd.HolderDID,
+		UserRoles:         cmd.UserRoles,
 	}
 	err = event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo)
 	if err != nil {
@@ -165,4 +171,16 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	return tx.Commit()
+}
+
+// classification of a template revision for the update events (DCS-FR-TR-21).
+func classification(template *db.ContractTemplate) templateevents.Classification {
+	return templateevents.Classification{
+		TemplateType:      template.TemplateType,
+		PartyType:         template.PartyType,
+		Jurisdiction:      template.Jurisdiction,
+		Industry:          template.Industry,
+		TemplateLevel:     template.TemplateLevel,
+		RequiredTemplates: template.RequiredTemplates,
+	}
 }

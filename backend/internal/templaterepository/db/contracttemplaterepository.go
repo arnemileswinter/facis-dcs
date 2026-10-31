@@ -111,6 +111,8 @@ type ContractTemplateHistory struct {
 	UpdatedAt    time.Time      `db:"updated_at"`
 	TemplateData *datatype.JSON `db:"template_data"`
 	BaseTemplate *string        `db:"base_template"`
+	SearchableMetadata
+	Structure
 }
 
 type SearchValues struct {
