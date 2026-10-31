@@ -45,6 +45,7 @@ import (
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/db/pq"
 	"digital-contracting-service/internal/base/envelope"
 	"digital-contracting-service/internal/base/event"
@@ -615,7 +616,11 @@ func main() {
 		if err := templateCatalogueClient.CheckReadiness(ctx, requireFCHealth); err != nil {
 			log.Fatalf(ctx, err, "federated catalogue readiness gate failed")
 		}
-		if err := fcschemas.Sync(ctx, templateCatalogueClient); err != nil {
+		// Replicas that start together sync one after the other, so they do
+		// not create the same schema in the catalogue twice.
+		if err := basedb.RunLocked(ctx, db, "fc-schema-sync", func() error {
+			return fcschemas.Sync(ctx, templateCatalogueClient)
+		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
 	}
