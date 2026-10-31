@@ -641,21 +641,45 @@ true
 {{- end }}
 
 {{/*
-DCS_CONFIG_SHA256_PINS (DCS-NFR-SEC-04): configIntegrity.pins plus the SHA-256
-of the operator trust ConfigMap as the cluster holds it at render time.
+DCS_CONFIG_SHA256_PINS (DCS-NFR-SEC-04): configIntegrity.pins. The pin of the
+operator trust ConfigMap is an explicit value, required in production
+(templates/prerequisites.yaml): a pin taken from the live ConfigMap at render
+time would take over an edit of it, and helm template or ArgoCD would render
+none.
 */}}
 {{- define "digital-contracting-service.configPins" -}}
-{{- $pins := deepCopy .Values.configIntegrity.pins -}}
-{{- $trust := .Values.oid4vp.trust -}}
-{{- if and $trust.enabled $trust.existingConfigMap (not (hasKey $pins "oid4vp-trust-data")) -}}
-{{- $cm := lookup "v1" "ConfigMap" .Release.Namespace $trust.existingConfigMap -}}
-{{- with (get ($cm.data | default dict) $trust.existingConfigMapKey) -}}
-{{- $_ := set $pins "oid4vp-trust-data" (sha256sum .) -}}
-{{- end -}}
-{{- end -}}
 {{- $parts := list -}}
-{{- range $name, $hash := $pins -}}
+{{- range $name, $hash := (.Values.configIntegrity.pins | default dict) -}}
 {{- $parts = append $parts (printf "%s=%s" $name $hash) -}}
 {{- end -}}
 {{- join "," $parts -}}
+{{- end }}
+
+{{/* Name of the /metrics Service; the alert rules select it by this name. */}}
+{{- define "digital-contracting-service.metricsServiceName" -}}
+{{- printf "%s-metrics" (include "digital-contracting-service.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end }}
+
+{{/*
+Labels of the ServiceMonitor and the PrometheusRule (DCS-NFR-SEC-11): the
+selectors of the Prometheus that loads them. alerts.labels when set; else
+release: <this release> for the co-deployed kube-prometheus-stack
+(monitoring.enabled), whose selectors match its own release; else
+release: prometheus, the release name of a separately installed stack.
+*/}}
+{{- define "digital-contracting-service.monitoringLabels" -}}
+{{- if .Values.alerts.labels -}}
+{{- toYaml .Values.alerts.labels -}}
+{{- else if .Values.monitoring.enabled -}}
+release: {{ .Release.Name }}
+{{- else -}}
+release: prometheus
+{{- end -}}
+{{- end }}
+
+{{/* "true" when the Prometheus Operator CRDs exist or monitoring.enabled. */}}
+{{- define "digital-contracting-service.prometheusOperator" -}}
+{{- if or .Values.monitoring.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") -}}
+true
+{{- end -}}
 {{- end }}

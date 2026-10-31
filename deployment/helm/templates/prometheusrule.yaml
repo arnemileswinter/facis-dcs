@@ -1,24 +1,26 @@
-{{- if and .Values.alerts.enabled (or .Values.monitoring.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule")) }}
+{{- if and .Values.alerts.enabled (include "digital-contracting-service.prometheusOperator" .) }}
 {{- $fullname := include "digital-contracting-service.fullname" . }}
 {{- $ns := .Release.Namespace }}
-{{- $sel := printf "namespace=%q, service=%q" $ns (printf "%s-metrics" $fullname) }}
+{{- $sel := printf "namespace=%q, service=%q" $ns (include "digital-contracting-service.metricsServiceName" .) }}
 # Alert rules for continuous monitoring (DCS-NFR-SEC-11). Alertmanager routes
-# them; the liveness probe restarts a backend that stops serving.
+# them; the liveness probe restarts a backend that stops serving. The series
+# come from the ServiceMonitor of templates/servicemonitor.yaml, which renders
+# with these rules.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: {{ $fullname }}
   labels:
     {{- include "digital-contracting-service.labels" . | nindent 4 }}
-    {{- with .Values.alerts.labels }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+    {{- include "digital-contracting-service.monitoringLabels" . | nindent 4 }}
 spec:
   groups:
     - name: {{ $fullname }}
       rules:
         - alert: DCSBackendDown
-          expr: up{ {{- $sel -}} } == 0
+          # absent(): with every pod gone the scrape target disappears and up
+          # has no series at all.
+          expr: up{ {{- $sel -}} } == 0 or absent(up{ {{- $sel -}} })
           for: 5m
           labels:
             severity: critical
@@ -62,5 +64,19 @@ spec:
             severity: critical
           annotations:
             summary: "The DCS database backup job in {{ $ns }} failed (DCS-NFR-SF-03)."
+        # A job that stays Pending never fails; these two catch it.
+        - alert: DCSBackupStale
+          expr: time() - kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ printf "%s-db-backup" $fullname | quote }}} > 93600
+          labels:
+            severity: critical
+          annotations:
+            summary: "The last successful DCS database backup in {{ $ns }} is older than 26 hours (DCS-NFR-SF-03)."
+        - alert: DCSBackupNeverSucceeded
+          expr: absent(kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ printf "%s-db-backup" $fullname | quote }}})
+          for: 26h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No DCS database backup in {{ $ns }} has succeeded for 26 hours (DCS-NFR-SF-03)."
         {{- end }}
 {{- end }}

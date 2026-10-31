@@ -37,9 +37,9 @@ helm template lifecycle "$CHART_DIR" \
 helm template lifecycle "$CHART_DIR" \
   -f "$CHART_DIR/values.bdd.yml" \
   --set fcservice.portal.enabled=true >"$TMP_DIR/enabled-b.yaml"
-# The in-cluster TLS key material (global.internalTLS) is generated on each
-# install, so it is the one part that may differ.
-generated_tls='^[[:space:]]+(ca|tls)\.(crt|key): '
+# The in-cluster TLS key material (global.internalTLS) and the Kubo API token
+# are generated on each install, so they are the parts that may differ.
+generated_tls='^[[:space:]]+((ca|tls)\.(crt|key)|token): '
 cmp <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-a.yaml") <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-b.yaml") ||
   fail "identical locked inputs rendered different manifests"
 
@@ -331,14 +331,14 @@ if grep -q 'name: FEDERATED_CATALOGUE_API_URL' "$TMP_DIR/disabled.yaml"; then
 fi
 
 if helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.acceptance.yml" >/dev/null 2>"$TMP_DIR/remote-error"; then
+  -f "$CHART_DIR/values.acceptance.yml" -f "$CHART_DIR/tests/acceptance.prerequisites.yml" \
+  --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=false >/dev/null 2>"$TMP_DIR/remote-error"; then
   fail "remote ADMIN_ALL catalogue rendered without explicit ADR-18 acknowledgement"
 fi
 grep -q 'acknowledgeAdminAllTrustBoundary' "$TMP_DIR/remote-error" ||
   fail "remote FC rejection does not explain the required ADR-18 acknowledgement"
 helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.acceptance.yml" \
-  --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true \
+  -f "$CHART_DIR/values.acceptance.yml" -f "$CHART_DIR/tests/acceptance.prerequisites.yml" \
   >"$TMP_DIR/remote-acknowledged.yaml"
 
 if grep -nE 'helm dependency update' \

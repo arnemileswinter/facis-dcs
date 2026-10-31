@@ -136,15 +136,18 @@ for prof in "bdd dcs" "bdd2 dcs2"; do
   [[ "$(env_of "$f" Deployment "$rb" $C PDF_CORE_URL)" == "https://$rb-pdf-core:8443" ]] || fail "values.$v.yml: pdf-core without TLS"
   [[ "$(env_of "$f" Deployment "$r-hydra" hydra DSN)" == *"@$r-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt" ]] \
     || fail "values.$v.yml: Hydra reaches the database without TLS"
-  grep -q 'name: statuslist-service' "$f" && fail "values.$v.yml deploys the XFSC statuslist-service"
-  # Hydra admin API: TLS 1.3 proxy in the pod, called over https by the backend
-  # and the client registration job.
+  grep -q '^  name: [a-z0-9-]*statuslist-service$' "$f" && fail "values.$v.yml deploys the XFSC statuslist-service"
+  # Hydra admin API: TLS 1.3 proxy in the pod, called over https by the
+  # backend. The Service has no plain admin port; each Hydra pod registers the
+  # clients over loopback.
   grep -q 'ssl_protocols TLSv1.3;' <<<"$(obj "$f" Deployment "$r-hydra" "next((c['args'][0] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'tls-proxy'), None)")" \
     || fail "values.$v.yml: Hydra has no TLS 1.3 proxy"
   [[ "$(obj "$f" Service "$r-hydra" "[p['port'] for p in x['spec']['ports'] if p['name'] == 'https']")" == "[8443]" ]] || fail "values.$v.yml: Hydra service has no https port"
   [[ "$(env_of "$f" Deployment "$rb" $C HYDRA_ADMIN_URL)" == "https://$r-hydra:8443" ]] || fail "values.$v.yml: backend calls the Hydra admin API without TLS"
-  [[ "$(env_of "$f" Job "$r-hydra-clients" register-clients HYDRA_ADMIN)" == "https://$r-hydra:8443" ]] || fail "values.$v.yml: client registration without TLS"
-  [[ "$(env_of "$f" Job "$r-hydra-clients" register-clients CURL_CA_BUNDLE)" == /etc/dcs-internal-tls/ca.crt ]] || fail "values.$v.yml: client registration does not verify Hydra"
+  [[ "$(obj "$f" Service "$r-hydra" "[p['port'] for p in x['spec']['ports'] if p['targetPort'] == 'admin' or p['port'] == 4445]")" == "[]" ]] || fail "values.$v.yml: plain Hydra admin port on the Service"
+  [[ "$(obj "$f" Service "$r-ipfs" "[p['port'] for p in x['spec']['ports'] if p['targetPort'] == 'api' or p['port'] == 5001]")" == "[]" ]] || fail "values.$v.yml: plain IPFS RPC port on the Service"
+  [[ "$(env_of "$f" Deployment "$r-hydra" register-clients HYDRA_ADMIN)" == "http://127.0.0.1:4445" ]] || fail "values.$v.yml: Hydra pods do not register the clients over loopback"
+  obj "$f" Job "$r-hydra-clients" "x" >/dev/null 2>&1 && fail "values.$v.yml: Hydra clients still registered by a hook Job"
   proxy="$(obj "$f" Deployment "$rb" "next((c['readinessProbe']['httpGet']['path'] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'statuslist-localhost-proxy'), None)")"
   [[ "$proxy" == /issuer/status-list/1 ]] || fail "values.$v.yml: localhost proxy readiness depends on $proxy"
 done
@@ -161,5 +164,109 @@ grep -q -- '--cacert' <<<"$pdp_probe" && grep -q '/etc/dcs-internal-tls/ca.crt' 
 # The issuer release renders the orce chart on its own, without the parent.
 helm template dcs-issuer "$CHART_DIR/charts/orce" -f "$CHART_DIR/values.issuer-base.yml" -f "$CHART_DIR/values.issuer.bdd.yml" \
   | grep -q 'tls-proxy' && fail "standalone orce chart renders the TLS proxy"
+
+# ---- DCS-NFR-SEC-03, DCS-NFR-SF-02, DCS-NFR-SEC-14: NetworkPolicies ----------
+# Every restricted API admits only its clients, every policy selects real pods
+# on ports they have, and every pod the chart owns is under the default deny.
+for prof in "all" "bdd" "bdd2"; do
+  case "$prof" in
+    all) f="$TMP/a.yaml" ;;
+    *) f="$TMP/ci-$prof.yaml" ;;
+  esac
+  python3 - "$f" <<'EOF' || fail "NetworkPolicies of $prof"
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+nps = {d["metadata"]["name"]: d["spec"] for d in docs if d["kind"] == "NetworkPolicy"}
+pods = []
+for d in docs:
+    s = d["spec"] if "spec" in d else {}
+    if d["kind"] in ("Deployment", "StatefulSet", "DaemonSet", "Job"):
+        t = s["template"]
+    elif d["kind"] == "CronJob":
+        t = s["jobTemplate"]["spec"]["template"]
+    else:
+        continue
+    ports = {p["name"] for c in t["spec"]["containers"] for p in c.get("ports", []) if "name" in p}
+    pods.append((d["metadata"]["name"], t.get("metadata", {}).get("labels", {}), ports))
+rel = next(d["metadata"]["labels"]["app.kubernetes.io/instance"] for d in docs if d["kind"] == "NetworkPolicy")
+
+def matches(sel, labels):
+    if any(labels.get(k) != v for k, v in sel.get("matchLabels", {}).items()):
+        return False
+    return all(labels.get(e["key"]) in e["values"] for e in sel.get("matchExpressions", []))
+
+def selected(sel):
+    return [p for p in pods if matches(sel, p[1])]
+
+def peer_pods(rule):
+    return {p[0] for f in rule.get("from", []) if "podSelector" in f and "namespaceSelector" not in f for p in selected(f["podSelector"])}
+
+errors = []
+deny = nps[next(n for n in nps if n.endswith("-default-deny"))]
+assert deny["policyTypes"] == ["Ingress"] and not deny.get("ingress"), "default deny admits traffic"
+owned = [p for p in pods if p[1].get("app.kubernetes.io/instance") == rel and p[2]]
+for p in owned:
+    if p not in selected(deny["podSelector"]):
+        errors.append("pod %s with ports is not under the default deny" % p[0])
+for n, spec in nps.items():
+    targets = selected(spec["podSelector"])
+    if not targets:
+        errors.append("%s selects no pod" % n)
+    for r in spec.get("ingress", []):
+        for port in r.get("ports", []):
+            if not any(port["port"] in t[2] for t in targets):
+                errors.append("%s: no selected pod has port %s" % (n, port["port"]))
+        for f in r.get("from", []):
+            if "podSelector" in f and "namespaceSelector" not in f and not selected(f["podSelector"]):
+                errors.append("%s: peer %s selects no pod" % (n, f))
+
+def admitted(component, port):
+    np = next((s for n, s in nps.items() if n.endswith("-" + component)), None)
+    if np is None:
+        return "absent"
+    out = []
+    for r in np.get("ingress", []):
+        if any(p["port"] == port for p in r.get("ports", [])):
+            out.append(None if "from" not in r else peer_pods(r))
+    return out
+
+# The "all" render has no Hydra; the BDD renders cover it.
+deployed_elsewhere = {"hydra"} if not any(p[1].get("app.kubernetes.io/name") == "hydra" for p in pods) else set()
+backend = {p[0] for p in pods if p[1].get("app.kubernetes.io/component") == "backend" and p[1].get("app.kubernetes.io/instance") == rel}
+for component, port in (("hydra", "admin"), ("hydra", "https"), ("ipfs", "api"), ("ipfs", "https"), ("ipfs", "gateway"),
+                        ("nats", "client"), ("pdf-core", "https")):
+    got = admitted(component, port)
+    if got != [backend] and not (got == "absent" and component in deployed_elsewhere):
+        errors.append("%s port %s admits %s, not only the backend %s" % (component, port, got, backend))
+clients = backend | {p[0] for p in pods if p[1].get("app.kubernetes.io/name") == "hydra" or p[0].endswith(("-db-backup", "-pac-monitor"))}
+if admitted("postgresql", "postgres") != [clients]:
+    errors.append("postgresql admits %s, not its clients %s" % (admitted("postgresql", "postgres"), clients))
+for component, port in (("hydra", "public"), ("backend", "https")):
+    if admitted(component, port) != [None] and component not in deployed_elsewhere:
+        errors.append("%s port %s is not open" % (component, port))
+if errors:
+    sys.exit("\n".join(errors))
+EOF
+done
+[[ "$(render "${ALL[@]}" --set networkPolicy.enabled=false | grep -c 'kind: NetworkPolicy')" == 0 ]] || fail "NetworkPolicies with networkPolicy.enabled=false"
+# An empty peer list leaves the rule out instead of admitting every source.
+render "${ALL[@]}" --set networkPolicy.metricsFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: metrics' \
+  && fail "metrics port admitted without metricsFrom"
+
+# ---- DCS-NFR-SF-02: the Kubo RPC API needs the bearer token --------------------
+f="$TMP/a.yaml"
+init="$(obj "$f" Deployment dcs-ipfs "x['spec']['template']['spec']['initContainers'][0]['args'][0]")"
+grep -q 'API.Authorizations "{\\"dcs\\":{\\"AuthSecret\\":\\"bearer:$IPFS_API_TOKEN\\"' <<<"$init" || fail "Kubo API without authorization: $init"
+for w in "Deployment dcs-ipfs ipfs" "Deployment $B $C"; do
+  read -r kind name ctr <<<"$w"
+  grep -q "'name': 'dcs-ipfs-api', 'key': 'token'" <<<"$(env_of "$f" "$kind" "$name" "$ctr" IPFS_API_TOKEN)" || fail "$name gets no IPFS_API_TOKEN"
+done
+[[ "$(obj "$f" Secret dcs-ipfs-api "len(x['stringData']['token'])")" -ge 32 ]] || fail "short Kubo API token"
+render "${ALL[@]}" --set ipfs.api.auth.enabled=false >"$TMP/noauth.yaml"
+grep -q "API.Authorizations '{}'" <<<"$(obj "$TMP/noauth.yaml" Deployment dcs-ipfs "x['spec']['template']['spec']['initContainers'][0]['args'][0]")" \
+  || fail "Kubo keeps an authorization after api.auth.enabled=false"
+[[ "$(env_of "$TMP/noauth.yaml" Deployment $B $C IPFS_API_TOKEN)" == None ]] || fail "IPFS_API_TOKEN without Kubo authorization"
+render "${ALL[@]}" --set ipfs.apiTokenSecretRef.name=ext >"$TMP/ext.yaml"
+[[ "$(env_of "$TMP/ext.yaml" Deployment $B $C IPFS_API_TOKEN)" == *"'name': 'ext', 'key': 'IPFS_API_TOKEN'"* ]] || fail "ipfs.apiTokenSecretRef not used"
 
 echo 'in-cluster security render tests passed'

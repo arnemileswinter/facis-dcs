@@ -16,8 +16,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # optional components (ACME renewal, flow import job, XFSC statuslist-service)
 # and of the standalone issuer release.
 render -f "$CHART_DIR/values.bdd.yml" >"$TMP/bdd.yaml"
-render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}" >"$TMP/prod.yaml"
-render -f "$CHART_DIR/values.acceptance.yml" "${ACK[@]}" >"$TMP/acceptance.yaml"
+render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" >"$TMP/prod.yaml"
+render -f "$CHART_DIR/values.acceptance.yml" -f "$CHART_DIR/tests/acceptance.prerequisites.yml" >"$TMP/acceptance.yaml"
 render -f "$CHART_DIR/values.bdd.yml" --set orce.flowsFile.enabled=false --set statuslistService.enabled=true \
   --set acmeRenewal.enabled=true --set acmeRenewal.host=dcs.example.org --set acmeRenewal.email=ops@example.org \
   --set acmeRenewal.secretName=tls --set backup.enabled=true --set logging.enabled=true \
@@ -86,6 +86,23 @@ EOF
 grep -q '^ARG DOCKER_UID=10001$' "$CHART_DIR/../docker/Dockerfile" || fail "DCS image user is not 10001"
 grep -q '^USER ${DOCKER_UID}:${DOCKER_UID}$' "$CHART_DIR/../docker/Dockerfile" || fail "DCS image does not run as DOCKER_UID"
 grep -q '^USER 10001:10001$' "$CHART_DIR/../../pdf-core/Dockerfile" || fail "pdf-core image does not run as 10001"
+# DCS-NFR-SEC-05, DCS-NFR-SQ-02: the runtime base is pinned by digest, the
+# default target is the production image, and the BDD helper and the dev trust
+# fixtures exist only in the ci stage (tests/bdd/Makefile builds --target ci).
+python3 - "$CHART_DIR/../docker/Dockerfile" "$CHART_DIR/../../tests/bdd/Makefile" <<'EOF' || fail "DCS image stages"
+import re, sys
+text = open(sys.argv[1]).read()
+stages = re.split(r"^FROM ", text, flags=re.M)[1:]
+heads = [s.split("\n", 1)[0] for s in stages]
+runtime = next(s for s in stages if s.split("\n", 1)[0].endswith(" AS runtime"))
+assert re.match(r"debian:stable-slim@sha256:[0-9a-f]{64} AS runtime$", runtime.split("\n", 1)[0]), heads
+assert heads[-1] == "runtime AS production", heads
+ci = next(s for s in stages if s.split("\n", 1)[0] == "runtime AS ci")
+for name in ("hsmsign", "trust.dev.json", "x5c-trust-anchors.dev.pem"):
+    assert name in ci, name
+    assert not re.search(r"^COPY .*" + re.escape(name), runtime, flags=re.M), name + " in the runtime image"
+assert "--target ci" in open(sys.argv[2]).read(), "the BDD image is not the ci target"
+EOF
 python3 - "$TMP/prod.yaml" <<'EOF' || fail "backend pod user or /tmp"
 import sys, yaml
 d = next(x for x in yaml.safe_load_all(open(sys.argv[1])) if x and x["kind"] == "Deployment"
@@ -117,7 +134,7 @@ D=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 digests=()
 for k in image pdfCore.image global.internalTLS.proxy.image statusListLocalhostProxy.image backup.image \
   postgresql.image hydra.image nats.image orce.image dss.image ipfs.image logging.loki.image \
-  logging.collector.image statuslistService.image; do
+  logging.collector.image logging.gateway.image statuslistService.image; do
   digests+=(--set "$k.digest=$D")
 done
 render -f "$CHART_DIR/values.bdd.yml" --set statuslistService.enabled=true --set backup.enabled=true \

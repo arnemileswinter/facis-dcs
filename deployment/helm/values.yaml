@@ -49,8 +49,29 @@ service:
   # Prometheus /metrics, on its own ClusterIP Service (<fullname>-metrics).
   metricsPort: 9464
 
+# A ServiceMonitor for /metrics. It renders anyway wherever the alert rules
+# render (alerts below), because they evaluate its series.
 serviceMonitor:
   enabled: false
+
+# NetworkPolicies (templates/networkpolicy.yaml; DCS-NFR-SEC-03, DCS-NFR-SEC-14,
+# DCS-NFR-SF-02). Every pod the chart owns gets ingress only from its clients:
+# the Hydra admin API, the IPFS RPC API, pdf-core and NATS only from the
+# backend; PostgreSQL only from the backend, Hydra, the backup and the
+# compliance monitor. The backend API, the Hydra public API, ORCE, DSS and the
+# Federated Catalogue stay open: the ingress routes them and they authenticate
+# their callers. A CNI that enforces NetworkPolicy is a prerequisite.
+networkPolicy:
+  enabled: true
+  # Peers that may scrape /metrics (port metrics).
+  metricsFrom:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+  # More peers for every restricted rule, for example the node CIDR as an
+  # ipBlock where the CNI does not admit kubelet probes from the node.
+  extraFrom: []
 
 ingress:
   enabled: false
@@ -68,7 +89,7 @@ ingress:
   tlsOptions:
     enabled: true
     minVersion: "VersionTLS13"
-    # Leer lassen: eine Obergrenze schliesst kuenftige Versionen aus.
+    # Leave empty: an upper bound excludes future versions.
     maxVersion: ""
     cipherSuites: []
     sniStrict: false
@@ -243,15 +264,20 @@ paths:
   api: ""
   ui: ""
 
-# DID identity Secret mount (DCS_DID). Disabled by default: most deployments
-# derive their signing identity from the PKCS#11 token directly. Enabled by
-# the BDD kind harness, where a post-install hsm-provision Job publishes
-# did.json (freshly derived from the in-cluster SoftHSM2 token key) into the
-# Secret named by the 'identitySecretName' helper.
+# DID document of this instance (DCS_DID, fatal at startup when missing). It
+# publishes the public key of the HSM key dcs-did.
+#   - enabled: did.json comes from the hsm-provision Job of the co-deployed
+#     SoftHSM2 token (pkcs11.provisioning), published into the Secret named by
+#     the 'identitySecretName' helper, or read off the token volume.
+#   - existingSecret: did.json from a Secret the operator creates (key
+#     did.json). Required with a real HSM (provisioning disabled); create it
+#     with gendid against that HSM (deployment/README.md, "Production
+#     prerequisites").
 identity:
   enabled: false
   # Override the auto-derived <fullname>-identity Secret name.
   secretName: ""
+  existingSecret: ""
   mountPath: "/app/identity"
 
 # Application readiness is intentionally distinct from process liveness.
@@ -301,9 +327,9 @@ podDisruptionBudget:
 # x5c-trust-anchors-poa, x5c-trust-anchors-pid, oid4vp-trust-policy.
 #   pins:
 #     x5c-trust-anchors-poa: <sha256sum of the file>
-# The chart pins oid4vp-trust-data itself when oid4vp.trust.existingConfigMap
-# exists at install or upgrade time: an edit of that ConfigMap outside a release
-# then stops the backend at its next start.
+# Pin oid4vp-trust-data to the SHA-256 of the trust document of
+# oid4vp.trust.existingConfigMap (required in production): an edit of that
+# ConfigMap outside a release then stops the backend at its next start.
 configIntegrity:
   pins: {}
 
@@ -371,7 +397,9 @@ signing:
     name: ""
     key: "ISSUER_DID"
 
-  # RFC 3161 Timestamp Authority (optional; activates real timestamps on C2PA manifests).
+  # RFC 3161 Timestamp Authority (TSA_URL). Required: the backend does not
+  # start without it, and every C2PA manifest and archive entry carries a
+  # timestamp from it.
   tsaURL: ""
   # Optional: Secret (key tsa-cert.pem) holding the TSA certificate to trust
   # for RFC3161 token verification, overriding the embedded certs/tsa.crt
@@ -459,7 +487,8 @@ postgresql:
   # database — list it here as well. Hydra in particular only runs
   # `hydra migrate sql`, which assumes the database already exists; without an
   # entry it stays unready and the backend cannot discover the OIDC provider.
-  additionalDatabases: []
+  # "hydra" is the database of hydra.config.coDeployedPostgresql.
+  additionalDatabases: ["hydra"]
   # Defaults to an emptyDir, which loses every contract on a pod restart. Enable
   # for anything longer-lived than a test cluster.
   persistence:
@@ -736,6 +765,17 @@ ipfs:
   mfsBaseURLSecretRef:
     name: ""
     key: "IPFS_MFS_BASE_URL"
+  # The co-deployed Kubo accepts RPC calls only with the bearer token of the
+  # Secret <release>-ipfs-api, which the backend gets as IPFS_API_TOKEN
+  # (DCS-NFR-SF-02). The NetworkPolicy also admits only the backend.
+  api:
+    auth:
+      enabled: true
+  # Token of a Kubo outside this release (API.Authorizations "bearer:<token>").
+  # Set it when mfsBaseURL or mfsBaseURLSecretRef names such a node.
+  apiTokenSecretRef:
+    name: ""
+    key: "IPFS_API_TOKEN"
   persistence:
     enabled: false
     size: 5Gi
@@ -779,13 +819,15 @@ logging:
       # Set an encrypted StorageClass: logs can hold personal data.
       storageClassName: ""
 
-# Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule when the Prometheus
-# Operator CRD exists or monitoring.enabled. labels must match the
-# ruleSelector of the Prometheus that should load them.
+# Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule together with the
+# ServiceMonitor they read when the Prometheus Operator CRD exists or
+# monitoring.enabled. labels go on both and must match the ruleSelector and
+# serviceMonitorSelector of the Prometheus that loads them. Empty: release:
+# <this release> with monitoring.enabled (the co-deployed
+# kube-prometheus-stack), else release: prometheus.
 alerts:
   enabled: true
-  labels:
-    release: prometheus
+  labels: {}
   serverErrorRatio: 0.05
   authFailuresPerSecond: 1
   p95LatencySeconds: 2

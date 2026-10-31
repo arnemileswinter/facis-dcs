@@ -4,9 +4,14 @@
 #
 # Every field below was checked against the actual chart schema
 # (deployment/helm/values.yaml + templates), not guessed. Secrets audit
-# (E5): every credential below resolves via secretKeyRef — no plaintext
-# secret is committed in this file — with ONE documented exception (Hydra),
-# noted where it occurs.
+# (E5): every credential below resolves via secretKeyRef; no plaintext secret
+# is committed in this file.
+#
+# Like values.prod.yml it does not render as shipped: the chart names every
+# value the backend needs to start (templates/prerequisites.yaml), and
+# deployment/README.md, "Production prerequisites", lists them with the
+# Secrets and their keys. deployment/argocd/application.yaml fills them for
+# an example.
 
 replicaCount: 2
 
@@ -54,15 +59,15 @@ database:
     name: dcs-acceptance-db-credentials
     key: DATABASE_URL
 
-# Hydra (OAuth2/OIDC): the system secret comes from a Kubernetes Secret
-# (create it before install, high-entropy value):
+# Hydra (OAuth2/OIDC): the system secret, the DSN of its own PostgreSQL
+# database and the client secret come from a Kubernetes Secret (create it
+# before install, high-entropy values):
 #   kubectl create secret generic dcs-acceptance-hydra-secrets \
-#     --from-literal=secretsSystem="$(openssl rand -hex 32)"
-# For an existing Hydra with a persistent database, append the previous
-# system secret after a comma (see deployment/README.md, Hydra).
-# `clients[].client_secret` has no secretKeyRef equivalent: populate it via
-# `--set` from your secret manager at deploy time, never committed to a values
-# file.
+#     --from-literal=secretsSystem="$(openssl rand -hex 32)" \
+#     --from-literal=dsn='postgres://hydra:<password>@<host>:5432/hydra?sslmode=verify-full' \
+#     --from-literal=dcs-client-secret="$(openssl rand -hex 32)"
+# To rotate the system secret, append the previous one after a comma (see
+# deployment/README.md, Hydra).
 hydra:
   enabled: true
   secrets:
@@ -70,14 +75,28 @@ hydra:
       name: dcs-acceptance-hydra-secrets
   config:
     dev: false
+    dsnSecretRef:
+      name: dcs-acceptance-hydra-secrets
+      key: dsn
     selfIssuerURL: "https://acceptance.dcs.example.org"
-    loginURL: "https://acceptance.dcs.example.org/ui/"
-    consentURL: "https://acceptance.dcs.example.org/api/auth/consent"
-    logoutURL: "https://acceptance.dcs.example.org/api/auth/logout-complete"
+    loginURL: "https://acceptance.dcs.example.org/digital-contracting-service/ui/"
+    consentURL: "https://acceptance.dcs.example.org/digital-contracting-service/api/auth/consent"
+    logoutURL: "https://acceptance.dcs.example.org/digital-contracting-service/api/auth/logout-complete"
     # DCS-IR-CI-09, DCS-NFR-BR-06: an access token issued before a credential
     # revocation stays valid for at most 5 minutes.
     accessTokenTTL: "5m"
-  clients: []
+  clients:
+    - client_id: dcs-client
+      client_secretSecretRef:
+        name: dcs-acceptance-hydra-secrets
+        key: dcs-client-secret
+      grant_types: ["authorization_code", "refresh_token"]
+      response_types: ["code"]
+      scope: "openid offline_access"
+      redirect_uris: ["https://acceptance.dcs.example.org/digital-contracting-service/api/auth/callback"]
+      post_logout_redirect_uris: ["https://acceptance.dcs.example.org/digital-contracting-service/api/auth/logout-complete"]
+      token_endpoint_auth_method: client_secret_post
+      skip_consent: true
 
 # PKCS#11: acceptance still runs against the co-deployed SoftHSM2 token
 # (provisioning.enabled=true, same as values.bdd.yml) rather than a real HSM
@@ -88,6 +107,11 @@ pkcs11:
   pinSecretRef:
     name: dcs-acceptance-hsm-pin
     key: PKCS11_PIN
+
+# DCS_DID: did.json of the SoftHSM2 key dcs-did, published by the
+# hsm-provision Job.
+identity:
+  enabled: true
 
 federatedCatalogue:
   enabled: true

@@ -22,7 +22,7 @@ jobs:
     # mid-run with the diagnostic dump skipped — a suite that cannot finish
     # reports nothing at all. Raised to leave headroom; the growth itself is
     # worth reducing rather than absorbing indefinitely. The load test after
-    # the suite adds about 10 minutes.
+    # the suite adds about 15 minutes (its capacity steps about 5 of them).
     timeout-minutes: 100
     concurrency:
       group: bdd-kind-${{ github.ref }}
@@ -107,8 +107,9 @@ jobs:
             PDF_CORE_BUILD_CACHE="--cache-from type=gha,scope=pdf-core-image-v2 --cache-to type=gha,mode=max,scope=pdf-core-image-v2"
 
       # NFR-PER-01/02: k6 against the same stack, with one and then two DCS
-      # replicas. Also runs when scenarios failed, as long as the stack was
-      # deployed. Limits and load level: tests/load/dcs_load.js.
+      # replicas, then the capacity of each (tests/load/run_load.py). Also runs
+      # when scenarios failed, as long as the stack was deployed. Limits and
+      # load level: tests/load/dcs_load.js.
       - name: Load test (k6)
         if: ${{ !cancelled() && steps.bdd.outcome != 'skipped' }}
         run: make -C tests/bdd run_load_kind_once KIND_CLUSTER_NAME=dcs-bdd
@@ -162,10 +163,11 @@ jobs:
           docker exec dcs-bdd-control-plane df -h / /var || true
           for release in dcs dcs2; do
             echo "--- ${release}-ipfs node state ---"
+            # The Kubo RPC API requires its bearer token (charts/ipfs, api.auth).
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
-              sh -c 'ipfs pin ls --type=recursive 2>/dev/null | wc -l' || true
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" pin ls --type=recursive 2>/dev/null | wc -l' || true
             kubectl exec -n dcs-bdd "deployment/${release}-ipfs" -c ipfs -- \
-              ipfs repo stat || true
+              sh -c 'ipfs --api-auth "bearer:$IPFS_API_TOKEN" repo stat' || true
           done
 
       - name: Generate coverage XML and summary

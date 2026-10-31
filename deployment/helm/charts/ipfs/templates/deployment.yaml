@@ -27,7 +27,6 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or .Values.api.cors.enabled .Values.config.routingType .Values.config.noSync }}
       initContainers:
         - name: ipfs-config
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
@@ -39,6 +38,10 @@ spec:
           command:
             - /bin/sh
             - -c
+          {{- if .Values.api.auth.enabled }}
+          env:
+            {{- include "ipfs.apiTokenEnv" . | nindent 12 }}
+          {{- end }}
           args:
             - |
               set -eu
@@ -47,6 +50,11 @@ spec:
               fi
               ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001
               ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+              {{- if .Values.api.auth.enabled }}
+              ipfs config --json API.Authorizations "{\"dcs\":{\"AuthSecret\":\"bearer:$IPFS_API_TOKEN\",\"AllowedPaths\":[\"/api/v0\"]}}"
+              {{- else }}
+              ipfs config --json API.Authorizations '{}'
+              {{- end }}
               {{- if .Values.api.cors.enabled }}
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '{{ toJson .Values.api.cors.allowOrigins }}'
               ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '{{ toJson .Values.api.cors.allowMethods }}'
@@ -78,7 +86,6 @@ spec:
           volumeMounts:
             - name: ipfs-data
               mountPath: /data/ipfs
-      {{- end }}
       containers:
         - name: ipfs
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
@@ -97,6 +104,11 @@ spec:
             - name: swarm-tcp
               containerPort: 4001
               protocol: TCP
+          {{- if .Values.api.auth.enabled }}
+          # For the ipfs CLI in this container (kubectl exec).
+          env:
+            {{- include "ipfs.apiTokenEnv" . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             tcpSocket:
               port: api

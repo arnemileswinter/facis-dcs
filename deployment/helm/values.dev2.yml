@@ -169,6 +169,9 @@ ipfs:
   persistence:
     enabled: true
   api:
+    # The backend runs on the host and calls the NodePort without a token.
+    auth:
+      enabled: false
     cors:
       enabled: true
       allowOrigins:
@@ -206,3 +209,8 @@ global:
   # reaches PostgreSQL, NATS, IPFS and ORCE through their NodePorts.
   internalTLS:
     enabled: false
+
+# The backend runs on the host and reaches PostgreSQL, NATS, IPFS and Hydra
+# through NodePorts, which the NetworkPolicies would refuse.
+networkPolicy:
+  enabled: false

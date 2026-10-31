@@ -26,9 +26,9 @@ metadata:
     {{- end }}
     {{- if include "digital-contracting-service.tlsOptionEnforced" . }}
     {{/*
-    Die TLSOption gilt erst, wenn der Router sie nennt. Ohne diese Annotation
-    liegt die Ressource im Cluster und Traefik handelt trotzdem TLS 1.2 aus —
-    deshalb wird sie hier gesetzt und nicht dem Betreiber ueberlassen.
+    The TLSOption applies only when the router names it. Without this
+    annotation the resource exists in the cluster and Traefik still negotiates
+    TLS 1.2, so the chart sets it here.
     */}}
     traefik.ingress.kubernetes.io/router.tls.options: {{ printf "%s-%s-tls13@kubernetescrd" .Release.Namespace (include "digital-contracting-service.fullname" .) | quote }}
     {{- end }}
