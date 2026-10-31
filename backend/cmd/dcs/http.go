@@ -46,6 +46,7 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/pathutil"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
 	"digital-contracting-service/internal/service"
@@ -321,10 +322,15 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 
 // newOuterMux routes /orce/* to the webhook platform, the status list and
 // /readyz to their handlers, and everything else to Goa. It does not serve
-// /metrics: that is on the metrics listener (see serveMetrics).
+// /metrics: that is on the metrics listener (see serveMetrics). The webhook
+// platform is also under the API path (DCS_API_PATH), where the ingress routes
+// the calls of the Webhooks view (DCS-NFR-SQ-08).
 func newOuterMux(webhookPlatform, statusList, goaMux http.Handler) *http.ServeMux {
 	outerMux := http.NewServeMux()
 	outerMux.Handle("/orce/", http.StripPrefix("/orce", webhookPlatform))
+	if apiRoot := strings.TrimSuffix(pathutil.NormalizePath(os.Getenv("DCS_API_PATH"), "", false), "/"); apiRoot != "" {
+		outerMux.Handle(apiRoot+"/orce/", http.StripPrefix(apiRoot+"/orce", webhookPlatform))
+	}
 	// The status list for the credentials this deployment issues (ADR-34). It
 	// sits here rather than in the generated API surface for two reasons: it is
 	// served at the origin root, the way did.json is, so a verifier holding only

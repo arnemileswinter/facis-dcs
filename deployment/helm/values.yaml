@@ -527,8 +527,10 @@ hydra:
 #       roles: ["Sys. Contract Creator"]
 #
 # Valid roles: Sys. Contract Creator, Sys. Contract Reviewer, Sys. Contract
-# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer. The
-# strings must match exactly; an unknown one stops the backend at startup.
+# Approver, Sys. Contract Manager, Sys. Auditor, Sys. Contract Signer,
+# Sys. Integration Manager (manages the webhook subscriptions of its
+# organization, /orce/webhooks). The strings must match exactly; an unknown one
+# stops the backend at startup.
 # Sys. Contract Signer holds no signing scope (ADR-17), so a signature always
 # needs a person with a wallet.
 #

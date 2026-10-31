@@ -30,8 +30,14 @@ type TokenValidator func(ctx context.Context, token string) (Caller, error)
 
 // managementRoles may create, list and delete webhook subscriptions. A
 // subscription connects a third-party system to DCS events, which ADR-29
-// assigns to the Integration Manager and the System Administrator.
-var managementRoles = []string{userrole.IntegrationManager.String(), userrole.SystemAdministrator.String()}
+// assigns to the Integration Manager and the System Administrator. The
+// machine role Sys. Integration Manager lets an integration (ORCE) manage its
+// subscriptions with its own credential.
+var managementRoles = []string{
+	userrole.IntegrationManager.String(),
+	userrole.SystemAdministrator.String(),
+	userrole.SystemIntegrationManager.String(),
+}
 
 // Platform is the webhook subscription HTTP handler.
 // Mount it on any path prefix with http.StripPrefix.
