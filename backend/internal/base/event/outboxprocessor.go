@@ -113,7 +113,20 @@ func (j OutboxProcessor) startPublishingJob(ctx context.Context, interval time.D
 }
 
 func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
-	schedulerLogic := func() error {
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if err := j.anchorPending(ctx); err != nil {
+			log.Printf("could not process outbox entries: %v", err)
+		}
+	}
+}
+
+// anchorPending anchors the next batch of unprocessed outbox events. One
+// replica at a time does this: the batch, the per-resource chain heads and the
+// checkpoint chain are read and then extended, and two replicas doing that at
+// once anchor the same events twice and fork the chains.
+func (j OutboxProcessor) anchorPending(ctx context.Context) error {
+	_, err := db.RunExclusive(ctx, j.DB, "outbox-anchoring", func() error {
 		tx, err := j.DB.BeginTxx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("could not start transaction: %w", err)
@@ -182,14 +195,8 @@ func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.D
 			return nil
 		}
 		return j.anchorBatch(ctx, anchorable)
-	}
-
-	ticker := time.NewTicker(interval)
-	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
-			log.Printf("could not process outbox entries: %v", err)
-		}
-	}
+	})
+	return err
 }
 
 // anchorBatch anchors one batch of audit-visible events and commits to it with
@@ -615,7 +622,7 @@ func (j OutboxProcessor) startTimestampingJob(ctx context.Context, interval time
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if _, err := db.RunExclusive(ctx, j.DB, "audit-checkpoint-timestamping", schedulerLogic); err != nil {
 			log.Printf("could not timestamp pending checkpoints: %v", err)
 		}
 	}

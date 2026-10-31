@@ -10,6 +10,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	basedb "digital-contracting-service/internal/base/db"
 	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -287,12 +288,15 @@ func (e *ContractEraser) RetryPending(ctx context.Context) {
 }
 
 // StartEraseRetryJob re-delivers pending peer erasures on the given interval
-// (same mechanics as the sync-fail scheduler, separate queue).
-func (e *ContractEraser) StartEraseRetryJob(ctx context.Context, interval time.Duration) {
+// (same mechanics as the sync-fail scheduler, separate queue), on one replica
+// at a time.
+func (e *ContractEraser) StartEraseRetryJob(ctx context.Context, database *sqlx.DB, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		for range ticker.C {
-			e.RetryPending(ctx)
+			if _, err := basedb.RunExclusive(ctx, database, "peer-erase-retry", func() error { e.RetryPending(ctx); return nil }); err != nil {
+				log.Printf(ctx, "could not retry pending peer erasures: %v", err)
+			}
 		}
 	}()
 }

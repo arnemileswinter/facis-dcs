@@ -24,6 +24,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
@@ -234,8 +235,7 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		return attempts, nil
 	}
 
-	ticker := time.NewTicker(interval)
-	for range ticker.C {
+	retryPass := func() error {
 		log.Printf(ctx, "start retrying failed contract PDF ships")
 		syncFails, err := readSyncFails()
 		if err != nil {
@@ -252,6 +252,16 @@ func (s *DCSToDCSSynchronizer) startSyncFailScheduler(ctx context.Context, inter
 		s.retryUndeliveredSettlements(ctx)
 		s.retryUndeliveredSettlementWithdrawals(ctx)
 		s.retryUndeliveredNegotiationMessages(ctx)
+		return nil
+	}
+
+	// One replica at a time retries, so a peer does not get each retry once
+	// per replica.
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		if _, err := basedb.RunExclusive(ctx, s.DB, "peer-sync-retry", retryPass); err != nil {
+			log.Printf(ctx, "could not retry failed peer deliveries: %v", err)
+		}
 	}
 }
 

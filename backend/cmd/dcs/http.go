@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	didservice "digital-contracting-service/gen/did_service"
 
 	genauth "digital-contracting-service/gen/auth"
@@ -148,7 +150,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	contractStorageArchiveEndpoints *contractstoragearchive.Endpoints, contractWorkflowEngineEndpoints *contractworkflowengine.Endpoints,
 	dcsToDcsEndpoints *dcstodcs.Endpoints, pdfGenerationEndpoints *pdfgeneration.Endpoints, processAuditAndComplianceEndpoints *processauditandcompliance.Endpoints,
 	signatureManagementEndpoints *signaturemanagement.Endpoints, templateCatalogueIntegrationEndpoints *templatecatalogueintegration.Endpoints,
-	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, infoEndpoints *geninfo.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, wg *sync.WaitGroup,
+	templateRepositoryEndpoints *templaterepository.Endpoints, didEnpoints *didservice.Endpoints, c2paEndpoints *c2paservice.Endpoints, semanticHubEndpoints *semantichubgen.Endpoints, keyInventoryEndpoints *keyinventory.Endpoints, infoEndpoints *geninfo.Endpoints, webhookPlatform *webhookplatform.Platform, statusList *provenance.StatusListSigner, db *sqlx.DB, wg *sync.WaitGroup,
 	errc chan error, dbg bool) {
 
 	var (
@@ -239,7 +241,7 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 	outerMux := newOuterMux(webhookPlatform, provenance.StatusListHandler(statusList), mux)
 
 	var handler http.Handler = outerMux
-	handler = middleware.RateLimitAuthenticated(conf.APIRateLimitPerMinute(), handler)
+	handler = middleware.RateLimitAuthenticated(db, conf.APIRateLimitPerMinute(), handler)
 	handler = reportContentTypeMiddleware(handler)
 	handler = evidenceBodyLimit(handler)
 	handler = service.RequestContextMiddleware(handler)

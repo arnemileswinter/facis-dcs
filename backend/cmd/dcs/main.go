@@ -45,6 +45,7 @@ import (
 	"digital-contracting-service/internal/base"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/db/pq"
 	"digital-contracting-service/internal/base/envelope"
 	"digital-contracting-service/internal/base/event"
@@ -239,6 +240,11 @@ func main() {
 	}
 	if err := service.RefreshValidationAnchors(ctx, db); err != nil {
 		log.Fatalf(ctx, err, "Could not anchor validation to the Semantic Hub's active schemas")
+	}
+	if err := service.FollowHubActivations(ctx, os.Getenv("DATABASE_URL"), func(ctx context.Context) error {
+		return service.RefreshValidationAnchors(ctx, db)
+	}); err != nil {
+		log.Fatalf(ctx, err, "Could not follow Semantic Hub activations of other replicas")
 	}
 
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: db})
@@ -509,7 +515,7 @@ func main() {
 		ERepo:       eraseRepo,
 		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}
-	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
+	contractEraser.StartEraseRetryJob(ctx, db, conf.SyncFailCronJobTimeOut())
 
 	// Termination propagation (DCS-NFR-BR-06): notices queued by the terminate
 	// command go to every counterparty instance and are retried until confirmed.
@@ -625,7 +631,11 @@ func main() {
 		if err := templateCatalogueClient.CheckReadiness(ctx, requireFCHealth); err != nil {
 			log.Fatalf(ctx, err, "federated catalogue readiness gate failed")
 		}
-		if err := fcschemas.Sync(ctx, templateCatalogueClient); err != nil {
+		// Replicas that start together sync one after the other, so they do
+		// not create the same schema in the catalogue twice.
+		if err := basedb.RunLocked(ctx, db, "fc-schema-sync", func() error {
+			return fcschemas.Sync(ctx, templateCatalogueClient)
+		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
 	}
@@ -1037,7 +1047,7 @@ func main() {
 		log.Errorf(ctx, err, "failed to shut down bootstrap HTTP server")
 	}
 	serveMetrics(ctx, &wg)
-	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, &wg, errc, *dbgF)
+	handleHTTPServer(ctx, listenURL, authEndpoints, contractStorageArchiveEndpoints, contractWorkflowEngineEndpoints, dcsToDcsEndpoints, pdfGenerationEndpoints, processAuditAndComplianceEndpoints, signatureManagementEndpoints, templateCatalogueIntegrationEndpoints, templateRepositoryEndpoints, didEntpoints, c2paEndpoints, semanticHubEndpoints, keyInventoryEndpoints, infoEndpoints, webhookPlatform, statusListSigner, db, &wg, errc, *dbgF)
 
 	// Wait for signal.
 	log.Printf(ctx, "exiting (%v)", <-errc)

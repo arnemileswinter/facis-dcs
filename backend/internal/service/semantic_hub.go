@@ -19,6 +19,8 @@ import (
 	"digital-contracting-service/internal/semantichub"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
+	"goa.design/clue/log"
 )
 
 const maxSchemaFetchBytes = 8 << 20 // 8 MiB
@@ -375,6 +377,33 @@ func (s *semanticHubsrvc) List(ctx context.Context) (res []*semantichubgen.Seman
 		})
 	}
 	return out, nil
+}
+
+// FollowHubActivations calls refresh each time any replica commits a hub
+// activation, and after the listening connection is restored, because
+// activations can be missed while it is down. The anchors are process-wide
+// state, so without this only the replica that served the activation request
+// would use the new versions.
+func FollowHubActivations(ctx context.Context, databaseURL string, refresh func(context.Context) error) error {
+	listener := pq.NewListener(databaseURL, time.Second, time.Minute, nil)
+	if err := listener.Listen(semantichub.ActivationChannel); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("listen for semantic hub activations: %w", err)
+	}
+	go func() {
+		defer func() { _ = listener.Close() }()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-listener.Notify:
+				if err := refresh(ctx); err != nil {
+					log.Errorf(ctx, err, "re-anchor validation after a semantic hub activation")
+				}
+			}
+		}
+	}()
+	return nil
 }
 
 // RefreshValidationAnchors re-points the validation layer's process-wide
