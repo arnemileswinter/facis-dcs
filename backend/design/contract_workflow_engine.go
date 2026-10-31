@@ -582,7 +582,9 @@ var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("reason", String, "Reason for terminating contract")
+	Attribute("reason", String, "Reason for terminating contract", func() {
+		MinLength(1)
+	})
 	Attribute("updated_at", String, "Updated at")
 
 	Required("did", "reason", "updated_at")

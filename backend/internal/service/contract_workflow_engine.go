@@ -291,6 +291,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
 		errors.Is(err, command.ErrKPIContractTerminated) ||
 		errors.Is(err, command.ErrMissingRequiredMetadata) ||
+		errors.Is(err, command.ErrTerminationReasonRequired) ||
 		errors.Is(err, command.ErrNotPublishable) ||
 		errors.Is(err, fcclient.ErrFederatedCatalogueNotConfigured) ||
 		// Deployment refusals are the operator's to fix — no target designated,
