@@ -14,7 +14,8 @@ type Event string
 
 const (
 	// EventOffer: first transmission of a draft contract to the
-	// counterparty (SRS 2.2.6). Triggers the PostSync broadcast.
+	// counterparty (SRS 2.2.6). Its OFFER event makes the DCS-to-DCS
+	// synchronizer ship the contract PDF to the counterparty peers.
 	EventOffer Event = "OFFER"
 
 	// EventWithdraw: initiator retracts the contract before it is approved.

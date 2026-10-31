@@ -1,4 +1,4 @@
-# ArgoCD Application manifest (DCS-OE-03, previously absent). Example for
+# ArgoCD Application manifest (DCS-OE-03). Example for
 # the acceptance environment — duplicate and swap valueFiles/destination for
 # production (values.prod.yml).
 #

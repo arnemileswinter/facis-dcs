@@ -116,7 +116,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 	// a draft.
 	if processData.State == contractstate.Draft.String() || processData.State == contractstate.Offered.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator) {
 			return errors.New("invalid user permission")
 		}
 
@@ -156,7 +156,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Rejected.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator) {
 			return errors.New("invalid user permission")
 		}
 
@@ -198,7 +198,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer, userrole.SystemContractReviewer) {
 			return errors.New("invalid user permission")
 		}
 
@@ -357,7 +357,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Submitted.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractReviewer) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractReviewer, userrole.SystemContractReviewer) {
 			return errors.New("invalid user permission")
 		}
 
@@ -414,7 +414,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Reviewed.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractApprover) {
+		if !cmd.UserRoles.HasRoles(userrole.ContractApprover, userrole.SystemContractApprover) {
 			return errors.New("invalid user permission")
 		}
 

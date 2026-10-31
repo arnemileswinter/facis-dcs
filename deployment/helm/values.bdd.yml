@@ -216,6 +216,18 @@ hydra:
       response_types: []
       scope: ""
       token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-reviewer
+      client_secret: dcs-orce-reviewer-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
+    - client_id: dcs-orce-approver
+      client_secret: dcs-orce-approver-secret
+      grant_types: ["client_credentials"]
+      response_types: []
+      scope: ""
+      token_endpoint_auth_method: client_secret_post
     # Deliberately present and deliberately unable to sign: see the
     # systemClients entry below and ADR-17.
     - client_id: dcs-orce-signer
@@ -347,6 +359,14 @@ systemClients:
   - client_id: dcs-orce-manager
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Sys. Contract Manager"]
+  # Reviews contracts and forwards them to approval (UC-12-02).
+  - client_id: dcs-orce-reviewer
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Reviewer"]
+  # Approves reviewed contracts (UC-12-03).
+  - client_id: dcs-orce-approver
+    participant_did: "did:web:dcs-a.localhost%3A18080"
+    roles: ["Sys. Contract Approver"]
   # SRS Table 5 defines System Contract Signer as "API-based digital signing
   # for autonomous or IoT systems". eIDAS Art. 3(9) makes a signatory a NATURAL
   # PERSON, and an advanced signature requires their sole control (Art. 26) —

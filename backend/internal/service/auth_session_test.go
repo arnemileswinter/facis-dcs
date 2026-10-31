@@ -7,9 +7,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"digital-contracting-service/internal/auth"
+	authevents "digital-contracting-service/internal/auth/event"
 	"digital-contracting-service/internal/auth/hydra"
 )
 
@@ -33,6 +35,7 @@ func refreshingHydra(t *testing.T) (*hydra.Client, *[]string) {
 		payload, _ := json.Marshal(map[string]any{
 			"sub": "did:example:holder",
 			"ext": map[string]any{
+				"iss":   "did:web:participant.example",
 				"roles": []string{"Template Creator"},
 				hydra.CredentialStatusClaim: map[string]any{
 					"iss":    "https://issuer.example",
@@ -112,6 +115,48 @@ func TestRefreshEndsTheSessionOfARevokedCredential(t *testing.T) {
 	}
 	if c := refreshCookie(w); c == nil || c.MaxAge >= 0 {
 		t.Fatalf("the refresh cookie was not cleared: %+v", c)
+	}
+}
+
+// FR-UC-09-2: a session that ends at refresh because its PoA is revoked is
+// written to the audit trail with the subject, the participant and the reason.
+// A session that stays open writes nothing.
+func TestRefreshAuditsTheEndOfARevokedSession(t *testing.T) {
+	client, _ := refreshingHydra(t)
+	var audited []authevents.SessionEndedEvent
+	revocation := error(nil)
+	svc := &authSvc{
+		hydra:                 client,
+		checkCredentialStatus: func(json.RawMessage) error { return revocation },
+		recordSessionEnded: func(_ context.Context, evt authevents.SessionEndedEvent) error {
+			audited = append(audited, evt)
+			return nil
+		},
+	}
+
+	ctx, _ := refreshRequest()
+	if _, err := svc.Refresh(ctx); err != nil {
+		t.Fatalf("refresh with an active credential failed: %v", err)
+	}
+	if len(audited) != 0 {
+		t.Fatalf("a session that stays open was audited as ended: %+v", audited)
+	}
+
+	revocation = errors.New("credential status list index 7 is revoked")
+	ctx, _ = refreshRequest()
+	if _, err := svc.Refresh(ctx); err == nil {
+		t.Fatal("refresh with a revoked credential succeeded")
+	}
+	if len(audited) != 1 {
+		t.Fatalf("the session end was audited %d times, want once", len(audited))
+	}
+	got := audited[0]
+	if got.SubjectDID != "did:example:holder" || got.ParticipantDID != "did:web:participant.example" ||
+		!strings.Contains(got.Reason, "revoked") || got.OccurredAt.IsZero() {
+		t.Fatalf("session end audit event = %+v", got)
+	}
+	if got.EventType() != "AUTH_SESSION_ENDED" || got.GetDID() != "did:example:holder" {
+		t.Fatalf("session end audit event is keyed as %s/%s", got.EventType(), got.GetDID())
 	}
 }
 

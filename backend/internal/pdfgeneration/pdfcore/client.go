@@ -644,6 +644,34 @@ func (c *Client) ExtractPayload(ctx context.Context, pdf []byte) ([]byte, error)
 	return payload, nil
 }
 
+// ManifestReference returns the remote C2PA manifest URL that a PDF references
+// in its XMP metadata, or "" when it references none (DCS-OR-C2PA-008).
+func (c *Client) ManifestReference(ctx context.Context, pdf []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/manifest/reference", bytes.NewReader(pdf))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err := checkStatus(resp); err != nil {
+		return "", err
+	}
+	ref, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("pdf-core manifest-reference read: %w", err)
+	}
+	return strings.TrimSpace(string(ref)), nil
+}
+
 // checkStatus returns an error for non-2xx responses, including the status code
 // in the message. Hard-fail: callers must not silently swallow pdf-core errors.
 func checkStatus(resp *http.Response) error {
