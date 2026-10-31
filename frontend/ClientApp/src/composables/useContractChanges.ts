@@ -10,6 +10,7 @@ export interface ContractChange {
 }
 
 const RECONNECT_MS = 5_000
+const MAX_RECONNECT_MS = 60_000
 // The server sends a heartbeat every 30 seconds; silence beyond this is a dead connection.
 const SILENCE_MS = 75_000
 
@@ -62,7 +63,10 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
         signal: controller.signal,
       })
       if (response.status === 401) {
-        return (await authenticationService.refresh()) === true
+        // The next attempt uses the refreshed token after the reconnect delay,
+        // so a server that keeps refusing is not called in a loop.
+        await authenticationService.refresh()
+        return false
       }
       if (!response.ok || !response.body) return false
       const reader = response.body.getReader()
@@ -88,9 +92,14 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
   }
 
   async function run() {
+    let failures = 0
     while (!stopped) {
       const ended = await listen()
-      if (!stopped && !ended) await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS))
+      failures = ended ? 0 : failures + 1
+      if (!stopped && !ended) {
+        const delay = Math.min(RECONNECT_MS * 2 ** (failures - 1), MAX_RECONNECT_MS)
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
     }
   }
 
