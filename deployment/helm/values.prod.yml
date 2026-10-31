@@ -123,3 +123,10 @@ dss:
 # Set persistence.storageClassName to an encrypted class.
 backup:
   enabled: true
+
+# Log store with retention (DCS-NFR-SEC-09): values.yaml, logging. Set
+# loki.persistence.storageClassName to an encrypted class. Logs are read
+# through Grafana (monitoring.enabled, or a Grafana in this namespace that
+# loads labelled data source ConfigMaps).
+logging:
+  enabled: true

@@ -1,3 +1,4 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -26,6 +27,9 @@ spec:
       {{- if and (eq (.Values.service.type | default "ClusterIP") "NodePort") .Values.service.swarmNodePort }}
       nodePort: {{ .Values.service.swarmNodePort }}
       {{- end }}
+    {{- if $tls }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     app.kubernetes.io/name: ipfs
     app.kubernetes.io/instance: {{ .Release.Name }}

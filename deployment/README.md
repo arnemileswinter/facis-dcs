@@ -563,6 +563,8 @@ chain from `signing.issuerX5ChainPath`. pdf-core is configured with no signing
 material: the backend sends the chain with each render request in the
 `X-DCS-C2PA-X5Chain` header.
 
+The acceptance profile runs its 2 backend pods on one node (required `podAffinity` in `values.acceptance.yml`), because the SoftHSM2 token volume is ReadWriteOnce; prod uses a real HSM and has no such volume.
+
 SoftHSM2 is a software token and is NOT a production HSM. For production set
 `pkcs11.provisioning.enabled=false` and point `pkcs11` at a real external PKCS#11
 module whose token already holds the keys:
@@ -640,7 +642,14 @@ Two trust configurations follow from that:
   ```
 - HTTPS redirect and HSTS (DCS-IR-CI-03): when `route.publicBaseURL` is `https://`, the backend answers a request that the proxy received over plain HTTP (`X-Forwarded-Proto: http`) with a redirect to HTTPS, and sends `Strict-Transport-Security` on HTTPS responses.
 - PostgreSQL: put `sslmode=verify-full` (with `sslrootcert`) in the `DATABASE_URL` of the external database. `database.sslmode` sets the mode of a URL the chart derives.
-- In-cluster traffic between the backend and NATS, IPFS, pdf-core, DSS and the co-deployed PostgreSQL is plain HTTP/TCP inside the namespace. Encrypt it with a service mesh (mTLS) or a CNI with transparent encryption.
+- In-cluster TLS (DCS-NFR-SEC-14, `global.internalTLS`, on by default). The chart generates a CA on install (Secret `<release>-internal-ca`, kept on upgrade, ECDSA P-256) and a server certificate for the co-deployed services (`<release>-internal-tls`). The co-deployed PostgreSQL accepts TCP connections only with TLS 1.3 (`hostssl`), and the derived `DATABASE_URL` uses `sslmode=verify-full`. NATS requires TLS 1.3, and the derived `NATS_URL` is `tls://`. IPFS RPC, pdf-core, DSS and ORCE serve plain HTTP only: a TLS proxy container in each pod serves TLS 1.3 on port 8443, and the backend calls it there. Their plain ports stay for probes, ingress routes and port-forwards. The backend, the backup and the compliance monitor trust the CA (`SSL_CERT_DIR`, `sslrootcert`). Another client of the co-deployed PostgreSQL, for example Hydra, needs `sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt` in its DSN; Hydra mounts the CA there. URLs set in values (`signing.tsaURL`, `auditExecutor.url`, `federation.trustPdpURL`, ...) are used as given. The BDD and e2e kind stacks (`values.bdd.yml`, `values.bdd2.yml`) run with it on. Instance B calls the ORCE and DSS it shares with instance A on their plain ports, because they belong to another release with another CA. The dev profiles set `global.internalTLS.enabled: false`, because the dev backend runs on the host and reaches the services through NodePorts.
+- Co-deployed PostgreSQL password: with `postgresql.auth.password` empty, the chart generates a random password on install and keeps it on upgrade (Secret `<release>-postgresql`). The backend, the backup and the compliance monitor get it as `PGPASSWORD`.
+
+### Logs (DCS-NFR-SEC-09)
+- `logging.enabled` (on in `values.prod.yml` and `values.acceptance.yml`) co-deploys Loki and a collector (Grafana Alloy). The collector reads the logs of every pod in the release namespace through the Kubernetes API (a namespaced Role, no node access) and pushes them to Loki over TLS.
+- Retention: `logging.retention` (default `2160h`, 90 days). The Loki compactor deletes older lines. Set `logging.loki.persistence.storageClassName` to an encrypted class.
+- Access: Loki has no ingress and no authentication of its own. A NetworkPolicy lets only the collector and the pods in `logging.queryFrom` (default: Grafana in the same namespace) connect. The chart writes a Grafana data source ConfigMap (label `grafana_datasource: "1"`) that the Grafana of `monitoring.enabled` loads; Grafana requires a login. For a Grafana in another namespace, add its namespace to `logging.queryFrom` and load the data source there.
+- The audit trail is not in Loki: it stays in the database (`audit_trail_log`, hash-chained, anchored by checkpoints) without expiry and is part of the database backup.
 
 ### Values
 Override the following at minimum:

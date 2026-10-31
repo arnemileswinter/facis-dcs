@@ -93,3 +93,18 @@ spec:
               port: admin
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+          # Internal CA for a DSN to the co-deployed PostgreSQL with
+          # sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt.
+          volumeMounts:
+            - name: internal-ca
+              mountPath: /etc/dcs-internal-tls
+              readOnly: true
+      volumes:
+        - name: internal-ca
+          secret:
+            secretName: {{ .Release.Name }}-internal-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+          {{- end }}

@@ -391,8 +391,8 @@ kind_coredns_rewrite: ensure_k8s_tools
 
 # Deploys the SECOND DCS release (instance B, features/17_peer_trust) into
 # the same kind namespace, strictly after instance A: B probes
-# several of A's already-deployed shared services (Traefik, ORCE TSA, Status
-# List Service, IPFS) at its own startup, so it depends on kind_deploy rather
+# several of A's already-deployed shared services (Traefik, ORCE TSA,
+# DSS) at its own startup, so it depends on kind_deploy rather
 # than only on kind_create/kind_load_image.
 kind_deploy_b: kind_deploy
 	@echo "Deploying instance B (release $(HELM_RELEASE_B)) after instance A ($(HELM_RELEASE))..."

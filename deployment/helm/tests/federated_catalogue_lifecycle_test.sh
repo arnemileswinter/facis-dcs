@@ -13,9 +13,21 @@ fail() {
 
 command -v helm >/dev/null || fail "helm is required"
 
+# helm dependency build also packs every local subchart into charts/*.tgz. Helm
+# then loads the copy and the directory, and the copy can hide a later edit of
+# the directory. The packed copies of local subcharts are removed again.
+remove_local_subchart_archives() {
+  local dir
+  for dir in "$CHART_DIR"/charts/*/; do
+    rm -f "$CHART_DIR/charts/$(basename "$dir")"-*.tgz
+  done
+}
+trap 'remove_local_subchart_archives; rm -rf "$TMP_DIR"' EXIT
+
 lock_before="$(sha256sum "$CHART_DIR/Chart.lock")"
 helm dependency build --skip-refresh "$CHART_DIR" >/dev/null
 lock_after="$(sha256sum "$CHART_DIR/Chart.lock")"
+remove_local_subchart_archives
 [[ "$lock_before" == "$lock_after" ]] ||
   fail "helm dependency build changed the authoritative Chart.lock"
 
@@ -25,7 +37,10 @@ helm template lifecycle "$CHART_DIR" \
 helm template lifecycle "$CHART_DIR" \
   -f "$CHART_DIR/values.bdd.yml" \
   --set fcservice.portal.enabled=true >"$TMP_DIR/enabled-b.yaml"
-cmp "$TMP_DIR/enabled-a.yaml" "$TMP_DIR/enabled-b.yaml" ||
+# The in-cluster TLS key material (global.internalTLS) is generated on each
+# install, so it is the one part that may differ.
+generated_tls='^[[:space:]]+(ca|tls)\.(crt|key): '
+cmp <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-a.yaml") <(grep -Ev "$generated_tls" "$TMP_DIR/enabled-b.yaml") ||
   fail "identical locked inputs rendered different manifests"
 
 deployment_image() {
@@ -226,9 +241,9 @@ statuslist_proxy_doc="$(awk '
 ' <<<"$backend_doc")"
 grep -q 'readinessProbe:' <<<"$statuslist_proxy_doc" &&
   grep -q 'httpGet:' <<<"$statuslist_proxy_doc" &&
-  grep -q 'path: "/statuslist/v1/tenants/c2pa/status/1"' <<<"$statuslist_proxy_doc" &&
+  grep -q 'path: "/issuer/status-list/1"' <<<"$statuslist_proxy_doc" &&
   grep -q 'port: sl-proxy' <<<"$statuslist_proxy_doc" ||
-  fail "BDD status-list proxy readiness does not verify the required seeded list route"
+  fail "BDD status-list proxy readiness does not verify the issuer status list route"
 if grep -q 'tcpSocket:' <<<"$statuslist_proxy_doc"; then
   fail "status-list proxy still reports ready from TCP reachability alone"
 fi
@@ -242,8 +257,8 @@ default_proxy_doc="$(awk '
   found && /^        - name:/ { exit }
   found { print }
 ' "$TMP_DIR/proxy-default.yaml")"
-grep -q 'path: "/statuslist/health"' <<<"$default_proxy_doc" ||
-  fail "status-list proxy default readiness path is not its functional health route"
+grep -q 'path: "/issuer/status-list/1"' <<<"$default_proxy_doc" ||
+  fail "status-list proxy default readiness path is not the issuer status list"
 
 # The backend needs the PKCS#11 material produced by this post-install hook
 # before /readyz can become successful. The supported deploy path therefore
@@ -285,10 +300,18 @@ grep -q 'readinessProbe:' <<<"$fc_service_doc" ||
 if grep -Eq 'startupProbe:|livenessProbe:' <<<"$fc_service_doc"; then
   fail "fc-service cold start is still bounded by a restart-triggering probe"
 fi
-if awk -v RS='---' '
-  /kind: Job/ && /fc-realm-provision/ && /(sleep [0-9]|for i in|until |while )/ { found=1 }
-  END { exit !found }
-' "$TMP_DIR/enabled-a.yaml"; then
+# Keycloak reports Available before its admin API issues tokens, so the Job
+# retries the admin token, bounded (require_admin_token). No other step polls,
+# retries or sleeps.
+realm_job_doc="$(awk '
+  /^# Source: digital-contracting-service\/templates\/fc-realm-provision-job.yaml$/ { found=1 }
+  found && /^---$/ { exit }
+  found { print }
+' "$TMP_DIR/enabled-a.yaml")"
+grep -q 'for attempt in $(seq 1 60); do' <<<"$realm_job_doc" ||
+  fail "realm provisioning admin token retry is not bounded"
+if sed '/require_admin_token() {/,/^              }$/d' <<<"$realm_job_doc" |
+  grep -Eq '(sleep [0-9]|for i in|until |while )'; then
   fail "realm provisioning retains polling, retry, or artificial sleep"
 fi
 
@@ -300,8 +323,9 @@ if grep -Eqi 'neo4j|n10s(\.graphconfig\.show)?' "$TMP_DIR/enabled-runtime.yaml";
   [[ -z "$offenders" ]] || fail "rendered runtime still references Neo4j/n10s: $offenders"
 fi
 
-helm template lifecycle "$CHART_DIR" \
-  -f "$CHART_DIR/values.dev.yml" >"$TMP_DIR/disabled.yaml"
+# The chart default has the Federated Catalogue off. values.dev.yml turns it on:
+# the development backend syncs its schemas with the co-deployed catalogue.
+helm template lifecycle "$CHART_DIR" >"$TMP_DIR/disabled.yaml"
 if grep -q 'name: FEDERATED_CATALOGUE_API_URL' "$TMP_DIR/disabled.yaml"; then
   fail "disabled deployment still configures the backend FC startup gate"
 fi

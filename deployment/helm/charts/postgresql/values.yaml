@@ -10,7 +10,8 @@ service:
 
 auth:
   username: dcs
-  password: dcs
+  # Empty: random on install, kept from the Secret on upgrade.
+  password: ""
   database: dcs
 
 # Additional databases to create on init (list of names)

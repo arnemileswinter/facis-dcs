@@ -62,15 +62,7 @@ spec:
                 capabilities:
                   drop: ["ALL"]
               env:
-                - name: DATABASE_URL
-                  {{- if .Values.database.secretRef.name }}
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.database.secretRef.name | quote }}
-                      key: {{ .Values.database.secretRef.key | quote }}
-                  {{- else }}
-                  value: {{ include "digital-contracting-service.databaseURL" . | quote }}
-                  {{- end }}
+                {{- include "digital-contracting-service.databaseEnv" . | nindent 16 }}
                 - name: RETENTION_DAYS
                   value: {{ .Values.backup.retentionDays | quote }}
               command:
@@ -90,8 +82,14 @@ spec:
               volumeMounts:
                 - name: backup
                   mountPath: /backup
+                {{- if .Values.global.internalTLS.enabled }}
+                {{- include "digital-contracting-service.internalCAVolumeMount" . | nindent 16 }}
+                {{- end }}
           volumes:
             - name: backup
               persistentVolumeClaim:
                 claimName: {{ $claim }}
+            {{- if .Values.global.internalTLS.enabled }}
+            {{- include "digital-contracting-service.internalCAVolume" . | nindent 12 }}
+            {{- end }}
 {{- end }}

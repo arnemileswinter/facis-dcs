@@ -72,6 +72,12 @@ spec:
       serviceAccountName: {{ include "digital-contracting-service.fullname" . }}-hsm-provision
       {{- end }}
       restartPolicy: OnFailure
+      {{- with .Values.affinity }}
+      # The Job mounts the token volume of the backend pods, so it takes their
+      # affinity (values.acceptance.yml pins them to one node).
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
