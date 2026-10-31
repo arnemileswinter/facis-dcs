@@ -198,7 +198,9 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 	} else if processData.State == contractstate.Negotiation.String() {
 
-		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer, userrole.SystemContractReviewer) {
+		// The counterparty drives its inbound contract as Contract Manager, so
+		// the Manager closes the round it negotiates (DCS-IR-CWE-03).
+		if !cmd.UserRoles.HasRoles(userrole.ContractCreator, userrole.SystemContractCreator, userrole.ContractNegotiator, userrole.ContractReviewer, userrole.SystemContractReviewer, userrole.ContractManager) {
 			return errors.New("invalid user permission")
 		}
 
@@ -497,6 +499,15 @@ func (h *Submitter) contractDataForSemanticValidation(ctx context.Context, tx *s
 		normalizedContractData, err = validation.CarrySemanticBundle(stored.ContractData, normalizedContractData)
 		if err != nil {
 			return nil, fmt.Errorf("could not carry the pinned Semantic Hub bundle forward: %w", err)
+		}
+		// The submitted document is a save like an update: the same parent
+		// checks, and a history entry of the replaced version with the actor
+		// (DCS-FR-CWE-08, DCS-FR-CWE-02).
+		if err := checkContractParent(ctx, tx, h.CRepo, cmd.DID, normalizedContractData); err != nil {
+			return nil, err
+		}
+		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID, cmd.SubmittedBy); err != nil {
+			return nil, fmt.Errorf("could not create history entry: %w", err)
 		}
 		updateData := db.ContractUpdateData{
 			DID:          cmd.DID,

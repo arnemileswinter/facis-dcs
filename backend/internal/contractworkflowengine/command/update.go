@@ -137,17 +137,8 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		}
 	}
 
-	// Reject an update whose (locally resolvable) parent chain would loop
-	// back to this contract. Non-local parents are simply not walked further —
-	// cross-instance parents are legitimate and unresolvable here by design.
-	if parentDID := extractParentContractDID(cmd.ContractData); parentDID != "" {
-		if err := h.checkNoParentCycle(ctx, tx, cmd.DID, parentDID); err != nil {
-			return err
-		}
-		// DCS-FR-TR-23: the parent fits the template levels and dependencies.
-		if err := templatestructure.CheckContractParent(ctx, tx, cmd.DID, parentDID); err != nil {
-			return err
-		}
+	if err := checkContractParent(ctx, tx, h.CRepo, cmd.DID, cmd.ContractData); err != nil {
+		return err
 	}
 
 	if cmd.ExpDate != nil {
@@ -317,11 +308,27 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	return tx.Commit()
 }
 
+// checkContractParent refuses a document whose (locally resolvable) parent
+// chain loops back to the contract, or whose parent does not fit the template
+// levels and dependencies (DCS-FR-TR-23, DCS-FR-CWE-02). Non-local parents are
+// not walked further: cross-instance parents are legitimate and unresolvable
+// here by design.
+func checkContractParent(ctx context.Context, tx *sqlx.Tx, repo db.ContractRepo, selfDID string, data *datatype.JSON) error {
+	parentDID := extractParentContractDID(data)
+	if parentDID == "" {
+		return nil
+	}
+	if err := checkNoParentCycle(ctx, tx, repo, selfDID, parentDID); err != nil {
+		return err
+	}
+	return templatestructure.CheckContractParent(ctx, tx, selfDID, parentDID)
+}
+
 // checkNoParentCycle walks the parent chain starting at proposedParentDID and
 // rejects if it reaches selfDID. Parents that do not resolve locally end the
 // walk (cross-instance parents are legitimate and unresolvable here). A visited
 // set guards against any pre-existing loop in stored data.
-func (h *Updater) checkNoParentCycle(ctx context.Context, tx *sqlx.Tx, selfDID, proposedParentDID string) error {
+func checkNoParentCycle(ctx context.Context, tx *sqlx.Tx, repo db.ContractRepo, selfDID, proposedParentDID string) error {
 	visited := map[string]bool{}
 	current := proposedParentDID
 	for current != "" {
@@ -334,7 +341,7 @@ func (h *Updater) checkNoParentCycle(ctx context.Context, tx *sqlx.Tx, selfDID, 
 		}
 		visited[current] = true
 
-		parent, err := h.CRepo.ReadDataByDID(ctx, tx, current)
+		parent, err := repo.ReadDataByDID(ctx, tx, current)
 		if err != nil {
 			// Parent not resolvable locally (e.g. a cross-instance frame): stop.
 			return nil
