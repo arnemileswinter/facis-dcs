@@ -3,57 +3,53 @@ package middleware
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
-// RateLimitAuthenticated enforces the per-credential request budget for API
-// interactions (DCS-FR-CWE-28): every request presenting an Authorization
-// header is counted against a fixed one-minute window keyed by that
-// credential, and requests beyond limitPerMinute are answered 429 with a
-// Retry-After. Requests without an Authorization header are not counted —
-// unauthenticated routes (login, DID document, static assets, probes) are
-// not "API interactions" in the CWE-28 sense, and API routes reject them via
-// their own auth anyway.
+// RateLimiter enforces the per-caller request budget for API interactions
+// (DCS-FR-CWE-28). The authenticator calls it after the token is validated,
+// with the validated caller identity as key. So a request that does not
+// authenticate is not counted and writes no counter row, and one caller
+// cannot get more budget from other tokens or other spellings of the
+// Authorization header.
 //
 // The counters are in Postgres, so all replicas of the instance share one
-// budget per credential. When the counter cannot be read, the request is
-// let through: the limiter does not make a database fault a 429.
-func RateLimitAuthenticated(db *sqlx.DB, limitPerMinute int, next http.Handler) http.Handler {
-	l := &rateLimiter{db: db, limit: limitPerMinute}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		retryAfter, ok, err := l.take(r.Context(), auth, time.Now())
-		if err != nil {
-			log.Printf("rate limit: count request: %v", err)
-		} else if !ok {
-			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())+1))
-			http.Error(w, fmt.Sprintf("rate limit exceeded: more than %d API requests per minute for this credential", l.limit), http.StatusTooManyRequests)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-type rateLimiter struct {
+// budget per caller. When the counter cannot be read, the request is let
+// through: the limiter does not make a database fault a 429.
+type RateLimiter struct {
 	db    *sqlx.DB
 	limit int
 }
 
-// take counts one request for the credential in one atomic upsert and reports
+func NewRateLimiter(db *sqlx.DB, limitPerMinute int) *RateLimiter {
+	return &RateLimiter{db: db, limit: limitPerMinute}
+}
+
+// Limit is the budget per caller and minute.
+func (l *RateLimiter) Limit() int { return l.limit }
+
+// Allow counts one request of caller. When the caller is over budget it
+// returns false and how long until the window resets.
+func (l *RateLimiter) Allow(ctx context.Context, caller string) (time.Duration, bool) {
+	retryAfter, ok, err := l.take(ctx, caller, time.Now())
+	if err != nil {
+		log.Printf("rate limit: count request: %v", err)
+		return 0, true
+	}
+	return retryAfter, ok
+}
+
+// take counts one request for the caller in one atomic upsert and reports
 // whether it is within budget; when over budget it returns how long until the
 // window resets. A window older than a minute restarts at now with count 1.
 // When a window restarts, rows of windows that ended are deleted.
-func (l *rateLimiter) take(ctx context.Context, credential string, now time.Time) (time.Duration, bool, error) {
-	sum := sha256.Sum256([]byte(credential))
+func (l *RateLimiter) take(ctx context.Context, caller string, now time.Time) (time.Duration, bool, error) {
+	sum := sha256.Sum256([]byte(caller))
 	var row struct {
 		Start time.Time `db:"window_start"`
 		Count int       `db:"request_count"`
@@ -77,4 +73,22 @@ func (l *rateLimiter) take(ctx context.Context, credential string, now time.Time
 		return time.Minute - now.Sub(row.Start), false, nil
 	}
 	return 0, true, nil
+}
+
+type responseHeaderKey struct{}
+
+// ResponseHeaders lets code that sees only the request context, such as the
+// authenticator, set response headers (Retry-After).
+func ResponseHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), responseHeaderKey{}, w.Header())))
+	})
+}
+
+// SetRetryAfter sets the Retry-After header of the response to wait, rounded
+// up to whole seconds.
+func SetRetryAfter(ctx context.Context, wait time.Duration) {
+	if h, ok := ctx.Value(responseHeaderKey{}).(http.Header); ok {
+		h.Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
+	}
 }

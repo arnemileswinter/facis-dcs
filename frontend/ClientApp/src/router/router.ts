@@ -8,6 +8,7 @@ import {
   EyeIcon,
   KeyIcon,
   LockClosedIcon,
+  LockOpenIcon,
   PencilSquareIcon,
   ServerStackIcon,
   ShieldCheckIcon,
@@ -33,6 +34,7 @@ import { useAuthTokenStore } from '@/stores/auth-token-store'
 import { useNavStore } from '@/stores/nav-store'
 import ContractTargetAdminView from '@/views/admin/ContractTargetAdminView.vue'
 import KeyInventoryAdminView from '@/views/admin/KeyInventoryAdminView.vue'
+import LockoutAdminView from '@/views/admin/LockoutAdminView.vue'
 import MachineIdentityAdminView from '@/views/admin/MachineIdentityAdminView.vue'
 import ArchiveDashboardView from '@/views/archive/ArchiveDashboardView.vue'
 import ArchiveDetailView from '@/views/archive/ArchiveDetailView.vue'
@@ -108,6 +110,7 @@ const ROUTES = {
     TARGETS: 'admin.targets',
     SYSTEM_USERS: 'admin.system-users',
     KEY_INVENTORY: 'admin.key-inventory',
+    LOCKOUTS: 'admin.lockouts',
   },
   SEMANTIC_HUB: {
     DASHBOARD: 'semantic_hub.dashboard',
@@ -503,6 +506,19 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Key Inventory',
       order: 13,
+      roles: ['SYSTEM_ADMINISTRATOR'],
+    },
+  },
+  {
+    path: '/admin/lockouts',
+    name: ROUTES.ADMIN.LOCKOUTS,
+    component: LockoutAdminView,
+    meta: {
+      name: 'Lockouts',
+      icon: LockOpenIcon,
+      requiresAuth: true,
+      title: 'DCS - Lockouts',
+      order: 14,
       roles: ['SYSTEM_ADMINISTRATOR'],
     },
   },

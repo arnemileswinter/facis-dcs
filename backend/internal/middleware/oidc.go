@@ -50,9 +50,10 @@ type SystemClient struct {
 
 // HydraJWTValidator validates JWT tokens from OIDC providers.
 type HydraJWTValidator struct {
-	provider *oidc.Provider
-	verifier *oidc.IDTokenVerifier
-	config   HydraJWTConfig
+	provider        *oidc.Provider
+	verifier        *oidc.IDTokenVerifier
+	expiredVerifier *oidc.IDTokenVerifier
+	config          HydraJWTConfig
 }
 
 // NewHydraJWTValidator connects to the OIDC provider to get public keys.
@@ -73,19 +74,52 @@ func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWT
 		return nil, fmt.Errorf("failed to discover OIDC provider: %w", err)
 	}
 
+	skipSignature, err := algNoneAllowed()
+	if err != nil {
+		return nil, err
+	}
 	// Skip audience check — client binding is validated in ValidateToken via client_id (and aud).
 	// The token signature and issuer are still fully validated.
-	verifier := provider.Verifier(&oidc.Config{
+	oidcConfig := &oidc.Config{
 		ClientID:                   config.ClientID,
 		SkipClientIDCheck:          true,
-		InsecureSkipSignatureCheck: os.Getenv("JWT_ALG_NONE_SUPPORTED") == "true",
-	})
+		InsecureSkipSignatureCheck: skipSignature,
+	}
+	verifier := provider.Verifier(oidcConfig)
+	expiredConfig := *oidcConfig
+	expiredConfig.SkipExpiryCheck = true
 
 	return &HydraJWTValidator{
-		provider: provider,
-		verifier: verifier,
-		config:   config,
+		provider:        provider,
+		verifier:        verifier,
+		expiredVerifier: provider.Verifier(&expiredConfig),
+		config:          config,
 	}, nil
+}
+
+// algNoneAllowed reads JWT_ALG_NONE_SUPPORTED, which turns off the token
+// signature check. Only a stack that declares itself a development or test
+// stack with DCS_ALLOW_DEV_TRUST=true may set it (DCS-NFR-SEC-03).
+func algNoneAllowed() (bool, error) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("JWT_ALG_NONE_SUPPORTED")), "true") {
+		return false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true") {
+		return false, fmt.Errorf("JWT_ALG_NONE_SUPPORTED=true turns off the access token signature check; it is refused unless DCS_ALLOW_DEV_TRUST=true declares a development or test stack")
+	}
+	log.Printf("WARNING: JWT_ALG_NONE_SUPPORTED=true: access token signatures are NOT checked; any caller can forge any role. Development and test stacks only.")
+	return true, nil
+}
+
+// ExpiredTokenSubject returns the subject of a token whose signature and
+// issuer are valid but whose lifetime ended, or "" for any other token. It
+// identifies the caller of a refused expired token in the attempt log.
+func (v *HydraJWTValidator) ExpiredTokenSubject(ctx context.Context, token string) string {
+	idToken, err := v.expiredVerifier.Verify(ctx, token)
+	if err != nil {
+		return ""
+	}
+	return idToken.Subject
 }
 
 // TokenInfo holds the validated identity extracted from a JWT.

@@ -53,6 +53,9 @@ type AuthConfig struct {
 }
 
 type authSvc struct {
+	// JWTAuthenticator guards the administrator methods and keeps the
+	// lockout of credential holders (FR-UC-01-4).
+	auth.JWTAuthenticator
 	hydra             *hydra.Client
 	trust             *oid4vp.TrustConfig
 	dcqlQuery         any
@@ -71,7 +74,7 @@ type authSvc struct {
 	recordSessionEnded func(context.Context, authevents.SessionEndedEvent) error
 }
 
-func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
+func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, jwtAuth auth.JWTAuthenticator, cfg AuthConfig) (genauth.Service, error) {
 	if cfg.Hydra == nil {
 		return nil, fmt.Errorf("hydra client is required")
 	}
@@ -110,6 +113,7 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 	}
 
 	return &authSvc{
+		JWTAuthenticator:  jwtAuth,
 		hydra:             cfg.Hydra,
 		trust:             cfg.Trust,
 		dcqlQuery:         cfg.DCQLQuery,

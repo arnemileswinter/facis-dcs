@@ -165,7 +165,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	require.ErrorContains(t, err, "not authorized")
 	// Real JWT -> generated HTTP handler -> authorization -> denied access row.
 	validator, token := qaSignedTokens(t)
-	engine.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	engine.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(engine)
 	endpoints.Use(auth.AccessMetadataMiddleware)
 	mux := goahttp.NewMuxer()

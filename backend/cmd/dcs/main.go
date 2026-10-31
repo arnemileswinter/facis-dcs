@@ -363,8 +363,9 @@ func main() {
 	ipfsAPIClient := ipfs.NewClient(mfsBaseURL)
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
-	lockRepo := &pg.PostgresIPLockoutRepo{}
+	lockRepo := &pg.PostgresLockoutRepo{}
 	jwtAuth := auth.NewJWTAuthenticator(hydraJWTValidator, db, aAttemptRepo, lockRepo)
+	jwtAuth.Limiter = middleware.NewRateLimiter(db, conf.APIRateLimitPerMinute())
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
@@ -869,7 +870,7 @@ func main() {
 		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
 
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
-		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
+		authSvc, err = service.NewAuth(db, presentationRepo, jwtAuth, authCfg)
 		if err != nil {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}

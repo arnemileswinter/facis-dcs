@@ -23,6 +23,15 @@ http.interceptors.response.use(
     if (axios.isAxiosError(err)) {
       // One retry with a refreshed token; a second 401 is the server's answer.
       const config = err.config as (typeof err.config & { retriedAfterRefresh?: boolean }) | undefined
+      // A 401 with Retry-After is a lockout after repeated invalid
+      // credentials (FR-UC-01-4): a refreshed token is refused too.
+      const lockedFor = Number(err.response?.headers?.['retry-after'])
+      if (err.status === 401 && lockedFor > 0) {
+        const minutes = Math.ceil(lockedFor / 60)
+        err.message = `${err.response?.data?.message ?? 'Access refused.'} Too many invalid credentials came from this address. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+        bindReportedHttpError(err, errorStore.add(err.message))
+        return Promise.reject(err)
+      }
       if (err.status === 401 && config && !config.retriedAfterRefresh) {
         const isRefreshed = await authenticationService.refresh()
         if (isRefreshed) {

@@ -35,12 +35,14 @@ type JWTAuthenticator struct {
 	Validator    *middleware.HydraJWTValidator
 	DB           *sqlx.DB
 	AAttemptRepo db.AccessAttemptRepo
-	LockRepo     db.IPLockoutRepo
+	LockRepo     db.LockoutRepo
+	// Limiter counts the requests of each authenticated caller. Nil sets no limit.
+	Limiter *middleware.RateLimiter
 }
 
 // NewJWTAuthenticator returns a JWTAuthenticator backed by the given OIDC
 // validator.
-func NewJWTAuthenticator(v *middleware.HydraJWTValidator, db *sqlx.DB, aAttemptRepo db.AccessAttemptRepo, lockRepo db.IPLockoutRepo) JWTAuthenticator {
+func NewJWTAuthenticator(v *middleware.HydraJWTValidator, db *sqlx.DB, aAttemptRepo db.AccessAttemptRepo, lockRepo db.LockoutRepo) JWTAuthenticator {
 	return JWTAuthenticator{Validator: v, DB: db, AAttemptRepo: aAttemptRepo, LockRepo: lockRepo}
 }
 
@@ -51,42 +53,58 @@ func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *sec
 	ip := middleware.IPFromContext(ctx)
 
 	// A locked-out caller is refused before its token is read, so a valid
-	// credential presented during the lockout does not get through.
-	if a.isLocked(ctx, ip) {
-		a.logAttempt(ctx, ip, nil, nil, false, db.AccessOutcomeFailed)
-		return ctx, goa.PermanentError("unauthorized", CredentialRefused)
+	// credential presented during the lockout does not get through. The
+	// refusal does not count toward the lockout, so the lock ends by time.
+	if until, locked := a.LockedUntil(ctx, ip); locked {
+		a.logAttempt(ctx, db.AccessAttempt{IPAddress: ip, Outcome: db.AccessOutcomeFailed})
+		return ctx, LockedOut(ctx, until)
 	}
 
 	if token == "" {
-		a.logAttempt(ctx, ip, nil, nil, false, db.AccessOutcomeFailed)
+		a.logAttempt(ctx, db.AccessAttempt{IPAddress: ip, Outcome: db.AccessOutcomeFailed})
 		return ctx, goa.PermanentError("unauthorized", "missing JWT token")
 	}
 
 	info, err := a.Validator.ValidateToken(ctx, token)
 	if err != nil {
 		log.Printf("refused token from %s: %v", ip, err)
-		a.logAttempt(ctx, ip, nil, nil, false, db.AccessOutcomeFailed)
 		// An access token that only expired is the normal end of its
 		// lifetime: the client refreshes it, often for several parallel
-		// requests at once. Only a token that is not genuine can start a lockout.
+		// requests at once. Only a token that is not genuine counts toward
+		// a lockout.
 		var expired *oidc.TokenExpiredError
-		if !errors.As(err, &expired) {
-			a.checkAndLock(ctx, ip)
+		if errors.As(err, &expired) {
+			attempt := db.AccessAttempt{IPAddress: ip, Outcome: db.AccessOutcomeFailed}
+			if sub := a.Validator.ExpiredTokenSubject(ctx, token); sub != "" {
+				attempt.AttemptBy = &sub
+			}
+			a.logAttempt(ctx, attempt)
+		} else {
+			a.RecordInvalidCredential(ctx, ip, ip, nil)
 		}
 		return ctx, goa.PermanentError("unauthorized", CredentialRefused)
+	}
+
+	// The budget belongs to the validated caller: the holder (or machine
+	// client) acting for one organization, whatever token it presents.
+	if a.Limiter != nil {
+		if wait, ok := a.Limiter.Allow(ctx, info.ParticipantDID+"|"+info.HolderDID); !ok {
+			middleware.SetRetryAfter(ctx, wait)
+			return ctx, goa.PermanentError("too_many_requests", "rate limit exceeded: more than %d API requests per minute for this caller", a.Limiter.Limit())
+		}
 	}
 
 	if len(scheme.RequiredScopes) > 0 {
 		if !hasAnyRole(info.Roles, scheme.RequiredScopes) {
 			// A valid credential without the required role is an authorization
 			// decision; it does not count toward the lockout (FR-UC-01-4).
-			a.logAttempt(ctx, ip, &info.HolderDID, info.Roles, true, db.AccessOutcomeDenied)
+			a.logAttempt(ctx, db.AccessAttempt{IPAddress: ip, AttemptBy: &info.HolderDID, Roles: rolesJSON(info.Roles), Success: true, Outcome: db.AccessOutcomeDenied})
 			return ctx, goa.PermanentError("forbidden", "insufficient permissions: requires one of %v", scheme.RequiredScopes)
 		}
 	}
 
 	finalize := func(err error) {
-		a.logAttempt(ctx, ip, &info.HolderDID, info.Roles, true, accessOutcome(err))
+		a.logAttempt(ctx, db.AccessAttempt{IPAddress: ip, AttemptBy: &info.HolderDID, Roles: rolesJSON(info.Roles), Success: true, Outcome: accessOutcome(err)})
 	}
 	if pending, ok := ctx.Value(accessFinalizerKey{}).(*accessFinalizer); ok {
 		pending.record = finalize
@@ -96,6 +114,18 @@ func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *sec
 
 	ctx = middleware.InjectAuthContext(ctx, info.Roles, info.HolderDID, info.ParticipantDID)
 	return ctx, nil
+}
+
+// LockedOut is the refusal of a locked-out caller: the FR-UC-01-4 message,
+// and a Retry-After header with the time until the lock ends.
+func LockedOut(ctx context.Context, until time.Time) error {
+	middleware.SetRetryAfter(ctx, time.Until(until))
+	return goa.PermanentError("unauthorized", CredentialRefused)
+}
+
+func rolesJSON(roles []string) string {
+	raw, _ := json.Marshal(roles)
+	return string(raw)
 }
 
 // hasAnyRole returns true if roles contains at least one of the required roles.
@@ -112,72 +142,72 @@ func hasAnyRole(roles []string, required []string) bool {
 	return false
 }
 
-// logAttempt writes a login attempt – errors are ignored so that a DB issue
-// does not block the login flow.
-func (a JWTAuthenticator) logAttempt(ctx context.Context, ip string, attemptBy *string, roles []string, success bool, outcome string) {
-
+// logAttempt writes an access attempt. Errors are ignored so that a
+// database issue does not block the request.
+func (a JWTAuthenticator) logAttempt(ctx context.Context, attempt db.AccessAttempt) {
 	tx, err := a.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return
 	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
+	defer rollback(tx)
+	a.createAttempt(ctx, tx, attempt)
+	_ = tx.Commit()
+}
 
+func (a JWTAuthenticator) createAttempt(ctx context.Context, tx *sqlx.Tx, attempt db.AccessAttempt) {
 	metadata := accessMetadataFromContext(ctx)
-	roleBytes, _ := json.Marshal(roles)
-	_ = a.AAttemptRepo.Create(ctx, tx, db.AccessAttempt{
-		IPAddress:   ip,
-		AttemptBy:   attemptBy,
-		AttemptedAt: time.Now().UTC(),
-		Success:     success,
-		Outcome:     outcome,
-		Service:     ctx.Value(goa.ServiceKey).(string),
-		Method:      ctx.Value(goa.MethodKey).(string),
-		Roles:       string(roleBytes), Scope: metadata.Scope, DID: metadata.DID, Justification: metadata.Justification,
-	})
-
-	_ = tx.Commit()
+	attempt.AttemptedAt = time.Now().UTC()
+	attempt.Service, _ = ctx.Value(goa.ServiceKey).(string)
+	attempt.Method, _ = ctx.Value(goa.MethodKey).(string)
+	if attempt.Roles == "" {
+		attempt.Roles = "null"
+	}
+	attempt.Scope, attempt.DID, attempt.Justification = metadata.Scope, metadata.DID, metadata.Justification
+	_ = a.AAttemptRepo.Create(ctx, tx, attempt)
 }
 
-// checkAndLock locks the IP out once it reaches the failed-attempt threshold.
-// The lock ends by time only; a valid credential does not clear it.
-func (a JWTAuthenticator) checkAndLock(ctx context.Context, ip string) {
+func rollback(tx *sqlx.Tx) {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		log.Printf("could not rollback transaction: %v", err)
+	}
+}
+
+// RecordInvalidCredential logs a refused invalid credential that counts
+// toward a lockout of key, and locks key once it reaches the threshold
+// (FR-UC-01-4). Only attempts after the end of the last lock of key count,
+// so a lock that ended or was lifted does not re-arm at the next failure.
+func (a JWTAuthenticator) RecordInvalidCredential(ctx context.Context, key, ip string, attemptBy *string) {
 	tx, err := a.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return
 	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
+	defer rollback(tx)
 
-	count, err := a.AAttemptRepo.CountFailedAttemptsByIP(ctx, tx, ip, time.Now().Add(-conf.LoginLockoutDuration()))
+	a.createAttempt(ctx, tx, db.AccessAttempt{IPAddress: ip, AttemptBy: attemptBy, Outcome: db.AccessOutcomeFailed, LockoutKey: &key})
 
-	if err == nil && count >= conf.LoginAttemptsThresholdInDuration() {
-		lockUntil := time.Now().Add(conf.LoginLockoutDuration())
-		_ = a.LockRepo.SetLockout(ctx, tx, ip, lockUntil)
-		log.Printf("locked out %s until %s after %d failed attempts", ip, lockUntil.Format(time.RFC3339), count)
+	now := time.Now()
+	since := now.Add(-conf.LoginLockoutDuration())
+	if last, err := a.LockRepo.LockedUntil(ctx, tx, key); err == nil && last.After(since) {
+		since = last
 	}
-
+	count, err := a.AAttemptRepo.CountLockoutAttempts(ctx, tx, key, since)
+	if err == nil && count >= conf.LoginAttemptsThresholdInDuration() {
+		lockUntil := now.Add(conf.LoginLockoutDuration())
+		_ = a.LockRepo.SetLockout(ctx, tx, key, lockUntil)
+		log.Printf("locked out %s until %s after %d invalid credentials", key, lockUntil.Format(time.RFC3339), count)
+	}
 	_ = tx.Commit()
 }
 
-// isLocked fails open on a database error, like the attempt log.
-func (a JWTAuthenticator) isLocked(ctx context.Context, ip string) bool {
+// LockedUntil reports whether key is locked out and until when. It fails
+// open on a database error, like the attempt log.
+func (a JWTAuthenticator) LockedUntil(ctx context.Context, key string) (time.Time, bool) {
 	tx, err := a.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
-	defer func(tx *sqlx.Tx) {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("could not rollback transaction: %v", err)
-		}
-	}(tx)
+	defer rollback(tx)
 
-	locked, _, err := a.LockRepo.IsLocked(ctx, tx, ip)
-	return err == nil && locked
+	until, err := a.LockRepo.LockedUntil(ctx, tx, key)
+	return until, err == nil && until.After(time.Now())
 }
