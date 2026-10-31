@@ -19,11 +19,11 @@ import (
 
 // WebhookPayload is the JSON body sent to a subscriber's callback URL.
 type WebhookPayload struct {
-	EventID       string          `json:"event_id"`
-	CorrelationID string          `json:"correlation_id"`
-	Event         string          `json:"event"`
-	DID           string          `json:"did"`
-	OccurredAt    time.Time       `json:"occurred_at"`
+	EventID       string    `json:"event_id"`
+	CorrelationID string    `json:"correlation_id"`
+	Event         string    `json:"event"`
+	DID           string    `json:"did"`
+	OccurredAt    time.Time `json:"occurred_at"`
 	// Owner names who owns the contract (created_by and the responsible
 	// parties), so a receiving flow can route a contract event to them. It is
 	// absent for template events.

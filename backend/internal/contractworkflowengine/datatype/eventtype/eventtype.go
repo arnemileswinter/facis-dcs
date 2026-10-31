@@ -52,15 +52,15 @@ const (
 	Terminate                   EventType = "TERMINATE_CONTRACT"
 	// Activate records the deployment acknowledgement that moves a contract
 	// from SIGNED to ACTIVE.
-	Activate EventType = "ACTIVATE_CONTRACT"
-	Renew                       EventType = "RENEW_CONTRACT"
-	RecordEvidence              EventType = "RECORD_EVIDENCE"
-	ContractExpired             EventType = "CONTRACT_EXPIRED"
-	ContractRenewalDue          EventType = "CONTRACT_RENEWAL_DUE"
-	RetrieveAllTemplates        EventType = "RETRIEVE_ALL_TEMPLATES"
-	RemoteActionRequestEvent    EventType = "REMOTE_ACTION_REQUEST"
-	Offer                       EventType = "OFFER_CONTRACT"
-	Withdraw                    EventType = "WITHDRAW_CONTRACT"
+	Activate                 EventType = "ACTIVATE_CONTRACT"
+	Renew                    EventType = "RENEW_CONTRACT"
+	RecordEvidence           EventType = "RECORD_EVIDENCE"
+	ContractExpired          EventType = "CONTRACT_EXPIRED"
+	ContractRenewalDue       EventType = "CONTRACT_RENEWAL_DUE"
+	RetrieveAllTemplates     EventType = "RETRIEVE_ALL_TEMPLATES"
+	RemoteActionRequestEvent EventType = "REMOTE_ACTION_REQUEST"
+	Offer                    EventType = "OFFER_CONTRACT"
+	Withdraw                 EventType = "WITHDRAW_CONTRACT"
 	// PublishCatalogue records that a contract's metadata was registered in
 	// the Federated Catalogue (DCS-IR-CWE-10).
 	PublishCatalogue EventType = "PUBLISH_CONTRACT_TO_CATALOGUE"
