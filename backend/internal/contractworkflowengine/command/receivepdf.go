@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,13 @@ type PeerPdfReceiveCmd struct {
 // §2): two signatures over the same revision are refused, never merged, and
 // the local copy is not overwritten.
 var ErrSigningConflict = errors.New("the shipped PDF does not extend the signed revision this instance holds: signatures over the same revision are refused, never merged or overwritten")
+
+// ErrClosedCopy refuses a shipped PDF for a local copy that is TERMINATED,
+// EXPIRED or WITHDRAWN. These states have no exit other than termination, so
+// no ship can change such a copy.
+var ErrClosedCopy = errors.New("the local copy of the contract is closed and takes no ship")
+
+var closedStates = []contractstate.ContractState{contractstate.Terminated, contractstate.Expired, contractstate.Withdrawn}
 
 // PeerPdfReceiver upserts a peer-shipped contract into this instance's own
 // store and opens its own local workflow tasks (ADR-13): each DCS runs its own
@@ -96,6 +104,11 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	existing, err := h.CRepo.ReadProcessDataByDIDOrNil(ctx, tx, cmd.ContractIRI)
 	if err != nil {
 		return fmt.Errorf("could not read local contract copy: %w", err)
+	}
+	// A closed copy has no workflow left that a ship could feed: its content,
+	// version, PDF and tasks stay as they were closed (DCS-FR-CWE-23).
+	if existing != nil && slices.Contains(closedStates, contractstate.ContractState(existing.State)) {
+		return fmt.Errorf("%w: the local copy of %s is %s", ErrClosedCopy, cmd.ContractIRI, existing.State)
 	}
 
 	// A shipped PDF replaces the local copy only if it extends the signed
