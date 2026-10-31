@@ -145,7 +145,7 @@ test.describe('admin UI accessibility hardening', () => {
 
     await page.goto('/ui/admin/system-users')
     const roleControls = page.locator('fieldset').getByRole('checkbox')
-    await expect(roleControls).toHaveCount(5)
+    await expect(roleControls).toHaveCount(6)
     for (let index = 0; index < (await roleControls.count()); index += 1) {
       await expectBinaryControl(page, roleControls.nth(index))
     }

@@ -37,10 +37,20 @@ test('the C2PA verifier shows the banner and four checks, and refuses a tampered
     })
     expect(exported.ok()).toBeTruthy()
     const pdf = Buffer.from(await exported.body())
-    // The page content streams are not compressed: change one letter of the
-    // first text-showing operator, keeping the length so the xref stays valid.
-    const at = pdf.indexOf(') Tj')
-    expect(at).toBeGreaterThan(0)
+    // The PDF has incremental revisions (signature, lifecycle manifests), and
+    // each revision can replace the page content streams, so the text of an
+    // earlier revision is not shown. Change the text the first page shows:
+    // the content stream of the first page in the last page tree. The streams
+    // are not compressed: change one letter of the first text-showing
+    // operator, keeping the length so the xref stays valid.
+    const text = pdf.toString('latin1')
+    const lastDefinition = (object: string) =>
+      [...text.matchAll(new RegExp(`(?<![0-9])${object} 0 obj`, 'g'))].at(-1)?.index ?? -1
+    const firstPage = [...text.matchAll(/\/Type \/Pages \/Kids \[(\d+) 0 R/g)].at(-1)?.[1] ?? ''
+    const contents = /\/Contents (\d+) 0 R/.exec(text.slice(lastDefinition(firstPage)))?.[1] ?? ''
+    const at = text.indexOf(') Tj', lastDefinition(contents))
+    expect(firstPage && contents, 'the first page and its content stream are found').toBeTruthy()
+    expect(at).toBeGreaterThan(lastDefinition(contents))
     pdf[at - 1] = pdf[at - 1] === 0x58 ? 0x59 : 0x58
 
     await verifier.getByLabel('PDF copy to verify').setInputFiles({

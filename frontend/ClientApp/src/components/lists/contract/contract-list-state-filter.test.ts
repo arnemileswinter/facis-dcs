@@ -155,3 +155,24 @@ it('filters the whole search result before it cuts the page', async () => {
   expect(wrapper.text()).toContain('hit-28')
   wrapper.unmount()
 })
+
+// DCS-IR-CWE-11: a server reload for a filter keeps the filter menu and the
+// search mounted, so a second state can be picked in the open menu.
+it('keeps the filter controls mounted while a filter reloads the page', async () => {
+  const wrapper = await mountList()
+  const filterUid = () => wrapper.findComponent({ name: 'ListStateFilter' }).vm.$.uid
+  const mounted = filterUid()
+  let resolve!: (value: unknown) => void
+  mocks.retrieve.mockReturnValue(new Promise((done) => (resolve = done)))
+  useContractStateFilterStore().setFilter('DRAFT')
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('Loading contracts...')
+  expect(filterUid()).toBe(mounted)
+  expect(wrapper.findComponent({ name: 'ContractListSearch' }).exists()).toBe(true)
+  resolve(page([row('drafted', 'DRAFT')]))
+  await flushPromises()
+  expect(filterUid()).toBe(mounted)
+  expect(wrapper.text()).toContain('drafted')
+  wrapper.unmount()
+})

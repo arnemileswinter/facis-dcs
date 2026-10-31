@@ -70,10 +70,19 @@ func AuditTemplateShapes(ctx context.Context, raw *datatype.JSON) ([]PolicyFindi
 		return nil, err
 	}
 	findings, _, err := validateAgainstHubShapes(ctx, template)
-	for i := range findings {
-		findings[i].Source = SourceHubShapes
+	// A negotiable leaf references a declared contract field that the
+	// contract fills. Its cardinality is checked on the contract, so the
+	// missing value does not refuse the template.
+	leaves := unfilledFieldLeaves(template)
+	kept := findings[:0]
+	for _, finding := range findings {
+		if finding.Operator == "MinCountConstraintComponent" && leaves.has(finding.FocusNode, finding.Path) {
+			continue
+		}
+		finding.Source = SourceHubShapes
+		kept = append(kept, finding)
 	}
-	return findings, err
+	return kept, err
 }
 
 // ValidationReportHash computes a stable SHA-256 hash (hex) of a set of

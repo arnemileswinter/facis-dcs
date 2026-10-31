@@ -191,6 +191,22 @@ test('archive deletion shreds the encryption keys on both instances', async ({ p
 
     await expect(a.page.getByTestId(`erasure-badge-${contractDid}`)).toHaveText(/Keys live/)
 
+    // Only a contract out of force can be erased (DCS-FR-CSA-17), on this
+    // instance and on the peer: the Archive Manager terminates it first, and
+    // the termination notice brings B's copy to TERMINATED.
+    await expect(a.page.getByTestId(`archive-delete-${contractDid}`)).toHaveCount(0)
+    await a.page.getByTestId(`archive-terminate-${contractDid}`).click()
+    const terminateDialog = a.page.getByRole('dialog').filter({ hasText: 'Confirmation' })
+    await terminateDialog.getByPlaceholder('Termination reason').fill('Contract ended before the erasure request (E2E)')
+    const terminated = a.page.waitForResponse(
+      (r) => r.url().includes('/contract/terminate') && r.request().method() === 'POST' && r.ok(),
+    )
+    await a.page.getByTestId('confirmation-confirm').click()
+    await terminated
+    await assertReceivedInState(a, contractDid, 'TERMINATED')
+    await assertReceivedInState(b, contractDid, 'TERMINATED')
+
+    await a.gotoAs('Archive Manager', '/ui/archive/dashboard')
     await a.page.getByTestId(`archive-delete-${contractDid}`).click()
     const dialog = a.page.getByRole('dialog').filter({ hasText: 'Confirmation' })
     await expect(dialog).toBeVisible()
