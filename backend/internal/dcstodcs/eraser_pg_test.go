@@ -11,6 +11,8 @@ import (
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
+	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 )
 
 const erasedDID = "did:web:dcs.example:contract:erase-1"
@@ -154,6 +156,100 @@ func TestShredErasesResidualCopiesOfTheContentAndPersonalData(t *testing.T) {
 	require.NoError(t, db.Select(&bodies, `SELECT event_data::text FROM outbox_events
 		WHERE did = $1 AND event_type <> 'KEY_SHREDDED' ORDER BY id`, erasedDID))
 	require.Equal(t, []string{`{"erased": true}`, `{"erased": true}`, `{"justification": "kept record"}`, `{"case_id": "kept case"}`}, bodies)
+}
+
+// NFR-17: the free text users entered about the contract is erased too: its
+// name and description now and in its history, the reasons of rejected
+// changes, and the termination reasons.
+func TestShredErasesTheFreeTextOfTheContract(t *testing.T) {
+	db := pgtest.Open(t)
+	seedErasableContract(t, db)
+	statements := []string{
+		`UPDATE contracts SET name = 'secret name', description = 'secret description' WHERE did = $1`,
+		`UPDATE contract_history SET name = 'secret old name', description = 'secret old description' WHERE did = $1`,
+		`INSERT INTO contract_negotiation_decisions (negotiation_id, negotiator, decision, rejection_reason)
+		 SELECT id, 'did:web:peer', 'REJECTED', 'secret objection' FROM contract_negotiations WHERE did = $1`,
+		`INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
+		 VALUES ($1, 'secret termination reason', now(), 'Org A', 'Contract Manager')`,
+		`INSERT INTO contract_peer_terminations (did, peer_did, reason) VALUES ($1, 'did:web:peer', 'secret termination reason')`,
+	}
+	for _, statement := range statements {
+		_, err := db.Exec(statement, erasedDID)
+		require.NoError(t, err, statement)
+	}
+
+	shredForTest(t, db)
+
+	var freeText int
+	require.NoError(t, db.Get(&freeText, `
+		SELECT (SELECT count(*) FROM contracts WHERE did = $1 AND num_nonnulls(name, description) > 0)
+		     + (SELECT count(*) FROM contract_history WHERE did = $1 AND num_nonnulls(name, description) > 0)
+		     + (SELECT count(*) FROM contract_negotiation_decisions d JOIN contract_negotiations n ON n.id = d.negotiation_id
+		         WHERE n.did = $1 AND d.rejection_reason IS NOT NULL)
+		     + (SELECT count(*) FROM contract_terminations WHERE did = $1 AND reason <> '')
+		     + (SELECT count(*) FROM contract_peer_terminations WHERE did = $1 AND reason <> '')`, erasedDID))
+	require.Zero(t, freeText, "free text about the contract survived the erasure")
+}
+
+// A peer erase goes only to a party that holds a copy: the origin this
+// instance received the contract from, or a peer a revision was delivered to.
+func TestErasePartiesAreThePeersThatHoldACopy(t *testing.T) {
+	db := pgtest.Open(t)
+	ctx := context.Background()
+	parties := &DBContractParties{DB: db, CRepo: &cwepg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}}
+	insert := func(did, origin, counterparty string) {
+		t.Helper()
+		_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, responsible)
+			VALUES ($1, $2::text, $2::text, 'TERMINATED', 'tpl', 1, jsonb_build_object('creator', $2::text, 'counterparty', $3::text))`, did, origin, counterparty)
+		require.NoError(t, err)
+	}
+	insert("never-shipped", "did:web:local", "did:web:peer")
+	insert("shipped", "did:web:local", "did:web:peer")
+	insert("received", "did:web:peer", "did:web:local")
+	_, err := db.Exec(`INSERT INTO contract_pdf_deliveries (did, peer_did, contract_state, pdf_cid) VALUES ('shipped', 'did:web:peer', 'OFFERED', 'cid')`)
+	require.NoError(t, err)
+
+	for did, want := range map[string][]string{
+		"never-shipped": {"did:web:local"},
+		"shipped":       {"did:web:local", "did:web:peer"},
+		"received":      {"did:web:peer"},
+	} {
+		got, err := parties.Parties(ctx, did)
+		require.NoError(t, err)
+		require.ElementsMatch(t, want, got, did)
+	}
+}
+
+// CWE-5: a peer erases this instance's copy only when the copy is no longer
+// in force and no retention period of its archive entries runs.
+func TestPeerEraseNeedsAClosedCopyOutsideRetention(t *testing.T) {
+	db := pgtest.Open(t)
+	ctx := context.Background()
+	erasure := DBPeerErasure{DB: db, CRepo: &cwepg.PostgresContractRepo{}}
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, responsible)
+		VALUES ($1, 'did:web:peer', 'did:web:peer', 'ACTIVE', 'tpl', 1, jsonb_build_object('creator', 'did:web:peer', 'counterparty', 'did:web:local'))`, erasedDID)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, erasure.AuthorizeErase(ctx, "did:web:dcs.example:contract:unknown", "did:web:peer"), ErrNoSharedCopy)
+	require.ErrorIs(t, erasure.AuthorizeErase(ctx, erasedDID, "did:web:stranger"), ErrNoSharedCopy)
+	require.ErrorIs(t, erasure.AuthorizeErase(ctx, erasedDID, "did:web:peer"), ErrNotErasable, "an ACTIVE copy was erasable")
+
+	_, err = db.Exec(`UPDATE contracts SET state = 'TERMINATED' WHERE did = $1`, erasedDID)
+	require.NoError(t, err)
+	archive := func(version int, retention string) {
+		t.Helper()
+		_, err := db.Exec(`INSERT INTO contract_archive_entries (did, contract_version, stored_by, contract_snapshot, content_hash, snapshot_cid, evidence, retention_until)
+			VALUES ($1, $2, 'did:web:local', '{}', 'sha256:`+"0000000000000000000000000000000000000000000000000000000000000000"+`', 'bafy',
+			        '{"source":"SIGNING_WORKFLOW_COMPLETION","snapshot_hash_algorithm":"SHA-256"}', now() + $3::interval)`, erasedDID, version, retention)
+		require.NoError(t, err)
+	}
+	archive(1, "-1 day")
+	require.NoError(t, erasure.AuthorizeErase(ctx, erasedDID, "did:web:peer"), "an ended retention kept the copy")
+
+	archive(2, "1 year")
+	err = erasure.AuthorizeErase(ctx, erasedDID, "did:web:peer")
+	require.ErrorIs(t, err, ErrNotErasable, "a copy under retention was erasable")
+	require.ErrorContains(t, err, "retained until")
 }
 
 // After the erasure the contract keeps the organization names of its

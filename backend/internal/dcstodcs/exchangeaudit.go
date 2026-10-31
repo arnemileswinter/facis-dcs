@@ -41,6 +41,23 @@ func RecordPeerExchangeTx(ctx context.Context, tx *sqlx.Tx, did, exchange, direc
 	}, componenttype.ContractWorkflowEngine)
 }
 
+// PeerExchangeRefusedEvent records a peer that refused a notice of this
+// instance for good: the peer holds no copy of the contract shared with this
+// instance. The notice is not sent again. The contract's lifecycle shows it.
+type PeerExchangeRefusedEvent struct {
+	DID        string    `json:"did"`
+	Exchange   string    `json:"exchange"`
+	PeerDID    string    `json:"peer_did"`
+	Reason     string    `json:"reason"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements [baseevent.Event].
+func (e PeerExchangeRefusedEvent) EventType() string { return "PEER_EXCHANGE_REFUSED" }
+
+// GetDID implements [baseevent.Event].
+func (e PeerExchangeRefusedEvent) GetDID() string { return e.DID }
+
 // RecordPeerExchange writes the PEER_EXCHANGE audit event in its own
 // transaction.
 func RecordPeerExchange(ctx context.Context, db *sqlx.DB, did, exchange, direction, peerDID string) error {

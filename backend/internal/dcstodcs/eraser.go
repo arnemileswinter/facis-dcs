@@ -2,8 +2,10 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
+	"database/sql"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	basedb "digital-contracting-service/internal/base/db"
 	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
@@ -22,6 +25,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 )
 
 // ScopeShredder destroys a contract scope's wrapped CEK records and leaves
@@ -91,8 +95,9 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 
 // eraseContractContent removes the plaintext copies of the contract content
 // and of the signers' personal data that Postgres holds (DCS-NFR-SEC-13,
-// DCS-NFR-COMP-03): the current and historical contract data, negotiation
-// change requests and drafts, the archive snapshot, the payload pinned for
+// DCS-NFR-COMP-03): the current and historical contract data, name and
+// description, negotiation change requests, rejection reasons and drafts,
+// the termination reasons, the archive snapshot, the payload pinned for
 // signing, the PDF prepared for signing, the PID claims and presentations of
 // the signing ceremonies, the payload of every JAdES signature over the
 // contract, and the outbox copies of the event bodies that the audit trail
@@ -101,8 +106,14 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
 	statements := []string{
 		`UPDATE contracts SET contract_data = ` + partyNamesOnly + ` WHERE did = $1 AND contract_data IS DISTINCT FROM ` + partyNamesOnly,
+		`UPDATE contracts SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
 		`UPDATE contract_history SET contract_data = '{}'::jsonb WHERE did = $1 AND contract_data IS DISTINCT FROM '{}'::jsonb`,
+		`UPDATE contract_history SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
 		`UPDATE contract_negotiations SET change_request = '{}'::jsonb WHERE did = $1 AND change_request IS DISTINCT FROM '{}'::jsonb`,
+		`UPDATE contract_negotiation_decisions SET rejection_reason = NULL
+		 WHERE rejection_reason IS NOT NULL AND negotiation_id IN (SELECT id FROM contract_negotiations WHERE did = $1)`,
+		`UPDATE contract_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
+		`UPDATE contract_peer_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
 		`DELETE FROM contract_negotiation_drafts WHERE contract_did = $1`,
 		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1 AND contract_snapshot <> '{}'::jsonb`,
 		`UPDATE signature_ceremonies SET pinned_payload = NULL, prepared_pdf = NULL, pid_claims = NULL, vp_token = NULL, poa_vp_token = NULL
@@ -158,10 +169,14 @@ func eraseOutboxBodies(ctx context.Context, tx *sqlx.Tx, contractIRI string) err
 	return err
 }
 
-// DBContractParties reads the contract's parties from its Responsible record.
+// DBContractParties reads the parties of the contract that hold a copy of it:
+// the origin this instance received it from, and each peer this instance
+// delivered a revision to. A party that never received the contract gets no
+// erase request.
 type DBContractParties struct {
 	DB    *sqlx.DB
 	CRepo db.ContractRepo
+	SRepo db2.SyncRepository
 }
 
 func (p *DBContractParties) Parties(ctx context.Context, contractIRI string) ([]string, error) {
@@ -178,7 +193,80 @@ func (p *DBContractParties) Parties(ctx context.Context, contractIRI string) ([]
 	if data.Responsible == nil {
 		return nil, nil
 	}
-	return data.Responsible.GetParties(), nil
+	deliveries, err := p.SRepo.GetPDFDeliveries(ctx, tx, contractIRI)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the deliveries of contract %s: %w", contractIRI, err)
+	}
+	return db2.PeersHoldingCopy(data.Responsible.GetParties(), data.Origin, deliveries), nil
+}
+
+// The refusals of PeerErasure.AuthorizeErase.
+var (
+	// ErrNoSharedCopy: this instance holds no copy of the contract that the
+	// requesting peer is a party of. The refusal does not change.
+	ErrNoSharedCopy = errors.New("this instance holds no copy of the contract shared with the requesting peer")
+	// ErrNotErasable: the copy is in force, or a retention period of its
+	// archive entries runs. The refusal can change later.
+	ErrNotErasable = errors.New("the local copy of the contract may not be erased now")
+)
+
+// PeerErasure decides whether a peer may have the local copy of a contract
+// erased.
+type PeerErasure interface {
+	AuthorizeErase(ctx context.Context, contractIRI, peerDID string) error
+}
+
+// erasableStates are the states in which a contract is no longer in force
+// and may be erased (DCS-FR-CWE-20, DCS-FR-CSA-17).
+var erasableStates = []string{
+	contractstate.Terminated.String(), contractstate.Expired.String(), contractstate.Revoked.String(),
+	contractstate.Rejected.String(), contractstate.Withdrawn.String(),
+}
+
+// DBPeerErasure allows a peer erase only for a party of the contract, only
+// for a copy that is no longer in force, and only while no live archive entry
+// of the contract is under retention.
+type DBPeerErasure struct {
+	DB    *sqlx.DB
+	CRepo db.ContractRepo
+}
+
+func (e DBPeerErasure) AuthorizeErase(ctx context.Context, contractIRI, peerDID string) error {
+	tx, err := e.DB.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	exists, err := e.CRepo.ExistsByDID(ctx, tx, contractIRI)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: no contract %s", ErrNoSharedCopy, contractIRI)
+	}
+	contract, err := e.CRepo.ReadDataByDID(ctx, tx, contractIRI)
+	if err != nil {
+		return err
+	}
+	if contract.Responsible == nil || !slices.Contains(contract.Responsible.GetParties(), peerDID) {
+		return fmt.Errorf("%w: peer %s is not a party of contract %s", ErrNoSharedCopy, peerDID, contractIRI)
+	}
+	if !slices.Contains(erasableStates, contract.State) {
+		return fmt.Errorf("%w: contract %s is %s, and only a contract in state %v may be erased",
+			ErrNotErasable, contractIRI, contract.State, erasableStates)
+	}
+	var retainedUntil *time.Time
+	if err := tx.GetContext(ctx, &retainedUntil, `
+		SELECT max(retention_until) FROM contract_archive_entries
+		 WHERE did = $1 AND deleted_at IS NULL AND retention_until > now()`, contractIRI); err != nil {
+		return err
+	}
+	if retainedUntil != nil {
+		return fmt.Errorf("%w: the archive entries of contract %s are retained until %s",
+			ErrNotErasable, contractIRI, retainedUntil.UTC().Format(time.RFC3339))
+	}
+	return nil
 }
 
 // HTTPPeerEraseSender calls POST /peer/contracts/erase on the peer resolved
@@ -201,10 +289,14 @@ func (HTTPPeerEraseSender) SendErase(ctx context.Context, peerDID string, req *d
 
 // ContractEraser runs the erasure of a contract's content-encryption keys
 // (DCS-NFR-COMP-03, DCS-NFR-SEC-13): shred the local wrapped CEKs with a
-// KEY_SHREDDED audit event, then ask every counterparty instance to shred its
-// own via /peer/contracts/erase. An unreachable peer leaves a pending
-// contract_erasures row that the retry scheduler re-delivers.
+// KEY_SHREDDED audit event, then ask every counterparty instance that holds a
+// copy to shred its own via /peer/contracts/erase. An unreachable peer, or a
+// peer whose copy is still in force or under retention, leaves a pending
+// contract_erasures row that the retry scheduler re-delivers with backoff. A
+// peer that holds no copy shared with this instance refuses for good: the row
+// is marked refused and is not sent again.
 type ContractEraser struct {
+	DB          *sqlx.DB
 	DIDDocument identity.DIDDocument
 	Shredder    ScopeShredder
 	Parties     ContractParties
@@ -247,14 +339,14 @@ func (e *ContractEraser) EraseContract(ctx context.Context, contractIRI, actor, 
 }
 
 // attemptPeerErase delivers one erase request; success confirms the ledger
-// row, failure counts a retry attempt.
+// row, a final refusal marks it refused, any other failure counts a retry
+// attempt.
 func (e *ContractEraser) attemptPeerErase(ctx context.Context, contractIRI, peer string) error {
 	localPeer, err := e.DIDDocument.GetID()
 	if err != nil {
 		return err
 	}
-	secretValue := rand.Text()
-	secretHash, err := e.DIDDocument.Sign([]byte(secretValue))
+	secretValue, secretHash, err := SignPeerChallenge(&e.DIDDocument, OpErase, localPeer, peer, contractIRI, nil)
 	if err != nil {
 		return err
 	}
@@ -264,16 +356,37 @@ func (e *ContractEraser) attemptPeerErase(ctx context.Context, contractIRI, peer
 		SecretValue: secretValue,
 		SecretHash:  secretHash,
 	})
-	if sendErr != nil {
-		if err := e.ERepo.RecordAttempt(ctx, contractIRI, peer); err != nil {
+	switch {
+	case IsFinalPeerRefusal(sendErr):
+		if err := e.ERepo.Refuse(ctx, contractIRI, peer, sendErr.Error()); err != nil {
+			log.Printf(ctx, "could not record the refused erase of %s toward %s: %v", contractIRI, peer, err)
+		}
+		return sendErr
+	case sendErr != nil:
+		if err := e.ERepo.RecordAttempt(ctx, contractIRI, peer, sendErr.Error()); err != nil {
 			log.Printf(ctx, "could not record erase attempt for %s toward %s: %v", contractIRI, peer, err)
 		}
 		return sendErr
 	}
-	return e.ERepo.Confirm(ctx, contractIRI, peer)
+	if err := e.ERepo.Confirm(ctx, contractIRI, peer); err != nil {
+		return err
+	}
+	if err := RecordPeerExchange(ctx, e.DB, contractIRI, "erase", ExchangeSent, peer); err != nil {
+		log.Printf(ctx, "could not audit the erase of %s toward %s: %v", contractIRI, peer, err)
+	}
+	return nil
 }
 
-// RetryPending re-delivers every not-yet-confirmed peer erase request.
+// IsFinalPeerRefusal reports whether a peer refused a request for a reason
+// that does not change: it holds no copy of the contract shared with this
+// instance.
+func IsFinalPeerRefusal(err error) bool {
+	var serviceErr *goa.ServiceError
+	return errors.As(err, &serviceErr) && serviceErr.Name == "not_found"
+}
+
+// RetryPending re-delivers the peer erase requests that are neither confirmed
+// nor refused and whose backoff has passed.
 func (e *ContractEraser) RetryPending(ctx context.Context) {
 	pending, err := e.ERepo.GetPending(ctx)
 	if err != nil {

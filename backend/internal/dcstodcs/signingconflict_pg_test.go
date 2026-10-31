@@ -52,7 +52,7 @@ func peerClient(t *testing.T, refusal error) *dcstodcs.Client {
 func shipOnce(t *testing.T, s *DCSToDCSSynchronizer, client *dcstodcs.Client) error {
 	t.Helper()
 	ctx := context.Background()
-	shipErr := s.deliverPdf(ctx, client, conflictPeerDID, &dcstodcs.DCSToDCSContractPdfRequest{
+	_, shipErr := s.deliverPdf(ctx, client, conflictPeerDID, &dcstodcs.DCSToDCSContractPdfRequest{
 		FromPeerDid: "did:web:dcs-a.example",
 		ContractIri: conflictContractDID,
 		Pdf:         []byte("%PDF-1.7 signed by A"),

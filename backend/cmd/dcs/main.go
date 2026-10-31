@@ -516,9 +516,10 @@ func main() {
 	eraseRepo := &pq2.PostgresEraseRepository{DB: db}
 	shredder := &dcstodcs2.AuditedShredder{DB: db, Keys: cekRepo, Artifacts: artifactStore}
 	contractEraser := &dcstodcs2.ContractEraser{
+		DB:          db,
 		DIDDocument: *didDocument,
 		Shredder:    shredder,
-		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo},
+		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo, SRepo: &syncRepo},
 		ERepo:       eraseRepo,
 		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}

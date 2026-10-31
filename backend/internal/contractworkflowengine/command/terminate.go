@@ -92,10 +92,21 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 	occurredAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	// A concurrent termination of the same contract (a local one and a peer
+	// notice) read the same non-terminal state. The second one to insert finds
+	// the row of the first and is refused as a transition from TERMINATED.
+	recorded, err := tx.ExecContext(ctx, `
 		INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
-		VALUES ($1, $2, $3, $4, $5)`, cmd.DID, cmd.Reason, occurredAt, cmd.TerminatedBy, role); err != nil {
+		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (did) DO NOTHING`, cmd.DID, cmd.Reason, occurredAt, cmd.TerminatedBy, role)
+	if err != nil {
 		return fmt.Errorf("could not record the termination: %w", err)
+	}
+	rows, err := recorded.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("could not record the termination: %w", err)
+	}
+	if rows == 0 {
+		return contractstate.ValidateTransition(contractstate.Terminated, contractstate.EventTerminate)
 	}
 
 	if err := closeOpenTasks(ctx, tx, cmd.DID); err != nil {
@@ -153,7 +164,9 @@ func initiatingRole(cmd TerminateCmd, localPeer string) (string, error) {
 }
 
 // queuePeerTerminations records one termination notice per party instance
-// other than this one; dcstodcs.TerminationNotifier delivers them.
+// other than this one that holds a copy of the contract;
+// dcstodcs.TerminationNotifier delivers them. A party that never received
+// the contract gets no notice.
 func (h *Terminator) queuePeerTerminations(ctx context.Context, tx *sqlx.Tx, did, reason, localPeer string) error {
 	contract, err := h.CRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
@@ -162,7 +175,11 @@ func (h *Terminator) queuePeerTerminations(ctx context.Context, tx *sqlx.Tx, did
 	if contract.Responsible == nil {
 		return nil
 	}
-	for _, party := range contract.Responsible.GetParties() {
+	deliveries, err := h.SRepo.GetPDFDeliveries(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read the peers that received contract %s: %w", did, err)
+	}
+	for _, party := range db2.PeersHoldingCopy(contract.Responsible.GetParties(), contract.Origin, deliveries) {
 		if party == localPeer {
 			continue
 		}

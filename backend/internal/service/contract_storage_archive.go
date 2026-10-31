@@ -306,10 +306,16 @@ func erasureStatusResponse(did string, records []artifactstore.CEKRecord, reques
 			RequestedAt: request.RequestedAt.UTC().Format(time.RFC3339),
 			RetryCount:  request.RetryCount,
 		}
-		if request.ConfirmedAt != nil {
+		switch {
+		case request.ConfirmedAt != nil:
 			peer.Status = "confirmed"
 			confirmedAt := request.ConfirmedAt.UTC().Format(time.RFC3339)
 			peer.ConfirmedAt = &confirmedAt
+		case request.RefusedAt != nil:
+			peer.Status = "refused"
+			peer.LastError = request.LastError
+		default:
+			peer.LastError = request.LastError
 		}
 		if request.LastTriedAt != nil {
 			lastTriedAt := request.LastTriedAt.UTC().Format(time.RFC3339)

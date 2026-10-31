@@ -81,12 +81,13 @@ var ArchiveAnnotationResponse = Type("ArchiveAnnotationResponse", func() {
 })
 
 var ArchiveErasurePeerStatus = Type("ArchiveErasurePeerStatus", func() {
-	Description("The erasure-handshake state of one counterparty instance: pending while the peer erase request is still queued for retry, confirmed once the peer acknowledged shredding its wrapped CEKs")
+	Description("The erasure-handshake state of one counterparty instance: pending while the peer erase request is still queued for retry, confirmed once the peer acknowledged shredding its wrapped CEKs, refused when the peer holds no copy of the contract shared with this instance and the request is not sent again")
 
 	Attribute("peer_did", String, "Decentralized Identifier of the counterparty instance")
-	Attribute("status", String, "Handshake state: pending or confirmed", func() {
-		Enum("pending", "confirmed")
+	Attribute("status", String, "Handshake state: pending, confirmed or refused", func() {
+		Enum("pending", "confirmed", "refused")
 	})
+	Attribute("last_error", String, "The peer's answer to the last attempt that did not confirm; absent once confirmed")
 	Attribute("requested_at", String, "When the peer erase was triggered (RFC3339)")
 	Attribute("confirmed_at", String, "When the peer confirmed shredding its CEKs (RFC3339); absent while pending")
 	Attribute("retry_count", Int, "Number of failed delivery attempts so far")
