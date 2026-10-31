@@ -198,7 +198,8 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	}
 	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
 	var evidenceCIDs []string
-	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1`, p.Did); err != nil {
+	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1
+		UNION SELECT content_cid FROM contract_archive_sections WHERE did = $1`, p.Did); err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 	snapshotCIDs = append(snapshotCIDs, evidenceCIDs...)

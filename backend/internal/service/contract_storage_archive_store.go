@@ -43,6 +43,8 @@ func (s *contractStorageArchivesrvc) Store(ctx context.Context, p *contractstora
 		return s.storeContract(ctx, p.Did)
 	case "evidence":
 		return s.storeEvidence(ctx, p)
+	case "section":
+		return s.storeSection(ctx, p)
 	}
 	return nil, contractstoragearchive.MakeBadRequest(fmt.Errorf("unknown kind %q", p.Kind))
 }

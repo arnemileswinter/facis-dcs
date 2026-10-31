@@ -41,6 +41,7 @@ const (
 	AnnotateArchived            EventType = "ANNOTATE_ARCHIVED_CONTRACT"
 	SearchArchived              EventType = "SEARCH_ARCHIVED_CONTRACTS"
 	StoreArchiveEvidence        EventType = "STORE_ARCHIVE_EVIDENCE"
+	StoreArchiveSection         EventType = "STORE_ARCHIVE_SECTION"
 	ArchiveOperationFailed      EventType = "ARCHIVE_OPERATION_FAILED"
 	RetrieveByID                EventType = "RETRIEVE_CONTRACT_BY_ID"
 	AccessDenied                EventType = "CONTRACT_ACCESS_DENIED"
