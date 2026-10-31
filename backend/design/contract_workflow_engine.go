@@ -64,6 +64,18 @@ var ContractBlockAnnotation = Type("ContractBlockAnnotation", func() {
 	Required("block_id", "comment")
 })
 
+var ContractReviewFinding = Type("ContractReviewFinding", func() {
+	Description("One reviewer decision on a contract: forward to approval or return to negotiation, with the reviewer's comments and block annotations")
+	Attribute("submitted_by", String, "Organization of the reviewer")
+	Attribute("holder_did", String, "Holder DID of the reviewer")
+	Attribute("occurred_at", String, "Time of the decision, RFC3339")
+	Attribute("contract_version", Int, "Contract version the decision applies to")
+	Attribute("decision", String, "APPROVAL or REJECT")
+	Attribute("comments", ArrayOf(String), "Reviewer comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Reviewer annotations on document blocks")
+	Required("submitted_by", "occurred_at", "contract_version", "comments", "annotations")
+})
+
 var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Description("Contract submit request")
 
@@ -1927,6 +1939,39 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("not_found", ErrorResult)
 		HTTP(func() {
 			GET("/contract/lifecycle/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// GET /contract/review-findings/{did}
+	Method("review_findings", func() {
+		Description("retrieve the reviewer decisions on a contract with their comments and block annotations, newest first, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-IR-CWE-08", "DCS-FR-CWE-25")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractReviewFinding))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/review-findings/{did}")
 			Response(StatusOK)
 			Response("forbidden", StatusForbidden)
 			Response("not_found", StatusNotFound)
