@@ -15,6 +15,7 @@ import { useContractContentValuesStore } from '@contract-workflow-engine/store/c
 import { useContractEditorUiStore } from '@contract-workflow-engine/store/contractEditorUiStore'
 import ContractMachineReadableView from '@/components/contract/ContractMachineReadableView.vue'
 import ContractManagerActions from '@/components/contract/ContractManagerActions.vue'
+import ContractPdfVerifierPanel from '@/components/contract/ContractPdfVerifierPanel.vue'
 import ContractTargetPicker from '@/components/contract/ContractTargetPicker.vue'
 import ExpiredPolicyNotice from '@/components/contract/ExpiredPolicyNotice.vue'
 import { useDocumentExport } from '@/composables/useDocumentExport'
@@ -304,6 +305,9 @@ const exportBundle = async () => {
                     <ContractTargetPicker :contract="contract" @designated="reloadContract" />
                   </div>
                 </div>
+
+                <!-- C2PA verifier: the stored PDF or a copy (DCS-OR-C2PA-006, -008) -->
+                <ContractPdfVerifierPanel :did="contract.did" class="mt-4" />
 
                 <!-- Deployment KPIs with the target system's verdict (DCS-FR-CWE-31, DCS-FR-CWE-09, ADR-33) -->
                 <div

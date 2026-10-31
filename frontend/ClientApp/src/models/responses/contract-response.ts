@@ -231,3 +231,25 @@ export interface MachineIdentityCreateResponse {
   identity: MachineIdentity
   credential: MachineCredential
 }
+
+/** The verification of a contract PDF (DCS-OR-C2PA-006, -008): the four named
+ *  checks and the lifecycle state the banner shows. */
+export interface ContractPdfVerifyResult {
+  match: boolean
+  jsonld_hash: string
+  base_pdf_hash: string
+  stored_base_pdf_hash: string
+  c2pa_manifest_found: boolean
+  c2pa_signature_status: string
+  vc_proof_status: string
+  status_list_uri?: string
+  lifecycle_status?: string
+  status_list_status?: string
+  status_list_check: string
+  status_list_error?: string
+  pdf_signature_status: string
+  pdf_signature_source?: string
+  pdf_signature_detail?: string
+  discrepancy?: string
+  c2pa_manifest_source?: string
+}

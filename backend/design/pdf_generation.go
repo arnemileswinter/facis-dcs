@@ -227,7 +227,7 @@ var _ = Service("PDFGeneration", func() {
 
 	// verify_contract_pdf_copy — POST /pdf/verify/contract/{did}
 	Method("verify_contract_pdf_copy", func() {
-		Description("Verify a copy of a contract PDF that the caller submits (DCS-OR-C2PA-008). A copy that carries its embedded C2PA manifest is verified against that manifest. A copy without an embedded manifest is verified against the remote manifest it references in its XMP metadata: the reference must be this contract's GET /c2pa/manifest/{did}, the contract PDF that holds that manifest is verified, and the copy must show the same pages and carry the same machine-readable payload. c2pa_manifest_source names the manifest that was used.")
+		Description("Verify a copy of a contract PDF that the caller submits (DCS-OR-C2PA-008). A copy that carries its embedded C2PA manifest and is the stored contract PDF, or an earlier revision of it, is verified against that manifest. Any other copy is verified against the remote manifest it references in its XMP metadata: the reference must name this contract's GET /c2pa/manifest/{did}, at this instance or at the host of a party's did:web, the contract PDF that holds that manifest is verified, and the copy must show exactly the same pages (annotations, resources and signature widgets included) and carry the same machine-readable payload. c2pa_manifest_source names the manifest that was used.")
 		Meta("dcs:requirements", "DCS-OR-C2PA-008")
 		Security(JWTAuth, func() {
 			Scope("Contract Manager")

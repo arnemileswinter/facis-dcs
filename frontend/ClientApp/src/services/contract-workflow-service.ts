@@ -39,6 +39,7 @@ import type {
   ContractNegotiationResponse,
   ContractOfferAcceptResponse,
   ContractOfferResponse,
+  ContractPdfVerifyResult,
   ContractRejectResponse,
   ContractRenewResponse,
   ContractRetrieveByIdResponse,
@@ -278,18 +279,19 @@ export const contractWorkflowService: ContractWorkflowService = {
       .then((res) => res.data)
   },
 
-  async verifyPdf(did: string): Promise<{
-    match: boolean
-    jsonld_hash: string
-    base_pdf_hash: string
-    stored_base_pdf_hash: string
-    c2pa_manifest_found?: boolean
-    c2pa_signature_status?: string
-    vc_proof_status?: string
-    status_list_uri?: string
-    lifecycle_status?: string
-    status_list_status?: string
-  }> {
-    return http.get(`/pdf/verify/contract/${encodeURIComponent(did)}`).then((res) => res.data)
+  async verifyPdf(did: string): Promise<ContractPdfVerifyResult> {
+    return http.get<ContractPdfVerifyResult>(`/pdf/verify/contract/${encodeURIComponent(did)}`).then((res) => res.data)
+  },
+
+  // A copy of the contract PDF someone holds, checked against this contract's
+  // stored PDF and its manifest (DCS-OR-C2PA-008).
+  async verifyPdfCopy(did: string, copy: Blob): Promise<ContractPdfVerifyResult> {
+    let binary = ''
+    new Uint8Array(await copy.arrayBuffer()).forEach((b) => {
+      binary += String.fromCharCode(b)
+    })
+    return http
+      .post<ContractPdfVerifyResult>(`/pdf/verify/contract/${encodeURIComponent(did)}`, { pdf: btoa(binary) })
+      .then((res) => res.data)
   },
 }
