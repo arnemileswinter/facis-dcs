@@ -445,6 +445,19 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
         await expect(page.getByLabel('Tag', { exact: true })).not.toBeVisible()
         await page.keyboard.press('Tab')
         await expect(page.getByRole('button', { name: 'Reset search' })).toBeFocused()
+        // Saved queries and export (DCS-FR-CSA-22) follow the search; Save
+        // query stays disabled until the query has a name.
+        await page.keyboard.press('Tab')
+        await expect(page.getByLabel('Name for this query')).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Export CSV' })).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Export JSON' })).toBeFocused()
+        if (role === 'Archive Manager') {
+          // Row selection for bulk termination (DCS-FR-CSA-23).
+          await page.keyboard.press('Tab')
+          await expect(page.getByRole('checkbox', { name: `Select ${longName}` }).first()).toBeFocused()
+        }
         await page.keyboard.press('Tab')
         await expect(page.getByRole('link', { name: `${longName}, version 1`, exact: true })).toBeFocused()
         const open = page.locator('.archive-entry-link')
