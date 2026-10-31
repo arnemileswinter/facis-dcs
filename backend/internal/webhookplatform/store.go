@@ -102,6 +102,8 @@ type Subscriptions interface {
 	// DeleteOwned returns false when no subscription with that id belongs to ownerDID.
 	DeleteOwned(ctx context.Context, id, ownerDID string) (bool, error)
 	ByEvent(ctx context.Context, event string) ([]Subscription, error)
+	// ByID returns the subscription with its secret, or nil when it is gone.
+	ByID(ctx context.Context, id string) (*Subscription, error)
 }
 
 // PostgresSubscriptions stores subscriptions in webhook_subscriptions, with
@@ -184,6 +186,28 @@ func (s PostgresSubscriptions) ByEvent(ctx context.Context, event string) ([]Sub
 	return subs, nil
 }
 
+// ByID returns the subscription with its decrypted secret, or nil.
+func (s PostgresSubscriptions) ByID(ctx context.Context, id string) (*Subscription, error) {
+	var row struct {
+		Subscription
+		Ciphertext []byte `db:"secret_ciphertext"`
+		WrappedCEK []byte `db:"secret_wrapped_cek"`
+	}
+	err := s.DB.GetContext(ctx, &row, `
+        SELECT `+subscriptionColumns+`, secret_ciphertext, secret_wrapped_cek
+        FROM webhook_subscriptions WHERE id = $1`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read webhook subscription %s: %w", id, err)
+	}
+	if row.Secret, err = s.Secrets.Open(row.ID, row.Ciphertext, row.WrappedCEK); err != nil {
+		return nil, err
+	}
+	return &row.Subscription, nil
+}
+
 // PendingCallback tracks an in-flight webhook dispatch awaiting a callback.
 type PendingCallback struct {
 	EventID       string
@@ -193,33 +217,46 @@ type PendingCallback struct {
 	SentAt        time.Time
 }
 
-// Delivery is the recorded outcome of one webhook notification attempt —
-// the observable behind GET /deliveries (monitoring and BDD assertions).
+// Delivery is the delivery of one dispatched event to one subscription and
+// the outcome of its last attempt — the observable behind GET /deliveries
+// (monitoring and BDD assertions).
 type Delivery struct {
-	EventID       string    `json:"event_id" db:"event_id"`
-	CorrelationID string    `json:"correlation_id" db:"correlation_id"`
-	Event         string    `json:"event" db:"event"`
-	DID           string    `json:"did" db:"did"`
-	CallbackURL   string    `json:"callback_url" db:"callback_url"`
-	OwnerDID      string    `json:"-" db:"owner_did"`
-	StatusCode    int       `json:"status_code,omitempty" db:"status_code"`
-	Error         string    `json:"error,omitempty" db:"error"`
-	DeliveredAt   time.Time `json:"delivered_at" db:"delivered_at"`
-	Acknowledged  bool      `json:"acknowledged" db:"acknowledged"`
+	ID             int64     `json:"-" db:"id"`
+	EventID        string    `json:"event_id" db:"event_id"`
+	CorrelationID  string    `json:"correlation_id" db:"correlation_id"`
+	Event          string    `json:"event" db:"event"`
+	DID            string    `json:"did" db:"did"`
+	SubscriptionID string    `json:"-" db:"subscription_id"`
+	CallbackURL    string    `json:"callback_url" db:"callback_url"`
+	OwnerDID       string    `json:"-" db:"owner_did"`
+	StatusCode     int       `json:"status_code,omitempty" db:"status_code"`
+	Error          string    `json:"error,omitempty" db:"error"`
+	Attempts       int       `json:"attempts" db:"attempts"`
+	DeliveredAt    time.Time `json:"delivered_at" db:"delivered_at"`
+	Acknowledged   bool      `json:"acknowledged" db:"acknowledged"`
+	// Payload is the signed body, kept until the delivery ends.
+	Payload []byte `json:"-" db:"payload"`
 }
 
 // maxDeliveries bounds how many entries ListDeliveries returns (newest kept).
 const maxDeliveries = 512
 
-// Deliveries stores pending callbacks and the delivery log.
+// Deliveries stores the dispatches, their deliveries and the outcomes.
 type Deliveries interface {
 	// TrackPending records an in-flight dispatch so its callback can be correlated.
 	TrackPending(ctx context.Context, p PendingCallback) error
-	// ResolvePending marks the dispatch for eventID as acknowledged and returns
-	// it. Only the first callback for an event_id resolves it.
-	ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error)
-	// AddDelivery records a notification outcome.
-	AddDelivery(ctx context.Context, d Delivery) error
+	// QueueDelivery records the delivery of a dispatch to one subscription
+	// before the first attempt, due again at retryAt, and returns its id.
+	QueueDelivery(ctx context.Context, d Delivery, retryAt time.Time) (int64, error)
+	// RecordAttempt records the outcome of one attempt. The delivery is due
+	// again at next; a zero next ends it.
+	RecordAttempt(ctx context.Context, id int64, statusCode int, errText string, next time.Time) error
+	// DueDeliveries returns up to limit deliveries due at now.
+	DueDeliveries(ctx context.Context, now time.Time, limit int) ([]Delivery, error)
+	// ResolvePending acknowledges the deliveries of eventID to ownerDID's
+	// subscriptions and returns the dispatch. Only the first callback of an
+	// organization for an event_id resolves it.
+	ResolvePending(ctx context.Context, eventID, ownerDID string) (PendingCallback, bool, error)
 	// ListDeliveries returns the newest deliveries to ownerDID's subscriptions,
 	// newest last.
 	ListDeliveries(ctx context.Context, ownerDID string) ([]Delivery, error)
@@ -242,12 +279,56 @@ func (s PostgresDeliveries) TrackPending(ctx context.Context, p PendingCallback)
 	return nil
 }
 
-func (s PostgresDeliveries) ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error) {
+func (s PostgresDeliveries) QueueDelivery(ctx context.Context, d Delivery, retryAt time.Time) (int64, error) {
+	var id int64
+	if err := s.DB.GetContext(ctx, &id, `
+        INSERT INTO webhook_deliveries (event_id, subscription_id, callback_url, owner_did, payload, next_attempt_at)
+        VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6) RETURNING id`,
+		d.EventID, d.SubscriptionID, d.CallbackURL, d.OwnerDID, d.Payload, retryAt); err != nil {
+		return 0, fmt.Errorf("queue webhook delivery %s: %w", d.EventID, err)
+	}
+	return id, nil
+}
+
+func (s PostgresDeliveries) RecordAttempt(ctx context.Context, id int64, statusCode int, errText string, next time.Time) error {
+	var nextAttempt *time.Time
+	if !next.IsZero() {
+		nextAttempt = &next
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+        UPDATE webhook_deliveries
+        SET status_code = $2, error = $3, attempts = attempts + 1, delivered_at = now(), next_attempt_at = $4,
+            payload = CASE WHEN $4::timestamptz IS NULL THEN NULL ELSE payload END
+        WHERE id = $1`, id, statusCode, errText, nextAttempt); err != nil {
+		return fmt.Errorf("record webhook delivery attempt %d: %w", id, err)
+	}
+	return nil
+}
+
+func (s PostgresDeliveries) DueDeliveries(ctx context.Context, now time.Time, limit int) ([]Delivery, error) {
+	out := []Delivery{}
+	if err := s.DB.SelectContext(ctx, &out, `
+        SELECT d.id, d.event_id, p.correlation_id, p.event, p.did, COALESCE(d.subscription_id::text, '') AS subscription_id,
+               d.callback_url, d.owner_did, d.status_code, d.error, d.attempts, COALESCE(d.delivered_at, p.sent_at) AS delivered_at,
+               d.acknowledged_at IS NOT NULL AS acknowledged, d.payload
+        FROM webhook_deliveries d JOIN webhook_dispatches p ON p.event_id = d.event_id
+        WHERE d.next_attempt_at <= $1
+        ORDER BY d.next_attempt_at LIMIT $2`, now, limit); err != nil {
+		return nil, fmt.Errorf("list due webhook deliveries: %w", err)
+	}
+	return out, nil
+}
+
+func (s PostgresDeliveries) ResolvePending(ctx context.Context, eventID, ownerDID string) (PendingCallback, bool, error) {
 	var p PendingCallback
 	err := s.DB.QueryRowxContext(ctx, `
-        UPDATE webhook_dispatches SET acknowledged_at = now()
-        WHERE event_id = $1 AND acknowledged_at IS NULL
-        RETURNING event_id, correlation_id, event, did, sent_at`, eventID).
+        WITH acknowledged AS (
+            UPDATE webhook_deliveries SET acknowledged_at = now()
+            WHERE event_id = $1 AND owner_did = $2 AND acknowledged_at IS NULL
+            RETURNING event_id
+        )
+        SELECT event_id, correlation_id, event, did, sent_at FROM webhook_dispatches
+        WHERE event_id IN (SELECT event_id FROM acknowledged)`, eventID, ownerDID).
 		Scan(&p.EventID, &p.CorrelationID, &p.Event, &p.DID, &p.SentAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PendingCallback{}, false, nil
@@ -258,23 +339,14 @@ func (s PostgresDeliveries) ResolvePending(ctx context.Context, eventID string) 
 	return p, true, nil
 }
 
-func (s PostgresDeliveries) AddDelivery(ctx context.Context, d Delivery) error {
-	if _, err := s.DB.ExecContext(ctx, `
-        INSERT INTO webhook_deliveries (event_id, callback_url, owner_did, status_code, error, delivered_at)
-        VALUES ($1, $2, $3, $4, $5, $6)`,
-		d.EventID, d.CallbackURL, d.OwnerDID, d.StatusCode, d.Error, d.DeliveredAt); err != nil {
-		return fmt.Errorf("record webhook delivery %s: %w", d.EventID, err)
-	}
-	return nil
-}
-
 func (s PostgresDeliveries) ListDeliveries(ctx context.Context, ownerDID string) ([]Delivery, error) {
 	out := []Delivery{}
 	if err := s.DB.SelectContext(ctx, &out, `
-        SELECT event_id, correlation_id, event, did, callback_url, owner_did, status_code, error, delivered_at, acknowledged
+        SELECT event_id, correlation_id, event, did, callback_url, owner_did, status_code, error, attempts, delivered_at, acknowledged
         FROM (
             SELECT d.id, d.event_id, p.correlation_id, p.event, p.did, d.callback_url, d.owner_did,
-                   d.status_code, d.error, d.delivered_at, p.acknowledged_at IS NOT NULL AS acknowledged
+                   d.status_code, d.error, d.attempts, COALESCE(d.delivered_at, p.sent_at) AS delivered_at,
+                   d.acknowledged_at IS NOT NULL AS acknowledged
             FROM webhook_deliveries d JOIN webhook_dispatches p ON p.event_id = d.event_id
             WHERE d.owner_did = $1
             ORDER BY d.id DESC LIMIT $2

@@ -326,6 +326,11 @@ spec:
             - name: DCS_FORCE_EIDAS_CERT
               value: "true"
             {{- end }}
+            {{- if .Values.webhooks.insecureHosts }}
+            # Webhook callback hosts that may use plain http (webhooks.insecureHosts).
+            - name: DCS_WEBHOOK_INSECURE_HOSTS
+              value: {{ .Values.webhooks.insecureHosts | quote }}
+            {{- end }}
             {{- if .Values.federation.trustPdpURL }}
             # ADR-19 federation trust gate. Emitted only when set so a deployment
             # that configures it through extraEnv instead does not end up with two

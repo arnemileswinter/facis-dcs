@@ -473,6 +473,13 @@ pkcs11:
       # provisioner never created.
       pullPolicy: ""
 
+# Webhook subscriptions (/orce/webhooks, DCS-IR-SI-02). A delivery carries
+# contract content (DCS-IR-CI-01), so a callback URL is https. Plain http is
+# accepted only for loopback, a host DCS_DIDWEB_INSECURE_HOSTS names, or a
+# host:port listed here (comma-separated).
+webhooks:
+  insecureHosts: ""
+
 # ---- Co-deployed dependencies ----------------------------------------
 # Each sub-chart owns its full set of configurable values.
 # Only fields referenced by the parent chart's helpers are listed here.

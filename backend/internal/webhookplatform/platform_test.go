@@ -70,6 +70,17 @@ func (f *fakeSubscriptions) ByEvent(_ context.Context, event string) ([]Subscrip
 	return out, nil
 }
 
+func (f *fakeSubscriptions) ByID(_ context.Context, id string) (*Subscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.subs {
+		if s.ID == id {
+			return &s, nil
+		}
+	}
+	return nil, nil
+}
+
 func admitAll(context.Context, string, string, string) bool { return true }
 
 // Each test token is the name of a caller in this table.
@@ -245,10 +256,12 @@ func TestCallerWithoutManagementRoleIsForbidden(t *testing.T) {
 	}
 }
 
-func TestSubscribeRejectsCallbackURLsThatAreNotPlainHTTP(t *testing.T) {
+func TestSubscribeRejectsCallbackURLsThatAreNotHTTPS(t *testing.T) {
 	subs := &fakeSubscriptions{}
 	p := newTestPlatform(subs)
-	for _, u := range []string{"ftp://receiver.example/hook", "/relative", "https://user:pw@receiver.example/hook", "http://"} {
+	// UC-IF-25: a delivery carries contract content, so plain http is refused
+	// for a host the deployment does not name.
+	for _, u := range []string{"ftp://receiver.example/hook", "/relative", "https://user:pw@receiver.example/hook", "http://", "http://receiver.example/hook"} {
 		rec := do(t, p, http.MethodPost, "/webhooks", "manager-a",
 			`{"event":"template.updated","callback_url":"`+u+`"}`)
 		if rec.Code != http.StatusBadRequest {
@@ -262,8 +275,8 @@ func TestSubscribeRejectsCallbackURLsThatAreNotPlainHTTP(t *testing.T) {
 
 func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
 	store := newMemDeliveries()
-	_ = store.AddDelivery(context.Background(), Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA})
-	_ = store.AddDelivery(context.Background(), Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB})
+	_, _ = store.QueueDelivery(context.Background(), Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA}, time.Now())
+	_, _ = store.QueueDelivery(context.Background(), Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB}, time.Now())
 	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
 	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll, nil), validate, nil)
 
@@ -274,5 +287,45 @@ func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
 	}
 	if len(got) != 1 || got[0]["event_id"] != "a" {
 		t.Fatalf("GET /deliveries for org A = %v, want only org A's delivery", got)
+	}
+}
+
+// UC-IF-26: a callback needs a management role, and it acknowledges only the
+// deliveries of the caller's organization. Another organization's callback
+// for the same event_id finds nothing to acknowledge.
+func TestCallbackAcknowledgesOnlyTheCallerOrganizationDeliveries(t *testing.T) {
+	store := newMemDeliveries()
+	ctx := context.Background()
+	_ = store.TrackPending(ctx, PendingCallback{EventID: "evt", Event: "contract.created"})
+	_, _ = store.QueueDelivery(ctx, Delivery{EventID: "evt", CallbackURL: "https://a.example", OwnerDID: orgA}, time.Now())
+	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
+	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll, nil), validate, nil)
+	body := `{"event_id":"evt","status":"done"}`
+
+	if rec := do(t, p, http.MethodPost, "/callbacks", "template-a", body); rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /callbacks without a management role = %d, want 403", rec.Code)
+	}
+	if rec := do(t, p, http.MethodPost, "/callbacks", "admin-b", body); rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /callbacks by an organization that did not receive the event = %d, want 404", rec.Code)
+	}
+	if got, _ := store.ListDeliveries(ctx, orgA); got[0].Acknowledged {
+		t.Fatal("another organization acknowledged org A's delivery")
+	}
+	if rec := do(t, p, http.MethodPost, "/callbacks", "manager-a", body); rec.Code != http.StatusOK {
+		t.Fatalf("POST /callbacks by the receiving organization = %d %s, want 200", rec.Code, rec.Body)
+	}
+	if got, _ := store.ListDeliveries(ctx, orgA); !got[0].Acknowledged {
+		t.Fatal("the receiving organization's callback did not acknowledge its delivery")
+	}
+}
+
+// A host the deployment names may receive deliveries over plain http.
+func TestSubscribeAcceptsPlainHTTPForANamedHost(t *testing.T) {
+	t.Setenv("DCS_WEBHOOK_INSECURE_HOSTS", "receiver.example:8080")
+	p := newTestPlatform(&fakeSubscriptions{})
+	rec := do(t, p, http.MethodPost, "/webhooks", "manager-a",
+		`{"event":"template.updated","callback_url":"http://receiver.example:8080/hook"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /webhooks with a named plain-http host = %d %s, want 201", rec.Code, rec.Body)
 	}
 }

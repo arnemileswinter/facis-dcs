@@ -384,6 +384,12 @@ systemClients:
     participant_did: "did:web:dcs-a.localhost%3A18080"
     roles: ["Contract Target System"]
 
+# The BDD webhook receiver runs in the behave process and serves plain http
+# (steps/support/services/webhook_receiver_service.py). The Makefile sets the
+# address the cluster reaches it at.
+webhooks:
+  insecureHosts: "host.docker.internal:18444"
+
 orce:
   enabled: true
   checkpointSink:
