@@ -36,9 +36,8 @@
 Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony, PID binding
 
   # ---------------------------------------------------------------------
-  # PAdES signature production - pdf-core POST /sign, exercised indirectly
-  # via POST /signature/apply after a completed ceremony (see steps module
-  # docstring point 1).
+  # PAdES signature production - exercised through the prepare/submit wallet
+  # ceremony (ADR-12, ADR-20); see the steps module docstring point 1.
   # ---------------------------------------------------------------------
 
   @DCS-OR-C2PA-002 @DCS-OR-C2PA-010

@@ -1,11 +1,9 @@
 # Signature retrieve/validate/audit/compliance (DCS-FR-SM-15, DCS-FR-SM-18,
 # DCS-FR-SM-19, DCS-FR-SM-21, UC-04): GET /signature/retrieve/{did},
 # POST /signature/validate, GET /signature/audit,
-# POST /signature/compliance (backend/design/signature_management.go). All
-# three are already implemented; only /signature/verify (contract integrity &
-# envelope check, used as a setup step by other packs) and /signature/apply
-# (the signing ceremony itself, covered by 22_real_signing_vertical) had
-# scenario coverage before this file.
+# POST /signature/compliance (backend/design/signature_management.go). The
+# signing ceremony itself (POST /signature/prepare, POST /signature/submit and
+# the OID4VP request routes) is covered by features/22_real_signing_vertical.
 
 @UC-04 @DCS-FR-SM-18 @DCS-FR-SM-19 @DCS-FR-SM-21 @DCS-FR-UC-04-2
 Feature: Signature validation, audit, and compliance
