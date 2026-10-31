@@ -200,6 +200,12 @@ global:
   #     port-forwards.
   #   - The backend API and the Hydra admin API have the same TLS proxy for
   #     in-cluster callers (ORCE, the backend, the Hydra client job).
+  #   - The backend calls the Hydra public API on hydra.service.publicTLSPort.
+  #   - The ingress reaches the backend, the Hydra public API (port
+  #     hydra.service.publicTLSPort) and the Federated Catalogue on their TLS
+  #     proxies and verifies the internal CA, when ingress.className is
+  #     traefik or nginx, or empty with the Traefik ServersTransport CRD
+  #     (deployment/README.md, "TLS").
   # The backend, the backup and the compliance monitor trust the CA. Another
   # client of the co-deployed PostgreSQL or NATS (Hydra, statuslist-service)
   # needs sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt in its

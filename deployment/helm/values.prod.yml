@@ -35,6 +35,9 @@ ingress:
   # controller is Traefik, the chart enforces it (ingress.tlsOptions, on by
   # default). For another controller, set the minimum on the controller and
   # verify it: deployment/README.md, "TLS".
+  # The hop from the controller to the pods is TLS 1.3 when className is
+  # traefik or nginx, or empty on a cluster with the Traefik CRDs. Behind
+  # another controller the routes use the plain ports.
 
 database:
   url: ""

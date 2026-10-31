@@ -31,6 +31,9 @@ service:
   type: ClusterIP
   publicPort: 4444
   adminPort: 4445
+  # TLS proxy port of the public API (global.internalTLS); the parent ingress
+  # routes to it.
+  publicTLSPort: 8444
   publicNodePort: null
   adminNodePort: null
 
