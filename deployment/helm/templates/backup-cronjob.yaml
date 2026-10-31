@@ -49,16 +49,21 @@ spec:
           restartPolicy: Never
           securityContext:
             # The postgres user of the postgres image.
+            runAsNonRoot: true
             runAsUser: 70
             runAsGroup: 70
             fsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: pg-dump
               # The pg_dump major version must be at least the server's.
-              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}{{ with .Values.backup.image.digest }}@{{ . }}{{ end }}"
               imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              # Writes only to /backup.
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
               env:

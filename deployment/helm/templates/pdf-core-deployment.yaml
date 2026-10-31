@@ -22,10 +22,18 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.pdfCore.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: pdf-core
-          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.pdfCore.image.repository }}:{{ .Values.pdfCore.image.tag | default .Chart.AppVersion }}{{ with .Values.pdfCore.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.pdfCore.image.pullPolicy }}
+          {{- with .Values.pdfCore.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.pdfCore.service.port }}

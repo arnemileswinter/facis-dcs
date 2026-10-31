@@ -1,6 +1,30 @@
 image:
   repository: oryd/hydra
   tag: "v2.2.0"
+  # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# 100:101 is the ory user of the Hydra image. Hydra writes no files: its state
+# is in the database of config.dsn (DCS-NFR-SEC-05).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Image of the client registration job: it needs sh and curl. It runs as UID
+# 65532 on a read-only root filesystem.
+jobImage:
+  repository: alpine/k8s
+  tag: "1.33.4"
+  digest: "sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68"
   pullPolicy: IfNotPresent
 
 service:

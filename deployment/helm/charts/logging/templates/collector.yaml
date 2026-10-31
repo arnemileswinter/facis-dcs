@@ -52,9 +52,12 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/collector-config.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ $name }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: alloy
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}{{ with .Values.collector.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
           args:
             - run
@@ -63,6 +66,7 @@ spec:
             - --server.http.listen-addr=127.0.0.1:12345
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 473
             capabilities:
@@ -75,6 +79,9 @@ spec:
             - name: config
               mountPath: /etc/alloy
               readOnly: true
+            # --storage.path
+            - name: tmp
+              mountPath: /tmp
             {{- if $tls }}
             - name: internal-ca
               mountPath: /etc/dcs-internal-tls
@@ -84,6 +91,8 @@ spec:
         - name: config
           configMap:
             name: {{ $name }}
+        - name: tmp
+          emptyDir: {}
         {{- if $tls }}
         - name: internal-ca
           secret:

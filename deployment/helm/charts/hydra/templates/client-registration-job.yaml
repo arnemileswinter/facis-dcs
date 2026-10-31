@@ -18,9 +18,21 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: register-clients
-          image: alpine:3.19
+          image: "{{ .Values.jobImage.repository }}:{{ .Values.jobImage.tag }}{{ with .Values.jobImage.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.jobImage.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           {{- with (.Values.jobResources | default .Values.resources) }}
           # Its own pod, so this block does not overlap the server's. Without one
           # a LimitRange default applies and the hook is refused on a namespace
@@ -44,7 +56,6 @@ spec:
             - -c
             - |
               set -e
-              apk add --no-cache curl jq >/dev/null 2>&1
 
               echo "Waiting for Hydra admin API..."
               until curl -sf $HYDRA_ADMIN/health/ready >/dev/null; do sleep 3; done

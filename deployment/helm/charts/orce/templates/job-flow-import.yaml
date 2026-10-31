@@ -12,9 +12,19 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
+        # The ORCE image carries curl and jq: nothing is installed at run time.
         - name: flow-importer
-          image: alpine:3.19
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with (.Values.jobResources | default .Values.resources) }}
           # Its own pod, so this block does not overlap the server's. Without one
           # a LimitRange default applies and the hook is refused on a namespace
@@ -32,8 +42,6 @@ spec:
             - -c
             - |
               set -ex
-
-              apk add --no-cache curl jq > /dev/null 2>&1
 
               BASE_URL="http://{{ .Release.Name }}-orce:{{ .Values.service.port | default 1880 }}"
 
@@ -123,8 +131,12 @@ spec:
             - name: flows
               mountPath: /flows
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: flows
           configMap:
             name: {{ .Release.Name }}-orce-flows
+        - name: tmp
+          emptyDir: {}
 {{- end }}

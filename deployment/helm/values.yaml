@@ -4,6 +4,10 @@ image:
   repository: "[registry]"
   pullPolicy: IfNotPresent
   tag: ""
+  # Optional "sha256:<hex>". When set, the image is pulled as
+  # <repository>:<tag>@<digest>, so the registry cannot serve other content
+  # under the tag. Each image of the chart and its subcharts has this key.
+  digest: ""
 
 imagePullSecrets: []
 
@@ -22,8 +26,22 @@ serviceAccount:
 
 podAnnotations: {}
 podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# Security context of the backend pod, the compliance monitor and the SoftHSM2
+# provisioning job (DCS-NFR-SEC-05). 10001 is the user of the DCS image
+# (deployment/docker/Dockerfile). The containers write only to /tmp (emptyDir)
+# and the token volume.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
 service:
   type: ClusterIP
@@ -194,6 +212,7 @@ global:
       image:
         repository: nginx
         tag: "1.27-alpine"
+        digest: ""
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -501,6 +520,7 @@ statusListLocalhostProxy:
   image:
     repository: nginx
     tag: alpine
+    digest: ""
     pullPolicy: IfNotPresent
   listenPort: 18080
   upstream: ""
@@ -669,7 +689,21 @@ pdfCore:
   image:
     repository: ""     # set to your registry image, e.g. registry.example.com/facis/pdf-core
     tag: ""            # set to the image tag; falls back to .Chart.AppVersion
+    digest: ""
     pullPolicy: IfNotPresent
+  # 10001 is the user of the pdf-core image (pdf-core/Dockerfile). pdf-core
+  # writes no files (DCS-NFR-SEC-05).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   replicaCount: 1
   service:
     port: 8080
@@ -861,6 +895,7 @@ backup:
     repository: postgres
     # At least the major version of the database server.
     tag: "16-alpine"
+    digest: ""
     pullPolicy: IfNotPresent
   persistence:
     # Empty: the chart creates <fullname>-db-backup (kept on uninstall).
