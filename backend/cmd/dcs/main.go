@@ -55,6 +55,7 @@ import (
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/contractworkflowengine/deployevent"
@@ -525,6 +526,20 @@ func main() {
 		event.StartEventLogger(ctx, logSubClient)
 	}
 
+	// Live dashboard updates (DCS-FR-CWE-24): no queue group, so every replica
+	// receives every event for the streams it serves.
+	contractChanges := changefeed.New()
+	changeSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, "")
+	if err != nil {
+		log.Fatalf(ctx, err, "Could not create contract change NATS subscriber")
+	}
+	defer func() { _ = changeSubClient.Close() }()
+	go func() {
+		if err := contractChanges.Listen(changeSubClient); err != nil {
+			log.Errorf(ctx, err, "contract change subscriber stopped")
+		}
+	}()
+
 	auditTrailReader := base.AuditTrailReader{
 		IPFSClient: ipfsAPIClient,
 		Artifacts:  artifactStore,
@@ -844,7 +859,7 @@ func main() {
 
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
-			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL())
+			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
 		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
 		// The credentials this instance issued verify against its own published
 		// document without a round trip; a peer's lifecycle or signing-summary

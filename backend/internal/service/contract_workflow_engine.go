@@ -31,6 +31,7 @@ import (
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -75,6 +76,8 @@ type contractWorkflowEnginesrvc struct {
 	MachineIdentities    machineidentity.Repo
 	HydraAdmin           MachineCredentialIssuer
 	HydraPublicIssuerURL string
+	// Changes feeds the live contract event stream (DCS-FR-CWE-24).
+	Changes *changefeed.Feed
 	auth.JWTAuthenticator
 }
 
@@ -89,7 +92,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	targetClient command.ContractTargetClient,
 	workflowGate *workflowgate.Coordinator,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
-	hydraPublicIssuerURL string) contractworkflowengine.Service {
+	hydraPublicIssuerURL string, changes *changefeed.Feed) contractworkflowengine.Service {
 
 	service := &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -116,6 +119,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		MachineIdentities:    machineIdentities,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
+		Changes:              changes,
 	}
 	if workflowGate != nil {
 		for _, gate := range []string{"submission", "offer", "approval", "deployment"} {

@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, type Ref, ref, useId, watch } from 'vue'
+import { computed, onMounted, onUnmounted, type Ref, ref, useId, useTemplateRef, watch } from 'vue'
 import { useContractPermissions } from '@contract-workflow-engine/composables/useContractPermissions'
+import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import Pagination from '@/components/Pagination.vue'
+import { type ContractChange, useContractChanges } from '@/composables/useContractChanges'
 import { ROUTES } from '@/router/router'
+import { archiveService } from '@/services/archive-service'
+import { contractWorkflowService } from '@/services/contract-workflow-service'
+import { useAuthStore } from '@/stores/auth-store'
 import { useContractsStore } from '@/stores/contracts-store'
 import { useContractStateFilterStore } from '@/stores/state-filter-store'
 import { contractStates } from '@/types/contract-state'
+import { reportBulk, runBulk } from '@/utils/bulk-action'
 import { compareValues } from '@/utils/comparison'
 import ContractListItem from './ContractListItem.vue'
 import ContractListSearch from './ContractListSearch.vue'
@@ -92,6 +98,94 @@ const applySearchResult = (searchResult: Contract[] | null) => {
 }
 
 onUnmounted(() => stateFilterStore.reset())
+
+// Live updates (DCS-FR-CWE-24): a changed contract on this page is fetched
+// again on its own; a change to any other contract offers a reload, so a
+// change never reloads the whole list unasked.
+const listOutdated = ref(false)
+
+async function applyChange(change: ContractChange) {
+  const index = contracts.value.findIndex((contract) => contract.did === change.did)
+  if (index < 0) {
+    listOutdated.value = true
+    return
+  }
+  const [fresh] = await contractWorkflowService.search({ did: change.did })
+  const current = contracts.value.findIndex((contract) => contract.did === change.did)
+  if (current < 0) return
+  if (fresh) contracts.value.splice(current, 1, { ...contracts.value[current]!, ...fresh })
+  else contracts.value.splice(current, 1)
+}
+useContractChanges((change) => void applyChange(change))
+
+async function reloadList() {
+  listOutdated.value = false
+  searchResults.value = null
+  await setPaginatedContracts()
+}
+
+// Bulk actions (DCS-FR-CWE-24): each one calls the per-contract endpoint for
+// every selected contract and reports one summary.
+const authStore = useAuthStore()
+const { isApprover, isManager } = useContractPermissions()
+const isArchiveManager = computed(() => authStore.user?.roles?.includes('ARCHIVE_MANAGER') ?? false)
+const selectedDids = ref(new Set<string>())
+const selectedContracts = computed(() => contracts.value.filter((contract) => selectedDids.value.has(contract.did)))
+const bulkRunning = ref(false)
+const bulkModal = useTemplateRef('bulk-modal')
+
+function setSelected(did: string, value: boolean | undefined) {
+  const next = new Set(selectedDids.value)
+  if (value) next.add(did)
+  else next.delete(did)
+  selectedDids.value = next
+}
+
+async function bulk(
+  label: string,
+  message: string,
+  action: (contract: Contract, reason?: string) => Promise<unknown>,
+  needsReason = false,
+) {
+  const dialog = bulkModal.value
+  if (!dialog || selectedContracts.value.length === 0) return
+  const { isCanceled, data } = await dialog.reveal({
+    message: `${message} (${selectedContracts.value.length} selected)`,
+    ...(needsReason ? { editor: { requiredText: true, placeholder: 'Reason' } } : {}),
+  })
+  if (isCanceled || (needsReason && !data)) return
+  bulkRunning.value = true
+  try {
+    reportBulk(label, await runBulk(selectedContracts.value, (contract) => action(contract, data)))
+    selectedDids.value = new Set()
+    await reloadList()
+  } finally {
+    bulkRunning.value = false
+  }
+}
+
+const bulkRenew = () =>
+  bulk('Renew', 'Create a renewal contract from each selected contract?', (contract) =>
+    contractWorkflowService.renew({ did: contract.did, updated_at: contract.updated_at }),
+  )
+const bulkTerminate = () =>
+  bulk(
+    'Terminate',
+    'Terminate the selected contracts? The reason is recorded with each termination.',
+    (contract, reason) =>
+      contractWorkflowService.terminate({ did: contract.did, updated_at: contract.updated_at, reason: reason ?? '' }),
+    true,
+  )
+const bulkPublish = () =>
+  bulk(
+    'Register in catalogue',
+    'Register the selected contracts in the Federated Catalogue? Each entry shows name, state, version, template and validity period, without content or parties.',
+    (contract) => contractWorkflowService.publishCatalogue(contract.did),
+  )
+const bulkArchive = () =>
+  bulk('Archive', 'Archive the current version of each selected contract?', (contract) =>
+    archiveService.storeContract(contract.did),
+  )
 </script>
 
 <template>
@@ -120,11 +214,39 @@ onUnmounted(() => stateFilterStore.reset())
           />
         </div>
       </li>
+      <li v-if="listOutdated" class="px-4" data-testid="contracts-outdated">
+        <div role="status" class="alert alert-info">
+          Contracts changed since this list was loaded.
+          <button class="btn btn-sm" @click="reloadList">Reload</button>
+        </div>
+      </li>
+      <li
+        v-if="selectedContracts.length > 0"
+        class="flex flex-wrap items-center gap-2 px-4"
+        data-testid="contracts-bulk-actions"
+      >
+        <span class="text-sm">{{ selectedContracts.length }} selected</span>
+        <button v-if="isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkRenew">Renew selected</button>
+        <button v-if="isManager" class="btn btn-sm btn-error" :disabled="bulkRunning" @click="bulkTerminate">
+          Terminate selected
+        </button>
+        <button v-if="isApprover || isManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkPublish">
+          Register selected in catalogue
+        </button>
+        <button v-if="isArchiveManager" class="btn btn-sm" :disabled="bulkRunning" @click="bulkArchive">
+          Archive selected
+        </button>
+        <button class="btn btn-ghost btn-sm" :disabled="bulkRunning" @click="selectedDids = new Set()">
+          Clear selection
+        </button>
+      </li>
       <template v-if="filteredContracts.length > 0">
         <ContractListItem
           v-for="contract in filteredContracts"
           :key="`${contract.did}|${contract.contract_version}`"
           :contract="contract"
+          :selected="selectedDids.has(contract.did)"
+          @update:selected="setSelected(contract.did, $event)"
         />
       </template>
       <li v-else-if="isRepositoryEmpty" class="flex flex-col items-start gap-2 px-4 py-8">
@@ -156,5 +278,6 @@ onUnmounted(() => stateFilterStore.reset())
         />
       </div>
     </div>
+    <ConfirmationModal ref="bulk-modal" />
   </div>
 </template>

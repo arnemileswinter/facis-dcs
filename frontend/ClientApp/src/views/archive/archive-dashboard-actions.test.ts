@@ -21,6 +21,13 @@ const archive = vi.hoisted(() => ({
   delete: vi.fn(),
 }))
 const workflow = vi.hoisted(() => ({ terminate: vi.fn() }))
+const live = vi.hoisted(() => ({ onChange: vi.fn<(change: { did: string; event_type: string }) => void>() }))
+
+vi.mock('@/composables/useContractChanges', () => ({
+  useContractChanges: (fn: typeof live.onChange) => {
+    live.onChange.mockImplementation(fn)
+  },
+}))
 
 vi.mock('@/services/archive-service', () => ({ archiveService: archive }))
 vi.mock('@/services/contract-workflow-service', () => ({ contractWorkflowService: workflow }))
@@ -101,5 +108,52 @@ describe('archive dashboard actions', () => {
     const wrapper = await mountDashboard()
     expect(wrapper.find(`[data-testid="archive-terminate-${signed.did}"]`).exists()).toBe(true)
     expect(wrapper.find('[data-testid="archive-terminate-did:web:example.com:contract:2"]').exists()).toBe(false)
+  })
+
+  // DCS-FR-CSA-23: a change to a listed contract searches that contract again;
+  // a change to another contract offers a reload.
+  it('updates a changed entry in place and offers a reload for others', async () => {
+    const wrapper = await mountDashboard()
+    archive.search.mockResolvedValue([{ ...signed, state: 'TERMINATED' }])
+    live.onChange({ did: signed.did, event_type: 'TERMINATE_CONTRACT' })
+    await flushPromises()
+    expect(archive.search).toHaveBeenCalledWith({ did: signed.did })
+    expect(wrapper.get(`[data-testid="archive-entry-${signed.did}"]`).text()).toContain('TERMINATED')
+    expect(archive.retrieve).toHaveBeenCalledTimes(1)
+
+    live.onChange({ did: 'did:web:example.com:contract:other', event_type: 'STORE_ARCHIVED_CONTRACT' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="archive-entries-outdated"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  // DCS-FR-CSA-23: the Archive Manager terminates several contracts at once
+  // with one reason.
+  it('terminates the selected contracts', async () => {
+    HTMLDialogElement.prototype.showModal = vi.fn()
+    HTMLDialogElement.prototype.close = vi.fn()
+    const second = { ...signed, did: 'did:web:example.com:contract:2' }
+    archive.retrieve.mockResolvedValue([signed, second])
+    workflow.terminate.mockResolvedValue({})
+    const wrapper = await mountDashboard()
+    await wrapper.get(`[data-testid="archive-select-${signed.did}"]`).setValue(true)
+    await wrapper.get(`[data-testid="archive-select-${second.did}"]`).setValue(true)
+    await wrapper.get('[data-testid="archive-terminate-selected"]').trigger('click')
+    await flushPromises()
+    const modals = document.querySelectorAll('dialog')
+    const modal = modals[modals.length - 1]!
+    const reason = modal.querySelector('textarea')!
+    reason.value = 'retention reached'
+    reason.dispatchEvent(new Event('input'))
+    await flushPromises()
+    modal.querySelector<HTMLButtonElement>('[data-testid="confirmation-confirm"]')!.click()
+    await flushPromises()
+    expect(workflow.terminate).toHaveBeenCalledTimes(2)
+    expect(workflow.terminate).toHaveBeenCalledWith({
+      did: second.did,
+      reason: 'retention reached',
+      updated_at: second.updated_at,
+    })
+    wrapper.unmount()
   })
 })

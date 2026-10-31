@@ -3,6 +3,7 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline'
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
+import { type ContractChange, useContractChanges } from '@/composables/useContractChanges'
 import { ROUTES } from '@/router/router'
 import {
   type ArchiveComplianceItem,
@@ -25,6 +26,7 @@ import {
   type SavedArchiveQuery,
   saveQuery,
 } from '@/utils/archive-search'
+import { reportBulk, runBulk } from '@/utils/bulk-action'
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
 
@@ -234,6 +236,67 @@ async function terminateEntry(entry: ArchivedContract) {
     await loadEntries()
   } catch {
     // the shared http interceptor already surfaced the server's error
+  } finally {
+    terminating.value = false
+  }
+}
+
+// Live updates (DCS-FR-CSA-23): a changed contract in the list is searched
+// again on its own; a change to any other contract offers a reload.
+const entriesOutdated = ref(false)
+
+async function applyChange(change: ContractChange) {
+  if (!entries.value.some((entry) => entry.did === change.did)) {
+    entriesOutdated.value = true
+    return
+  }
+  const request = entriesRequest
+  const fresh = await archiveService.search({ did: change.did })
+  if (request !== entriesRequest) return
+  const at = entries.value.findIndex((entry) => entry.did === change.did)
+  if (at < 0) return
+  const others = entries.value.filter((entry) => entry.did !== change.did)
+  entries.value = [...others.slice(0, at), ...fresh, ...others.slice(at)]
+}
+useContractChanges((change) => {
+  if (canReadEntries.value) void applyChange(change)
+})
+
+function reloadEntries() {
+  entriesOutdated.value = false
+  void loadEntries()
+}
+
+// Bulk termination (DCS-FR-CSA-23): one reason, one terminate call per
+// selected contract, one summary.
+const selectedDids = ref(new Set<string>())
+
+function setSelected(did: string, value: boolean) {
+  const next = new Set(selectedDids.value)
+  if (value) next.add(did)
+  else next.delete(did)
+  selectedDids.value = next
+}
+
+async function terminateSelected() {
+  const dialog = confirmationModal.value
+  const selected = Array.from(selectedDids.value)
+    .map((did) => entries.value.find((entry) => entry.did === did))
+    .filter((entry): entry is ArchivedContract => !!entry)
+  if (!dialog || selected.length === 0) return
+  const { isCanceled, data: reason } = await dialog.reveal({
+    message: `Terminate ${selected.length} selected contracts? A reason is required and is recorded with each termination.`,
+    editor: { requiredText: true, placeholder: 'Termination reason' },
+  })
+  if (isCanceled || !reason) return
+  terminating.value = true
+  try {
+    const result = await runBulk(selected, (entry) =>
+      contractWorkflowService.terminate({ did: entry.did, reason, updated_at: entry.updated_at }),
+    )
+    reportBulk('Terminate', result)
+    selectedDids.value = new Set()
+    await loadEntries()
   } finally {
     terminating.value = false
   }
@@ -557,6 +620,22 @@ function shortDid(did: string): string {
             </label>
           </div>
         </form>
+        <div v-if="entriesOutdated" role="status" class="alert alert-info" data-testid="archive-entries-outdated">
+          Archived contracts changed since this list was loaded.
+          <button class="btn btn-sm" @click="reloadEntries">Reload</button>
+        </div>
+        <div v-if="isArchiveManager && selectedDids.size > 0" class="flex items-center gap-2">
+          <span class="text-sm">{{ selectedDids.size }} selected</span>
+          <button
+            class="btn btn-sm btn-error"
+            :disabled="terminating"
+            data-testid="archive-terminate-selected"
+            @click="terminateSelected"
+          >
+            Terminate selected
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="selectedDids = new Set()">Clear selection</button>
+        </div>
         <p v-if="entriesLoading" role="status">Loading archived contracts…</p>
         <div v-else-if="entriesError" class="alert alert-error" data-testid="archive-entries-error">
           {{ entriesError }}
@@ -581,6 +660,15 @@ function shortDid(did: string): string {
               <template v-for="entry in entries" :key="`${entry.did}-${entry.contract_version}`">
                 <tr class="archive-entry" :data-testid="`archive-entry-${entry.did}`">
                   <td>
+                    <input
+                      v-if="isArchiveManager"
+                      type="checkbox"
+                      class="checkbox mr-2 checkbox-sm"
+                      :checked="selectedDids.has(entry.did)"
+                      :aria-label="`Select ${entry.name || entry.did}`"
+                      :data-testid="`archive-select-${entry.did}`"
+                      @change="setSelected(entry.did, ($event.target as HTMLInputElement).checked)"
+                    />
                     <RouterLink
                       :to="{
                         name: ROUTES.ARCHIVE.DETAIL,
@@ -984,6 +1072,7 @@ function shortDid(did: string): string {
   outline-offset: -2px;
 }
 .archive-entry button,
+.archive-entry input,
 .archive-entry a:not(.archive-entry-link) {
   position: relative;
   z-index: 2;

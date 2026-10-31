@@ -11,6 +11,21 @@ import (
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 )
 
+// DCS-FR-CWE-24: the metrics wrapper lets the server-sent event stream flush
+// each event to the client instead of holding it in the response buffer.
+func TestMetricsMiddlewareFlushesStreamedResponses(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	metricsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("data: {}\n\n"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush: %v", err)
+		}
+	})).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/contract/events", nil))
+	if !recorder.Flushed {
+		t.Fatal("the event stayed in the response buffer")
+	}
+}
+
 // TestErrorFormatterPreservesBundleExportFindings verifies that a
 // *pdfgeneration.BundleExportRefusedError keeps its findings array (and gets a
 // 422 status) instead of being collapsed into the generic Goa error hull —
