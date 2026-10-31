@@ -97,3 +97,26 @@ it('reports a gap when the server drops changes for the stream', async () => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
+
+// CWE-23: a stream the server ends normally (token lifetime, shutdown of a
+// replica) is followed by a new one at once; a change made in between reaches
+// neither, so it is reported as a gap too.
+it('reports a gap when a stream connects after a stream that ended', async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  useAuthTokenStore().setTokens('Bearer', 'header.payload.signature')
+  const ended = () => new Response('data: {"event_type":"CONNECTED","did":""}\n\n', { status: 200 })
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(ended())
+    .mockResolvedValueOnce(openStream('data: {"event_type":"CONNECTED","did":""}\n\n'))
+  vi.stubGlobal('fetch', fetchMock)
+  const onGap = vi.fn()
+  const wrapper = mountChanges(() => undefined, onGap)
+  await vi.advanceTimersByTimeAsync(100)
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(onGap).toHaveBeenCalledOnce()
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})

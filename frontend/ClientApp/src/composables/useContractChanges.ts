@@ -47,7 +47,8 @@ export function parseContractChanges(buffer: string): { changes: ContractChange[
  * component is mounted. The stream reconnects after a drop and refreshes an
  * expired session. fetch is used because EventSource cannot send the
  * Authorization header. onGap is called when changes can be lost: a stream
- * connects after a failed one, or the server reports RESYNC.
+ * connects after an earlier stream or a failed attempt, or the server reports
+ * RESYNC.
  */
 export function useContractChanges(onChange: (change: ContractChange) => void, onGap?: () => void) {
   let stopped = false
@@ -102,9 +103,12 @@ export function useContractChanges(onChange: (change: ContractChange) => void, o
 
   async function run() {
     let failures = 0
+    let connected = false
     while (!stopped) {
+      // A change made between two streams reaches neither of them.
       const ended = await listen(() => {
-        if (failures > 0) onGap?.()
+        if (connected || failures > 0) onGap?.()
+        connected = true
       })
       failures = ended ? 0 : failures + 1
       if (!stopped && !ended) {
