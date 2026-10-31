@@ -1,6 +1,8 @@
 -- Erasure (DCS-NFR-SEC-13, DCS-NFR-COMP-03, ADR-28). A shred destroys the
 -- wrapped CEK itself. The shredded row keeps only the destruction record.
 ALTER TABLE content_encryption_keys ALTER COLUMN wrapped_cek DROP NOT NULL;
+-- A row shredded before this migration still holds its wrapped key.
+UPDATE content_encryption_keys SET wrapped_cek = NULL WHERE shredded_at IS NOT NULL;
 ALTER TABLE content_encryption_keys
     ADD CONSTRAINT chk_cek_shredded_has_no_key
         CHECK ((shredded_at IS NULL) = (wrapped_cek IS NOT NULL));
