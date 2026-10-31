@@ -734,6 +734,8 @@ The chart generates the other credentials (the internal CA and certificate, the 
 
 A production cluster also needs a CNI that enforces NetworkPolicy ("Network policies") and a Grafana for the logs ("Logs").
 
+Database (DCS-OE-05): the backend needs PostgreSQL. PostgreSQL 16 is the version the chart deploys and the tests run on; other versions are not tested. The backend keeps its replicas consistent with PostgreSQL functions that a "PostgreSQL-compatible" server may not have: transaction-level advisory locks (`pg_advisory_xact_lock`, `pg_try_advisory_xact_lock`) keyed with `hashtext`, `LISTEN`/`NOTIFY` (`pg_notify`), `gen_random_uuid`, `jsonb` and full-text search (`tsvector`). A server without them, for example CockroachDB, is not supported ([ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §9).
+
 Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back. The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
 
 Other values for every profile:

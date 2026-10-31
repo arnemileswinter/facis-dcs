@@ -1016,5 +1016,5 @@ sharedServices:
 # loopback and a host:port that DCS_DIDWEB_INSECURE_HOSTS names.
 contractTargets: []
 #  - name: "Reference ORCE target"
-#    url: "http://my-release-orce:1880/contract-target/deploy"
+#    url: "https://my-release-orce:8443/contract-target/deploy"
 #    description: "The shipped ORCE contract-target flow."

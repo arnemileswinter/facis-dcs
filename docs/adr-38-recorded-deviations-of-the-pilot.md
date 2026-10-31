@@ -182,6 +182,21 @@ and Hydra's default of 1 hour where the profile sets no lifetime.
 Reason: a status-list request per API call would make every call depend on
 the issuer's status list endpoint. The lifetime bounds the delay.
 
+### 9. The database is PostgreSQL (DCS-OE-05, DCS-PC-03)
+
+The backend keeps its replicas consistent with PostgreSQL functions:
+transaction-level advisory locks (`pg_advisory_xact_lock`,
+`pg_try_advisory_xact_lock`) keyed with `hashtext`
+(`backend/internal/base/db/exclusive.go`), `LISTEN`/`NOTIFY` for the Semantic
+Hub cache, `gen_random_uuid`, `jsonb` and full-text search. A database that
+calls itself PostgreSQL-compatible but lacks one of them, for example
+CockroachDB, is not supported. PostgreSQL 16 is the version the chart deploys
+and the tests run on.
+
+Reason: these functions are what keeps several backend replicas from running
+the same job twice or forking a document. An abstraction over them would
+have one implementation.
+
 ## Consequences
 
 - A template user verifies the provenance credential against the instance
@@ -209,3 +224,5 @@ the issuer's status list endpoint. The lifetime bounds the delay.
   configuration admits for it, not from a federated identity provider.
 - An operator who needs a shorter delay after a revocation sets a shorter
   access-token lifetime.
+- An operator runs PostgreSQL, not another database that speaks its wire
+  protocol.
