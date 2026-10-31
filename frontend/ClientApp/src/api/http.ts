@@ -8,6 +8,8 @@ import { bindReportedHttpError } from '@/utils/report-action-error'
 const http = axios.create({
   baseURL: getConfig().API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  // goa reads a repeated query key as an array (state=A&state=B), not state[]=A.
+  paramsSerializer: { indexes: null },
 })
 
 http.interceptors.request.use((config) => {

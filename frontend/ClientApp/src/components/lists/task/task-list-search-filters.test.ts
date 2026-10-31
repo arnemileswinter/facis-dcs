@@ -21,7 +21,7 @@ it.each([
   const wrapper = mount(TaskListSearch, {
     props: {
       tasks: [{ did: 'did:web:c1', type: 'contract' as const }],
-      contractSearchDefaults: { state: ContractState.submitted },
+      contractSearchDefaults: { state: [ContractState.submitted] },
     },
     global: { plugins: [pinia] },
   })
@@ -35,6 +35,6 @@ it.each([
   await wrapper.get('button:last-of-type').trigger('click')
   await flushPromises()
 
-  expect(search).toHaveBeenLastCalledWith({ state: ContractState.submitted, [key]: value })
+  expect(search).toHaveBeenLastCalledWith({ state: [ContractState.submitted], [key]: value })
   wrapper.unmount()
 })
