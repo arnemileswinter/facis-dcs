@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/contractworkflowengine/command"
@@ -26,14 +25,9 @@ func (r *recordingDeployer) Handle(_ context.Context, cmd command.DeployCmd) (*c
 	return &command.DeployResult{DID: cmd.DID}, nil
 }
 
-func appliedSignatureEvent(t *testing.T, did string) cloudevent.Event {
+func appliedSignatureEvent(t *testing.T, did string) json.RawMessage {
 	t.Helper()
-	evt := cloudevent.New()
-	evt.SetID("1")
-	evt.SetSource("test")
-	evt.SetType("APPLIED_SIGNATURE")
-	require.NoError(t, evt.SetData(cloudevent.ApplicationJSON, json.RawMessage(`{"did":"`+did+`"}`)))
-	return evt
+	return json.RawMessage(`{"did":"` + did + `"}`)
 }
 
 // Both deployment paths run the same multi-signer gate, and that gate reads

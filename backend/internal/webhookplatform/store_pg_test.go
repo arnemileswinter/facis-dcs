@@ -98,3 +98,28 @@ func TestPostgresDeliveriesAreDueUntilTheyEnd(t *testing.T) {
 		t.Fatalf("an ended delivery keeps its payload: %d, %v", payloads, err)
 	}
 }
+
+// NFR-26 (DCS-NFR-SF-01): a DCS event reaches the webhook subscribers from the
+// outbox table, without NATS, and only once.
+func TestWebhookDeliveriesAreReadFromTheOutbox(t *testing.T) {
+	db := pgtest.Open(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO outbox_events (component, event_type, event_data, did) VALUES
+		('CONTRACT_TEMPLATE_REPOSITORY', 'CREATE_CONTRACT_TEMPLATE', '{"did":"did:web:a.example:template:1"}', 'did:web:a.example:template:1')`); err != nil {
+		t.Fatal(err)
+	}
+	store := newMemDeliveries()
+	subs := &fakeSubscriptions{subs: []Subscription{{ID: "s", Event: "template.created", CallbackURL: "https://receiver.example/hook", Secret: "whsec_x", OwnerDID: orgA}}}
+	consumer := OutboxConsumer(db, NewDispatcher(subs, store, admitAll, nil))
+
+	for range 2 {
+		if err := consumer.Poll(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, _ := store.ListDeliveries(ctx, orgA)
+	if len(got) != 1 || got[0].Event != "template.created" || got[0].DID != "did:web:a.example:template:1" {
+		t.Fatalf("deliveries = %+v, want one template.created delivery", got)
+	}
+}

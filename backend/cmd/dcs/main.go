@@ -673,23 +673,9 @@ func main() {
 		nil,
 	)
 
-	// Start the NATS→Webhook bridge: automatically fans out to all registered
-	// webhook subscribers whenever a DCS lifecycle event fires on the event bus.
-	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not create webhook NATS subscriber")
-	}
-	defer func(webhookSubClient *event.CloudEventSubClient) {
-		err := webhookSubClient.Close()
-		if err != nil {
-			log.Errorf(ctx, err, "failed to close webhook subscriber")
-		}
-	}(webhookSubClient)
-	go func() {
-		if err := webhookplatform.StartNATSBridge(webhookSubClient, webhookDispatcher); err != nil {
-			log.Fatalf(ctx, err, "Could not start webhook NATS bridge")
-		}
-	}()
+	// Fan out every DCS lifecycle event to the registered webhook subscribers,
+	// read from the outbox so no event is lost while no replica listens on NATS.
+	webhookplatform.OutboxConsumer(db, webhookDispatcher).Start(ctx, time.Second)
 	// A delivery the subscriber did not accept, or that a stopped replica did
 	// not send, is sent again by one replica at a time (DCS-IR-SI-02).
 	go func() {
@@ -963,17 +949,9 @@ func main() {
 
 	// Start the auto-deploy subscriber (DCS-FR-CWE-06): once the signing
 	// workflow completes (APPLIED_SIGNATURE), it calls the same
-	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses.
-	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
-	if err != nil {
-		log.Fatalf(ctx, err, "Could not create contract-deployment NATS subscriber")
-	}
-	defer func(deploySubClient *event.CloudEventSubClient) {
-		err := deploySubClient.Close()
-		if err != nil {
-			log.Errorf(ctx, err, "Could not close contract-deployment subscriber")
-		}
-	}(deploySubClient)
+	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses. It
+	// reads the outbox, so no signature is missed while no replica listens on
+	// NATS.
 	deploySub := &deployevent.Subscriber{
 		Gate: workflowGateCoordinator,
 		Deployer: &cwecommand.Deployer{
@@ -987,11 +965,7 @@ func main() {
 		},
 		LocalPeer: did,
 	}
-	go func() {
-		if err := deploySub.Start(deploySubClient); err != nil {
-			errc <- fmt.Errorf("could not start contract-deployment subscriber: %w", err)
-		}
-	}()
+	deploySub.OutboxConsumer(db).Start(ctx, time.Second)
 
 	var (
 		authEndpoints                         *genauth.Endpoints
