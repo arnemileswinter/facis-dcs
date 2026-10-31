@@ -99,6 +99,11 @@ func (v verifier) VerifyPID(vpToken string, ctx PresentationContext) (*VerifiedP
 		return nil, err
 	}
 
+	minimal, err := minimisePIDClaims(verified.RawClaims)
+	if err != nil {
+		return nil, err
+	}
+	verified.RawClaims = minimal
 	return verified, nil
 }
 
