@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	pdfquery "digital-contracting-service/internal/pdfgeneration/query"
+	"digital-contracting-service/internal/signingmanagement/dss"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
 
 	"github.com/jmoiron/sqlx"
@@ -207,10 +208,9 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 		CRepo:            s.CRepo,
 		Artifacts:        s.Artifacts,
 		PDFCore:          s.PDFCore,
-		VCIssuer:         s.VCIssuer,
-		IssuerDID:        s.IssuerDID,
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
+		Signatures:       pdfSignatureValidator(),
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
@@ -233,10 +233,9 @@ func (s *pdfGenerationSrvc) VerifyContractPdfCopy(ctx context.Context, p *pdfgen
 			CRepo:            s.CRepo,
 			Artifacts:        s.Artifacts,
 			PDFCore:          s.PDFCore,
-			VCIssuer:         s.VCIssuer,
-			IssuerDID:        s.IssuerDID,
 			Credentials:      s.Credentials,
 			CredentialStatus: s.CredentialStatus,
+			Signatures:       pdfSignatureValidator(),
 		},
 		Export: &pdfquery.ExportContractPdfHandler{
 			DB:        s.DB,
@@ -263,8 +262,6 @@ func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.Ver
 		TRepo:            s.TRepo,
 		Artifacts:        s.Artifacts,
 		PDFCore:          s.PDFCore,
-		VCIssuer:         s.VCIssuer,
-		IssuerDID:        s.IssuerDID,
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
 	}
@@ -284,4 +281,14 @@ func isNotFoundErr(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "not found") || strings.Contains(msg, "no rows")
+}
+
+// pdfSignatureValidator returns the EU DSS client the verifier validates PAdES
+// signatures with, the one /signature/validate uses, or nil when DSS_URL is
+// not set.
+func pdfSignatureValidator() pdfquery.PDFSignatureValidator {
+	if url := dss.URL(); url != "" {
+		return dss.New(url)
+	}
+	return nil
 }

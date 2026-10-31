@@ -15,6 +15,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/signingmanagement/dss"
 )
 
 type PDFStateData struct {
@@ -26,13 +27,46 @@ type PDFStateData struct {
 
 type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PDFStateData) error
 
-// pdfSignatureNotAvailable is the honest PDF-signature check status reported
-// by the verify endpoint (DCS-OR-C2PA-006): the verify path does not
-// cryptographically re-verify the PAdES CMS signature over its /ByteRange
-// (pdf-core's /verify treats the signed span as an opaque suffix), and the
-// verifier must never falsely report a passed PDF signature check it did not
-// actually perform.
-const pdfSignatureNotAvailable = provenance.CheckNotAvailable
+// PDFSignatureValidator validates every PAdES signature a PDF carries. The EU
+// DSS client (signingmanagement/dss), which /signature/validate also uses, is
+// the implementation.
+type PDFSignatureValidator interface {
+	ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*dss.Report, error)
+}
+
+// pdfSignatureSourceDSS names the validator behind pdf_signature_status.
+const pdfSignatureSourceDSS = "eu-dss"
+
+// checkPDFSignatures is the PDF-signature check of the verifier
+// (DCS-OR-C2PA-006): every PAdES signature is validated by the EU DSS and must
+// be a sound advanced electronic signature, by the same criteria the signing
+// path accepts a signature with (dss.Report.AssertValidAES). It returns the
+// status, the source and the indication of each signature.
+func checkPDFSignatures(ctx context.Context, pdf []byte, validator PDFSignatureValidator) (status, source, detail string) {
+	if !provenance.CarriesPAdESSignature(pdf) {
+		return provenance.CheckNotAvailable, "", ""
+	}
+	if validator == nil {
+		return provenance.CheckIndeterminate, pdfSignatureSourceDSS, "no EU DSS validation service is configured (DSS_URL)"
+	}
+	reports, err := validator.ValidatePDFSignatures(ctx, pdf)
+	if err != nil {
+		return provenance.CheckIndeterminate, pdfSignatureSourceDSS, err.Error()
+	}
+	status = provenance.CheckValid
+	details := make([]string, 0, len(reports))
+	for i, report := range reports {
+		indication := report.Indication
+		if report.SubIndication != "" {
+			indication += "/" + report.SubIndication
+		}
+		details = append(details, fmt.Sprintf("signature %d by %q: %s", i+1, report.SignedBy, indication))
+		if report.AssertValidAES() != nil {
+			status = provenance.CheckInvalid
+		}
+	}
+	return status, pdfSignatureSourceDSS, strings.Join(details, "; ")
+}
 
 const (
 	statusPublicationConsistencyWait = 6 * time.Second
@@ -162,14 +196,14 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 		StatusListCheck:     "failed",
 		StatusListError:     ptrToString("stored artifact is not authentic"),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
-		PdfSignatureStatus:  pdfSignatureNotAvailable,
+		PdfSignatureStatus:  provenance.CheckInvalid,
 		Discrepancy:         ptrToString(discrepancyNotAuthentic),
 	}
 }
 
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
-	lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+	signatures PDFSignatureValidator, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
@@ -246,6 +280,8 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
+	pdfSignatureStatus, pdfSignatureSource, pdfSignatureDetail := checkPDFSignatures(ctx, pdfBytes, signatures)
+
 	return &pdfgen.PDFVerifyResult{
 		Match:             match,
 		C2paManifestFound: c2paManifestFound,
@@ -263,12 +299,10 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		StatusListCheck:     statusListCheck,
 		StatusListError:     ptrToString(statusListError),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
-		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
-		// check, distinct from the C2PA COSE signature check. This path performs
-		// no cryptographic PAdES re-verification, so it honestly reports
-		// "not_available" rather than faking a passed PDF-signature verification.
-		PdfSignatureStatus: pdfSignatureNotAvailable,
-		Discrepancy:        ptrToString(discrepancy),
+		PdfSignatureStatus:  pdfSignatureStatus,
+		PdfSignatureSource:  ptrToString(pdfSignatureSource),
+		PdfSignatureDetail:  ptrToString(pdfSignatureDetail),
+		Discrepancy:         ptrToString(discrepancy),
 	}, nil
 }
 
@@ -299,7 +333,7 @@ func queryStatusWithPublicationBarrier(
 ) (string, error) {
 	status, err := query()
 	if err != nil || status != "active" ||
-		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended") {
+		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended" && lifecycleStatus != "expired") {
 		return status, err
 	}
 

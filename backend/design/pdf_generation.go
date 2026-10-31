@@ -30,10 +30,11 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	Attribute("status_list_error", String, "Explicit failure reason when the live status-list check could not be completed")
 
 	// PDF signature check (DCS-OR-C2PA-006). This is an independently named
-	// check distinct from the C2PA COSE signature check: when the PDF carries
-	// no PAdES signature, the verifier honestly reports "not_available" rather
-	// than faking a passed PDF-signature verification.
-	Attribute("pdf_signature_status", String, "PAdES/PDF signature verification status (DCS-OR-C2PA-006): 'not_available' when the PDF carries no PAdES signature, otherwise 'valid'/'invalid'. Never falsely reports a passed PDF signature check.")
+	// check distinct from the C2PA COSE signature check. Every PAdES signature
+	// is validated by the EU DSS, the validation /signature/validate uses.
+	Attribute("pdf_signature_status", String, "PAdES signature verification status (DCS-OR-C2PA-006): 'valid' when the EU DSS validated every PAdES signature of the PDF as a sound advanced electronic signature (no TOTAL-FAILED and no cryptographic sub-indication, a signing certificate present; a trust-chain gap such as NO_CERTIFICATE_CHAIN_FOUND is reported in pdf_signature_detail), 'invalid' when one failed, 'indeterminate' when the DSS could not be asked or is not configured, 'not_available' when the PDF carries no PAdES signature.")
+	Attribute("pdf_signature_source", String, "Which validator produced pdf_signature_status: 'eu-dss', the EU DSS validation service configured with DSS_URL. Empty when the PDF carries no PAdES signature.")
+	Attribute("pdf_signature_detail", String, "The DSS indication of each PAdES signature in document order (indication/sub-indication and signer), or the reason the signatures could not be validated.")
 
 	// Names WHY a verification failed, so a caller can tell failure classes
 	// apart without inferring them from combinations of the booleans above.

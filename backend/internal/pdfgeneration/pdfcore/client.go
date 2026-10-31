@@ -522,7 +522,20 @@ func (c *Client) VerifyContent(ctx context.Context, pdf []byte) (bool, string, e
 // Nothing is re-rendered, so the answer does not depend on render determinism:
 // the reference is a document the caller already holds. On a mismatch it returns
 // a diagnostic naming the page that diverged and a snippet of both sides.
+//
+// Signature widgets are left out of the comparison, so a submission that adds a
+// PAdES signature to the reference matches it.
 func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, false)
+}
+
+// MatchContentExact is MatchContent with the signature widgets compared too:
+// the submission must show exactly what the reference shows.
+func (c *Client) MatchContentExact(ctx context.Context, submitted, reference []byte) (bool, string, error) {
+	return c.matchContent(ctx, submitted, reference, true)
+}
+
+func (c *Client) matchContent(ctx context.Context, submitted, reference []byte, exact bool) (bool, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := writeField(mw, "pdf", submitted); err != nil {
@@ -530,6 +543,11 @@ func (c *Client) MatchContent(ctx context.Context, submitted, reference []byte) 
 	}
 	if err := writeField(mw, "reference", reference); err != nil {
 		return false, "", fmt.Errorf("pdf-core verify/content-match: write reference field: %w", err)
+	}
+	if exact {
+		if err := writeField(mw, "exact", []byte("true")); err != nil {
+			return false, "", fmt.Errorf("pdf-core verify/content-match: write exact field: %w", err)
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return false, "", fmt.Errorf("pdf-core verify/content-match: close multipart: %w", err)

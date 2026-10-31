@@ -57,16 +57,18 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Given contract "RSV Timestamp Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerThree"
     Then the signed PDF for contract "RSV Timestamp Contract" embeds an RFC3161 timestamp token
 
-  @DCS-OR-C2PA-002 @DCS-OR-C2PA-010
+  @DCS-OR-C2PA-002 @DCS-OR-C2PA-003 @DCS-OR-C2PA-004 @DCS-OR-C2PA-010
   Scenario: The order /update -> /sign -> /update leaves the PAdES signature and C2PA chain valid
     Given contract "RSV Order Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerFour"
     When the signature for contract "RSV Order Contract" is revoked as a post-sign C2PA update
     Then get http 200:Success code
     When I re-export the signed PDF for contract "RSV Order Contract"
     Then the signed PDF for contract "RSV Order Contract" still has a structurally valid PAdES signature
+    And the C2PA manifest history of contract "RSV Order Contract" ends with lifecycle status "suspended"
     When contract "RSV Order Contract" is exported and verified as PDF
     Then get http 200:Success code
     And the verification result shows match is true
+    And the PDF signature check for contract "RSV Order Contract" is reported valid by the EU DSS
 
   # ---------------------------------------------------------------------
   # Contract signer + apply flow
