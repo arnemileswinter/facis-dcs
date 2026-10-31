@@ -6,7 +6,7 @@ import { TemplateType } from '@template-repository/models/contract-template'
 import ConfirmationModal from '@/components/ConfirmationModal.vue'
 import { ROUTES } from '@/router/router'
 import { contractTemplateService } from '@/services/contract-template-service'
-import { TemplateState } from '@/types/contract-template-state'
+import { type ContractTemplateState, TemplateState } from '@/types/contract-template-state'
 import { reportActionError } from '@/utils/report-action-error'
 import type { PartialContractTemplate } from '@/models/contract-template/contract-template'
 
@@ -43,12 +43,10 @@ const isPublishing = ref(false)
 // DCS-FR-TR-17, DCS-FR-TR-18: a registered or published template is
 // deprecated; a draft, rejected or deprecated one is deleted. A template in
 // review or approved has no archive action.
-const deprecates = computed(() =>
-  [TemplateState.registered, TemplateState.published].includes(props.template.state),
-)
-const deletes = computed(() =>
-  [TemplateState.draft, TemplateState.rejected, TemplateState.deprecated].includes(props.template.state),
-)
+const deprecatedStates: ContractTemplateState[] = [TemplateState.registered, TemplateState.published]
+const deletedStates: ContractTemplateState[] = [TemplateState.draft, TemplateState.rejected, TemplateState.deprecated]
+const deprecates = computed(() => deprecatedStates.includes(props.template.state))
+const deletes = computed(() => deletedStates.includes(props.template.state))
 const canArchive = computed(() => isManager.value && (deprecates.value || deletes.value))
 
 const archiveLabel = computed(() => (deprecates.value ? 'Deprecate' : 'Delete'))

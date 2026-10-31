@@ -57,8 +57,15 @@ describe('template manager archive action', () => {
   })
 
   it('offers no archive action for a template in review, approved or deleted', () => {
-    for (const state of [TemplateState.submitted, TemplateState.reviewed, TemplateState.approved, TemplateState.deleted]) {
-      const labels = mountActions(state).findAll('button').map((candidate) => candidate.text())
+    for (const state of [
+      TemplateState.submitted,
+      TemplateState.reviewed,
+      TemplateState.approved,
+      TemplateState.deleted,
+    ]) {
+      const labels = mountActions(state)
+        .findAll('button')
+        .map((candidate) => candidate.text())
       expect(labels, state).not.toContain('Delete')
       expect(labels, state).not.toContain('Deprecate')
     }
@@ -66,7 +73,10 @@ describe('template manager archive action', () => {
 
   it('sends the justification the manager types', async () => {
     const wrapper = mountActions(TemplateState.registered)
-    await wrapper.findAll('button').find((candidate) => candidate.text() === 'Deprecate')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text() === 'Deprecate')!
+      .trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="confirmation-confirm"]').attributes('disabled')).toBeDefined()
     await wrapper.get('textarea').setValue('Replaced by version 2')
