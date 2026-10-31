@@ -1199,7 +1199,8 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	// the signature.)
 	rendererVersion := ""
 	if !artifactFrozen {
-		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, *data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)
+		stampedPDF, rv, err := stampLifecycleForSigning(ctx, cmd.DID, activationReason(cmd.SignerDID, ceremony.FieldName),
+			*data.ContractData, basePDF, h.PDFCore, h.VCIssuer, h.IssuerDID)
 		if err != nil {
 			return nil, fmt.Errorf("stamp active lifecycle assertion before signing: %w", err)
 		}
@@ -1629,6 +1630,12 @@ func (h *Applier) loadBasePDF(ctx context.Context, storedPDF, jsonld []byte) ([]
 	return pdfBytes, nil
 }
 
+// activationReason is the reason the "active" lifecycle assertion and its
+// credential record: the signature that activates the contract.
+func activationReason(signerDID, fieldName string) string {
+	return fmt.Sprintf("Activated by the signature of %s in signature field %s", signerDID, fieldName)
+}
+
 // stampLifecycleForSigning embeds the "active" C2PA lifecycle assertion
 // (DCS-OR-C2PA-004) into pdfBytes and returns the updated PDF plus the
 // renderer version pdf-core reports. It is the update-then-sign counterpart of
@@ -1638,14 +1645,13 @@ func (h *Applier) loadBasePDF(ctx context.Context, storedPDF, jsonld []byte) ([]
 // transition (see the Applier.VCIssuer field doc comment).
 func stampLifecycleForSigning(
 	ctx context.Context,
-	did string,
+	did, reason string,
 	jsonldBytes, pdfBytes []byte,
 	pdfCore *pdfcore.Client,
 	vcIssuer provenance.VCIssuer,
 	issuerDID string,
 ) ([]byte, string, error) {
 	const c2paState = "active"
-	const reason = "Contract activated for execution"
 
 	h := sha256.Sum256(pdfBytes)
 	assetHash := hex.EncodeToString(h[:])
