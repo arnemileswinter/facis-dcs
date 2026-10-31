@@ -34,6 +34,7 @@ import (
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	db2 "digital-contracting-service/internal/dcstodcs/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 	"digital-contracting-service/internal/semantichub"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 
@@ -42,6 +43,7 @@ import (
 	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/jmoiron/sqlx"
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 )
 
 type DCSToDCSSynchronizer struct {
@@ -502,7 +504,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			return err
 		}
 		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
-		if _, err := client.PostPdf(ctx, &dcstodcs.DCSToDCSContractPdfRequest{
+		if err := s.deliverPdf(ctx, client, peer, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
 			Pdf:            pdfBytes,
@@ -515,11 +517,46 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		}); err != nil {
 			return err
 		}
-		if err := RecordPeerExchange(ctx, s.DB, did, "post_pdf", ExchangeSent, peer); err != nil {
-			log.Printf(ctx, "could not audit the %s ship of %s to %s: %v", state, did, peer, err)
-		}
 	}
 	return nil
+}
+
+// deliverPdf posts one PDF ship to one peer. A peer that refuses the copy as a
+// signing conflict (ADR-38 §2) refuses it again on every retry, so the
+// conflict is recorded on this instance and the ship gets no retry entry.
+func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, peer string, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+	if _, err := client.PostPdf(ctx, req); err != nil {
+		if !isSigningConflict(err) {
+			return err
+		}
+		log.Printf(ctx, "peer %s refused the copy of %s as a signing conflict: %v", peer, req.ContractIri, err)
+		return s.recordSigningConflict(ctx, req.ContractIri, peer, err)
+	}
+	if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
+		log.Printf(ctx, "could not audit the ship of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	return nil
+}
+
+// isSigningConflict reports whether a peer refused a shipped PDF because it
+// does not extend the signed revision the peer holds.
+func isSigningConflict(err error) bool {
+	var serviceErr *goa.ServiceError
+	return errors.As(err, &serviceErr) && serviceErr.Name == "conflict"
+}
+
+// recordSigningConflict records on this instance that the peer refused its
+// signed copy, so the compliance monitor reports the conflict here too.
+func (s *DCSToDCSSynchronizer) recordSigningConflict(ctx context.Context, did, peer string, refusal error) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := pacevent.RecordSigningConflictTx(ctx, tx, did, peer, pacevent.SigningConflictSent, refusal.Error()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // recordShipOutcome persists a ship attempt's sync_fails side effect and,

@@ -13,7 +13,7 @@ import (
 // contract's audit trail.
 func TestEveryOutboundPeerExchangeIsAudited(t *testing.T) {
 	for _, site := range []struct{ file, function, call string }{
-		{"synchronizer.go", "shipToPeers", "RecordPeerExchange"},
+		{"synchronizer.go", "deliverPdf", "RecordPeerExchange"},
 		{"settlement.go", "deliverSettlement", "RecordPeerExchangeTx"},
 		{"settlement.go", "deliverSettlementWithdrawal", "RecordPeerExchangeTx"},
 	} {

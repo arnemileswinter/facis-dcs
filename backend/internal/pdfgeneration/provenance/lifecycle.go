@@ -1,6 +1,7 @@
 package provenance
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -179,6 +180,15 @@ func CarriesPAdESSignature(pdf []byte) bool {
 		}
 	}
 	return false
+}
+
+// ExtendsSignedRevision reports whether next can replace current without
+// dropping a signature: current holds no PAdES signature, or next starts with
+// current (an incremental update). Each PAdES signature covers all earlier
+// revisions, so a document that does not start with a signed revision does
+// not contain the signatures of that revision.
+func ExtendsSignedRevision(current, next []byte) bool {
+	return !CarriesPAdESSignature(current) || bytes.HasPrefix(next, current)
 }
 
 // pdfNameToken is one PDF name in a document, as a reader resolves it.

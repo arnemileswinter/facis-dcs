@@ -13,6 +13,7 @@ import (
 	"digital-contracting-service/internal/base/pgtest"
 	cwerepo "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	pacrepo "digital-contracting-service/internal/processauditandcompliance/db/pg"
+	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 	qry "digital-contracting-service/internal/processauditandcompliance/query"
 )
 
@@ -24,6 +25,45 @@ func insertContract(t *testing.T, db *sqlx.DB, state string, startDate time.Time
 		t.Fatalf("insert contract: %v", err)
 	}
 	return did
+}
+
+// ADR-38 §2: a signed copy refused as a signing conflict is a compliance risk
+// on both instances, the one that refused it and the one whose copy it was.
+func TestMonitorFlagsSigningConflictsOnBothSides(t *testing.T) {
+	db := pgtest.Open(t)
+	refused := insertContract(t, db, "SIGNED", time.Now().Add(48*time.Hour))
+	ctx := context.Background()
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, direction := range []string{pacevent.SigningConflictReceived, pacevent.SigningConflictSent} {
+		if err := pacevent.RecordSigningConflictTx(ctx, tx, refused, "did:web:peer.example", direction, "refused"); err != nil {
+			t.Fatalf("record signing conflict: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor := qry.ComplianceMonitor{DB: db, ATRepo: &cwerepo.PostgresApprovalTaskRepo{}, CRepo: &cwerepo.PostgresContractRepo{}, FRepo: &pacrepo.PostgresRiskFindingRepo{}}
+	result, err := monitor.Handle(ctx, qry.MonitorQry{MonitoredBy: qry.SystemMonitorPrincipal})
+	if err != nil {
+		t.Fatalf("monitor: %v", err)
+	}
+	var details []string
+	for _, risk := range result.Risks {
+		if risk.DID == refused && risk.RiskType == qry.RiskTypeSigningConflict {
+			details = append(details, risk.Detail)
+		}
+	}
+	want := []string{
+		"this instance refused the signed copy of did:web:peer.example: both instances hold a signature over the same revision",
+		"did:web:peer.example refused the signed copy of this instance: both instances hold a signature over the same revision",
+	}
+	if len(details) != len(want) || details[0] != want[0] || details[1] != want[1] {
+		t.Errorf("signing conflict risks = %q, want %q", details, want)
+	}
 }
 
 // DCS-FR-PACM-05: the monitor flags late signatures and signatures that rely

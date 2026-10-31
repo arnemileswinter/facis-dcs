@@ -240,12 +240,14 @@ var _ = Service("DcsToDcs", func() {
 		Result(DCSToDCSContractPdfResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("conflict", ErrorResult, "The shipped PDF does not extend the signed revision the receiver holds (ADR-38 §2). The receiver keeps its copy; the sender does not ship this copy again.")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/peer/contracts/pdf")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("conflict", StatusConflict)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
