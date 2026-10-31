@@ -164,11 +164,12 @@ type CredentialStateReader func(ctx context.Context, presentation string) (statu
 // signaturePolicyFindings judges each signature this instance applied against
 // the signature policy (DCS-FR-SM-21): the achieved level against the level the
 // contract requires for its field, the status of the signing certificate and
-// of the Power of Attorney presented at its ceremony, and whether that Power
-// of Attorney grants a signing role. A credential status that cannot be read
-// is not a finding here; the compliance viewer shows it per signature.
+// of the PID and the Power of Attorney presented at its ceremony, and whether
+// that Power of Attorney grants a signing role. A signature without a Power of
+// Attorney presentation and a credential status that cannot be read are
+// findings: the check does not pass while the credential status is unknown.
 func signaturePolicyFindings(
-	ctx context.Context, tx *sqlx.Tx, ceremonies signatureAuthorities, credentialState CredentialStateReader,
+	ctx context.Context, tx *sqlx.Tx, ceremonies signatureAuthorities, credentialState, pidState CredentialStateReader,
 	contractData []byte, signatures []db.SignatureRecord,
 ) ([]string, error) {
 	var findings []string
@@ -191,6 +192,7 @@ func signaturePolicyFindings(
 			return nil, fmt.Errorf("could not resolve the ceremony behind the signature of %s: %w", sig.SignerDID, err)
 		}
 		if ceremony == nil || derefStr(ceremony.PoAVpToken) == "" {
+			findings = append(findings, fmt.Sprintf("The signature of signer %s carries no Power of Attorney presentation", sig.SignerDID))
 			continue
 		}
 		var roles userrole.UserRoles
@@ -198,14 +200,30 @@ func signaturePolicyFindings(
 		if !roles.HasRoles(userrole.ContractSigner) {
 			findings = append(findings, fmt.Sprintf("The Power of Attorney presented by signer %s grants no signing role", sig.SignerDID))
 		}
-		if credentialState == nil {
-			continue
-		}
-		if state, err := credentialState(ctx, *ceremony.PoAVpToken); err == nil && (state == status.StateInvalid || state == status.StateSuspended) {
-			findings = append(findings, fmt.Sprintf("The Power of Attorney presented by signer %s is %s", sig.SignerDID, state))
-		}
+		findings = append(findings, credentialStatusFindings(ctx, credentialState, "Power of Attorney", sig.SignerDID, *ceremony.PoAVpToken)...)
+		findings = append(findings, credentialStatusFindings(ctx, pidState, "PID", sig.SignerDID, derefStr(ceremony.VpToken))...)
 	}
 	return findings, nil
+}
+
+// credentialStatusFindings reads the live status of one presented credential.
+// A revoked or suspended credential is a finding, and so is a status that
+// cannot be determined. A nil reader skips the check.
+func credentialStatusFindings(ctx context.Context, read CredentialStateReader, credential, signer, presentation string) []string {
+	if read == nil {
+		return nil
+	}
+	if presentation == "" {
+		return []string{fmt.Sprintf("The credential status of signer %s could not be determined: no %s presentation is kept", signer, credential)}
+	}
+	state, err := read(ctx, presentation)
+	switch {
+	case err != nil:
+		return []string{fmt.Sprintf("The credential status of signer %s could not be determined: %s: %v", signer, credential, err)}
+	case state == status.StateInvalid || state == status.StateSuspended:
+		return []string{fmt.Sprintf("The %s presented by signer %s is %s", credential, signer, state)}
+	}
+	return nil
 }
 
 // nodeIRI reads an IRI from a JSON-LD value that is either {"@id": iri} or a
@@ -238,6 +256,9 @@ type ComplianceValidator struct {
 	// CredentialState reads the live status of a Power of Attorney presented
 	// at signing; nil skips that check.
 	CredentialState CredentialStateReader
+	// PIDState reads the live status of the PID presented at signing; nil
+	// skips that check.
+	PIDState CredentialStateReader
 }
 
 // Handle evaluates the contract's signatures against the signature
@@ -311,7 +332,7 @@ func (h *ComplianceValidator) Handle(ctx context.Context, cmd ComplianceCmd) ([]
 	if contract.ContractData != nil {
 		contractData = *contract.ContractData
 	}
-	policyFindings, err := signaturePolicyFindings(ctx, tx, h.CeremonyRepo, h.CredentialState, contractData, signatures)
+	policyFindings, err := signaturePolicyFindings(ctx, tx, h.CeremonyRepo, h.CredentialState, h.PIDState, contractData, signatures)
 	if err != nil {
 		return nil, err
 	}

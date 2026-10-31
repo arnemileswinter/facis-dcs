@@ -801,6 +801,9 @@ func (s *signatureManagementsrvc) Compliance(ctx context.Context, req *signature
 		CredentialState: func(ctx context.Context, presentation string) (status.State, error) {
 			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposeLogin)
 		},
+		PIDState: func(ctx context.Context, presentation string) (status.State, error) {
+			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposePID)
+		},
 	}
 
 	findings, err := queryHandler.Handle(ctx, qry)
