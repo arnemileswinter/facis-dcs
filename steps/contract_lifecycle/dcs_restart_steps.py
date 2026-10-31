@@ -65,9 +65,34 @@ def step_dcs_restarts(context):
         except requests.RequestException:
             status = None
         if status is not None and status < 500 and status != 404:
-            return
+            break
         time.sleep(2)
-    raise AssertionError(f"DCS did not answer at {health} after the restart (last HTTP {status})")
+    else:
+        raise AssertionError(f"DCS did not answer at {health} after the restart (last HTTP {status})")
+    _wait_for_harness_forwards()
+
+
+def _wait_for_harness_forwards():
+    """A kubectl port-forward to the replaced pod fails the first connection
+    after the rollout and then exits; keep_port_forward.sh starts a new one to
+    the new pod. Use up that first failure here, so the next scenario that
+    calls a forward gets a response."""
+    for origin, path in (
+        (os.getenv("BDD_DCS_INTERNAL_ORIGIN", ""), "/readyz"),
+        (os.getenv("BDD_DCS_METRICS_ORIGIN", ""), "/metrics"),
+    ):
+        origin = origin.strip().rstrip("/")
+        if not origin:
+            continue
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                requests.get(origin + path, timeout=10)
+                break
+            except requests.RequestException as exc:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"Harness forward {origin} did not reconnect after the restart: {exc}") from exc
+                time.sleep(2)
 
 
 @when('the creator submits contract "{name}" for review after the restart')
