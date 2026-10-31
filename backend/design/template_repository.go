@@ -508,9 +508,12 @@ var ContractTemplatePublishResponse = Type("ContractTemplatePublishResponse", fu
 })
 
 // Template Repository Service  (/template/...)
-// templateVerifyScopes are the roles that verify a template on either verify route.
+// templateVerifyScopes are the roles that verify a template on either verify
+// route. The Template Approver reads the validation results before the
+// decision (DCS-IR-TR-05); only a reviewer's verification completes a task.
 var templateVerifyScopes = func() {
 	Scope("Template Reviewer")
+	Scope("Template Approver")
 	Scope("Template Manager")
 	Scope("Contract Creator")
 }

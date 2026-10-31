@@ -72,4 +72,8 @@ func TestTemplateUserMayVerifyTemplates(t *testing.T) {
 			t.Errorf("%s scopes = %v, want Contract Creator", name, scopes)
 		}
 	}
+	// DCS-IR-TR-05: the approver reads the validation results before the decision.
+	if !slices.Contains(verify, "Template Approver") {
+		t.Errorf("verify scopes = %v, want Template Approver", verify)
+	}
 }
