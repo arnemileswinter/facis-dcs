@@ -647,6 +647,11 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 	}, nil
 }
 
+// VerifyByID serves GET /template/verify/{did} with the checks and audit of Verify (DCS-FR-TR-20).
+func (s *templateRepositorysrvc) VerifyByID(ctx context.Context, req *templaterepository.ContractTemplateVerifyRequest) (*templaterepository.ContractTemplateVerifyResponse, error) {
+	return s.Verify(ctx, req)
+}
+
 // mark template as approved, with optional decision notes.
 func (s *templateRepositorysrvc) Approve(ctx context.Context, req *templaterepository.ContractTemplateApproveRequest) (res *templaterepository.ContractTemplateApproveResponse, err error) {
 
