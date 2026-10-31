@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -36,7 +35,6 @@ func (r *PostgresIPLockoutRepo) SetLockout(ctx context.Context, tx *sqlx.Tx, ip 
         ON CONFLICT (ip_address) DO UPDATE SET locked_until = $2
     `
 	_, err := tx.ExecContext(ctx, statement, ip, until)
-	fmt.Println(err)
 	return err
 }
 
