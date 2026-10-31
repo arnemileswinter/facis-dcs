@@ -50,6 +50,9 @@ const (
 	Review                      EventType = "REVIEW_CONTRACT"
 	Audit                       EventType = "AUDIT_CONTRACT"
 	Terminate                   EventType = "TERMINATE_CONTRACT"
+	// Activate records the deployment acknowledgement that moves a contract
+	// from SIGNED to ACTIVE.
+	Activate EventType = "ACTIVATE_CONTRACT"
 	Renew                       EventType = "RENEW_CONTRACT"
 	RecordEvidence              EventType = "RECORD_EVIDENCE"
 	ContractExpired             EventType = "CONTRACT_EXPIRED"

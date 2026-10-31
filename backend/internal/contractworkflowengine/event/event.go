@@ -813,6 +813,29 @@ func (e TerminateEvent) GetDID() string {
 	return e.DID
 }
 
+// ActivateEvent is emitted when the target system acknowledges a deployment
+// and the contract moves from SIGNED to ACTIVE. ActivatedBy is the OAuth2
+// client of the target system.
+type ActivateEvent struct {
+	DID             string    `json:"did"`
+	ContractVersion int       `json:"contract_version"`
+	CorrelationID   string    `json:"correlation_id"`
+	ActivatedBy     string    `json:"activated_by"`
+	PreviousState   string    `json:"previous_state"`
+	NewState        string    `json:"new_state"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e ActivateEvent) EventType() string {
+	return eventtype.Activate.String()
+}
+
+// GetDID implements the Event interface.
+func (e ActivateEvent) GetDID() string {
+	return e.DID
+}
+
 // CataloguePublishEvent is emitted when a contract's metadata is registered in
 // the Federated Catalogue (DCS-IR-CWE-10).
 type CataloguePublishEvent struct {

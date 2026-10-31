@@ -14,8 +14,11 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
+	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 )
 
 // ErrDeploymentCallbackUnauthorized is returned when the caller is not the
@@ -189,6 +192,18 @@ func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx
 		return fmt.Errorf("could not activate contract %s: %w", deployment.DID, err)
 	}
 
+	evt := contractevents.ActivateEvent{
+		DID:             deployment.DID,
+		ContractVersion: processData.ContractVersion,
+		CorrelationID:   cmd.CorrelationID,
+		ActivatedBy:     cmd.CallerClientID,
+		PreviousState:   processData.State,
+		NewState:        contractstate.Active.String(),
+		OccurredAt:      activatedAt,
+	}
+	if err := event.Create(ctx, tx, evt, componenttype.ContractWorkflowEngine); err != nil {
+		return fmt.Errorf("could not create event: %w", err)
+	}
 	return nil
 }
 
