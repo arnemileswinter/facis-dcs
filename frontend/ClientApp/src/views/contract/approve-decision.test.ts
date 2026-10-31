@@ -79,7 +79,7 @@ it('sends the approver comment with the approval', async () => {
     decision_notes: ['clause 4 checked'],
   })
   // The optional comment does not turn the approval decision into a "Submit".
-  expect(revealed.options.at(-1)).toMatchObject({ confirmLabel: 'Confirm' })
+  expect(revealed.options[revealed.options.length - 1]).toMatchObject({ confirmLabel: 'Confirm' })
   wrapper.unmount()
 })
 
