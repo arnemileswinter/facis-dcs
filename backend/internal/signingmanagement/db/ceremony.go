@@ -25,6 +25,9 @@ type SignatureCeremony struct {
 	ContractDID string  `db:"contract_did"`
 	FieldName   string  `db:"field_name"`
 	RequestedBy string  `db:"requested_by"`
+	// RequestedHolderDID is the holder of the session that started the
+	// ceremony. Only that session may prepare, publish and submit for it.
+	RequestedHolderDID string `db:"requested_holder_did"`
 	Status      string  `db:"status"`
 	WalletURI   *string `db:"wallet_uri"`
 	Nonce       string  `db:"nonce"`
@@ -79,6 +82,12 @@ type SignatureCeremony struct {
 	// consistency checks (DCS-FR-SM-26).
 	SignerCertSubject *string `db:"signer_cert_subject"`
 	SignerCertSerial  *string `db:"signer_cert_serial"`
+
+	// The last refused wallet response for this ceremony: its error code,
+	// its reason and when it was refused. A new publish clears them.
+	LastRefusalCode *string    `db:"last_refusal_code"`
+	LastRefusal     *string    `db:"last_refusal"`
+	LastRefusalAt   *time.Time `db:"last_refusal_at"`
 }
 
 // PinnedBytes is the exact to-be-signed material and derived metadata pinned
@@ -152,12 +161,21 @@ type CeremonyRepo interface {
 	// RecordSignerCertificate persists the validated signing certificate's
 	// subject and serial on the ceremony (sole control evidence, DCS-FR-SM-26).
 	RecordSignerCertificate(ctx context.Context, tx *sqlx.Tx, ceremonyID, subject, serial string) error
-	// FindVerifiedCeremony returns the most recent verified ceremony for the
-	// given contract and signer, or (nil, nil) when none exists.
-	FindVerifiedCeremony(ctx context.Context, tx *sqlx.Tx, contractDID, signerDID string) (*SignatureCeremony, error)
-	// FindVerifiedCeremonyByField returns the most recent verified ceremony
+	// FindVerifiedCeremony returns the most recent verified, unconsumed
+	// ceremony for the given contract and signer, limited to fieldName when it
+	// is not empty, or (nil, nil) when none exists.
+	FindVerifiedCeremony(ctx context.Context, tx *sqlx.Tx, contractDID, signerDID, fieldName string) (*SignatureCeremony, error)
+	// FindVerifiedCeremonyByField returns the most recent verified, unconsumed ceremony
 	// for the given contract and signature FIELD, or (nil, nil) when none
 	// exists — the all-ceremonies-before-first-signature gate of the
 	// multi-signer flow (DCS-FR-SM-07/-17) checks every declared field.
 	FindVerifiedCeremonyByField(ctx context.Context, tx *sqlx.Tx, contractDID, fieldName string) (*SignatureCeremony, error)
+	// RecordRefusal keeps a refused wallet response on the ceremony. It
+	// reports true when the refusal before it is older than interval or
+	// there is none, which is when the caller audits it.
+	RecordRefusal(ctx context.Context, tx *sqlx.Tx, ceremonyID, code, reason string, interval time.Duration) (bool, error)
+	// MarkDocumentRetrieved records that the wallet retrieved the document
+	// with digest sha256. It reports false when that retrieval is already
+	// recorded.
+	MarkDocumentRetrieved(ctx context.Context, tx *sqlx.Tx, ceremonyID, sha256 string) (bool, error)
 }

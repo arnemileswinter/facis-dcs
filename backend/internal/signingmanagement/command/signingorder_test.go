@@ -19,12 +19,16 @@ import (
 
 const orderContractDID = "did:web:dcs-a.localhost:contract:ordered"
 
-// orderedContract declares two signature fields: "first" signs before
-// "second". deadline is the contract's signing deadline, or empty.
+// orderedContract declares two signature fields of two parties: "first"
+// signs before "second". deadline is the contract's signing deadline, or empty.
 func orderedContract(t *testing.T, deadline string) datatype.JSON {
 	t.Helper()
 	doc := map[string]any{
 		"@id": orderContractDID,
+		"dcs:parties": []any{
+			map[string]any{"@type": "dcs:CompanyParty", "dcs:legalName": "first"},
+			map[string]any{"@type": "dcs:CompanyParty", "dcs:legalName": "second"},
+		},
 		"dcs:signatureFields": []any{
 			map[string]any{"@type": "dcs:SignatureField", "dcs:signatoryName": "second", "dcs:signingOrder": 2},
 			map[string]any{"@type": "dcs:SignatureField", "dcs:signatoryName": "first", "dcs:signingOrder": 1},
@@ -71,8 +75,10 @@ type orderCeremonies struct{ db.CeremonyRepo }
 func orderCeremony(field string) *db.SignatureCeremony {
 	signer, credential, hash, renderer := "did:jwk:signer", "AES", "hash", "v1"
 	count, version := 0, 1
+	verifiedAt := time.Now().UTC()
 	return &db.SignatureCeremony{
 		ID: "ceremony-" + field, ContractDID: orderContractDID, FieldName: field, Status: db.CeremonyVerified, SignerDID: &signer,
+		VerifiedAt: &verifiedAt,
 		PreparedPDF: []byte("%PDF-prepared"), PinnedContentHash: &hash, PinnedRendererVersion: &renderer,
 		PinnedSignedCount: &count, PinnedContractVersion: &version, RequiredCredentialType: &credential,
 	}

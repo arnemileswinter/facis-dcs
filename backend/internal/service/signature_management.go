@@ -61,6 +61,9 @@ func mapSignatureCommandError(err error) error {
 	if errors.Is(err, command.ErrCeremonyRequired) || errors.Is(err, command.ErrCeremoniesIncomplete) {
 		return signaturemanagement.MakeCeremonyRequired(err)
 	}
+	if errors.Is(err, command.ErrCeremonyNotCallers) {
+		return signaturemanagement.MakeForbidden(err)
+	}
 	// Its own code, not bad_request: "the contract is waiting for the
 	// counterparty to settle this version" is a different answer to a signer
 	// than "you may not sign", and the frontend distinguishes signing
@@ -504,6 +507,10 @@ func (s *signatureManagementsrvc) newApplier() (command.Applier, error) {
 // externally — with their wallet/QTSP or a desktop PAdES signer. The DCS applies
 // no signature (ADR-12, DCS-FR-SM-16).
 func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *signaturemanagement.SMSignaturePrepareRequest) (res *signaturemanagement.SMSignaturePrepareResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -545,6 +552,10 @@ func (s *signatureManagementsrvc) PrepareSignature(ctx context.Context, req *sig
 // control, ADR-12, DCS-FR-SM-16/-18). The same path serves the wallet callback
 // and a downloaded-then-desktop-signed re-upload.
 func (s *signatureManagementsrvc) SubmitSignature(ctx context.Context, req *signaturemanagement.SMSignatureSubmitRequest) (res *signaturemanagement.SMContractApplyResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -1058,6 +1069,10 @@ func optString(s string) *string {
 }
 
 func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signaturemanagement.SMSignatureRequestStartRequest) (res *signaturemanagement.SMSignatureRequestStartResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.ContractDid); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
@@ -1068,11 +1083,12 @@ func (s *signatureManagementsrvc) StartCeremony(ctx context.Context, req *signat
 
 	handler := command.StartCeremonyHandler{DB: s.DB, CeremonyRepo: s.CeremonyRepo}
 	ceremony, err := handler.Handle(ctx, command.StartCeremonyCmd{
-		ContractDID: req.ContractDid,
-		FieldName:   req.FieldName,
-		RequestedBy: middleware.GetParticipantID(ctx),
-		BaseURL:     baseURL,
-		ClientID:    s.OID4VPClientID,
+		ContractDID:        req.ContractDid,
+		FieldName:          req.FieldName,
+		RequestedBy:        middleware.GetParticipantID(ctx),
+		RequestedHolderDID: middleware.GetHolderDID(ctx),
+		BaseURL:            baseURL,
+		ClientID:           s.OID4VPClientID,
 	})
 	if err != nil {
 		return nil, signaturemanagement.MakeInternalError(err)
@@ -1120,6 +1136,12 @@ func (s *signatureManagementsrvc) CeremonyStatus(ctx context.Context, req *signa
 		signedAt := ceremony.ConsumedAt.UTC().Format(time.RFC3339)
 		res.SignedAt = &signedAt
 	}
+	if ceremony.RequestExpiresAt != nil {
+		requestExpiresAt := ceremony.RequestExpiresAt.UTC().Format(time.RFC3339)
+		res.RequestExpiresAt = &requestExpiresAt
+	}
+	res.RefusalCode = ceremony.LastRefusalCode
+	res.Refusal = ceremony.LastRefusal
 	return res, nil
 }
 

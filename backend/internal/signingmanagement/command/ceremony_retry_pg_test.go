@@ -27,7 +27,7 @@ func TestFailedOrExpiredCeremonyCanBeRetried(t *testing.T) {
 	status := &query.CeremonyStatusHandler{DB: database, CeremonyRepo: repo}
 	startCmd := StartCeremonyCmd{ContractDID: contractDID, FieldName: field, RequestedBy: "did:example:signer", BaseURL: "https://dcs.example", ClientID: "x509_san_dns:dcs.example"}
 	presentation := func(ceremonyID, organization string) PresentationCmd {
-		return PresentationCmd{CeremonyID: ceremonyID, SignerDID: "did:example:signer", SDHash: "sd", VpToken: "vp", PoAOrganization: organization}
+		return PresentationCmd{CeremonyID: ceremonyID, SignerDID: "did:example:signer", SDHash: "sd", VpToken: "vp", PoAOrganization: organization, PoASubjectDID: "did:example:signer", PoARoles: []string{"Contract Signer"}}
 	}
 	statusOf := func(id string) string {
 		t.Helper()
