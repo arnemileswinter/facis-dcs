@@ -189,6 +189,25 @@ func (e CaseFileExportedEvent) EventType() string { return "PAC_CASE_FILE_EXPORT
 // GetDID implements the Event interface.
 func (e CaseFileExportedEvent) GetDID() string { return e.DID }
 
+// PartyReportGeneratedEvent records that a party compliance report of a
+// contract was generated (DCS-FR-PACM-07): it shows signer identities and
+// credential metadata.
+type PartyReportGeneratedEvent struct {
+	DID         string             `json:"did"`
+	GeneratedBy string             `json:"generated_by"`
+	Status      string             `json:"status"`
+	ContentHash string             `json:"content_hash"`
+	OccurredAt  time.Time          `json:"occurred_at"`
+	HolderDID   string             `json:"holder_did"`
+	UserRoles   userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e PartyReportGeneratedEvent) EventType() string { return "PAC_PARTY_REPORT_GENERATED" }
+
+// GetDID implements the Event interface.
+func (e PartyReportGeneratedEvent) GetDID() string { return e.DID }
+
 // TrustGateDenialEvent anchors one federation trust-gate rejection (ADR-19):
 // either the agreement-credential check (layer 3a: missing, unsigned, or a
 // federation-rules hash mismatch) or the local policy-endpoint check (layer

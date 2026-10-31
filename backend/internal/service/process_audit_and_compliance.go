@@ -755,7 +755,18 @@ func (s *processAuditAndCompliancesrvc) persistReportGeneratedEvent(ctx context.
 	return nil
 }
 
+// Monitor runs the compliance sweep over every contract, as the scheduled
+// sweep does, and returns the risks of the contracts the caller may read
+// (DCS-FR-PACM-02, ADR-31).
 func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processauditandcompliance.MonitorPayload) (res *processauditandcompliance.PACMonitorResponse, err error) {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(scoped, s.DB)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -777,6 +788,9 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 
 	risks := make([]*processauditandcompliance.PACComplianceRisk, 0, len(result.Risks))
 	for _, risk := range result.Risks {
+		if allowed != nil && !allowed[risk.DID] {
+			continue
+		}
 		risks = append(risks, &processauditandcompliance.PACComplianceRisk{
 			Did:        risk.DID,
 			RiskType:   risk.RiskType,
@@ -794,22 +808,29 @@ func (s *processAuditAndCompliancesrvc) IncidentReport(ctx context.Context, p *p
 	log.Printf(ctx, "processAuditAndCompliance.incident_report")
 
 	if p == nil || len(p.Findings) == 0 {
-		return map[string]any{"status": "accepted"}, nil
+		return nil, processauditandcompliance.MakeBadRequest(errors.New("an incident report needs at least one finding"))
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
 
 	did := ""
 	if p.ContractDid != nil {
 		did = strings.TrimSpace(*p.ContractDid)
 	}
-	if did == "" && p.TemplateDid != nil {
+	switch {
+	case did != "":
+		if err := s.authorizeContract(ctx, did); err != nil {
+			return nil, err
+		}
+	case p.TemplateDid != nil && strings.TrimSpace(*p.TemplateDid) != "":
 		did = strings.TrimSpace(*p.TemplateDid)
-	}
-	if did == "" {
+		if err := s.authorizeIncidentDID(ctx, did); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, processauditandcompliance.MakeBadRequest(fmt.Errorf("incident report findings must be linked to a contract_did or template_did"))
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
-	defer cancel()
 
 	findings := make([]qry2.IncidentFinding, 0, len(p.Findings))
 	for _, finding := range p.Findings {
@@ -840,7 +861,7 @@ func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *process
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	handler := qry2.CaseFileExporter{DB: s.DB}
+	handler := qry2.CaseFileExporter{DB: s.DB, Authorize: s.authorizeIncidentDID}
 	content, err := handler.Handle(ctx, qry2.CaseFileQry{
 		CaseID:        p.CaseID,
 		ExportedBy:    middleware.GetParticipantID(ctx),
@@ -848,13 +869,71 @@ func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *process
 		HolderDID:     middleware.GetHolderDID(ctx),
 		UserRoles:     middleware.GetUserRoles(ctx),
 	})
-	if errors.Is(err, qry2.ErrCaseNotFound) {
+	var named interface{ ErrorName() string }
+	switch {
+	case errors.Is(err, qry2.ErrCaseNotFound):
 		return nil, processauditandcompliance.MakeNotFound(err)
-	}
-	if err != nil {
+	case errors.As(err, &named):
+		return nil, err
+	case err != nil:
 		return nil, processauditandcompliance.MakeInternalError(err)
 	}
 	return content, nil
+}
+
+// Cases lists the incident cases linked to a template or to a contract the
+// caller may read (DCS-IR-PACM-04, DCS-FR-PACM-05).
+func (s *processAuditAndCompliancesrvc) Cases(ctx context.Context, _ *processauditandcompliance.CasesPayload) ([]*processauditandcompliance.PACCase, error) {
+	scoped, err := s.contractAuditContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := readableContractDIDs(scoped, s.DB)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+	cases, err := qry2.Cases(ctx, s.DB)
+	if err != nil {
+		return nil, processauditandcompliance.MakeInternalError(err)
+	}
+	result := make([]*processauditandcompliance.PACCase, 0, len(cases))
+	for _, c := range cases {
+		if c.LinkedTo == "contract" && allowed != nil && !allowed[c.DID] {
+			continue
+		}
+		item := &processauditandcompliance.PACCase{
+			CaseID: c.CaseID, Did: c.DID, LinkedTo: c.LinkedTo, ReportedBy: c.ReportedBy,
+			ReportedAt: c.ReportedAt.UTC().Format(time.RFC3339), Findings: c.Findings,
+		}
+		if c.ExportedAt != nil {
+			exportedAt := c.ExportedAt.UTC().Format(time.RFC3339)
+			item.ExportedAt = &exportedAt
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+// authorizeIncidentDID admits a contract the caller may read and any
+// template: templates are not organization-scoped.
+func (s *processAuditAndCompliancesrvc) authorizeIncidentDID(ctx context.Context, did string) error {
+	var linked struct {
+		Contract bool `db:"contract"`
+		Template bool `db:"template"`
+	}
+	if err := s.DB.GetContext(ctx, &linked, `SELECT EXISTS (SELECT 1 FROM contracts WHERE did = $1) AS contract,
+		EXISTS (SELECT 1 FROM contract_templates WHERE did = $1) AS template`, did); err != nil {
+		return processauditandcompliance.MakeInternalError(err)
+	}
+	switch {
+	case linked.Contract:
+		return s.authorizeContract(ctx, did)
+	case linked.Template:
+		return nil
+	}
+	return processauditandcompliance.MakeNotFound(fmt.Errorf("no contract or template has DID %q", did))
 }
 
 // PartyReport exports the compliance report of a contract segmented by party
@@ -862,9 +941,15 @@ func (s *processAuditAndCompliancesrvc) CaseFile(ctx context.Context, p *process
 func (s *processAuditAndCompliancesrvc) PartyReport(ctx context.Context, p *processauditandcompliance.PartyReportPayload) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
+	if err := s.authorizeContract(ctx, p.Did); err != nil {
+		return nil, err
+	}
 
 	handler := qry2.PartyReporter{DB: s.DB}
-	content, err := handler.Handle(ctx, qry2.PartyReportQry{DID: p.Did, GeneratedBy: middleware.GetParticipantID(ctx)})
+	content, err := handler.Handle(ctx, qry2.PartyReportQry{
+		DID: p.Did, GeneratedBy: middleware.GetParticipantID(ctx),
+		HolderDID: middleware.GetHolderDID(ctx), UserRoles: middleware.GetUserRoles(ctx),
+	})
 	if errors.Is(err, qry2.ErrContractNotFound) {
 		return nil, processauditandcompliance.MakeNotFound(err)
 	}
