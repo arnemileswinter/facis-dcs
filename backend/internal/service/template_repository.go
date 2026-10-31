@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
@@ -77,7 +78,8 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 // ontology-prefix conflict, DCS-FR-TR-03) to bad_request; everything else
 // stays an internal error.
 func mapTemplateCommandError(err error) error {
-	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) {
+	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
+		errors.Is(err, templatestructure.ErrInvalid) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -114,17 +116,19 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.CreateCmd{
-		DID:          *did,
-		CreatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		TemplateType: templateType,
-		PartyType:    partyType.String(),
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &templateData,
-		Jurisdiction: req.Jurisdiction,
-		Industry:     req.Industry,
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               *did,
+		CreatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &templateData,
+		Jurisdiction:      req.Jurisdiction,
+		Industry:          req.Industry,
+		TemplateLevel:     base.DerefString(req.TemplateLevel),
+		RequiredTemplates: req.RequiredTemplates,
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	createHandler := command.Creator{
 		DB:     s.DB,
@@ -252,18 +256,20 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 	}
 
 	cmd := command.UpdateCmd{
-		DID:          req.Did,
-		UpdatedAt:    updatedAt,
-		TemplateType: templateType,
-		PartyType:    partyType.String(),
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &metaData,
-		Jurisdiction: req.Jurisdiction,
-		Industry:     req.Industry,
-		UpdatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               req.Did,
+		UpdatedAt:         updatedAt,
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &metaData,
+		Jurisdiction:      req.Jurisdiction,
+		Industry:          req.Industry,
+		TemplateLevel:     req.TemplateLevel,
+		RequiredTemplates: req.RequiredTemplates,
+		UpdatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	handler := command.Updater{
 		DB:     s.DB,
@@ -315,18 +321,20 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	}
 
 	cmd := command.UpdateManageCmd{
-		DID:          req.Did,
-		UpdatedAt:    updatedAt,
-		TemplateType: templateType,
-		PartyType:    partyType.String(),
-		Name:         req.Name,
-		Description:  req.Description,
-		TemplateData: &metaData,
-		Jurisdiction: req.Jurisdiction,
-		Industry:     req.Industry,
-		UpdatedBy:    middleware.GetParticipantID(ctx),
-		HolderDID:    middleware.GetHolderDID(ctx),
-		UserRoles:    middleware.GetUserRoles(ctx),
+		DID:               req.Did,
+		UpdatedAt:         updatedAt,
+		TemplateType:      templateType,
+		PartyType:         partyType.String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		TemplateData:      &metaData,
+		Jurisdiction:      req.Jurisdiction,
+		Industry:          req.Industry,
+		TemplateLevel:     req.TemplateLevel,
+		RequiredTemplates: req.RequiredTemplates,
+		UpdatedBy:         middleware.GetParticipantID(ctx),
+		HolderDID:         middleware.GetHolderDID(ctx),
+		UserRoles:         middleware.GetUserRoles(ctx),
 	}
 	handler := command.UpdateManager{
 		DB:     s.DB,
@@ -409,18 +417,20 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	var contractTemplates []*templaterepository.ContractTemplateSearchResponse
 	for _, item := range result {
 		contractTemplates = append(contractTemplates, &templaterepository.ContractTemplateSearchResponse{
-			Did:              item.DID,
-			Version:          item.Version,
-			State:            item.State.String(),
-			TemplateType:     item.TemplateType.String(),
-			PartyType:        item.PartyType,
-			Name:             item.Name,
-			Description:      item.Description,
-			CreatedAt:        item.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:        item.UpdatedAt.Format(time.RFC3339),
-			Jurisdiction:     item.Jurisdiction,
-			Industry:         item.Industry,
-			ComplianceStatus: &item.ComplianceStatus,
+			Did:               item.DID,
+			Version:           item.Version,
+			State:             item.State.String(),
+			TemplateType:      item.TemplateType.String(),
+			PartyType:         item.PartyType,
+			Name:              item.Name,
+			Description:       item.Description,
+			CreatedAt:         item.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
+			Jurisdiction:      item.Jurisdiction,
+			Industry:          item.Industry,
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -511,9 +521,11 @@ func (s *templateRepositorysrvc) Retrieve(ctx context.Context, req *templaterepo
 			UpdatedAt:    item.UpdatedAt.Format(time.RFC3339),
 			LatestDid:    item.LatestDID,
 
-			Jurisdiction:     item.Jurisdiction,
-			Industry:         item.Industry,
-			ComplianceStatus: &item.ComplianceStatus,
+			Jurisdiction:      item.Jurisdiction,
+			Industry:          item.Industry,
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -596,9 +608,11 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		UpdatedAt:    contractTemplate.UpdatedAt.Format(time.RFC3339),
 		TemplateData: templateJSONLD,
 
-		Jurisdiction:     contractTemplate.Jurisdiction,
-		Industry:         contractTemplate.Industry,
-		ComplianceStatus: &contractTemplate.ComplianceStatus,
+		Jurisdiction:      contractTemplate.Jurisdiction,
+		Industry:          contractTemplate.Industry,
+		ComplianceStatus:  &contractTemplate.ComplianceStatus,
+		TemplateLevel:     &contractTemplate.TemplateLevel,
+		RequiredTemplates: contractTemplate.RequiredTemplates,
 	}, nil
 }
 

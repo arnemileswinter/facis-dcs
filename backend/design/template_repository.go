@@ -19,6 +19,8 @@ var ContractTemplateCreateRequest = Type("ContractTemplateCreateRequest", func()
 	Attribute("template_data", Any, "The template data of the contract template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 
 	Required("template_type", "party_type")
 })
@@ -87,6 +89,8 @@ var ContractTemplateUpdateRequest = Type("ContractTemplateUpdateRequest", func()
 	Attribute("template_data", Any, "The template data of the contract template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 
 	Required("did", "updated_at")
 })
@@ -115,6 +119,8 @@ var ContractTemplateUpdateManageRequest = Type("ContractTemplateUpdateManageRequ
 	Attribute("template_data", Any, "The template data of the contract template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 
 	Required("did", "updated_at")
 })
@@ -161,6 +167,8 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("description", String, "A description for that template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Attribute("created_at", String, "The timestamp when the contract template was created")
@@ -193,6 +201,8 @@ var ContractTemplateItem = Type("ContractTemplateItem", func() {
 	Attribute("latest_did", String, "The DID of the newest contract template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version", "party_type")
@@ -317,6 +327,8 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 	Attribute("template_data", Any, "The template data of the contract template")
 	Attribute("jurisdiction", String, "Jurisdiction the template is drafted for (DCS-FR-TR-10)")
 	Attribute("industry", String, "Industry the template is drafted for (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
+	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
@@ -480,7 +492,7 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/create
 	Method("create", func() {
 		Description("Create a new template.")
-		Meta("dcs:requirements", "DCS-IR-TR-01")
+		Meta("dcs:requirements", "DCS-IR-TR-01", "DCS-FR-TR-02", "DCS-FR-TR-23")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -527,7 +539,7 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/submit
 	Method("submit", func() {
 		Description(`with action flag { forwardTo: "approval" | "draft" } and optional reviewComments. allow resubmission path with approver comments.`)
-		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-IR-TR-04", "DCS-IR-TR-05")
+		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-IR-TR-04", "DCS-IR-TR-05", "DCS-FR-TR-26")
 
 		Security(JWTAuth, func() {
 			Scope("Template Creator")
@@ -811,7 +823,7 @@ var _ = Service("TemplateRepository", func() {
 	// POST /template/approve
 	Method("approve", func() {
 		Description("mark template as approved, with optional decision notes.")
-		Meta("dcs:requirements", "DCS-IR-TR-05", "DCS-IR-TR-06")
+		Meta("dcs:requirements", "DCS-IR-TR-05", "DCS-IR-TR-06", "DCS-FR-TR-26")
 
 		Security(JWTAuth, func() {
 			Scope("Template Approver")

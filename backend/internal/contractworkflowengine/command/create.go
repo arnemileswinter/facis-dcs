@@ -23,6 +23,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -199,6 +200,10 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	contractTemplate, err := h.CTRepo.ReadContractTemplateDataByID(ctx, tx, cmd.TemplateDID)
 	if err != nil {
 		return fmt.Errorf("could not read contract template data: %w", err)
+	}
+	// DCS-FR-TR-26: the templates it requires must still be usable.
+	if err := templatestructure.CheckTemplate(ctx, tx, cmd.TemplateDID); err != nil {
+		return err
 	}
 
 	contractDocument, err := contracttemplate.ConvertTemplateDataToContractData(contractTemplate.TemplateData, cmd.TemplateDID, contractTemplate.TemplateVersion)

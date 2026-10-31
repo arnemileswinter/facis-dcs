@@ -50,6 +50,7 @@ type GetAllMetadataByFilterResult struct {
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
 	db.SearchableMetadata
+	db.Structure
 }
 
 type GetAllMetaDataByFilterHandler struct {
@@ -140,6 +141,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			UpdatedAt:    data.UpdatedAt,
 
 			SearchableMetadata: data.SearchableMetadata,
+			Structure:          data.Structure,
 		}
 	}
 

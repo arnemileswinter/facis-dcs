@@ -29,6 +29,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/command"
@@ -237,6 +238,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrInvalidOriginatorRole) ||
+		errors.Is(err, templatestructure.ErrInvalid) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||
 		errors.Is(err, command.ErrKPIRuleMissing) ||

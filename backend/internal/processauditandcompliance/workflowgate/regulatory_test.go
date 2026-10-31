@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 )
 
@@ -108,5 +109,42 @@ func TestHierarchyRuleNeedsTheParentInForce(t *testing.T) {
 		if got := resultFromLocal(findings); got != want {
 			t.Errorf("parent state %q: result = %s, want %s", state, got, want)
 		}
+	}
+}
+
+// DCS-FR-PACM-06: a missing or misconfigured parent is flagged before execution.
+func TestHierarchyRuleChecksTheTemplateLevels(t *testing.T) {
+	sub := &templatestructure.Template{DID: "tpl-sub", Level: templatestructure.SubAgreement, Requires: []string{"tpl-frame"}}
+	frame := &templatestructure.Template{DID: "tpl-frame", Family: "tpl-frame", Level: templatestructure.FrameAgreement}
+	agreement := &templatestructure.Template{DID: "tpl-agreement", Family: "tpl-agreement", Level: templatestructure.Agreement}
+	signed := regulatoryFacts{
+		Signatures: []signedField{{Field: "did:web:org-a", Signer: "did:key:jane", Achieved: "AES"}},
+		ParentDID:  "did:web:dcs:contract:parent", ParentState: "SIGNED",
+	}
+
+	missing := signed
+	missing.ParentDID, missing.ParentState, missing.Template = "", "", sub
+	findings := regulatoryFindings(contractRequiring("AES"), missing)
+	if got := findingFor(t, findings, RuleHierarchyLevels).Severity; got != validation.SeverityError {
+		t.Fatalf("sub-agreement without parent: severity = %s, want error", got)
+	}
+	if got := resultFromLocal(findings); got != "BLOCKED" {
+		t.Fatalf("sub-agreement without parent: result = %s, want BLOCKED", got)
+	}
+
+	wrong := signed
+	wrong.Template, wrong.ParentTemplate = sub, agreement
+	if got := resultFromLocal(regulatoryFindings(contractRequiring("AES"), wrong)); got != "BLOCKED" {
+		t.Fatalf("sub-agreement under an agreement: result = %s, want BLOCKED", got)
+	}
+
+	fits := signed
+	fits.Template, fits.ParentTemplate = sub, frame
+	findings = regulatoryFindings(contractRequiring("AES"), fits)
+	if got := findingFor(t, findings, RuleHierarchyLevels).Severity; got != validation.SeveritySatisfied {
+		t.Fatalf("sub-agreement under its frame: severity = %s, want satisfied", got)
+	}
+	if got := resultFromLocal(findings); got != "PASSED" {
+		t.Fatalf("sub-agreement under its frame: result = %s, want PASSED", got)
 	}
 }

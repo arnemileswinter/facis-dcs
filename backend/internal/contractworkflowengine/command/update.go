@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
@@ -132,6 +133,10 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	// cross-instance parents are legitimate and unresolvable here by design.
 	if parentDID := extractParentContractDID(cmd.ContractData); parentDID != "" {
 		if err := h.checkNoParentCycle(ctx, tx, cmd.DID, parentDID); err != nil {
+			return err
+		}
+		// DCS-FR-TR-23: the parent fits the template levels and dependencies.
+		if err := templatestructure.CheckContractParent(ctx, tx, cmd.DID, parentDID); err != nil {
 			return err
 		}
 	}

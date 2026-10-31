@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 )
 
@@ -30,6 +31,7 @@ const (
 	RuleGDPRRetention     = "regulatory.gdpr.retention-policy"
 	RuleNoPIDInPDF        = "regulatory.gdpr.no-pid-in-pdf"
 	RuleHierarchyComplete = "structure.hierarchy.parent-in-force"
+	RuleHierarchyLevels   = "structure.hierarchy.template-levels"
 )
 
 // signedField is one signature this instance applied: the signature field and
@@ -54,6 +56,10 @@ type regulatoryFacts struct {
 	// ParentDID is the dcs:parentContract of the contract, ParentState the
 	// state of that parent on this instance ("" when it is not known here).
 	ParentDID, ParentState string
+	// Template is the structure of the contract's template and ParentTemplate
+	// that of the parent contract's template. Each is nil when it is not
+	// known on this instance.
+	Template, ParentTemplate *templatestructure.Template
 }
 
 // tsaQualified reads DCS_TSA_QUALIFIED. No QTSP is operated by default.
@@ -90,6 +96,13 @@ func loadRegulatoryFacts(ctx context.Context, db *sqlx.DB, did string, content m
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return facts, fmt.Errorf("read parent contract: %w", err)
 		}
+		if facts.ParentTemplate, err = templatestructure.LoadForContract(ctx, db, facts.ParentDID); err != nil {
+			return facts, err
+		}
+	}
+	var err error
+	if facts.Template, err = templatestructure.LoadForContract(ctx, db, did); err != nil {
+		return facts, err
 	}
 	return facts, nil
 }
@@ -227,6 +240,18 @@ func regulatoryFindings(content map[string]any, facts regulatoryFacts) []validat
 	default:
 		findings = append(findings, regulatoryFinding(RuleHierarchyComplete, "Parent contract in force", validation.SeveritySatisfied,
 			fmt.Sprintf("parent contract %s is %s", facts.ParentDID, facts.ParentState)))
+	}
+
+	// Structure (DCS-FR-PACM-06, DCS-FR-TR-26): a contract has the parent its
+	// template level and required templates call for. An unknown parent is
+	// flagged by the rule above.
+	if facts.Template != nil && (facts.ParentDID == "" || facts.ParentTemplate != nil) {
+		if err := templatestructure.CheckParent(*facts.Template, facts.ParentTemplate); err != nil {
+			findings = append(findings, regulatoryFinding(RuleHierarchyLevels, "Template levels and dependencies", validation.SeverityError, err.Error()))
+		} else {
+			findings = append(findings, regulatoryFinding(RuleHierarchyLevels, "Template levels and dependencies", validation.SeveritySatisfied,
+				fmt.Sprintf("the %s contract has the parent its template requires", facts.Template.Level)))
+		}
 	}
 	return findings
 }

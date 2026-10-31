@@ -14,6 +14,7 @@ import (
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/templaterepository/datatype/approvaltaskstate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
@@ -73,6 +74,11 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 
 	if !valid {
 		return errors.New("invalid user")
+	}
+
+	// DCS-FR-TR-26: the required templates can have changed since submission.
+	if err := templatestructure.CheckTemplate(ctx, tx, cmd.DID); err != nil {
+		return err
 	}
 
 	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.ApprovedBy, approvaltaskstate.Approved.String())

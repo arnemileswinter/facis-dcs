@@ -34,8 +34,11 @@ type UpdateManageCmd struct {
 	TemplateData *datatype.JSON
 	Jurisdiction *string
 	Industry     *string
-	HolderDID    string
-	UserRoles    userrole.UserRoles
+	// TemplateLevel and RequiredTemplates are left unchanged when nil.
+	TemplateLevel     *string
+	RequiredTemplates []string
+	HolderDID         string
+	UserRoles         userrole.UserRoles
 }
 
 type UpdateManager struct {
@@ -100,6 +103,9 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		TemplateData: cmd.TemplateData,
 		Jurisdiction: cmd.Jurisdiction,
 		Industry:     cmd.Industry,
+
+		TemplateLevel:     cmd.TemplateLevel,
+		RequiredTemplates: cmd.RequiredTemplates,
 	}
 	if err := h.CTRepo.CreateHistoryEntryForDID(ctx, tx, cmd.DID); err != nil {
 		return fmt.Errorf("could not create history: %w", err)

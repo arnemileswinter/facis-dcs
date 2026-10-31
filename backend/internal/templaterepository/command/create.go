@@ -38,8 +38,11 @@ type CreateCmd struct {
 	TemplateData *datatype.JSON
 	Jurisdiction *string
 	Industry     *string
-	HolderDID    string
-	UserRoles    userrole.UserRoles
+	// TemplateLevel defaults to AGREEMENT when empty.
+	TemplateLevel     string
+	RequiredTemplates []string
+	HolderDID         string
+	UserRoles         userrole.UserRoles
 }
 
 type Creator struct {
@@ -80,6 +83,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 			Jurisdiction: cmd.Jurisdiction,
 			Industry:     cmd.Industry,
 		},
+		Structure: db.Structure{TemplateLevel: cmd.TemplateLevel, RequiredTemplates: cmd.RequiredTemplates},
 	}
 	createdAt, err := h.CTRepo.Create(ctx, tx, data)
 	if err != nil {
