@@ -887,6 +887,15 @@ if [[ "$args" == *"logs deployment/dcs-digital-contracting-service"* ]]; then
   fi
   exit 0
 fi
+# The NetworkPolicy probes of run_bdd_helm.sh answer as on an enforcing cluster.
+if [[ "$args" == *"logs pod/np-probe-"* ]]; then
+  printf 'backend=404\nbackend_exit=0\nipfs_exit=28\n'
+  exit 0
+fi
+if [[ "$args" == *"logs pod/np-outsider-"* ]]; then
+  printf 'backend=000\nbackend_exit=28\nipfs_exit=28\n'
+  exit 0
+fi
 if [[ "$args" == *"get pod"* && "$args" == *"orce"* ]]; then
   echo "orce-pod"
   exit 0
