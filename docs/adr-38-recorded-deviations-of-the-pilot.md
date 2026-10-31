@@ -126,6 +126,35 @@ verifies that signature. CRLs are served over plain HTTP so that revocation
 checking does not depend on TLS: a check over HTTPS needs the certificate
 of the CRL server, which can itself need a revocation check.
 
+### 6. A revoked credential ends access within the access-token lifetime (DCS-NFR-BR-06, DCS-IR-CI-09)
+
+The backend checks the status list of the login credential when it issues a
+session and at each token refresh, not at each request. An access token
+issued before a revocation stays valid until it expires. `values.prod.yml`
+and `values.acceptance.yml` set the access-token lifetime to 5 minutes
+(`hydra.config.accessTokenTTL`); a release that does not set it keeps the
+Hydra default of 1 hour (the dev and BDD profiles).
+
+Reason: a status-list check per request puts a network fetch, or a cache
+that is as old as its refresh interval, into every API call. The access
+token is the bound of the delay: the operator shortens it with
+`hydra.config.accessTokenTTL`.
+
+### 7. Login federates through credential issuers, not through an external OIDC or SAML identity provider (DCS-NFR-SEC-16)
+
+A user logs in with a verifiable credential over OID4VP; the DCS runs its
+own Hydra, which issues the session tokens. The identity providers that the
+DCS trusts are the credential issuers of the trust document
+(`oid4vp.trust`, deployment/README.md, "Credential issuers"). The DCS does
+not accept tokens or assertions of an external OIDC or SAML identity
+provider: a token must be bound to the client ID of this instance and carry
+the issuer of the presented credential (`backend/internal/middleware/oidc.go`).
+
+Reason (product-owner scope decision): the roles of a user come from the
+credential that the user presents, and the signature on that credential is
+verified against a trusted issuer. An OIDC or SAML login has no credential
+behind it to verify roles and holder binding against.
+
 ## Consequences
 
 - A template user verifies the provenance credential against the instance
@@ -146,3 +175,9 @@ of the CRL server, which can itself need a revocation check.
   `DCS_LOTL_OJ_URL` to the current publication, or takes a release that
   pins it.
 - A CRL fetch is plain HTTP; the CRL signature protects its content.
+- A revocation takes effect at the next token refresh, at most 5 minutes in
+  prod and acceptance, at most 1 hour where `hydra.config.accessTokenTTL` is
+  not set.
+- An organization that uses an OIDC or SAML identity provider issues its
+  users a credential (or has a trusted issuer do so); the DCS does not trust
+  the identity provider directly.
