@@ -38,3 +38,28 @@ func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, deadlineRisks())
 }
+
+// DCS-FR-SM-13: the sweep flags a contract on its way to signature whose
+// signing deadline passed, and leaves a signed one alone.
+func TestQAMonitorFlagsPassedSigningDeadlinePostgres(t *testing.T) {
+	database, _ := qaPostgresSchema(t)
+	for did, row := range map[string][2]string{
+		"late-approved":   {"APPROVED", "2026-01-01T00:00:00Z"},
+		"late-signed":     {"SIGNED", "2026-01-01T00:00:00Z"},
+		"future-approved": {"APPROVED", "2999-01-01T00:00:00Z"},
+	} {
+		_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data)
+			VALUES ($1,'','Org A',$2,'tpl',1,jsonb_build_object('dcs:signingDeadline', $3::text))`, did, row[0], row[1])
+		require.NoError(t, err)
+	}
+	monitor := qry.ComplianceMonitor{DB: database, ATRepo: &cwepg.PostgresApprovalTaskRepo{}, CRepo: &cwepg.PostgresContractRepo{}, FRepo: &pacpg.PostgresRiskFindingRepo{}}
+	result, err := monitor.Handle(context.Background(), qry.MonitorQry{MonitoredBy: qry.SystemMonitorPrincipal})
+	require.NoError(t, err)
+	var flagged []string
+	for _, risk := range result.Risks {
+		if risk.RiskType == qry.RiskTypeSigningDeadlineMissed {
+			flagged = append(flagged, risk.DID)
+		}
+	}
+	require.Equal(t, []string{"late-approved"}, flagged)
+}

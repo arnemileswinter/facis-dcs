@@ -136,22 +136,32 @@ func PresentedCredentialState(ctx context.Context, presentation string, trust *T
 	if err != nil {
 		return "", err
 	}
-	document, err := verifyCredentialDocument(parsed.IssuerJWT, parsed.Disclosures, trust, purpose)
+	chain, err := verifyPoAChain(parsed.IssuerJWT, parsed.Disclosures, trust, purpose)
 	if err != nil {
 		return "", err
 	}
-	result, err := resolveStatusList(ctx, document.RawClaims)
-	if err != nil {
-		return "", err
+	// A delegated credential is as revoked as the most severe state of any
+	// link of its delegation chain.
+	var results []status.Result
+	var rejected *status.CredentialVerificationResult
+	for _, link := range chain {
+		result, err := resolveStatusList(ctx, link.statusClaims)
+		if err != nil {
+			return "", err
+		}
+		if len(result.StatusResults) == 0 {
+			return "", fmt.Errorf("status list check: %s", result.Reason)
+		}
+		results = append(results, result.StatusResults...)
+		if !result.Accepted && rejected == nil {
+			rejected = &result
+		}
 	}
-	if len(result.StatusResults) == 0 {
-		return "", fmt.Errorf("status list check: %s", result.Reason)
-	}
-	if reference := mostSevereStatus(result.StatusResults); reference.State != status.StateValid {
+	if reference := mostSevereStatus(results); reference.State != status.StateValid {
 		return reference.State, nil
 	}
-	if !result.Accepted {
-		return "", mapStatusListRejection(result)
+	if rejected != nil {
+		return "", mapStatusListRejection(*rejected)
 	}
 	return status.StateValid, nil
 }

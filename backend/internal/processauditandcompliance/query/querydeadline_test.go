@@ -75,3 +75,17 @@ func TestMissedDeadlineRiskDetailIsStableAcrossSweeps(t *testing.T) {
 	second := missedDeadlineRisksFrom(contracts, nil, time.Date(2026, 10, 30, 12, 5, 0, 0, time.UTC))
 	require.Equal(t, first[0].Detail, second[0].Detail)
 }
+
+// DCS-FR-SM-13: a contract still waiting for signatures after its signing
+// deadline is a risk; one whose deadline lies ahead, or states none, is not.
+func TestSigningDeadlineRisks(t *testing.T) {
+	checkedAt := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	risks := signingDeadlineRisksFrom([]activeContract{
+		{DID: "passed", ContractData: []byte(`{"dcs:signingDeadline": "2026-10-29"}`)},
+		{DID: "ahead", ContractData: []byte(`{"dcs:signingDeadline": "2026-10-30"}`)},
+		{DID: "none", ContractData: []byte(`{}`)},
+	}, checkedAt)
+	require.Len(t, risks, 1)
+	require.Equal(t, "passed", risks[0].DID)
+	require.Equal(t, RiskTypeSigningDeadlineMissed, risks[0].RiskType)
+}
