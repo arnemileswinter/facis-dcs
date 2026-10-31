@@ -26,3 +26,19 @@ it('retries a refused request once after a refresh', async () => {
   expect(calls).toBe(2)
   expect(refresh).toHaveBeenCalledTimes(1)
 })
+
+// DCS-FR-PACM-03: a transition held for review names the gate run, so the user
+// can give it to the Compliance Officer who decides it.
+it('names the workflow-gate run of a transition held for review', async () => {
+  http.defaults.adapter = (config: InternalAxiosRequestConfig) => {
+    const response = {
+      data: { name: 'workflow_gate_blocked', message: 'workflow gate result is REVIEW', gate_run_id: 'run-42' },
+      status: 409,
+      statusText: '',
+      headers: {},
+      config,
+    }
+    return Promise.reject(new AxiosError('Conflict', 'ERR_BAD_REQUEST', config, null, response))
+  }
+  await expect(http.post('/contract/approve', {})).rejects.toThrow(/workflow gate result is REVIEW.*run-42/)
+})

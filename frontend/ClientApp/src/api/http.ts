@@ -35,6 +35,10 @@ http.interceptors.response.use(
     // message replaces Axios's "Request failed with status code N".
     if (axios.isAxiosError(err) && typeof err.response?.data?.message === 'string') {
       err.message = err.response.data.message
+      // A workflow gate in REVIEW names its run: the Compliance Officer decides it by this ID.
+      if (typeof err.response.data.gate_run_id === 'string') {
+        err.message += ` Workflow-gate run for the Compliance Officer review: ${err.response.data.gate_run_id}`
+      }
     }
     const messageId = errorStore.add(err.message)
     bindReportedHttpError(err, messageId)
