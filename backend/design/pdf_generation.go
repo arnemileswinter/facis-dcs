@@ -26,7 +26,7 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	Attribute("c2pa_signer_detail", String, "Per manifest, the party its signing leaf is anchored to, or why it is not.")
 	Attribute("vc_proof_status", String, "Embedded contract-lifecycle credential proof status: 'valid' when its Data Integrity proof verified against a key the credential's issuer publishes for assertions, 'invalid' when it did not, 'indeterminate' when the issuer could not be resolved, 'not_available' when the PDF carries no such credential. Never reports a pass for a credential that was only parsed.")
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
-	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
+	Attribute("lifecycle_status", String, "The banner (DCS-OR-C2PA-006: draft, active, amended, suspended, terminated, expired, replaced): the lifecycle state the verified lifecycle credential in the PDF asserts, or the contract's own state when no credential verified")
 	Attribute("status_list_status", String, "Live revocation state queried from the XFSC status list service: active or revoked (DCS-OR-C2PA-006)")
 	Attribute("status_list_check", String, "Named live status-list check result: passed, failed, or not_available (DCS-OR-C2PA-006)")
 	Attribute("status_list_error", String, "Explicit failure reason when the live status-list check could not be completed")

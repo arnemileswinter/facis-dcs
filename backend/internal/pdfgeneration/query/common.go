@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -290,6 +291,13 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	if result.VCPresent && len(result.VCBytes) > 0 {
 		vcProofStatus = provenance.CredentialCheck(credentials.Verify(result.VCBytes))
 	}
+	// The banner is the lifecycle state the verified credential asserts; the
+	// contract's own state stands in when there is no verified credential.
+	if vcProofStatus == provenance.CheckValid {
+		if asserted := assertedLifecycleStatus(result.VCBytes); asserted != "" {
+			lifecycleStatus = asserted
+		}
+	}
 
 	// The revocation lookup follows the credential's OWN credentialStatus, so it
 	// runs only once the credential is known to be the issuer's: an unverified
@@ -361,6 +369,20 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		PdfSignatureDetail:  ptrToString(pdfSignatureDetail),
 		Discrepancy:         ptrToString(discrepancy),
 	}, nil
+}
+
+// assertedLifecycleStatus is the credentialSubject.status of a lifecycle
+// credential, or "".
+func assertedLifecycleStatus(vc []byte) string {
+	var credential struct {
+		CredentialSubject struct {
+			Status string `json:"status"`
+		} `json:"credentialSubject"`
+	}
+	if json.Unmarshal(vc, &credential) != nil {
+		return ""
+	}
+	return strings.TrimSpace(credential.CredentialSubject.Status)
 }
 
 func evaluateLiveStatusCheck(
