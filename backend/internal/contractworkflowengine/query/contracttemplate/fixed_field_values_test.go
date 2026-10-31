@@ -9,8 +9,12 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 )
 
-// DCS-FR-TR-12: a contract created from a template takes the terms its SLA
-// rules fix ("field odrl:eq literal") as filled values.
+// DCS-FR-TR-12, DCS-FR-CWE-13: a contract created from a template takes the
+// terms its SLA rules fix ("field odrl:eq literal") as filled values. The
+// region field is the contract-jurisdiction concept, so the jurisdiction is
+// filled in and searchable (contract search jurisdiction filter).
+const jurisdictionShape = "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-jurisdiction"
+
 func TestContractTakesTheTermsTheSLARulesFix(t *testing.T) {
 	const base = "did:web:facis.example:template:1"
 	constraint := func(field, operator string, right any) map[string]any {
@@ -43,7 +47,7 @@ func TestContractTakesTheTermsTheSLARulesFix(t *testing.T) {
 		},
 		"dcs:contractFields": []any{
 			field("support-hours", "xsd:integer", nil),
-			field("region", "xsd:string", nil),
+			field("region", "xsd:string", map[string]any{"dcs:shape": map[string]any{"@id": jurisdictionShape}}),
 			field("availability", "xsd:decimal", nil),
 			field("fee", "xsd:decimal", map[string]any{"dcs:value": map[string]any{"@value": "10", "@type": "xsd:decimal"}}),
 		},
@@ -75,12 +79,15 @@ func TestContractTakesTheTermsTheSLARulesFix(t *testing.T) {
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(*contract, &doc))
 	values := map[string]any{}
+	shapes := map[string]any{}
 	for _, raw := range doc["dcs:contractFields"].([]any) {
 		f := raw.(map[string]any)
 		values[f["@id"].(string)] = f["dcs:value"]
+		shapes[f["@id"].(string)] = f["dcs:shape"]
 	}
 	require.Equal(t, map[string]any{"@value": "24", "@type": "xsd:integer"}, values[base+"#support-hours"])
 	require.Equal(t, map[string]any{"@value": "DEU", "@type": "xsd:string"}, values[base+"#region"])
+	require.Equal(t, map[string]any{"@id": jurisdictionShape}, shapes[base+"#region"], "the jurisdiction field keeps its concept")
 	require.Nil(t, values[base+"#availability"], "a bound is not a fixed term")
 	require.Equal(t, map[string]any{"@value": "10", "@type": "xsd:decimal"}, values[base+"#fee"], "a filled value is kept")
 }
