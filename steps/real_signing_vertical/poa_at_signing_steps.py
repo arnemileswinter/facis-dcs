@@ -19,7 +19,6 @@ import os
 import socket
 import subprocess
 import time
-import uuid
 
 from behave import given, then, when
 
@@ -316,6 +315,7 @@ def step_when_a_ships_bad_poa_to_b(context, name):
         _own_identity,
         _sign_secret_value_with_dev_key,
     )
+    from steps.support.peer_challenge import peer_challenge  # noqa: PLC0415
     from steps.support.services.pdf_service import PDFService  # noqa: PLC0415
 
     did, _ = ContractService._contract_data(context, name)
@@ -332,7 +332,8 @@ def step_when_a_ships_bad_poa_to_b(context, name):
         "poa_presentation": _poa_presentation_from_untrusted_issuer(party_did),
     })
 
-    secret_value = str(uuid.uuid4())
+    # The challenge names instance B as receiver and binds the shipped PDF.
+    secret_value = peer_challenge("post_pdf", did, party_did, context.peer_did_b, shipped_pdf)
     secret_hash = base64.b64encode(_sign_secret_value_with_dev_key(token_dir, secret_value)).decode()
 
     payload = {
