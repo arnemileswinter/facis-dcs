@@ -125,7 +125,7 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 	if p.State != nil {
 		tState, err := contractstate.NewContractState(*p.State)
 		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
+			return nil, contractstoragearchive.MakeBadRequest(err)
 		}
 		state = &tState
 	}

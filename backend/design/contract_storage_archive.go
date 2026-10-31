@@ -61,13 +61,14 @@ var ArchiveStatisticsResponse = Type("ArchiveStatisticsResponse", func() {
 	Attribute("archived_contracts", Int, "Number of distinct archived contracts")
 	Attribute("deleted_total", Int, "Number of soft-deleted archive entries")
 	Attribute("storage_bytes", Int64, "Storage volume of archived snapshots, evidence, and receipts, in bytes")
-	Attribute("compliant_total", Int, "Archive entries carrying complete evidence (content hash, TSA receipt, signature metadata)")
-	Attribute("flagged_total", Int, "Archive entries with incomplete evidence — flagged per DCS-FR-CSA-19")
+	Attribute("compliant_total", Int, "Live archive entries that pass every archive compliance rule (the verdict of GET /archive/compliance)")
+	Attribute("flagged_total", Int, "Live archive entries that fail at least one archive compliance rule (DCS-FR-CSA-19)")
 	Attribute("recent_actions", ArrayOfRequired(ArchiveRecentAction), "Most recent archive-affecting audit events, newest first")
-	Attribute("expiring_contracts", ArrayOfRequired(ArchiveExpiringContract), "Archived contracts expiring within the next 30 days, soonest first")
+	Attribute("expiring_contracts", ArrayOfRequired(ArchiveExpiringContract), "Archived contracts expiring within the next expiring_window_days, soonest first")
+	Attribute("expiring_window_days", Int, "The look-ahead window of expiring_contracts in days (DCS_ARCHIVE_EXPIRING_WINDOW_DAYS)")
 
 	Required("archived_total", "archived_contracts", "deleted_total", "storage_bytes",
-		"compliant_total", "flagged_total", "recent_actions", "expiring_contracts")
+		"compliant_total", "flagged_total", "recent_actions", "expiring_contracts", "expiring_window_days")
 })
 
 var ArchiveAnnotationResponse = Type("ArchiveAnnotationResponse", func() {
@@ -191,6 +192,8 @@ var _ = Service("ContractStorageArchive", func() {
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Contract Observer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 
 		Payload(ArchiveRetrieveRequest)
@@ -209,7 +212,12 @@ var _ = Service("ContractStorageArchive", func() {
 
 	Method("detail", func() {
 		Description("Read an exact immutable archive snapshot after contract party authorization")
-		Security(JWTAuth, func() { Scope("Archive Manager"); Scope("Contract Observer") })
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Contract Observer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
 		Payload(func() {
 			Token("token", String)
 			Attribute("did", String)
@@ -237,6 +245,8 @@ var _ = Service("ContractStorageArchive", func() {
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Contract Observer")
+			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 		Payload(ArchiveSearchRequest)
 		Result(ArrayOfRequired(ContractItem))
@@ -264,7 +274,7 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("store", func() {
-		Description("Store a contract, an evidence document or a contract section in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25, DCS-FR-CSA-26). kind=section archives one section or clause block of the latest archived version for the parties assigned to it; each party must be able to read the contract, and only these parties, the Auditor and the system roles read the section. kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. The entry gets the archive notary receipt and the RFC 3161 TSA receipt that the signing workflow gives its archive entry. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
+		Description("Store a contract, an evidence document or a contract section in the archive (DCS-IR-CSA-02, DCS-FR-CSA-25, DCS-FR-CSA-26). kind=section archives one section or clause block of the given archived version (the latest when contract_version is omitted) for the parties assigned to it; each party must be able to read the contract, and only these parties, the Auditor and the system roles read the section. kind=contract archives the current version of a SIGNED, TERMINATED or EXPIRED contract that has no archive entry for that version yet. The entry gets the archive notary receipt and the RFC 3161 TSA receipt that the signing workflow gives its archive entry. kind=evidence stores a document for an archived contract; the content is encrypted under the contract's key in IPFS and erased with it. Both are recorded in the archive audit log.")
 		Meta("dcs:requirements", "DCS-IR-CSA-02", "DCS-IR-CSA-06", "DCS-FR-CSA-25", "DCS-FR-CSA-26")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
@@ -283,6 +293,7 @@ var _ = Service("ContractStorageArchive", func() {
 			})
 			Attribute("section_id", String, "The @id of the section or clause block to archive (kind=section)")
 			Attribute("parties", ArrayOf(String), "The organizations assigned to the section, who may read it (kind=section)")
+			Attribute("contract_version", Int, "The archived contract version the section belongs to; the latest archived version when omitted (kind=section)", func() { Minimum(1) })
 			Required("kind", "did")
 		})
 		Result(ArchiveStoreResponse)
@@ -308,6 +319,7 @@ var _ = Service("ContractStorageArchive", func() {
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
@@ -317,6 +329,8 @@ var _ = Service("ContractStorageArchive", func() {
 		Result(ArrayOfRequired(ArchiveEvidenceItem))
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "No contract has this DID")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -324,6 +338,8 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -335,6 +351,7 @@ var _ = Service("ContractStorageArchive", func() {
 			Scope("Archive Manager")
 			Scope("Contract Observer")
 			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
@@ -367,6 +384,7 @@ var _ = Service("ContractStorageArchive", func() {
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
 			Scope("Auditor")
+			Scope("Compliance Officer")
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")

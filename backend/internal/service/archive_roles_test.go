@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"goa.design/goa/v3/security"
 
+	archive "digital-contracting-service/gen/contract_storage_archive"
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 )
 
@@ -32,6 +33,45 @@ func TestArchiveManagerMayTerminateAContract(t *testing.T) {
 		return contractworkflowengine.NewTerminateEndpoint(nil, auth)
 	}, &contractworkflowengine.ContractTerminateRequest{})
 	require.Contains(t, scopes, "Archive Manager")
+}
+
+// DCS-FR-CSA-24: the Auditor and the Compliance Officer inspect the archive
+// entries, their compliance verdict, evidence and sections from the archive
+// viewer. The archive writes stay with the Archive Manager.
+func TestAuditorAndComplianceOfficerInspectTheArchive(t *testing.T) {
+	reads := map[string]func(security.AuthJWTFunc) func(context.Context, any) (any, error){
+		"retrieve": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewRetrieveEndpoint(nil, a)
+		},
+		"detail": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewDetailEndpoint(nil, a)
+		},
+		"search": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewSearchEndpoint(nil, a)
+		},
+		"compliance": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewComplianceEndpoint(nil, a)
+		},
+		"evidence": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewEvidenceEndpoint(nil, a)
+		},
+		"sections": func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+			return archive.NewSectionsEndpoint(nil, a)
+		},
+	}
+	payloads := map[string]any{
+		"retrieve": &archive.ArchiveRetrieveRequest{}, "detail": &archive.DetailPayload{}, "search": &archive.ArchiveSearchRequest{},
+		"compliance": &archive.CompliancePayload{}, "evidence": &archive.EvidencePayload{}, "sections": &archive.SectionsPayload{},
+	}
+	for name, endpoint := range reads {
+		scopes := requiredScopes(t, endpoint, payloads[name])
+		require.Contains(t, scopes, "Auditor", name)
+		require.Contains(t, scopes, "Compliance Officer", name)
+	}
+	scopes := requiredScopes(t, func(a security.AuthJWTFunc) func(context.Context, any) (any, error) {
+		return archive.NewDeleteEndpoint(nil, a)
+	}, &archive.DeletePayload{})
+	require.Equal(t, []string{"Archive Manager"}, scopes)
 }
 
 // DCS-FR-CSA-24: the Auditor reads the contract content from the audit viewer.

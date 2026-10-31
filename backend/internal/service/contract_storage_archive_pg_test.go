@@ -114,9 +114,12 @@ func TestFailedArchiveOperationsAreAuditedWithTheirOutcome(t *testing.T) {
 	bad := "not-a-date"
 	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{ValidFrom: &bad})
 	require.Error(t, err)
+	unknownState := "PENDING"
+	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{State: &unknownState})
+	require.Equal(t, "bad_request", errorName(err), "an unknown state filter is a client error")
 
 	failed := archiveEvents(t, db, "ARCHIVE_OPERATION_FAILED")
-	require.Len(t, failed, 2)
+	require.Len(t, failed, 3)
 	require.Equal(t, "delete", failed[0]["operation"])
 	require.Equal(t, "did:web:dcs.example:contract:none", failed[0]["did"])
 	require.Equal(t, archiveManager, failed[0]["actor"])
