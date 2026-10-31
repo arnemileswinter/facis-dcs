@@ -198,6 +198,33 @@ func TestResavedCopyKeepsItsManifestReferenceAndPayload(t *testing.T) {
 	}
 }
 
+// A signer may add the widget of a signature field as a kid of the field
+// rather than merged into it; the widget then names the field as /Parent and
+// carries no /FT of its own. It is still the signature layer.
+func TestMatchPageContentLeavesOutAWidgetWhoseParentIsTheSignatureField(t *testing.T) {
+	prepared := preparedContractPDF(t)
+	pageID, _ := firstPageAndContentObjID(t, prepared)
+	maxID, err := findTrailerMaxObjID(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fieldID, widgetID := maxID+1, maxID+2
+	page := regexp.MustCompile(`/Annots \[([^\]]*)\]`).ReplaceAllString(objectBody(t, prepared, pageID),
+		fmt.Sprintf("/Annots [${1} %d 0 R]", widgetID))
+	signed := appendRevision(t, prepared, map[int]string{
+		fieldID:  fmt.Sprintf("<< /FT /Sig /T (Signature9) /Kids [%d 0 R] >>", widgetID),
+		widgetID: fmt.Sprintf("<< /Type /Annot /Subtype /Widget /Parent %d 0 R /Rect [54 72 234 132] /P %d 0 R >>", fieldID, pageID),
+		pageID:   page,
+	})
+
+	if err := MatchPageContent(signed, prepared); err != nil {
+		t.Fatalf("a signature widget under its field must pass the signing pin: %v", err)
+	}
+	if err := MatchPageContentExact(signed, prepared); err == nil {
+		t.Fatal("an added signature widget matched exactly")
+	}
+}
+
 // The signing pin leaves signature widgets out, since a PAdES signer adds or
 // fills one. A copy checked exactly must show the signatures as the reference
 // does.

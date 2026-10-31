@@ -410,12 +410,31 @@ func (g *pageGraphComparison) withoutSignatureWidgets(pdf []byte, v pdfValue) pd
 				annotation = obj.value
 			}
 		}
-		if ft := annotation.dict["FT"]; ft.kind == 'n' && ft.text == "Sig" {
+		if isSignatureWidget(pdf, annotation) {
 			continue
 		}
 		kept.array = append(kept.array, element)
 	}
 	return kept
+}
+
+// isSignatureWidget reports whether annotation is the widget of a signature
+// field: the field and its widget merged into one dictionary (/FT /Sig), or a
+// widget whose /Parent is the signature field.
+func isSignatureWidget(pdf []byte, annotation pdfValue) bool {
+	if ft := annotation.dict["FT"]; ft.kind == 'n' && ft.text == "Sig" {
+		return true
+	}
+	parent := annotation.dict["Parent"]
+	if annotation.dict["Subtype"].text != "Widget" || parent.kind != 'r' {
+		return false
+	}
+	field, err := resolvePDFObject(pdf, parent.ref)
+	if err != nil {
+		return false
+	}
+	ft := field.value.dict["FT"]
+	return ft.kind == 'n' && ft.text == "Sig"
 }
 
 // pageContents compares two /Contents values as the content a reader renders:
