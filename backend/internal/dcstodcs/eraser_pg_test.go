@@ -156,6 +156,38 @@ func TestShredErasesResidualCopiesOfTheContentAndPersonalData(t *testing.T) {
 	require.Equal(t, []string{`{"erased": true}`, `{"erased": true}`, `{"justification": "kept record"}`, `{"case_id": "kept case"}`}, bodies)
 }
 
+// DCS-NFR-SEC-13: the free text users entered about the contract goes with
+// the erasure: its name and description, now and in the history, the
+// rejection reason of a negotiation decision and the termination reasons.
+func TestShredErasesTheFreeTextAboutTheContract(t *testing.T) {
+	db := pgtest.Open(t)
+	seedErasableContract(t, db)
+	for _, statement := range []string{
+		`UPDATE contracts SET name = 'secret name', description = 'secret description' WHERE did = $1`,
+		`UPDATE contract_history SET name = 'secret name', description = 'secret description' WHERE did = $1`,
+		`INSERT INTO contract_negotiation_decisions (negotiation_id, negotiator, decision, rejection_reason)
+		 SELECT id, 'did:web:negotiator', 'REJECTED', 'secret rejection' FROM contract_negotiations WHERE did = $1`,
+		`INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
+		 VALUES ($1, 'secret termination', now(), 'did:web:manager', 'Contract Manager')`,
+		`INSERT INTO contract_peer_terminations (did, peer_did, reason) VALUES ($1, 'did:web:peer', 'secret termination')`,
+	} {
+		_, err := db.Exec(statement, erasedDID)
+		require.NoError(t, err, statement)
+	}
+
+	shredForTest(t, db)
+
+	var secrets int
+	require.NoError(t, db.Get(&secrets, `
+		SELECT (SELECT count(*) FROM contracts WHERE did = $1 AND num_nonnulls(name, description) > 0)
+		     + (SELECT count(*) FROM contract_history WHERE did = $1 AND num_nonnulls(name, description) > 0)
+		     + (SELECT count(*) FROM contract_negotiation_decisions d JOIN contract_negotiations n ON n.id = d.negotiation_id
+		        WHERE n.did = $1 AND d.rejection_reason IS NOT NULL)
+		     + (SELECT count(*) FROM contract_terminations WHERE did = $1 AND reason <> '')
+		     + (SELECT count(*) FROM contract_peer_terminations WHERE did = $1 AND reason <> '')`, erasedDID))
+	require.Zero(t, secrets, "free text about the contract survived the erasure")
+}
+
 // After the erasure the contract keeps the organization names of its
 // parties, so the read policy still admits a named party. Nothing else of a
 // party node stays.

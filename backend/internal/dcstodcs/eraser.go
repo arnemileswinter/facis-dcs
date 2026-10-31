@@ -95,9 +95,11 @@ func (s *AuditedShredder) Shred(ctx context.Context, contractIRI, actor, reason 
 // change requests and drafts, the archive snapshot, the payload pinned for
 // signing, the PDF prepared for signing, the PID claims and presentations of
 // the signing ceremonies, the payload of every JAdES signature over the
-// contract, and the outbox copies of the event bodies that the audit trail
-// erases with the key. The contract keeps its party names for the read
-// policy. Metadata, hashes and signature values stay as evidence.
+// contract, the free text users entered about it (contract name and
+// description, now and in the history, negotiation rejection reasons and
+// termination reasons), and the outbox copies of the event bodies that the
+// audit trail erases with the key. The contract keeps its party names for the
+// read policy. Metadata, hashes and signature values stay as evidence.
 func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) error {
 	statements := []string{
 		`UPDATE contracts SET contract_data = ` + partyNamesOnly + ` WHERE did = $1 AND contract_data IS DISTINCT FROM ` + partyNamesOnly,
@@ -109,6 +111,12 @@ func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) 
 		 WHERE contract_did = $1 AND num_nonnulls(pinned_payload, prepared_pdf, pid_claims, vp_token, poa_vp_token) > 0`,
 		`UPDATE contract_sync_signatures SET jades_signature = ` + detachedJWS + ` WHERE did = $1 AND split_part(jades_signature, '.', 2) <> ''`,
 		`UPDATE contract_signatures SET jades_signature = ` + detachedJWS + ` WHERE contract_did = $1 AND split_part(jades_signature, '.', 2) <> ''`,
+		`UPDATE contracts SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
+		`UPDATE contract_history SET name = NULL, description = NULL WHERE did = $1 AND num_nonnulls(name, description) > 0`,
+		`UPDATE contract_negotiation_decisions d SET rejection_reason = NULL FROM contract_negotiations n
+		 WHERE d.negotiation_id = n.id AND n.did = $1 AND d.rejection_reason IS NOT NULL`,
+		`UPDATE contract_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
+		`UPDATE contract_peer_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement, contractIRI); err != nil {
