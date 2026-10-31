@@ -41,7 +41,12 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 	if len(signatures) == 0 {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s has no signature to archive", contract.DID)
 	}
+	return buildSignedArchiveEntry(contract, storedBy, "SIGNING_WORKFLOW_COMPLETION", signatures, peerSignatures)
+}
 
+// buildSignedArchiveEntry builds the entry of a signed contract with its
+// signature evidence. source names who archived it.
+func buildSignedArchiveEntry(contract *db.Contract, storedBy, source string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
 	entries := make([]map[string]any, 0, len(signatures))
 	hashes := make(map[string]map[string]string, len(signatures))
 	for _, signing := range signatures {
@@ -65,9 +70,10 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 	if err != nil {
 		return db.ContractArchiveEntry{}, err
 	}
-	final := signatures[len(signatures)-1]
-	metadata := map[string]any{
-		"status": "SIGNED", "pdf_cid": final.PDFCID, "pdf_hash": archivePDFHash(final.PDFHash), "signatures": entries,
+	metadata := map[string]any{"status": "SIGNED", "signatures": entries}
+	if len(signatures) > 0 {
+		final := signatures[len(signatures)-1]
+		metadata["pdf_cid"], metadata["pdf_hash"] = final.PDFCID, archivePDFHash(final.PDFHash)
 	}
 	if len(peerSignatures) > 0 {
 		metadata["peer_signatures"] = peerSignatures
@@ -81,9 +87,9 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 		return db.ContractArchiveEntry{}, err
 	}
 	evidence, err := datatype.NewJSON(map[string]any{
-		"source":                  "SIGNING_WORKFLOW_COMPLETION",
+		"source":                  source,
 		"stored_by":               storedBy,
-		"stored_state":            contractstate.Signed.String(),
+		"stored_state":            contract.State,
 		"snapshot_hash_algorithm": archiveSnapshotHashAlgorithm,
 	})
 	if err != nil {
@@ -103,6 +109,26 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 		CredentialHashes: &credentialHashes,
 		Evidence:         &evidence,
 	}, nil
+}
+
+// ArchiveCredentialHashes hashes the credentials a signing ceremony
+// presented; the credentials themselves are not archived.
+func ArchiveCredentialHashes(vpToken, kbSdHash, poaVPToken string) map[string]string {
+	hashes := map[string]string{}
+	sha := func(value string) string {
+		sum := sha256.Sum256([]byte(value))
+		return "sha256:" + hex.EncodeToString(sum[:])
+	}
+	if vpToken != "" {
+		hashes["presentation"] = sha(vpToken)
+	}
+	if kbSdHash != "" {
+		hashes["key_binding"] = "sha256:" + strings.TrimPrefix(kbSdHash, "sha256:")
+	}
+	if poaVPToken != "" {
+		hashes["poa_presentation"] = sha(poaVPToken)
+	}
+	return hashes
 }
 
 func archivePDFHash(hash string) string {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
 	"digital-contracting-service/internal/middleware"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // archiveArtifacts is the encrypting IPFS store: content is encrypted under
@@ -61,12 +64,22 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// The per-contract lock serializes this store with a concurrent store, the
+	// signing workflow and a peer receipt of the same contract, so the check
+	// for an existing entry below holds until the insert.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", did); err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
 	contract, err := s.CRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
+	signatures, peerSignatures, err := archiveSigningEvidence(ctx, tx, did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
 	storedBy := middleware.GetParticipantID(ctx)
-	entry, err := cwecommand.BuildManualArchiveEntry(contract, storedBy)
+	entry, err := cwecommand.BuildManualArchiveEntry(contract, storedBy, signatures, peerSignatures)
 	if err != nil {
 		return nil, contractstoragearchive.MakeBadRequest(err)
 	}
@@ -103,8 +116,8 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 		TSAReceipt:      tsaReceipt,
 		EvidenceSummary: contractevents.ArchiveEvidenceSummary{
 			SnapshotHashAlgorithm: "SHA-256",
-			SignatureStatus:       "NOT_RECORDED",
-			CredentialHashStatus:  "NOT_RECORDED",
+			SignatureStatus:       "SIGNED",
+			CredentialHashStatus:  "HASHED",
 		},
 		OccurredAt: time.Now().UTC(),
 	}
@@ -116,6 +129,51 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 	}
 	version := entry.ContractVersion
 	return &contractstoragearchive.ArchiveStoreResponse{Did: did, Kind: "contract", ContractVersion: &version, ContentHash: entry.ContentHash}, nil
+}
+
+// archiveSigningEvidence reads the signatures this instance applied to the
+// contract, with the hashes of the credentials of their ceremonies, and the
+// signatures a peer applied, as the signing workflow archives them.
+func archiveSigningEvidence(ctx context.Context, tx *sqlx.Tx, did string) ([]cwecommand.ArchiveSigningEvidence, json.RawMessage, error) {
+	var rows []struct {
+		Signer         string     `db:"signer_did"`
+		CredentialType string     `db:"credential_type"`
+		Field          string     `db:"field_name"`
+		SignedAt       *time.Time `db:"signed_at"`
+		PDFCID         string     `db:"ipfs_cid"`
+		PDFHash        string     `db:"pdf_hash"`
+		CeremonyID     string     `db:"ceremony_id"`
+		VPToken        string     `db:"vp_token"`
+		KbSdHash       string     `db:"kb_sd_hash"`
+		PoAVPToken     string     `db:"poa_vp_token"`
+	}
+	if err := tx.SelectContext(ctx, &rows, `
+		SELECT s.signer_did, s.credential_type, COALESCE(s.field_name, '') AS field_name, s.signed_at,
+		       COALESCE(s.ipfs_cid, '') AS ipfs_cid, COALESCE(s.pdf_hash, '') AS pdf_hash, COALESCE(c.id::text, '') AS ceremony_id,
+		       COALESCE(c.vp_token, '') AS vp_token, COALESCE(c.kb_sd_hash, '') AS kb_sd_hash, COALESCE(c.poa_vp_token, '') AS poa_vp_token
+		FROM contract_signatures s LEFT JOIN signature_ceremonies c ON c.id = s.ceremony_id
+		WHERE s.contract_did = $1 AND s.status = 'SIGNED'
+		ORDER BY s.created_at, s.id`, did); err != nil {
+		return nil, nil, fmt.Errorf("read signatures: %w", err)
+	}
+	signatures := make([]cwecommand.ArchiveSigningEvidence, 0, len(rows))
+	for _, row := range rows {
+		signing := cwecommand.ArchiveSigningEvidence{
+			Signer: row.Signer, CredentialType: row.CredentialType, CeremonyID: row.CeremonyID, Field: row.Field,
+			PDFCID: row.PDFCID, PDFHash: row.PDFHash,
+			CredentialHashes: cwecommand.ArchiveCredentialHashes(row.VPToken, row.KbSdHash, row.PoAVPToken),
+		}
+		if row.SignedAt != nil {
+			signing.SignedAt = *row.SignedAt
+		}
+		signatures = append(signatures, signing)
+	}
+	var peers []byte
+	err := tx.GetContext(ctx, &peers, `SELECT poa_evidence FROM contract_sync_signatures WHERE did = $1 AND poa_evidence IS NOT NULL`, did)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, fmt.Errorf("read peer signatures: %w", err)
+	}
+	return signatures, peers, nil
 }
 
 func (s *contractStorageArchivesrvc) storeEvidence(ctx context.Context, p *contractstoragearchive.StorePayload) (*contractstoragearchive.ArchiveStoreResponse, error) {

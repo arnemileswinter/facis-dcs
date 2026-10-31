@@ -242,6 +242,7 @@ func TestArchiveManagerStoresAFinalContractOnce(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
 	require.NoError(t, err)
+	seedLocalSignature(t, db, did)
 	svc := archiveTestService(t, db)
 	artifacts := newMemoryArtifacts()
 	svc.Artifacts = artifacts
@@ -290,6 +291,7 @@ func TestArchiveManagerStoreNotarizesAndTimestampsTheEntry(t *testing.T) {
 	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version, contract_data)
 		VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'TERMINATED', 'did:web:tpl', 1, '{"clause":"terms"}')`, did)
 	require.NoError(t, err)
+	seedLocalSignature(t, db, did)
 	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 	notary := &stubArchiveNotary{}

@@ -1,11 +1,9 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
-	"time"
 
-	"digital-contracting-service/internal/base/conf"
-	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
@@ -23,42 +21,20 @@ var archivableStates = map[string]bool{
 }
 
 // BuildManualArchiveEntry freezes the current version of a SIGNED, TERMINATED
-// or EXPIRED contract for an archive entry an Archive Manager stores. The
-// entry records no signature evidence: the signing workflow is its only
-// source.
-func BuildManualArchiveEntry(contract *db.Contract, storedBy string) (db.ContractArchiveEntry, error) {
+// or EXPIRED contract for an archive entry an Archive Manager stores, with the
+// signatures this instance applied and the signatures a peer applied
+// (DCS-FR-CSA-06, DCS-FR-CSA-07, DCS-FR-CSA-08). A contract that carries no
+// signature is not archived: the signing workflow ran its compliance gates
+// and the synchronization check of the signed PDF before any signature.
+func BuildManualArchiveEntry(contract *db.Contract, storedBy string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
 	if contract == nil {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract is required")
 	}
 	if !archivableStates[contract.State] {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s is %s; only SIGNED, TERMINATED or EXPIRED contracts can be archived", contract.DID, contract.State)
 	}
-	snapshot, err := buildContractSnapshot(contract, nil, nil)
-	if err != nil {
-		return db.ContractArchiveEntry{}, err
+	if len(signatures) == 0 && len(peerSignatures) == 0 {
+		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s was never signed; only a signed contract can be archived", contract.DID)
 	}
-	contentHash, err := HashArchiveSnapshot(snapshot)
-	if err != nil {
-		return db.ContractArchiveEntry{}, err
-	}
-	evidence, err := datatype.NewJSON(map[string]any{
-		"source":                  ArchiveManagerStoreSource,
-		"stored_by":               storedBy,
-		"stored_state":            contract.State,
-		"snapshot_hash_algorithm": archiveSnapshotHashAlgorithm,
-	})
-	if err != nil {
-		return db.ContractArchiveEntry{}, err
-	}
-	storedAt := time.Now().UTC()
-	return db.ContractArchiveEntry{
-		DID:              contract.DID,
-		ContractVersion:  contract.ContractVersion,
-		StoredBy:         storedBy,
-		StoredAt:         storedAt,
-		RetentionUntil:   retentionUntil(contract.ExpDate, storedAt, conf.ArchiveRetentionYears()),
-		ContractSnapshot: snapshot,
-		ContentHash:      contentHash,
-		Evidence:         &evidence,
-	}, nil
+	return buildSignedArchiveEntry(contract, storedBy, ArchiveManagerStoreSource, signatures, peerSignatures)
 }
