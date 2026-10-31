@@ -421,7 +421,8 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
           contracts: [1, 2].map((contract_version) => ({
             did,
             name: longName,
-            state: 'SIGNED',
+            // Delete is offered only for a contract out of force (DCS-FR-CSA-17).
+            state: contract_version === 1 ? 'TERMINATED' : 'SIGNED',
             contract_version,
             archive_summary: 'Long archive summary '.repeat(15),
             archive_tags: ['long-tag'.repeat(25)],
@@ -614,7 +615,8 @@ for (const width of [390, 1280, 3440]) {
           contracts: [1, 2].map((contract_version) => ({
             did,
             name,
-            state: 'SIGNED',
+            // Delete is offered only for a contract out of force (DCS-FR-CSA-17).
+            state: contract_version === 1 ? 'TERMINATED' : 'SIGNED',
             contract_version,
             archive_summary: contract_version === 1 ? 'Summary '.repeat(30) : undefined,
             archive_tags: ['long-tag'.repeat(30)],
