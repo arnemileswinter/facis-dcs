@@ -31,6 +31,7 @@ import (
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/contractworkflowengine/changefeed"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
@@ -75,6 +76,8 @@ type contractWorkflowEnginesrvc struct {
 	MachineIdentities    machineidentity.Repo
 	HydraAdmin           MachineCredentialIssuer
 	HydraPublicIssuerURL string
+	// Changes feeds the live contract event stream (DCS-FR-CWE-24).
+	Changes *changefeed.Feed
 	auth.JWTAuthenticator
 }
 
@@ -89,7 +92,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	targetClient command.ContractTargetClient,
 	workflowGate *workflowgate.Coordinator,
 	machineIdentities machineidentity.Repo, hydraAdmin MachineCredentialIssuer,
-	hydraPublicIssuerURL string) contractworkflowengine.Service {
+	hydraPublicIssuerURL string, changes *changefeed.Feed) contractworkflowengine.Service {
 
 	service := &contractWorkflowEnginesrvc{
 		JWTAuthenticator: jwtAuth,
@@ -116,6 +119,7 @@ func NewContractWorkflowEngine(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		MachineIdentities:    machineIdentities,
 		HydraAdmin:           hydraAdmin,
 		HydraPublicIssuerURL: hydraPublicIssuerURL,
+		Changes:              changes,
 	}
 	if workflowGate != nil {
 		for _, gate := range []string{"submission", "offer", "approval", "deployment"} {
@@ -168,12 +172,8 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.
 		return value
 	}
 	roles := userrole.UserRoles{}
-	if values, ok := run.Continuation["user_roles"].([]any); ok {
-		for _, value := range values {
-			if role, ok := value.(string); ok {
-				roles = append(roles, userrole.UserRole(role))
-			}
-		}
+	for _, role := range continuationStrings(run.Continuation["user_roles"]) {
+		roles = append(roles, userrole.UserRole(role))
 	}
 	switch run.Gate {
 	case "submission":
@@ -195,11 +195,7 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.
 	case "approval":
 		return (&command.Approver{
 			DB: s.DB, CRepo: s.CRepo, ATRepo: s.ATRepo, SRepo: s.SRepo, DIDDocument: s.DIDDocument,
-		}).Handle(ctx, command.ApproveCmd{
-			DID: run.ContractDID, UpdatedAt: run.ContractUpdatedAt,
-			ApprovedBy: stringValue("requested_by"), HolderDID: stringValue("holder_did"),
-			UserRoles: roles, CauserDID: stringValue("causer_did"),
-		})
+		}).Handle(ctx, approveCmd(run.ContractDID, run.ContractUpdatedAt, run.Continuation))
 	case "deployment":
 		_, err := (&command.Deployer{
 			DB: s.DB, CRepo: s.CRepo, DeploymentRepo: s.DeploymentRepo,
@@ -214,6 +210,55 @@ func (s *contractWorkflowEnginesrvc) resumeReviewedWorkflowGateOnce(ctx context.
 	default:
 		return fmt.Errorf("reviewed continuation is not available for gate %q", run.Gate)
 	}
+}
+
+// approvalContinuation is what an approval resumes with when the approval
+// gate holds it for review.
+func approvalContinuation(ctx context.Context, localPeer string, decisionNotes []string) map[string]any {
+	return map[string]any{
+		"requested_by":   middleware.GetParticipantID(ctx),
+		"holder_did":     middleware.GetHolderDID(ctx),
+		"user_roles":     workflowRoles(ctx),
+		"causer_did":     localPeer,
+		"decision_notes": decisionNotes,
+	}
+}
+
+// approveCmd builds an approval from its gate continuation, so a direct and a
+// resumed (reviewed) approval record the same approver and decision notes
+// (DCS-FR-CWE-15).
+func approveCmd(did string, updatedAt time.Time, continuation map[string]any) command.ApproveCmd {
+	text := func(name string) string {
+		value, _ := continuation[name].(string)
+		return value
+	}
+	roles := userrole.UserRoles{}
+	for _, role := range continuationStrings(continuation["user_roles"]) {
+		roles = append(roles, userrole.UserRole(role))
+	}
+	return command.ApproveCmd{
+		DID: did, UpdatedAt: updatedAt,
+		ApprovedBy: text("requested_by"), DecisionNotes: continuationStrings(continuation["decision_notes"]),
+		HolderDID: text("holder_did"), UserRoles: roles, CauserDID: text("causer_did"),
+	}
+}
+
+// continuationStrings reads a string list from a continuation: []string as
+// built, []any after the stored JSON round trip.
+func continuationStrings(value any) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, item := range values {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // mapContractCommandError classifies a contract command handler error for
@@ -243,6 +288,8 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrKPIRuleUnknown) ||
 		errors.Is(err, command.ErrKPIContractTerminated) ||
 		errors.Is(err, command.ErrMissingRequiredMetadata) ||
+		errors.Is(err, command.ErrNotPublishable) ||
+		errors.Is(err, fcclient.ErrFederatedCatalogueNotConfigured) ||
 		// Deployment refusals are the operator's to fix — no target designated,
 		// one that is not registered, one that is disabled. Returning 500 made
 		// each read as an outage rather than as the answer to what was asked.
@@ -1528,25 +1575,13 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
-	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, map[string]any{
-		"requested_by": middleware.GetParticipantID(ctx),
-		"holder_did":   middleware.GetHolderDID(ctx),
-		"user_roles":   workflowRoles(ctx),
-		"causer_did":   localPeer,
-	})
+	continuation := approvalContinuation(ctx, localPeer, req.DecisionNotes)
+	updatedAt, _, err = s.runWorkflowGate(ctx, "approval", req.Did, updatedAt, continuation)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd := command.ApproveCmd{
-		DID:           req.Did,
-		UpdatedAt:     updatedAt,
-		ApprovedBy:    middleware.GetParticipantID(ctx),
-		DecisionNotes: req.DecisionNotes,
-		HolderDID:     middleware.GetHolderDID(ctx),
-		UserRoles:     middleware.GetUserRoles(ctx),
-		CauserDID:     localPeer,
-	}
+	cmd := approveCmd(req.Did, updatedAt, continuation)
 	handler := command.Approver{
 		DB:          s.DB,
 		CRepo:       s.CRepo,
@@ -1562,6 +1597,32 @@ func (s *contractWorkflowEnginesrvc) Approve(ctx context.Context, req *contractw
 	return &contractworkflowengine.ContractApproveResponse{
 		Did: req.Did,
 	}, nil
+}
+
+// PublishCatalogue registers an approved, signed or active contract in the
+// Federated Catalogue (DCS-IR-CWE-10).
+func (s *contractWorkflowEnginesrvc) PublishCatalogue(ctx context.Context, req *contractworkflowengine.ContractCataloguePublishRequest) (*contractworkflowengine.ContractCataloguePublishResponse, error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
+	defer cancel()
+
+	instanceDID, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
+	assetHash, err := (&command.CataloguePublisher{DB: s.DB, CRepo: s.CRepo, FCClient: s.FCClient}).Handle(ctx, command.CataloguePublishCmd{
+		DID:         req.Did,
+		PublishedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		InstanceDID: instanceDID,
+		UserRoles:   middleware.GetUserRoles(ctx),
+	})
+	if err != nil {
+		return nil, mapContractCommandError(err)
+	}
+	return &contractworkflowengine.ContractCataloguePublishResponse{Did: req.Did, AssetHash: assetHash}, nil
 }
 
 func (s *contractWorkflowEnginesrvc) Reject(ctx context.Context, req *contractworkflowengine.ContractRejectRequest) (res *contractworkflowengine.ContractRejectResponse, err error) {

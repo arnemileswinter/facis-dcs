@@ -84,6 +84,7 @@ export interface ContractWorkflowService {
   withdraw: (request: ContractWithdrawRequest) => Promise<ContractWithdrawResponse>
   renew: (request: ContractRenewRequest) => Promise<ContractRenewResponse>
   terminate: (request: ContractTerminateRequest) => Promise<ContractTerminateResponse>
+  publishCatalogue: (did: string) => Promise<{ did: string; asset_hash: string }>
   deploy: (request: ContractDeployRequest) => Promise<ContractDeployResponse>
   // Contract target systems (ADR-25)
   listTargets: () => Promise<ContractTarget[]>

@@ -10,6 +10,9 @@ const props = defineProps<{
   contract: Contract
 }>()
 
+// Bulk selection (DCS-FR-CWE-24); the checkbox shows only when the list binds it.
+const selected = defineModel<boolean | undefined>('selected', { default: undefined })
+
 const { isCreator } = useContractPermissions()
 
 const contractsStore = useContractsStore()
@@ -131,6 +134,14 @@ function isTemplateVersionErrorVisible(contract: Contract) {
 
         <h2 class="card-title justify-between">
           <div class="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              v-if="selected !== undefined"
+              v-model="selected"
+              type="checkbox"
+              class="checkbox checkbox-sm"
+              :aria-label="`Select ${contract.name ?? contract.did}`"
+              :data-testid="`select-${contract.did}`"
+            />
             <div class="truncate">Name: {{ contract.name }}</div>
           </div>
           <div class="ml-10 badge shrink-0 badge-secondary">{{ contract.state }}</div>

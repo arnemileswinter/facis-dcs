@@ -596,6 +596,40 @@ var ContractTerminateResponse = Type("ContractTerminateResponse", func() {
 	Required("did")
 })
 
+var ContractChangeEvent = Type("ContractChangeEvent", func() {
+	Description("A change to a contract the caller may read (DCS-FR-CWE-24, DCS-FR-CSA-23). It names the contract and the event only; the client fetches the changed contract itself.")
+
+	Attribute("did", String, "Decentralized Identifier of the changed contract")
+	Attribute("event_type", String, "The audit event that changed the contract")
+
+	Required("did", "event_type")
+})
+
+var ContractEventsRequest = Type("ContractEventsRequest", func() {
+	Description("Open the stream of contract changes")
+
+	Token("token", String, "JWT token")
+})
+
+var ContractCataloguePublishRequest = Type("ContractCataloguePublishRequest", func() {
+	Description("Register an approved, signed or active contract in the Federated Catalogue (DCS-IR-CWE-10). The catalogue entry carries the contract metadata only: identifier, name, state, version, template and validity period. It carries no contract content and no party.")
+
+	Token("token", String, "JWT token")
+
+	Attribute("did", String, "Decentralized Identifier of the contract to register")
+
+	Required("did")
+})
+
+var ContractCataloguePublishResponse = Type("ContractCataloguePublishResponse", func() {
+	Description("Result for registering a contract in the Federated Catalogue")
+
+	Attribute("did", String, "Decentralized Identifier of the registered contract")
+	Attribute("asset_hash", String, "Federated Catalogue asset hash of the catalogue entry")
+
+	Required("did", "asset_hash")
+})
+
 var ContractRenewRequest = Type("ContractRenewRequest", func() {
 	Description("Contract renew request: create a new linked contract instance from an existing one (DCS-FR-CWE-11/22, DCS-FR-CSA-15). The original contract is not mutated; the new instance starts in DRAFT carrying the original's template reference, metadata, and responsible parties, plus a dcs:renewsContract reference back to the original's DID, version and signatures: the signed PDF, which holds every signature, and the signatory and Power of Attorney the original's document records. The new instance carries no signature and needs fresh signatures.")
 
@@ -1709,6 +1743,67 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Response("forbidden", StatusForbidden)
 			Response("not_found", StatusNotFound)
 			POST("/contract/renew")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("events", func() {
+		Description("stream server-sent events that name each contract the caller may read when it changes, for live dashboard updates (DCS-FR-CWE-24, DCS-FR-CSA-23). Read events are not streamed.")
+		Meta("dcs:requirements", "DCS-FR-CWE-24", "DCS-FR-CSA-23")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+			Scope("Archive Manager")
+			Scope("Auditor")
+		})
+
+		Payload(ContractEventsRequest)
+		StreamingResult(ContractChangeEvent)
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/events")
+			ServerSentEvents()
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("publish_catalogue", func() {
+		Description("register an approved, signed or active contract in the Federated Catalogue with its metadata (DCS-IR-CWE-10). The approver chooses catalogue availability with this explicit action.")
+		Meta("dcs:requirements", "DCS-IR-CWE-10")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+		})
+
+		Payload(ContractCataloguePublishRequest)
+		Result(ContractCataloguePublishResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			POST("/contract/catalogue/publish")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

@@ -230,7 +230,7 @@ type SearchValues struct {
 	// (DCS-IR-CWE-07).
 	TemplateDID string
 	// Jurisdiction matches the value of the contract field whose shape is the
-	// contract-jurisdiction taxonomy concept (DCS-FR-CWE-13).
+	// contract-jurisdiction taxonomy concept (DCS-FR-CWE-13, DCS-FR-CSA-10).
 	Jurisdiction string
 }
 

@@ -813,6 +813,28 @@ func (e TerminateEvent) GetDID() string {
 	return e.DID
 }
 
+// CataloguePublishEvent is emitted when a contract's metadata is registered in
+// the Federated Catalogue (DCS-IR-CWE-10).
+type CataloguePublishEvent struct {
+	DID             string             `json:"did"`
+	HolderDID       string             `json:"holder_did"`
+	ContractVersion int                `json:"contract_version"`
+	AssetHash       string             `json:"asset_hash"`
+	PublishedBy     string             `json:"published_by"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	UserRoles       userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e CataloguePublishEvent) EventType() string {
+	return eventtype.PublishCatalogue.String()
+}
+
+// GetDID implements the Event interface.
+func (e CataloguePublishEvent) GetDID() string {
+	return e.DID
+}
+
 // RenewEvent is emitted on the newly created renewal contract when it is
 // derived from an existing (original) contract (DCS-FR-CWE-11/22,
 // DCS-FR-CSA-15). The original contract is not mutated and does not receive

@@ -183,6 +183,12 @@ export const contractWorkflowService: ContractWorkflowService = {
   async terminate(request: ContractTerminateRequest) {
     return http.post<ContractTerminateResponse>('/contract/terminate', request).then((res) => res.data)
   },
+  /** Registers the contract metadata in the Federated Catalogue (DCS-IR-CWE-10). */
+  async publishCatalogue(did: string) {
+    return http
+      .post<{ did: string; asset_hash: string }>('/contract/catalogue/publish', { did })
+      .then((res) => res.data)
+  },
 
   async deploy(request: ContractDeployRequest) {
     return http.post<ContractDeployResponse>('/contract/deploy', request).then((res) => res.data)

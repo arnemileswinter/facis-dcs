@@ -44,6 +44,7 @@ type SearchArchivedContractsQry struct {
 	Party           string
 	ValidFrom       *time.Time
 	ValidUntil      *time.Time
+	Jurisdiction    string
 }
 
 func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchivedContractsQry) (*GetArchivedContractsResult, error) {
@@ -118,6 +119,7 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		Party:           query.Party,
 		ValidFrom:       query.ValidFrom,
 		ValidUntil:      query.ValidUntil,
+		Jurisdiction:    query.Jurisdiction,
 	}
 
 	archivedContractsMetadata, err := h.CRepo.ReadArchivedContractsByFilter(ctx, tx, searchValues)
@@ -181,5 +183,6 @@ func searchCriteria(v db.SearchValues) map[string]string {
 	if v.ValidUntil != nil {
 		set("valid_until", v.ValidUntil.UTC().Format(time.RFC3339))
 	}
+	set("jurisdiction", v.Jurisdiction)
 	return criteria
 }
