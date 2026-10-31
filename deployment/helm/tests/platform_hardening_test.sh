@@ -42,6 +42,24 @@ render "${ACK[@]}" --api-versions traefik.io/v1alpha1/TLSOption --set ingress.en
   --set 'ingress.hosts[0].host=a.example' --set 'ingress.tls[0].hosts[0]=a.example' --set 'ingress.tls[0].secretName=t' \
   --set 'ingress.tlsOptions.cipherSuites[0]=TLS_AES_128_GCM_SHA256' >/dev/null || fail "TLSOption with cipherSuites does not render"
 
+# DCS-IR-CI-09 / DCS-NFR-BR-06: access tokens live 5 minutes in prod and
+# acceptance; the chart default keeps the Hydra default.
+for profile in prod acceptance; do
+  render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only charts/hydra/templates/deployment.yaml \
+    | grep -A1 'name: TTL_ACCESS_TOKEN$' | grep -q 'value: "5m"' || fail "values.$profile.yml: Hydra access-token TTL is not 5m"
+done
+render -f "$CHART_DIR/values.bdd.yml" --show-only charts/hydra/templates/deployment.yaml | grep -q TTL_ACCESS_TOKEN \
+  && fail "access-token TTL set without hydra.config.accessTokenTTL"
+
+# DCS-FR-CSA-14 / DCS-FR-CSA-19: archive retention policy of 10 years in prod
+# and acceptance; none by default.
+for profile in prod acceptance; do
+  render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only templates/deployment.yaml \
+    | grep -A1 'name: DCS_ARCHIVE_RETENTION_YEARS$' | grep -q 'value: "10"' || fail "values.$profile.yml: no 10-year archive retention"
+done
+render "${ACK[@]}" --show-only templates/deployment.yaml | grep -q DCS_ARCHIVE_RETENTION_YEARS \
+  && fail "archive retention set without archive.retentionYears"
+
 # DCS-NFR-PER-03: liveness probe and, with more than one replica, a PodDisruptionBudget.
 prod="$(render -f "$CHART_DIR/values.prod.yml" "${ACK[@]}")"
 grep -A4 'livenessProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no liveness probe on /livez"

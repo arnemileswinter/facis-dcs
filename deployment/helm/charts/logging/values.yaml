@@ -5,6 +5,8 @@ loki:
   image:
     repository: grafana/loki
     tag: "3.5.7"
+    # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+    digest: ""
     pullPolicy: IfNotPresent
   persistence:
     size: 10Gi
@@ -17,6 +19,8 @@ collector:
   image:
     repository: grafana/alloy
     tag: "v1.10.2"
+    # Optional "sha256:<hex>": pulls <repository>:<tag>@<digest>.
+    digest: ""
     pullPolicy: IfNotPresent
   resources: {}
 

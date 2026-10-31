@@ -19,6 +19,9 @@ spec:
       {{- if and (eq .Values.service.type "NodePort") .Values.service.adminNodePort }}
       nodePort: {{ .Values.service.adminNodePort }}
       {{- end }}
+    {{- if dig "internalTLS" "enabled" false (.Values.global | default dict) }}
+    {{- include "digital-contracting-service.internalTLSServicePort" . | nindent 4 }}
+    {{- end }}
   selector:
     app.kubernetes.io/name: hydra
     app.kubernetes.io/instance: {{ .Release.Name }}

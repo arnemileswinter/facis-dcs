@@ -142,6 +142,39 @@ jobs:
           version: v2.12.2
           working-directory: pdf-core
 
+  # Render tests of the Helm chart (deployment/helm/tests). They need helm,
+  # openssl and python3 with PyYAML.
+  helm-chart-tests:
+    name: Helm chart tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      # charts/*.tgz is gitignored: fetch the remote dependencies
+      # (kube-prometheus-stack, traefik). run_all.sh removes the packed copies
+      # of the local subcharts again.
+      - name: Build chart dependencies
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add traefik https://traefik.github.io/charts
+          helm dependency build deployment/helm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: python3 -m pip install pyyaml
+
+      - name: Run chart tests
+        run: bash deployment/helm/tests/run_all.sh
+
   # Scan Go code against the Go vulnerability database.
   govulncheck:
     name: govulncheck

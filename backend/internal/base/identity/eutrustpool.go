@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"digital-contracting-service/internal/base/safehttp"
 )
 
 // EU Trusted List constants (ETSI TS 119 612)
@@ -34,8 +36,11 @@ const (
 	DefaultRefreshInterval = 24 * time.Hour
 )
 
-// tslClient is the HTTP client used for all trusted-list downloads.
-var tslClient = &http.Client{Timeout: tslHTTPTimeout}
+// tslClient is the HTTP client used for all trusted-list downloads. It also
+// accepts TLS 1.2: each member state hosts its national trusted list on its
+// own server, and not all of them offer TLS 1.3. A trusted list is an XML
+// document the scheme operator signs.
+var tslClient = &http.Client{Timeout: tslHTTPTimeout, Transport: safehttp.TLS12Transport()}
 
 // tsl is a minimal mapping of an ETSI TS 119 612 trust status list (both
 // the LOTL and the national trusted lists share this structure).

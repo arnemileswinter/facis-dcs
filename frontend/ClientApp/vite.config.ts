@@ -37,7 +37,7 @@ export default defineConfig(({ mode, command }) => {
           // In dev mode, replace the placeholder with the actual base path
           return html.replace('__DCS_UI_BASE_PATH__', basePath)
         }
-        // In build mode, leave the placeholder for inject-config.sh to handle
+        // In build mode, the backend replaces the placeholder when it serves index.html
         return html
       },
     },

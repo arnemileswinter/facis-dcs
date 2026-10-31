@@ -330,7 +330,9 @@ dss:
 # the dispatch: dcs_url is B's in-cluster API base, token_url is B's own Hydra,
 # which is the only issuer B's backend accepts. The flow falls back to its own
 # DCS_URL / HYDRA_TOKEN_URL environment (instance A's) when a registry entry
-# carries neither, so A's dispatches are unchanged.
+# carries neither, so A's dispatches are unchanged. dcs_url is the http port:
+# the ORCE of release dcs trusts the internal CA of release dcs only, and each
+# release has its own.
 contractTargets:
   - name: "BDD Contract Target"
     url: "http://dcs-orce:1880/contract-target/deploy?dcs_url=http://dcs2-digital-contracting-service:8991/digital-contracting-service/api&token_url=http://dcs2-hydra:4444/oauth2/token"

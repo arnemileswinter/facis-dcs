@@ -242,16 +242,28 @@ when it exists, else generated (ECDSA P-256, 10 years). The result is kept in
 {{/*
 TLS proxy container for a component that serves plain HTTP only (IPFS RPC,
 pdf-core, DSS, ORCE). It terminates TLS 1.3 on global.internalTLS.proxy.port
-and forwards to the component on 127.0.0.1:<upstreamPort>. The pod must have
-the volume "internal-tls" (internalTLSVolume). Subcharts include this template
-only when global.internalTLS.enabled, so they render on their own as well.
+and forwards to the component on 127.0.0.1:<upstreamPort>. It runs as the nginx
+user of the image (UID 101) on a read-only root filesystem and writes only to
+/tmp. The pod must have the volumes of internalTLSVolume. Subcharts include
+this template only when global.internalTLS.enabled, so they render on their
+own as well.
 Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 5001)
 */}}
 {{- define "digital-contracting-service.internalTLSProxy" -}}
 {{- $p := .root.Values.global.internalTLS.proxy -}}
 - name: tls-proxy
-  image: "{{ $p.image.repository }}:{{ $p.image.tag }}"
+  image: "{{ $p.image.repository }}:{{ $p.image.tag }}{{ with $p.image.digest }}@{{ . }}{{ end }}"
   imagePullPolicy: {{ $p.image.pullPolicy }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   command: ["/bin/sh", "-c"]
   args:
     - |
@@ -261,6 +273,9 @@ Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "ups
       http {
         client_body_temp_path /tmp/client_body;
         proxy_temp_path /tmp/proxy;
+        fastcgi_temp_path /tmp/fastcgi;
+        uwsgi_temp_path /tmp/uwsgi;
+        scgi_temp_path /tmp/scgi;
         access_log off;
         server {
           listen {{ $p.port }} ssl;
@@ -297,13 +312,17 @@ Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "ups
     - name: internal-tls
       mountPath: /etc/dcs-internal-tls
       readOnly: true
+    - name: tls-proxy-tmp
+      mountPath: /tmp
 {{- end }}
 
-{{/* Volume with the server certificate and key, for servers. */}}
+{{/* Volumes of the TLS proxy: the server certificate and key, and its /tmp. */}}
 {{- define "digital-contracting-service.internalTLSVolume" -}}
 - name: internal-tls
   secret:
     secretName: {{ printf "%s-internal-tls" .Release.Name | quote }}
+- name: tls-proxy-tmp
+  emptyDir: {}
 {{- end }}
 
 {{/* Service port of the TLS proxy. */}}
@@ -373,11 +392,12 @@ In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
 {{- end }}
 
 {{/*
-Hydra admin API base URL (login/consent accept).
+Hydra admin API base URL (login/consent accept): the TLS proxy of the Hydra
+pod when global.internalTLS.enabled.
 */}}
 {{- define "digital-contracting-service.hydraAdminURL" -}}
 {{- if .Values.hydra.enabled -}}
-{{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.adminPort | int) -}}
+{{- include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-hydra" .Release.Name) "port" (.Values.hydra.service.adminPort | int)) -}}
 {{- end -}}
 {{- end }}
 

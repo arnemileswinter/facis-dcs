@@ -63,7 +63,7 @@ cmp -s "$TMP/ca.crt" "$TMP/ca2.crt" || fail "server Secret carries another CA"
 openssl verify -CAfile "$TMP/ca.crt" "$TMP/tls.crt" >/dev/null || fail "server certificate not issued by the internal CA"
 openssl x509 -in "$TMP/tls.crt" -noout -text | grep -q 'id-ecPublicKey' || fail "server key is not ECDSA"
 sans="$(openssl x509 -in "$TMP/tls.crt" -noout -ext subjectAltName)"
-for h in dcs-postgresql dcs-nats dcs-ipfs dcs-dss dcs-orce dcs-loki $B-pdf-core dcs-postgresql.dcs.svc.cluster.local; do
+for h in dcs-postgresql dcs-nats dcs-ipfs dcs-dss dcs-orce dcs-loki dcs-hydra $B $B-pdf-core dcs-postgresql.dcs.svc.cluster.local; do
   grep -q "DNS:$h\(,\|$\)" <<<"$sans" || fail "server certificate does not name $h"
 done
 
@@ -85,7 +85,8 @@ grep -q 'min_version: "1.3"' <<<"$(obj "$f" ConfigMap dcs-nats "x['data']['nats.
 [[ "$(env_of "$f" Deployment $B $C NATS_URL)" == tls://dcs-nats:4222 ]] || fail "NATS_URL is not tls://"
 
 # HTTP components: TLS proxy in each pod, the backend calls it and trusts the CA.
-for d in dcs-ipfs dcs-dss dcs-orce $B-pdf-core; do
+# The backend itself has one for in-cluster callers (ORCE).
+for d in dcs-ipfs dcs-dss dcs-orce $B-pdf-core $B; do
   proxy="$(obj "$f" Deployment "$d" "next((c['args'][0] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'tls-proxy'), None)")"
   grep -q 'ssl_protocols TLSv1.3;' <<<"$proxy" || fail "$d has no TLS 1.3 proxy"
   [[ "$(obj "$f" Service "$d" "[p['port'] for p in x['spec']['ports'] if p['name'] == 'https']")" == "[8443]" ]] || fail "service $d has no https port"
@@ -96,6 +97,11 @@ done
 for v in ORCE_ARCHIVE_NOTARY_URL ORCE_ARCHIVE_AUDIT_LOG_URL PAC_AUDIT_EXECUTOR_URL PAC_WORKFLOW_GATE_EXECUTOR_URL; do
   [[ "$(env_of "$f" Deployment $B $C $v)" == https://dcs-orce:8443/* ]] || fail "$v without TLS"
 done
+[[ "$(obj "$f" Service $B "[p['port'] for p in x['spec']['ports'] if p['name'] == 'http']")" == "[8991]" ]] || fail "backend http port (ingress, probes) removed"
+# ORCE calls the backend and Hydra over https and trusts the internal CA.
+[[ "$(env_of "$f" Deployment dcs-orce orce NODE_EXTRA_CA_CERTS)" == /etc/dcs-internal-tls/ca.crt ]] || fail "ORCE does not trust the internal CA"
+obj "$f" Deployment dcs-orce "next(c for c in x['spec']['template']['spec']['containers'] if c['name'] == 'orce')['volumeMounts']" \
+  | grep -q "'name': 'internal-ca', 'mountPath': '/etc/dcs-internal-tls'" || fail "ORCE does not mount the internal CA"
 # The ontology and context IRIs stay the service identity.
 [[ "$(env_of "$f" Deployment $B $C PDF_CORE_CONTEXT_IRI)" == http://$B-pdf-core:8080/ontology/dcs-pdf-core ]] || fail "context IRI changed"
 [[ "$(env_of "$f" Deployment $B $C SSL_CERT_DIR)" == /etc/ssl/certs:/etc/dcs-internal-tls ]] || fail "backend does not trust the internal CA"
@@ -114,6 +120,7 @@ render "${ALL[@]}" --set global.internalTLS.enabled=false >"$TMP/off.yaml"
 grep -q 'internal-tls' "$TMP/off.yaml" && fail "internal TLS rendered while global.internalTLS.enabled=false"
 [[ "$(env_of "$TMP/off.yaml" Deployment $B $C NATS_URL)" == nats://dcs-nats:4222 ]] || fail "NATS_URL without TLS changed"
 [[ "$(env_of "$TMP/off.yaml" Deployment $B $C IPFS_MFS_BASE_URL)" == http://dcs-ipfs:5001 ]] || fail "IPFS URL without TLS changed"
+grep -q 'name: tls-proxy' "$TMP/off.yaml" && fail "TLS proxy rendered while global.internalTLS.enabled=false"
 
 # The kind CI (BDD and e2e: values.bdd.yml, values.bdd2.yml) runs the TLS paths
 # of prod, with no XFSC statuslist-service.
@@ -130,12 +137,21 @@ for prof in "bdd dcs" "bdd2 dcs2"; do
   [[ "$(env_of "$f" Deployment "$r-hydra" hydra DSN)" == *"@$r-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt" ]] \
     || fail "values.$v.yml: Hydra reaches the database without TLS"
   grep -q 'name: statuslist-service' "$f" && fail "values.$v.yml deploys the XFSC statuslist-service"
+  # Hydra admin API: TLS 1.3 proxy in the pod, called over https by the backend
+  # and the client registration job.
+  grep -q 'ssl_protocols TLSv1.3;' <<<"$(obj "$f" Deployment "$r-hydra" "next((c['args'][0] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'tls-proxy'), None)")" \
+    || fail "values.$v.yml: Hydra has no TLS 1.3 proxy"
+  [[ "$(obj "$f" Service "$r-hydra" "[p['port'] for p in x['spec']['ports'] if p['name'] == 'https']")" == "[8443]" ]] || fail "values.$v.yml: Hydra service has no https port"
+  [[ "$(env_of "$f" Deployment "$rb" $C HYDRA_ADMIN_URL)" == "https://$r-hydra:8443" ]] || fail "values.$v.yml: backend calls the Hydra admin API without TLS"
+  [[ "$(env_of "$f" Job "$r-hydra-clients" register-clients HYDRA_ADMIN)" == "https://$r-hydra:8443" ]] || fail "values.$v.yml: client registration without TLS"
+  [[ "$(env_of "$f" Job "$r-hydra-clients" register-clients CURL_CA_BUNDLE)" == /etc/dcs-internal-tls/ca.crt ]] || fail "values.$v.yml: client registration does not verify Hydra"
   proxy="$(obj "$f" Deployment "$rb" "next((c['readinessProbe']['httpGet']['path'] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'statuslist-localhost-proxy'), None)")"
   [[ "$proxy" == /issuer/status-list/1 ]] || fail "values.$v.yml: localhost proxy readiness depends on $proxy"
 done
 for v in DSS_URL PAC_AUDIT_EXECUTOR_URL PAC_WORKFLOW_GATE_EXECUTOR_URL TSA_URL DCS_TRUST_PDP_URL ORCE_ARCHIVE_NOTARY_URL; do
   [[ "$(env_of "$TMP/ci-bdd.yaml" Deployment $B $C $v)" == https://dcs-*:8443* ]] || fail "values.bdd.yml: $v without TLS"
 done
+[[ "$(env_of "$TMP/ci-bdd.yaml" Deployment dcs-orce orce DCS_URL)" == https://$B:8443/* ]] || fail "values.bdd.yml: ORCE calls the backend without TLS"
 
 # The issuer release renders the orce chart on its own, without the parent.
 helm template dcs-issuer "$CHART_DIR/charts/orce" -f "$CHART_DIR/values.issuer-base.yml" -f "$CHART_DIR/values.issuer.bdd.yml" \
