@@ -116,7 +116,11 @@ async function applyChange(change: ContractChange) {
   if (fresh) contracts.value.splice(current, 1, { ...contracts.value[current]!, ...fresh })
   else contracts.value.splice(current, 1)
 }
-useContractChanges((change) => void applyChange(change))
+const emit = defineEmits<{ change: [change: ContractChange] }>()
+useContractChanges((change) => {
+  emit('change', change)
+  void applyChange(change)
+})
 
 async function reloadList() {
   listOutdated.value = false
