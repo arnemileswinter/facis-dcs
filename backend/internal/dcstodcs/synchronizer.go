@@ -535,7 +535,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			return err
 		}
 		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
-		if err := s.deliverPdf(ctx, client, peer, &dcstodcs.DCSToDCSContractPdfRequest{
+		if err := s.deliverPdf(ctx, client, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
 			Pdf:            pdfBytes,
@@ -547,12 +547,6 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			PinnedShapes:   WirePinnedShapes(pinnedShapes),
 		}); err != nil {
 			return err
-		}
-		// The peer accepted this revision, or refused it as a signing conflict,
-		// which it does again for every repeat. Either way the revision is not
-		// posted to this peer again.
-		if err := s.recordPDFDelivery(ctx, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}); err != nil {
-			log.Printf(ctx, "could not record the delivery of %s to %s: %v", did, peer, err)
 		}
 	}
 	return nil
@@ -573,7 +567,12 @@ func (s *DCSToDCSSynchronizer) recordPDFDelivery(ctx context.Context, delivery d
 // deliverPdf posts one PDF ship to one peer. A peer that refuses the copy as a
 // signing conflict (ADR-38 §2) refuses it again on every retry, so the
 // conflict is recorded on this instance and the ship gets no retry entry.
-func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, peer string, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+// deliverPdf posts one revision to delivery.PeerDID. A revision the peer
+// accepted is recorded as delivered and is not posted to that peer again. A
+// revision the peer refused as a signing conflict is not recorded, so the
+// next ship offers it again once the peer resolved the conflict.
+func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, delivery db2.PDFDelivery, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+	peer := delivery.PeerDID
 	if _, err := client.PostPdf(ctx, req); err != nil {
 		if !isSigningConflict(err) {
 			return err
@@ -583,6 +582,9 @@ func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.
 	}
 	if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
 		log.Printf(ctx, "could not audit the ship of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	if err := s.recordPDFDelivery(ctx, delivery); err != nil {
+		log.Printf(ctx, "could not record the delivery of %s to %s: %v", req.ContractIri, peer, err)
 	}
 	return nil
 }
