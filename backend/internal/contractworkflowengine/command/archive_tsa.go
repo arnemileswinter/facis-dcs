@@ -21,7 +21,7 @@ func NotarizeArchiveEntry(ctx context.Context, notary ArchiveNotary, timestamps 
 	if notary == nil {
 		return nil, nil, nil
 	}
-	payload := ArchiveNotaryPayload{
+	notaryReceipt, tsaReceipt, tsaReceiptJSON, err := notarize(ctx, notary, timestamps, ArchiveNotaryPayload{
 		EventType:       "ARCHIVE_STORED",
 		ArchiveEntryID:  fmt.Sprintf("%s#%d", entry.DID, entry.ContractVersion),
 		DID:             entry.DID,
@@ -30,10 +30,20 @@ func NotarizeArchiveEntry(ctx context.Context, notary ArchiveNotary, timestamps 
 		SnapshotCID:     entry.SnapshotCID,
 		StoredBy:        entry.StoredBy,
 		StoredAt:        entry.StoredAt,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
+	entry.TSAReceipt = tsaReceiptJSON
+	return notaryReceipt, tsaReceipt, nil
+}
+
+// notarize takes the notary receipt for payload and, when the TSA is
+// enabled, an RFC 3161 timestamp over the notarized evidence.
+func notarize(ctx context.Context, notary ArchiveNotary, timestamps ArchiveTimestampIssuer, payload ArchiveNotaryPayload) (*contractevents.ArchiveNotaryReceipt, *contractevents.ArchiveTSAReceipt, *datatype.JSON, error) {
 	receipt, err := notary.NotarizeArchiveEntry(ctx, payload)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not notarize archive entry: %w", err)
+		return nil, nil, nil, fmt.Errorf("could not notarize archive entry: %w", err)
 	}
 	notaryReceipt := &contractevents.ArchiveNotaryReceipt{
 		ReceiptType:    receipt.ReceiptType,
@@ -43,19 +53,19 @@ func NotarizeArchiveEntry(ctx context.Context, notary ArchiveNotary, timestamps 
 		ReceivedAt:     receipt.ReceivedAt,
 	}
 	if timestamps == nil || !timestamps.Enabled() {
-		return notaryReceipt, nil, nil
+		return notaryReceipt, nil, nil, nil
 	}
 	evidence, err := BuildArchiveTimestampEvidence(payload, receipt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not build archive TSA evidence: %w", err)
+		return nil, nil, nil, fmt.Errorf("could not build archive TSA evidence: %w", err)
 	}
 	evidenceBytes, err := CanonicalArchiveTimestampEvidence(evidence)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	rawReceipt, err := timestamps.TimestampBytes(ctx, evidenceBytes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not timestamp archive entry: %w", err)
+		return nil, nil, nil, fmt.Errorf("could not timestamp archive entry: %w", err)
 	}
 	tsaReceipt := &contractevents.ArchiveTSAReceipt{
 		ReceiptType:    "ARCHIVE_TSA_RECEIPT",
@@ -69,10 +79,9 @@ func NotarizeArchiveEntry(ctx context.Context, notary ArchiveNotary, timestamps 
 	}
 	tsaReceiptJSON, err := datatype.NewJSON(tsaReceipt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not encode archive TSA receipt: %w", err)
+		return nil, nil, nil, fmt.Errorf("could not encode archive TSA receipt: %w", err)
 	}
-	entry.TSAReceipt = &tsaReceiptJSON
-	return notaryReceipt, tsaReceipt, nil
+	return notaryReceipt, tsaReceipt, &tsaReceiptJSON, nil
 }
 
 type ArchiveTimestampIssuer interface {

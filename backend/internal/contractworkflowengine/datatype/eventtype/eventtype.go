@@ -42,6 +42,10 @@ const (
 	SearchArchived              EventType = "SEARCH_ARCHIVED_CONTRACTS"
 	StoreArchiveEvidence        EventType = "STORE_ARCHIVE_EVIDENCE"
 	StoreArchiveSection         EventType = "STORE_ARCHIVE_SECTION"
+	// StoreExecutionProof records the proof of contract execution over every
+	// signature, written when the last counterparty signature arrives after
+	// the archive entry (DCS-FR-SM-10).
+	StoreExecutionProof EventType = "STORE_EXECUTION_PROOF"
 	ArchiveOperationFailed      EventType = "ARCHIVE_OPERATION_FAILED"
 	RetrieveByID                EventType = "RETRIEVE_CONTRACT_BY_ID"
 	AccessDenied                EventType = "CONTRACT_ACCESS_DENIED"

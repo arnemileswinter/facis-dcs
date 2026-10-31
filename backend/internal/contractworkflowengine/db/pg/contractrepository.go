@@ -391,6 +391,36 @@ func (r *PostgresContractRepo) AppendArchivePeerSignatures(ctx context.Context, 
 	return n == 1, nil
 }
 
+func (r *PostgresContractRepo) ReadLatestArchiveEntry(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractArchiveEntry, error) {
+	var entry db.ContractArchiveEntry
+	err := tx.GetContext(ctx, &entry, `
+        SELECT did, contract_version, archive_status, content_hash, signature_metadata
+        FROM contract_archive_entries
+        WHERE did = $1 AND archive_status IN ('STORED', 'RETAINED')
+        ORDER BY contract_version DESC
+        LIMIT 1`, did)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (r *PostgresContractRepo) StoreExecutionProof(ctx context.Context, tx *sqlx.Tx, proof db.ExecutionProof) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_execution_proofs (did, content_hash, proof, notary_receipt, tsa_receipt)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (did, content_hash) DO NOTHING`,
+		proof.DID, proof.ContentHash, proof.Proof, proof.NotaryReceipt, proof.TSAReceipt)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]db.ContractArchiveEntry, error) {
 	query := `
         SELECT did, contract_version, archive_status, stored_by, stored_at, contract_snapshot,

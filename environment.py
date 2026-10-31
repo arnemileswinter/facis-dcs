@@ -78,6 +78,7 @@ def _cleanup_database(cursor):
 	cursor.execute("DELETE FROM contract_signatures")
 	cursor.execute("DELETE FROM signature_ceremonies")
 	cursor.execute("TRUNCATE contract_archive_evidence")
+	cursor.execute("TRUNCATE contract_execution_proofs")
 	cursor.execute("DELETE FROM contract_peer_terminations")
 	cursor.execute("DELETE FROM contracts")
 
