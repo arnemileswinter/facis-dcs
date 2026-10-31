@@ -23,10 +23,17 @@ const complianceStatusId = useId()
 // DCS-IR-TR-07, DCS-IR-TR-08: the dashboard filters the templates by state.
 const state = ref<ContractTemplateState | ''>('')
 const stateId = useId()
+// DCS-IR-TR-07, DCS-IR-TR-08: and by the day the template was created.
+const createdFrom = ref('')
+const createdFromId = useId()
+const createdTo = ref('')
+const createdToId = useId()
 const filters = computed(() => ({
   party_type: partyType.value || undefined,
   compliance_status: complianceStatus.value || undefined,
   state: state.value || undefined,
+  created_from: createdFrom.value || undefined,
+  created_to: createdTo.value || undefined,
 }))
 const emit = defineEmits<{
   searchResult: [value: PartialContractTemplate[] | null]
@@ -40,6 +47,7 @@ const filterLabels: Partial<Record<keyof PartialContractTemplate, string>> = {
   template_data: 'Template Data',
   jurisdiction: 'Jurisdiction',
   industry: 'Industry',
+  created_by: 'Owner',
 }
 
 const emptyTemplate: PartialContractTemplate = {
@@ -99,6 +107,14 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
           {{ toProperCase(option) }}
         </option>
       </select>
+    </div>
+    <div class="shrink-0 text-sm">
+      <label :for="createdFromId" class="sr-only">Created from</label>
+      <input :id="createdFromId" v-model="createdFrom" type="date" class="input w-max" title="Created from" />
+    </div>
+    <div class="shrink-0 text-sm">
+      <label :for="createdToId" class="sr-only">Created to</label>
+      <input :id="createdToId" v-model="createdTo" type="date" class="input w-max" title="Created to" />
     </div>
     <ListSearch
       class="w-full min-w-0 sm:w-auto sm:max-w-full sm:flex-1"
