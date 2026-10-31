@@ -113,9 +113,10 @@ spec:
             - name: internal-ca
               mountPath: /etc/dcs-internal-tls
               readOnly: true
-        # In-cluster callers reach the admin API over TLS 1.3 on the https port
+        # In-cluster callers reach the admin API over TLS 1.3 on the https port,
+        # the ingress reaches the public API on the https-public port
         # (DCS-NFR-SEC-14). The probes use the admin port in the pod.
-        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.service.adminPort) | nindent 8 }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.service.adminPort "extra" (list (dict "name" "https-public" "port" .Values.service.publicTLSPort "upstreamPort" .Values.service.publicPort))) | nindent 8 }}
       volumes:
         - name: internal-ca
           secret:

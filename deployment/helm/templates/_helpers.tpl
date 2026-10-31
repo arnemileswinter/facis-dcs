@@ -246,11 +246,13 @@ and forwards to the component on 127.0.0.1:<upstreamPort>. It runs as the nginx
 user of the image (UID 101) on a read-only root filesystem and writes only to
 /tmp. The pod must have the volumes of internalTLSVolume. Subcharts include
 this template only when global.internalTLS.enabled, so they render on their
-own as well.
+own as well. Optional "extra": more listeners, each a dict with "name" (port
+name), "port" and "upstreamPort".
 Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 5001)
 */}}
 {{- define "digital-contracting-service.internalTLSProxy" -}}
 {{- $p := .root.Values.global.internalTLS.proxy -}}
+{{- $servers := prepend (.extra | default list) (dict "name" "https" "port" $p.port "upstreamPort" .upstreamPort) -}}
 - name: tls-proxy
   image: "{{ $p.image.repository }}:{{ $p.image.tag }}{{ with $p.image.digest }}@{{ . }}{{ end }}"
   imagePullPolicy: {{ $p.image.pullPolicy }}
@@ -277,8 +279,9 @@ Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "ups
         uwsgi_temp_path /tmp/uwsgi;
         scgi_temp_path /tmp/scgi;
         access_log off;
+        {{- range $servers }}
         server {
-          listen {{ $p.port }} ssl;
+          listen {{ .port }} ssl;
           ssl_certificate /etc/dcs-internal-tls/tls.crt;
           ssl_certificate_key /etc/dcs-internal-tls/tls.key;
           ssl_protocols TLSv1.3;
@@ -293,13 +296,16 @@ Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "ups
             proxy_pass http://127.0.0.1:{{ .upstreamPort }};
           }
         }
+        {{- end }}
       }
       EOF
       exec nginx -c /tmp/nginx.conf -g 'daemon off;'
   ports:
-    - name: https
-      containerPort: {{ $p.port }}
+    {{- range $servers }}
+    - name: {{ .name }}
+      containerPort: {{ .port }}
       protocol: TCP
+    {{- end }}
   readinessProbe:
     tcpSocket:
       port: https
@@ -379,12 +385,15 @@ Hydra OAuth2/OIDC issuer (URLs issuer / discovery). Requires hydra.enabled.
 {{- end }}
 
 {{/*
-In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
+In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls:
+the TLS proxy of the public API when global.internalTLS.enabled.
 */}}
 {{- define "digital-contracting-service.hydraInternalIssuerURL" -}}
 {{- if .Values.hydra.enabled -}}
 {{- if .Values.hydra.config.internalIssuerURL -}}
 {{- .Values.hydra.config.internalIssuerURL -}}
+{{- else if .Values.global.internalTLS.enabled -}}
+{{- printf "https://%s-hydra:%d" .Release.Name (.Values.hydra.service.publicTLSPort | int) -}}
 {{- else -}}
 {{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.publicPort | int) -}}
 {{- end -}}
@@ -588,6 +597,36 @@ Default: auto-derived as <pdfCoreURL>/ontology/dcs-pdf-core.
 {{- .Values.pdfCore.contextIRI -}}
 {{- else -}}
 {{- printf "%s/ontology/dcs-pdf-core" (include "digital-contracting-service.pdfCoreURL" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Ingress controller that reaches the backend, the Hydra public API and the
+Federated Catalogue on their TLS proxies and verifies them against the internal
+CA (DCS-NFR-SEC-01, DCS-NFR-SEC-14): "nginx" for ingress.className nginx,
+"traefik" for ingress.className traefik or empty when the ServersTransport CRD
+exists. Empty: the ingress uses the plain ports.
+*/}}
+{{- define "digital-contracting-service.ingressBackendTLS" -}}
+{{- if .Values.global.internalTLS.enabled -}}
+{{- $class := .Values.ingress.className -}}
+{{- if eq $class "nginx" -}}
+nginx
+{{- else if and (or (eq $class "traefik") (not $class)) (include "digital-contracting-service.traefikServersTransportAnnotation" .) -}}
+traefik
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Service annotation that names the Traefik ServersTransport of the release
+(templates/ingress-backend-tls.yaml): Traefik then verifies the TLS proxy of
+the Service against the internal CA. Set when global.internalTLS.enabled and
+the ServersTransport CRD exists. Subcharts include it with their own context.
+*/}}
+{{- define "digital-contracting-service.traefikServersTransportAnnotation" -}}
+{{- if and (dig "internalTLS" "enabled" false (.Values.global | default dict)) (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/ServersTransport") -}}
+traefik.ingress.kubernetes.io/service.serverstransport: {{ printf "%s-%s-internal-tls@kubernetescrd" .Release.Namespace .Release.Name | quote }}
 {{- end -}}
 {{- end }}
 
