@@ -145,6 +145,39 @@ func MapCWEStateToC2PA(cweState string) (string, error) {
 	}
 }
 
+// DefaultLifecycleReason is the reason a lifecycle assertion records when the
+// event that caused it names none: the expiry cron and the retry sweep carry no
+// reason, and an assertion must carry one (DCS-OR-C2PA-003).
+func DefaultLifecycleReason(state string) string {
+	switch state {
+	case "draft":
+		return "Contract created as draft"
+	case "active":
+		return "Contract activated for execution"
+	case "amended":
+		return "Contract amended with new terms"
+	case "suspended":
+		return "Contract suspended pending review"
+	case "terminated":
+		return "Contract terminated by parties"
+	case "expired":
+		return "Contract reached expiration date"
+	case "replaced":
+		return "Contract replaced with newer version"
+	default:
+		return "Contract state changed to: " + state
+	}
+}
+
+// LifecycleReason is the event's reason, or DefaultLifecycleReason when the
+// event names none.
+func LifecycleReason(eventReason, state string) string {
+	if strings.TrimSpace(eventReason) != "" {
+		return eventReason
+	}
+	return DefaultLifecycleReason(state)
+}
+
 // IsFrozenC2PAState reports whether a cached PDF's C2PA state means the artifact
 // is immutable. Every pre-signing contract-formation state maps to "draft" (see
 // MapCWEStateToC2PA), so anything past "draft" is a PAdES-signed (or

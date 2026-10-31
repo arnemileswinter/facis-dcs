@@ -403,7 +403,7 @@ func (s *Subscriber) appendC2PA(ctx context.Context, cweEvt minimalCWEEvent) err
 	fileHash := hex.EncodeToString(h[:])
 
 	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
-		ctx, cweEvt.DID, fileHash, c2paState, cweEvt.Reason, s.IssuerDID, cweEvt.OccurredAt,
+		ctx, cweEvt.DID, fileHash, c2paState, provenance.LifecycleReason(cweEvt.Reason, c2paState), s.IssuerDID, cweEvt.OccurredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("issue lifecycle VC (DCS-OR-C2PA-004): %w", err)
@@ -459,7 +459,7 @@ func (s *Subscriber) appendSignedLifecycle(ctx context.Context, tx *sqlx.Tx, evt
 	}
 	sum := sha256.Sum256(signedPDF)
 	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
-		ctx, evt.DID, hex.EncodeToString(sum[:]), c2paState, evt.Reason, s.IssuerDID, evt.OccurredAt,
+		ctx, evt.DID, hex.EncodeToString(sum[:]), c2paState, provenance.LifecycleReason(evt.Reason, c2paState), s.IssuerDID, evt.OccurredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("issue lifecycle VC (DCS-OR-C2PA-004): %w", err)

@@ -24,6 +24,7 @@ import (
 	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
+	"digital-contracting-service/internal/pdfgeneration/provenance"
 )
 
 type memoryObjects struct{ blobs map[string][]byte }
@@ -225,7 +226,7 @@ func TestUnsignedFrozenContractGetsNoAppendedManifest(t *testing.T) {
 // post-signing state, and stops selecting it once the manifest is appended.
 func TestRetrySweepSelectsASignedPDFMissingItsLifecycleManifest(t *testing.T) {
 	const did = "did:web:dcs-a.example:contract:terminated"
-	s, _, database := signedLifecycleSubscriber(t, did, "TERMINATED", "active", true, []byte("%PDF signed revision"))
+	s, issuer, database := signedLifecycleSubscriber(t, did, "TERMINATED", "active", true, []byte("%PDF signed revision"))
 	if _, err := database.Exec(`INSERT INTO contract_signatures (contract_did, status, signature_bytes, signer_did, credential_type) VALUES ($1,'SIGNED','\x00','did:jwk:signer','AES')`, did); err != nil {
 		t.Fatal(err)
 	}
@@ -250,5 +251,9 @@ func TestRetrySweepSelectsASignedPDFMissingItsLifecycleManifest(t *testing.T) {
 	}
 	if selected() {
 		t.Fatal("the sweep still selects the contract after its manifest was appended")
+	}
+	// The sweep has no event to take a reason from; the assertion still names one.
+	if len(issuer.issued) != 1 || issuer.issued[0].reason != provenance.DefaultLifecycleReason("terminated") {
+		t.Fatalf("issued %+v, want the terminated credential with the default reason", issuer.issued)
 	}
 }

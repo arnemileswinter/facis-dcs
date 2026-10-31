@@ -174,7 +174,7 @@ func stampLifecycle(
 	log.Printf("pdfgeneration: stampLifecycle %s state=%s c2paState=%s pdfLen=%d",
 		did, state, c2paState, len(pdfBytes))
 
-	reason := stateToReason(c2paState)
+	reason := provenance.DefaultLifecycleReason(c2paState)
 
 	h := sha256.Sum256(pdfBytes)
 	assetHash := hex.EncodeToString(h[:])
@@ -433,27 +433,6 @@ func queryStatusWithPublicationBarrier(
 				return status, err
 			}
 		}
-	}
-}
-
-func stateToReason(state string) string {
-	switch state {
-	case "draft":
-		return "Contract created as draft"
-	case "active":
-		return "Contract activated for execution"
-	case "amended":
-		return "Contract amended with new terms"
-	case "suspended":
-		return "Contract suspended pending review"
-	case "terminated":
-		return "Contract terminated by parties"
-	case "expired":
-		return "Contract reached expiration date"
-	case "replaced":
-		return "Contract replaced with newer version"
-	default:
-		return "Contract state changed to: " + state
 	}
 }
 
