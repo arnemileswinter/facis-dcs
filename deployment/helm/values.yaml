@@ -714,6 +714,23 @@ kube-prometheus-stack:
     prometheusSpec:
       retention: 15d
 
+# ---- Optional log store (DCS-NFR-SEC-09) -----------------------------------
+# logging.enabled co-deploys Loki and a collector (Alloy) that stores the logs
+# of every pod in the release namespace. Loki keeps a line for `retention`; the
+# audit trail itself stays in the database without expiry. Only the collector
+# and Grafana (queryFrom, NetworkPolicy) can connect to Loki; Grafana requires a
+# login. The chart writes a Grafana data source ConfigMap
+# (label grafana_datasource: "1"), which the Grafana of monitoring.enabled
+# loads. Values: charts/logging/values.yaml.
+logging:
+  enabled: false
+  retention: 2160h
+  loki:
+    persistence:
+      size: 10Gi
+      # Set an encrypted StorageClass: logs can hold personal data.
+      storageClassName: ""
+
 # Alert rules (DCS-NFR-SEC-11), written as a PrometheusRule when the Prometheus
 # Operator CRD exists or monitoring.enabled. labels must match the
 # ruleSelector of the Prometheus that should load them.

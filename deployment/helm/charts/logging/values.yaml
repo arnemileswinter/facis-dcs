@@ -1,0 +1,29 @@
+# Time Loki keeps a log line. The compactor deletes older lines.
+retention: 2160h
+
+loki:
+  image:
+    repository: grafana/loki
+    tag: "3.5.7"
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 10Gi
+    # Empty uses the cluster default StorageClass. Set an encrypted class: the
+    # logs can hold personal data.
+    storageClassName: ""
+  resources: {}
+
+collector:
+  image:
+    repository: grafana/alloy
+    tag: "v1.10.2"
+    pullPolicy: IfNotPresent
+  resources: {}
+
+# Only these pods can connect to Loki, in addition to the collector. The
+# default is the Grafana of the monitoring stack in the same namespace. For a
+# Grafana in another namespace, add a namespaceSelector entry.
+queryFrom:
+  - podSelector:
+      matchLabels:
+        app.kubernetes.io/name: grafana
