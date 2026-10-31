@@ -74,6 +74,9 @@ hydra:
     loginURL: "https://acceptance.dcs.example.org/ui/"
     consentURL: "https://acceptance.dcs.example.org/api/auth/consent"
     logoutURL: "https://acceptance.dcs.example.org/api/auth/logout-complete"
+    # DCS-IR-CI-09, DCS-NFR-BR-06: an access token issued before a credential
+    # revocation stays valid for at most 5 minutes.
+    accessTokenTTL: "5m"
   clients: []
 
 # PKCS#11: acceptance still runs against the co-deployed SoftHSM2 token

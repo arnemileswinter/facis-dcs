@@ -79,6 +79,10 @@ spec:
             # DCS validates access tokens against Hydra's JWKS, which requires JWTs.
             - name: STRATEGIES_ACCESS_TOKEN
               value: "jwt"
+            {{- with .Values.config.accessTokenTTL }}
+            - name: TTL_ACCESS_TOKEN
+              value: {{ . | quote }}
+            {{- end }}
           ports:
             - name: public
               containerPort: {{ .Values.service.publicPort }}
