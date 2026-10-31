@@ -262,7 +262,7 @@ const exportPDF = async () => {
         <div class="sticky top-0 z-10 shrink-0 border-b border-base-300 bg-base-100">
           <div class="mx-auto max-w-4xl px-6 pt-3">
             <p class="mb-2 text-xs font-black tracking-widest text-base-content/70 uppercase">
-              Review Contract
+              <span>Review Contract</span>
               <span v-if="isReviewer" class="font-normal normal-case">· as Contract Reviewer</span>
             </p>
             <div role="tablist" class="tabs-border tabs tabs-lg">
