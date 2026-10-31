@@ -43,6 +43,9 @@ lists them with the Secrets and their keys.
 {{- $missing = append $missing "signing.issuerX5ChainPath: the mounted certificate chain of the HSM key dcs-c2pa, DCS_ISSUER_X5CHAIN_PATH" }}
 {{- end }}
 {{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.ingress.enabled (not .Values.networkPolicy.ingressFrom) }}
+{{- $missing = append $missing "networkPolicy.ingressFrom: the pods of the ingress controller, so the backend, ORCE and DSS admit no other client outside the release" }}
+{{- end }}
 {{- if $missing }}
 {{- fail (printf "this release uses a real HSM or a Hydra outside dev mode, and the backend cannot start without:\n  - %s\nSee deployment/README.md, \"Production prerequisites\"." (join "\n  - " $missing)) }}
 {{- end }}

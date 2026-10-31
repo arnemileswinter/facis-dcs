@@ -10,6 +10,12 @@ metadata:
 spec:
   backoffLimit: 0
   template:
+    metadata:
+      labels:
+        # A pod of this release: the ORCE NetworkPolicy admits it
+        # (networkPolicy.ingressFrom).
+        app.kubernetes.io/name: orce-flow-import
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       restartPolicy: OnFailure
       {{- with .Values.podSecurityContext }}

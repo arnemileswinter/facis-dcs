@@ -361,3 +361,18 @@ contractTargets:
 # DSS B shares with instance A belong to another release with another CA, so B
 # calls them on their plain ports (signing.tsaURL, dss.url, auditExecutor.url,
 # workflowGateExecutor.url, DCS_TRUST_PDP_URL, contractTargets).
+
+# The backend, ORCE and DSS admit only the Traefik ingress, the pods of this
+# release and the other BDD release (DCS-NFR-SEC-14). Instance A's ORCE (release dcs) posts the deployment callbacks of this instance's target.
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+  peersFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: dcs

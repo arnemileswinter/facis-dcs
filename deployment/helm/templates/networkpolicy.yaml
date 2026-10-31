@@ -2,6 +2,17 @@
 {{- $rel := .Release.Name }}
 {{- $app := include "digital-contracting-service.name" . }}
 {{- $extra := .Values.networkPolicy.extraFrom }}
+{{- /*
+With networkPolicy.ingressFrom set, the backend, ORCE and DSS admit only the
+ingress controller, the pods of this release and networkPolicy.peersFrom on
+every port (DCS-NFR-SEC-14). Without it they admit every source.
+*/}}
+{{- $ingressFrom := .Values.networkPolicy.ingressFrom | default list }}
+{{- $restricted := gt (len $ingressFrom) 0 }}
+{{- $ownRelease := dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/instance" .Release.Name)) }}
+{{- $routed := concat $ingressFrom (list $ownRelease) (.Values.networkPolicy.peersFrom | default list) }}
+{{- $backendRule := dict "ports" (list "http" "https") }}
+{{- if $restricted }}{{ $_ := set $backendRule "from" $routed }}{{ end }}
 {{- $backend := dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" $app "app.kubernetes.io/instance" $rel "app.kubernetes.io/component" "backend")) }}
 {{- $hydra := dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" "hydra" "app.kubernetes.io/instance" $rel)) }}
 {{- $statuslist := dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" "statuslist-service" "app.kubernetes.io/instance" $rel)) }}
@@ -26,8 +37,12 @@ networkPolicy.extraFrom is added to every rule that has peers.
 {{- $policies := list
   (dict "name" "backend" "on" true "labels" (dict "app.kubernetes.io/name" $app "app.kubernetes.io/component" "backend")
     "rules" (list
-      (dict "ports" (list "http" "https"))
+      $backendRule
       (dict "ports" (list "metrics") "from" .Values.networkPolicy.metricsFrom)))
+  (dict "name" "orce" "on" (and $restricted .Values.orce.enabled) "labels" (dict "app.kubernetes.io/name" "orce")
+    "rules" (list (dict "from" $routed)))
+  (dict "name" "dss" "on" (and $restricted .Values.dss.enabled) "labels" (dict "app.kubernetes.io/name" "dss")
+    "rules" (list (dict "from" $routed)))
   (dict "name" "pdf-core" "on" .Values.pdfCore.enabled "labels" (dict "app.kubernetes.io/name" $app "app.kubernetes.io/component" "pdf-core")
     "rules" (list (dict "ports" (list "http" "https") "from" (list $backend))))
   (dict "name" "hydra" "on" .Values.hydra.enabled "labels" (dict "app.kubernetes.io/name" "hydra")
@@ -73,7 +88,9 @@ spec:
           - {{ . | quote }}
           {{- end }}
   policyTypes: ["Ingress"]
-{{- if or .Values.orce.enabled .Values.dss.enabled .Values.fcservice.enabled .Values.statuslistService.enabled }}
+{{- $public := list "federated-catalogue" "federated-catalogue-portal" "fc-keycloak" "statuslist-service" }}
+{{- if not $restricted }}{{ $public = concat (list "dss" "orce") $public }}{{ end }}
+{{- if or (and (not $restricted) (or .Values.orce.enabled .Values.dss.enabled)) .Values.fcservice.enabled .Values.statuslistService.enabled }}
 ---
 # Components that are routed by the ingress, called by peers or by other
 # releases in the namespace (the BDD instance B uses this ORCE and DSS), and
@@ -92,7 +109,7 @@ spec:
         values: [{{ $rel | quote }}]
       - key: app.kubernetes.io/name
         operator: In
-        values: ["dss", "orce", "federated-catalogue", "federated-catalogue-portal", "fc-keycloak", "statuslist-service"]
+        values: {{ toJson $public }}
   policyTypes: ["Ingress"]
   ingress:
     - {}
@@ -117,11 +134,13 @@ spec:
     {{- /* A rule with an empty peer list is left out: an empty "from" admits every source. */}}
     {{- $peers := concat (.from | default list) $extra }}
     {{- if or (not (hasKey . "from")) $peers }}
-    - ports:
+    - {{- if .ports }}
+      ports:
         {{- range .ports }}
         - port: {{ . }}
           protocol: TCP
         {{- end }}
+      {{- end }}
       {{- if hasKey . "from" }}
       from:
         {{- toYaml $peers | nindent 8 }}
