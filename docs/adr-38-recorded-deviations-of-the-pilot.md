@@ -53,17 +53,22 @@ boot are properties of the host firmware, the operating system and the
 cluster. The operator who runs the nodes provides them; a container cannot
 provide them for its host.
 
-### 4. The EU national trusted lists are downloaded over TLS 1.2 or 1.3 (DCS-IR-CI-01)
+### 4. The EU trusted lists and the time-stamp authority are reached over TLS 1.2 or 1.3 (DCS-IR-CI-01)
 
-Every outbound HTTPS client of the backend requires TLS 1.3, except the
-client that downloads the EU List of Trusted Lists and the national trusted
-lists. That client accepts TLS 1.2 and TLS 1.3 and verifies the server
-certificate (`tslClient` in `backend/internal/base/identity/eutrustpool.go`,
+Every outbound HTTPS client of the backend requires TLS 1.3, except two. The
+RFC 3161 time-stamp client accepts TLS 1.2 and TLS 1.3 (`NewClient` in
+`backend/internal/base/tsa/tsa.go`, `TestTSAClientAcceptsTLS12`); the TSA signs
+every time-stamp token, and the backend verifies that signature against the
+configured TSA certificate. The client that downloads the EU List of Trusted
+Lists and the national trusted lists also accepts TLS 1.2 and TLS 1.3 and
+verifies the server certificate (`tslClient` in
+`backend/internal/base/identity/eutrustpool.go`,
 `TestTrustedListClientAcceptsTLS12`). It does not verify the XAdES signatures
 of the lists.
 
-Reason: each member state publishes its national trusted list on its own
-server, and not all of these servers offer TLS 1.3. With TLS 1.3 only, the
+Reason: not every time-stamp authority offers TLS 1.3. Each member state
+publishes its national trusted list on its own server, and not all of these
+servers offer TLS 1.3. With TLS 1.3 only, the
 lists of these member states are not available, and the signer certificates
 of their trust service providers are not trusted.
 
@@ -87,6 +92,6 @@ of the CRL server, which can itself need a revocation check.
 - A multi-signer contract takes one signing turn per signer.
 - An operator who needs a hardware root of trust or secure boot provides it
   in the platform that runs the DCS.
-- The trusted-list download is the one outbound HTTPS connection of the
-  backend that can use TLS 1.2.
+- The time-stamp requests and the trusted-list download are the outbound
+  HTTPS connections of the backend that can use TLS 1.2.
 - A CRL fetch is plain HTTP; the CRL signature protects its content.
