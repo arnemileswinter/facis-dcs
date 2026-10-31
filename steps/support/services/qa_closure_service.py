@@ -158,6 +158,17 @@ class QAClosureService:
         )
 
     @staticmethod
+    def terminate_contract(context, name):
+        from steps.template_management.contract_state_machine_steps import _terminate_contract
+
+        previous = AuthService.DEFAULT_ORGANIZATION
+        try:
+            AuthService.DEFAULT_ORGANIZATION = context.qa_contract_orgs[name]
+            _terminate_contract(context, name)
+        finally:
+            AuthService.DEFAULT_ORGANIZATION = previous
+
+    @staticmethod
     def delete_archived_contract(context, name):
         did, _ = ContractService._contract_data(context, name)
         headers = QAClosureService.headers(context, ["Archive Manager"], context.qa_contract_orgs[name])

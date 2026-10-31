@@ -70,9 +70,13 @@ Feature: Process audit and compliance management
     And the monitoring sweep flags contract "PAC Repeat Sweep Contract" with an "UNAUTHORIZED_ACCESS" compliance risk attributed to actor "UnrelatedCorp"
     And the PAC audit trail records exactly one "UNAUTHORIZED_ACCESS" risk for contract "PAC Repeat Sweep Contract"
 
+  # An incident report holds at least one typed finding linked to a contract
+  # or template. The refusal of a report without a finding is unit tested in
+  # backend/internal/service/pac_organization_scope_pg_test.go.
   @UC-08-02 @DCS-IR-PACM-04
   Scenario: Compliance Officer submits a non-compliance incident report
-    When the Compliance Officer submits a non-compliance incident report
+    Given contract "PAC Incident Report Contract" is in "Draft" status
+    When the Compliance Officer submits a non-compliance incident report linking contract "PAC Incident Report Contract" with risk type "UNAUTHORIZED_ACCESS" and detail "Access attempt outside the contract parties"
     Then get http 200:Success code
 
   # Backend half of the Non-Compliance Investigation UI (AC5, UI half is

@@ -59,9 +59,13 @@ Feature: Contract storage and archive retrieval
   # snapshot-CID selection and the hard-fail removal semantics are unit
   # tested in backend/internal/service/contract_storage_archive_delete_test.go
   # (no existing BDD step pattern reads raw IPFS CIDs).
+  # Only a contract that is no longer in force (TERMINATED, EXPIRED, REVOKED,
+  # REJECTED, WITHDRAWN) can be deleted from the archive, so the signed
+  # contract is terminated first.
   @UC-07-03 @DCS-FR-CSA-17 @DCS-FR-CSA-02 @DCS-IR-CSA-03 @DCS-NFR-SEC-13
   Scenario: Archive Manager deletes an archived contract with a logged justification
     Given contract "Archive Deletion Contract" has reached contract state "SIGNED"
+    And the Contract Manager terminates contract "Archive Deletion Contract" before the archive deletion
     When the Archive Manager deletes the archived contract "Archive Deletion Contract" with justification "no longer needed for compliance retention"
     Then get http 200:Success code
     And the archive deletion of contract "Archive Deletion Contract" is recorded in the archive audit log
@@ -193,9 +197,15 @@ Feature: Contract storage and archive retrieval
     When I attempt to annotate the archived contract "Unauthorized Annotation Contract" with my current role
     Then the request is denied with a client error
 
+  # The dashboard counts an entry as compliant only when it passes every rule
+  # of GET /archive/compliance (DCS-FR-CSA-19), metadata completeness included:
+  # both parties and a validity period. The shared SIGNED fixture is a
+  # one-party contract without dates, so the seams below complete it.
   @UC-07-01 @DCS-FR-CSA-21 @DCS-FR-CWE-10 @DCS-FR-UC-07-3
   Scenario: Archive dashboard statistics reflect the archive and flag expiring contracts
     Given contract "Archive Statistics Contract" has reached contract state "SIGNED"
+    And contract "Archive Statistics Contract" has counterparty "did:web:archive-statistics-bdd.example" set directly in the database (party-search test seam)
+    And contract "Archive Statistics Contract" has validity period "2026-01-01T00:00:00Z" to "2027-01-01T00:00:00Z" set directly in the database (validity-search test seam)
     And contract "Archive Statistics Contract" is set to expire in 7 days directly in the database (expiry-window test seam)
     When the Archive Manager retrieves the archive statistics
     Then get http 200:Success code

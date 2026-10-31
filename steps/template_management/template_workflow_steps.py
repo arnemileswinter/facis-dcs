@@ -654,7 +654,9 @@ def step_then_template_status(context, expected_status):
 @then('template "{name}" is still in "{expected_status}" status')
 def step_then_template_still_in_status(context, name, expected_status):
     t = TemplateService.named(context, name)
-    actual = TemplateService.fetch_template(context, t["did"]).get("state", "").upper()
+    # A scenario that authenticated no role reads as the Template Creator.
+    headers = getattr(context, "headers", None) or AuthService.get_headers_for_roles(["Template Creator"])
+    actual = TemplateService.fetch_template(context, t["did"], headers=headers).get("state", "").upper()
     assert actual == expected_status.upper(), (
         f"Template state changed: expected '{expected_status.upper()}', got '{actual}'"
     )

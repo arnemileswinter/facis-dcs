@@ -131,12 +131,21 @@ def step_then_can_highlight_sections(context):
     )
     # The reviewer's block annotations reach the approver through
     # GET /contract/review-findings with the block ids the approval view highlights.
-    findings = get_with_headers(context, f"{context.base_url}/contract/review-findings/{body.get('did')}")
-    assert findings.status_code == 200, findings.text
-    annotated = {a.get("block_id") for f in findings.json() for a in (f.get("annotations") or [])}
+    # The findings are read from the audit trail, which the outbox anchors
+    # after the reviewer's submit commits, so they appear within seconds.
     expected = set(getattr(context, "review_annotation_block_ids", None) or [])
-    assert expected and expected <= annotated, (
-        f"Expected the reviewer's annotated blocks {expected} in the review findings, got: {annotated}"
+    assert expected, "the reviewer submitted no block annotation"
+    annotated = set()
+    deadline = time.monotonic() + 60
+    while True:
+        findings = get_with_headers(context, f"{context.base_url}/contract/review-findings/{body.get('did')}")
+        assert findings.status_code == 200, findings.text
+        annotated = {a.get("block_id") for f in findings.json() for a in (f.get("annotations") or [])}
+        if expected <= annotated or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    assert expected <= annotated, (
+        f"Expected the reviewer's annotated blocks {expected} in the review findings within 60s, got: {annotated}"
     )
 
 

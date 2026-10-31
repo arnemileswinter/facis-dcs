@@ -10,7 +10,7 @@ import base64
 import time
 from urllib.parse import quote
 
-from behave import given, then, when
+from behave import given, step, then, when
 
 from steps.support.api_client import (
     pac_audit_timeline,
@@ -442,6 +442,15 @@ def step_given_contract_expires_soon(context, name, days):
     cursor.close()
 
 
+@step('the Contract Manager terminates contract "{name}" before the archive deletion')
+def step_terminate_before_archive_deletion(context, name):
+    """Only a contract that is no longer in force can be deleted from the
+    archive (contractstate.Erasable)."""
+    from steps.template_management.contract_state_machine_steps import _terminate_contract  # noqa: PLC0415
+
+    _terminate_contract(context, name)
+
+
 @when("the Archive Manager retrieves the archive statistics")
 def step_when_archive_manager_retrieves_statistics(context):
     headers = AuthService.get_headers_for_roles(["Archive Manager"])
@@ -465,9 +474,17 @@ def step_then_statistics_counts_archive(context):
 @then("the archive statistics report a compliant archive entry")
 def step_then_statistics_compliant(context):
     body = context.requests_response.json()
-    assert body.get("compliant_total", 0) >= 1, (
-        f"expected at least one compliant entry (snapshot + content hash + signature "
-        f"metadata + TSA receipt): {body}"
+    if body.get("compliant_total", 0) >= 1:
+        return
+    headers = AuthService.get_headers_for_roles(["Archive Manager"])
+    verdicts = get_with_headers(context, f"{context.base_url}/archive/compliance", headers=headers)
+    failed = [
+        {"did": item.get("did"), "failed": [c for c in item.get("checks", []) if not c.get("passed")]}
+        for item in (verdicts.json() if verdicts.status_code == 200 else [])
+    ][:3]
+    raise AssertionError(
+        f"expected at least one entry that passes every archive compliance rule: {body}; "
+        f"failed rules of the first entries: {failed or verdicts.text}"
     )
 
 
