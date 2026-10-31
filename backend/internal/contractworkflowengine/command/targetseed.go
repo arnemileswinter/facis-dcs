@@ -109,6 +109,10 @@ func SeedContractTargets(ctx context.Context, dbx *sqlx.DB, repo db.ContractTarg
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Replicas that start together seed one after the other.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('dcs-contract-target-seed'))`); err != nil {
+		return 0, err
+	}
 
 	seeded, err := seedTargets(ctx,
 		func(ctx context.Context) ([]db.ContractTarget, error) { return repo.ListTargets(ctx, tx) },
