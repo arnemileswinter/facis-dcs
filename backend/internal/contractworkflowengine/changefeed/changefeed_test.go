@@ -52,3 +52,17 @@ func TestFeedPassesTheActivation(t *testing.T) {
 	require.Len(t, changes, 1)
 	require.Equal(t, Change{DID: "did:contract:1", EventType: "ACTIVATE_CONTRACT"}, <-changes)
 }
+
+// CWE-9 (DCS-FR-CWE-24): a change that arrives from the counterparty instance
+// (a shipped offer or counteroffer, a negotiation message, a termination) is
+// recorded as a peer exchange and reaches the dashboards.
+func TestAReceivedPeerExchangeIsStreamed(t *testing.T) {
+	feed := New()
+	changes, stop := feed.Subscribe()
+	defer stop()
+
+	feed.Handle(busEvent(t, "PEER_EXCHANGE", `{"did":"did:contract:1","exchange":"post_negotiation","direction":"RECEIVED"}`))
+
+	require.Len(t, changes, 1)
+	require.Equal(t, Change{DID: "did:contract:1", EventType: "PEER_EXCHANGE"}, <-changes)
+}

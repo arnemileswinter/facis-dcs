@@ -19,14 +19,15 @@ type Change struct {
 
 // changeEvents are the audit events that change what a dashboard shows. Read
 // events are left out: a dashboard that refetches after a change writes one,
-// and streaming it would start the refetch again.
+// and streaming it would start the refetch again. PEER_EXCHANGE carries the
+// changes the counterparty instance shipped (DCS-NFR-BR-08).
 var changeEvents = map[string]bool{
 	"CREATE_CONTRACT": true, "UPDATE_CONTRACT": true, "SUBMIT_CONTRACT": true,
 	"OFFER_CONTRACT": true, "WITHDRAW_CONTRACT": true, "NEGOTIATE_CONTRACT": true,
 	"ACCEPT_OFFER_CONTRACT": true, "ACCEPT_RESPOND_CONTRACT": true, "REJECT_RESPOND_CONTRACT": true,
 	"WITHDRAW_RESPOND_CONTRACT": true, "INCREASE_CONTRACT_VERSION": true, "APPROVE_CONTRACT": true,
 	"REJECT_CONTRACT": true, "TERMINATE_CONTRACT": true, "RENEW_CONTRACT": true,
-	"CONTRACT_EXPIRED": true, "CONTRACT_RENEWAL_DUE": true, "REMOTE_SYNC": true,
+	"CONTRACT_EXPIRED": true, "CONTRACT_RENEWAL_DUE": true, "PEER_EXCHANGE": true,
 	"STORE_ARCHIVED_CONTRACT": true, "DELETE_ARCHIVED_CONTRACT": true, "ANNOTATE_ARCHIVED_CONTRACT": true,
 	"KEY_SHREDDED": true, "APPLIED_SIGNATURE": true, "REVOKE_SIGNATURE": true,
 	"PUBLISH_CONTRACT_TO_CATALOGUE": true, "ACTIVATE_CONTRACT": true,
