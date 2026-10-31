@@ -66,7 +66,7 @@ def cleanup_database(context):
 def _cleanup_database(cursor):
 	# TRUNCATE bypasses the append-only row triggers of the audit tables.
 	cursor.execute("TRUNCATE access_attempts")
-	cursor.execute("DELETE FROM ip_lockouts")
+	cursor.execute("DELETE FROM lockouts")
 
 	cursor.execute("DELETE FROM contract_negotiation_task")
 	cursor.execute("DELETE FROM contract_approval_task")
@@ -78,6 +78,7 @@ def _cleanup_database(cursor):
 	cursor.execute("DELETE FROM contract_signatures")
 	cursor.execute("DELETE FROM signature_ceremonies")
 	cursor.execute("TRUNCATE contract_archive_evidence")
+	cursor.execute("TRUNCATE contract_execution_proofs")
 	cursor.execute("DELETE FROM contract_peer_terminations")
 	cursor.execute("DELETE FROM contracts")
 
@@ -91,9 +92,11 @@ def _cleanup_database(cursor):
 def reset_ip_lockout(context):
 	# The suite sends every request from one address, so a lockout one
 	# scenario provokes (FR-UC-01-4) would refuse every scenario after it.
+	# Ending the lock now, as the administrator unlock does, also stops the
+	# failures before it from counting toward the next lock.
 	cursor = context.db.cursor()
 	try:
-		cursor.execute("DELETE FROM ip_lockouts")
+		cursor.execute("UPDATE lockouts SET locked_until = NOW() WHERE locked_until > NOW()")
 		context.db.commit()
 	except Exception:
 		context.db.rollback()

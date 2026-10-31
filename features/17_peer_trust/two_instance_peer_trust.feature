@@ -406,6 +406,27 @@ Feature: Two-instance peer trust — federation agreement credential, PDP gate, 
     Then the signature attempt on instance B is refused because the counterparty has not settled
 
   # ---------------------------------------------------------------------
+  # DCS-IR-SI-06: a counterparty DCS reads the information of a contract it is
+  # a party of (POST /peer/contracts/info). Every peer request carries a
+  # dcs-peer-v1 challenge (ADR-13) that binds the operation, the contract,
+  # the sender, the receiving instance and a nonce, so the same signed request
+  # is accepted once. A contract the peer does not share answers not_found,
+  # like one that does not exist.
+  # ---------------------------------------------------------------------
+
+  @DCS-IR-SI-06 @DCS-NFR-BR-08 @two-instance
+  Scenario: A counterparty reads the information of a shared contract once per signed request
+    Given instance A and instance B are both running and trust each other
+    When the initiator on instance A creates and offers a contract with instance B as counterparty
+    Then the contract appears on instance B in state OFFERED within a few seconds
+    When instance A asks instance B for the information of the cross-instance contract
+    Then instance B answers with the contract information in state OFFERED
+    When instance A sends the same signed information request to instance B again
+    Then instance B refuses the repeated request as a replay
+    When instance A asks instance B for the information of a contract instance B does not share with it
+    Then instance B answers that the contract is not found
+
+  # ---------------------------------------------------------------------
   # TAKING AN AGREEMENT BACK (contractworkflowengine/command/
   # settledagreement.go withdrawOwnSettlement, on submit.go's reviewer-reject
   # branch and on reject.go's approver rejection).

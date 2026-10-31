@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/artifactstore"
@@ -26,6 +27,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/base/validation"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -92,6 +94,13 @@ var ErrCeremonyNotPrepared = errors.New("ceremony has no to-be-signed document p
 // finalize writes commit in the SAME transaction, so this can only be lost to
 // a genuinely earlier submit, never a race.
 var ErrCeremonyConsumed = errors.New("ceremony signing request has already been consumed")
+
+// ErrCeremonyNotCallers refuses a ceremony that another session started.
+var ErrCeremonyNotCallers = errors.New("the signing ceremony was started by another session")
+
+// verifiedCeremonyTTL is how long a verified PID and PoA presentation
+// authorizes the preparation of the document to be signed.
+const verifiedCeremonyTTL = 30 * time.Minute
 
 // ErrDocumentMismatch rejects a submitted PDF whose initial revision (the
 // bytes before the signatory's incremental PAdES update) is not byte-for-byte
@@ -489,6 +498,58 @@ func AuditRefusedSigning(ctx context.Context, sqlDB *sqlx.DB, cmd ApplyCmd, step
 	}
 }
 
+// walletRefusalAuditInterval bounds how often the refusals of one ceremony are
+// audited. The wallet endpoints are unauthenticated: whoever holds the
+// ceremony URL can post to them.
+const walletRefusalAuditInterval = 10 * time.Second
+
+// maxRefusalLength bounds the refusal text kept on the ceremony and audited.
+const maxRefusalLength = 500
+
+// RecordWalletRefusal keeps a refused wallet response on its ceremony, where
+// the signer's status poll reads it, and audits it (DCS-FR-SM-19) unless the
+// ceremony was refused less than walletRefusalAuditInterval before. The
+// refusal text is bounded and stripped of control characters.
+func RecordWalletRefusal(ctx context.Context, sqlDB *sqlx.DB, repo db.CeremonyRepo, cmd ApplyCmd, step, code string, refusal error) {
+	reason := SanitizeRefusal(refusal.Error())
+	tx, err := sqlDB.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Printf("could not record the refused wallet response for ceremony %s: %v", cmd.CeremonyID, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	audit, err := repo.RecordRefusal(ctx, tx, cmd.CeremonyID, code, reason, walletRefusalAuditInterval)
+	if err == nil && audit {
+		err = event.Create(ctx, tx, event2.ApplyEvent{
+			DID: cmd.DID, AppliedBy: cmd.AppliedBy, OccurredAt: time.Now().UTC(), HolderDID: cmd.HolderDID,
+			UserRoles: cmd.UserRoles, CredentialType: cmd.CredentialType, SignerDID: cmd.SignerDID,
+			FieldName: cmd.FieldName, CeremonyID: cmd.CeremonyID, Step: step,
+			Outcome: event2.OutcomeFailed, Error: reason,
+		}, componenttype.SignatureManagement)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("could not record the refused wallet response for ceremony %s: %v", cmd.CeremonyID, err)
+	}
+}
+
+// SanitizeRefusal removes control characters from a refusal text and bounds
+// its length.
+func SanitizeRefusal(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	if runes := []rune(text); len(runes) > maxRefusalLength {
+		text = string(runes[:maxRefusalLength]) + "…"
+	}
+	return text
+}
+
 func (h *Applier) prepareToBeSigned(ctx context.Context, cmd ApplyCmd) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -576,6 +637,13 @@ func (h *Applier) SubmitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	return err
 }
 
+// SubmitWalletSignature is SubmitSignature for the unauthenticated wallet
+// callback. It audits nothing: the callback records every refusal through
+// RecordWalletRefusal.
+func (h *Applier) SubmitWalletSignature(ctx context.Context, cmd SubmitSignatureCmd) error {
+	return h.submitSignature(ctx, cmd)
+}
+
 func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) error {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -614,9 +682,6 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		ceremony.PinnedRendererVersion == nil || ceremony.PinnedSignedCount == nil ||
 		ceremony.PinnedContractVersion == nil || ceremony.RequiredCredentialType == nil {
 		return ErrCeremonyNotPrepared
-	}
-	if ceremony.ConsumedAt != nil {
-		return ErrCeremonyConsumed
 	}
 
 	// Safety net against staleness between prepare and submit: the contract
@@ -795,16 +860,17 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		return fmt.Errorf("%w: a wallet-ceremony signature requires a JAdES over the machine-readable payload to bind the request nonce", ErrNonceMismatch)
 	}
 	if jades != "" {
+		// A value that is no compact JWS is refused as such, before DSS.
+		payload, err := jwsPayloadBytes(jades)
+		if err != nil {
+			return fmt.Errorf("%w: decode JAdES payload: %v", ErrJAdESInvalid, err)
+		}
 		jadesReport, err := h.Validator.ValidatePDF(ctx, []byte(jades), ceremony.FieldName+"-payload.json")
 		if err != nil {
 			return fmt.Errorf("validate submitted JAdES: %w", err)
 		}
 		if err := jadesReport.AssertValidAES(); err != nil {
 			return fmt.Errorf("%w: %v", ErrJAdESInvalid, err)
-		}
-		payload, err := jwsPayloadBytes(jades)
-		if err != nil {
-			return fmt.Errorf("%w: decode JAdES payload: %v", ErrJAdESInvalid, err)
 		}
 		if len(ceremony.PinnedPayload) > 0 && !bytes.Equal(payload, ceremony.PinnedPayload) {
 			return fmt.Errorf("%w: JAdES payload is not the machine-readable document prepared for signing", ErrDocumentMismatch)
@@ -841,6 +907,16 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 	// ErrRegenerationInFlight. This is still the first lock the transaction
 	// takes, so the order that keeps it deadlock-free is unchanged.
 	if err := acquireRegenerationLock(ctx, tx, cmd.DID); err != nil {
+		return err
+	}
+
+	// The state, read again under the lock: a revocation that committed during
+	// the DSS round trips above stops this signature here.
+	current, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not re-read contract %s: %w", cmd.DID, err)
+	}
+	if err := contractstate.ValidateTransition(contractstate.ContractState(current.State), contractstate.EventSign); err != nil {
 		return err
 	}
 
@@ -900,6 +976,7 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		signedAt:        signedAt,
 		contractVersion: *ceremony.PinnedContractVersion,
 		localFields:     localSignatureFields(declaredFields, data.Responsible, h.LocalPeer),
+		fromState:       current.State,
 	}); err != nil {
 		return err
 	}
@@ -999,6 +1076,9 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 	if err != nil {
 		return nil, err
 	}
+	if err := assertCeremonyFresh(ceremony, time.Now().UTC()); err != nil {
+		return nil, err
+	}
 
 	// The contract's OWN declared signature-level requirement for this field
 	// (SM-01 per-contract level enforcement, ADR-20) — pinned below and
@@ -1059,6 +1139,11 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 		}
 		if !declared {
 			return nil, fmt.Errorf("%w: %s", ErrUnknownSignatureField, ceremony.FieldName)
+		}
+		// The field decides whose Power of Attorney authorizes the signature,
+		// so it must name a party of the contract (DCS-FR-SM-07).
+		if !fieldNamesAParty(ceremony.FieldName, *data.ContractData, data.CreatedBy, h.LocalPeer, data.Responsible) {
+			return nil, fmt.Errorf("%w: %s names no party of the contract", ErrUnknownSignatureField, ceremony.FieldName)
 		}
 		if signedCount == 0 {
 			var missing []string
@@ -1303,35 +1388,45 @@ func (h *Applier) prepare(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd) (*prep
 // On a multi-signer contract several fields may share one signer identity
 // (e.g. one person signing two roles), so resolving by signer alone is
 // ambiguous — FieldName disambiguates when provided; otherwise it falls back
-// to the signer's most recent verified ceremony (single-signer flow). Shared
-// by prepare() and SubmitSignature so both resolve identically.
+// to the signer's most recent verified ceremony (single-signer flow). Every
+// path returns only an unconsumed ceremony whose verified signatory is
+// cmd.SignerDID and that the calling session started. Shared by prepare() and
+// SubmitSignature so both resolve identically.
 func resolveCeremony(ctx context.Context, tx *sqlx.Tx, repo db.CeremonyRepo, cmd ApplyCmd) (*db.SignatureCeremony, error) {
-	if cmd.CeremonyID != "" {
-		ceremony, err := repo.GetCeremonyByID(ctx, tx, cmd.CeremonyID)
-		if err != nil {
-			return nil, fmt.Errorf("could not resolve signing ceremony %s: %w", cmd.CeremonyID, err)
-		}
-		if ceremony == nil || ceremony.Status != db.CeremonyVerified || ceremony.ContractDID != cmd.DID ||
-			ceremony.SignerDID == nil || *ceremony.SignerDID != cmd.SignerDID {
-			return nil, ErrCeremonyRequired
-		}
-		return ceremony, nil
-	}
-
 	var ceremony *db.SignatureCeremony
 	var err error
-	if cmd.FieldName != "" {
-		ceremony, err = repo.FindVerifiedCeremonyByField(ctx, tx, cmd.DID, cmd.FieldName)
+	if cmd.CeremonyID != "" {
+		ceremony, err = repo.GetCeremonyByID(ctx, tx, cmd.CeremonyID)
 	} else {
-		ceremony, err = repo.FindVerifiedCeremony(ctx, tx, cmd.DID, cmd.SignerDID)
+		ceremony, err = repo.FindVerifiedCeremony(ctx, tx, cmd.DID, cmd.SignerDID, cmd.FieldName)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("could not resolve signing ceremony: %w", err)
 	}
-	if ceremony == nil {
+	if ceremony == nil || ceremony.Status != db.CeremonyVerified || ceremony.ContractDID != cmd.DID ||
+		ceremony.SignerDID == nil || *ceremony.SignerDID != cmd.SignerDID {
 		return nil, ErrCeremonyRequired
 	}
+	// The session that started the ceremony is the one that signs with it: a
+	// different session of the same organization may not prepare, publish or
+	// submit for it.
+	if ceremony.RequestedBy != cmd.AppliedBy || ceremony.RequestedHolderDID != cmd.HolderDID {
+		return nil, ErrCeremonyNotCallers
+	}
+	if ceremony.ConsumedAt != nil {
+		return nil, ErrCeremonyConsumed
+	}
 	return ceremony, nil
+}
+
+// assertCeremonyFresh refuses a ceremony whose PID and PoA presentation is
+// older than verifiedCeremonyTTL: the document to be signed is handed out
+// only against a current presentation.
+func assertCeremonyFresh(ceremony *db.SignatureCeremony, now time.Time) error {
+	if ceremony.VerifiedAt == nil || now.Sub(*ceremony.VerifiedAt) > verifiedCeremonyTTL {
+		return fmt.Errorf("%w: the presentation of ceremony %s is older than %s; present the credentials again", ErrCeremonyRequired, ceremony.ID, verifiedCeremonyTTL)
+	}
+	return nil
 }
 
 // finalizeInput carries the post-signature state the Finalizer persists: the
@@ -1347,6 +1442,8 @@ type finalizeInput struct {
 	contractVersion int
 	// localFields are the declared signature fields this instance signs.
 	localFields []string
+	// fromState is the contract state read under the per-contract lock.
+	fromState string
 }
 
 // finalize persists a completed signature: it stores the signed PDF in IPFS,
@@ -1419,7 +1516,7 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		return fmt.Errorf("could not create signature: %w", err)
 	}
 
-	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Signed.String()); err != nil {
+	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, in.fromState, contractstate.Signed.String()); err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 
@@ -1475,7 +1572,11 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 		return fmt.Errorf("could not read signed contract for archive storage: %w", err)
 	}
 
-	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, appliedBy, signatures, peerSignatures)
+	history, err := h.ArchiveRepo.ReadHistoryByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read the version history for archive storage: %w", err)
+	}
+	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, history, appliedBy, signatures, peerSignatures)
 	if err != nil {
 		return fmt.Errorf("could not build archive entry: %w", err)
 	}
@@ -1520,6 +1621,29 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 	}
 
 	return nil
+}
+
+// fieldNamesAParty reports whether a signature field names a party of the
+// contract: this instance, the creating organization, a responsible party, or
+// an organization in dcs:parties.
+func fieldNamesAParty(field string, contractData []byte, createdBy, localPeer string, responsible *db.Responsible) bool {
+	parties := append([]string{localPeer, createdBy}, partyDIDs(responsible)...)
+	var doc map[string]any
+	if json.Unmarshal(contractData, &doc) == nil {
+		nodes, _ := doc["dcs:parties"].([]any)
+		for _, node := range nodes {
+			if party, ok := node.(map[string]any); ok {
+				name, _ := party["dcs:legalName"].(string)
+				parties = append(parties, name)
+			}
+		}
+	}
+	for _, party := range parties {
+		if party != "" && (party == field || identity.SameDIDWeb(party, field)) {
+			return true
+		}
+	}
+	return false
 }
 
 // localSignatureFields returns the declared fields whose signature this

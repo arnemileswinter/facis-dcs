@@ -44,6 +44,7 @@ import type {
   ContractRenewResponse,
   ContractRetrieveByIdResponse,
   ContractRetrieveResponse,
+  ContractReviewFinding,
   ContractReviewResponse,
   ContractSearchResponse,
   ContractSubmitResponse,
@@ -64,6 +65,11 @@ export const contractWorkflowService: ContractWorkflowService = {
   async lifecycle(did: string) {
     return http
       .get<ContractLifecycleEvent[]>(`/contract/lifecycle/${encodeURIComponent(did)}`)
+      .then((res) => res.data ?? [])
+  },
+  async reviewFindings(did: string) {
+    return http
+      .get<ContractReviewFinding[]>(`/contract/review-findings/${encodeURIComponent(did)}`)
       .then((res) => res.data ?? [])
   },
   async listEvidence(did: string) {

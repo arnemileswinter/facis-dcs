@@ -21,7 +21,7 @@ type activeContract struct {
 
 // missedDeadlineRisks reads the contracts in force and the rules the target
 // system reported on, and flags each obligation whose deadline has passed
-// without a report.
+// without a report received by the deadline.
 func (h *ComplianceMonitor) missedDeadlineRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]event2.ComplianceRisk, error) {
 	var contracts []activeContract
 	if err := tx.SelectContext(ctx, &contracts,
@@ -30,24 +30,27 @@ func (h *ComplianceMonitor) missedDeadlineRisks(ctx context.Context, tx *sqlx.Tx
 		return nil, fmt.Errorf("could not read contracts in force: %w", err)
 	}
 	var reports []struct {
-		DID    string `db:"did"`
-		RuleID string `db:"rule_id"`
+		DID      string    `db:"did"`
+		RuleID   string    `db:"rule_id"`
+		Received time.Time `db:"received"`
 	}
 	if err := tx.SelectContext(ctx, &reports,
-		`SELECT DISTINCT did, rule_id FROM contract_kpis WHERE rule_id IS NOT NULL`); err != nil {
+		`SELECT did, rule_id, MIN(observed_at) AS received FROM contract_kpis WHERE rule_id IS NOT NULL GROUP BY did, rule_id`); err != nil {
 		return nil, fmt.Errorf("could not read reported rules: %w", err)
 	}
-	reported := make(map[string]bool, len(reports))
+	reported := make(map[string]time.Time, len(reports))
 	for _, report := range reports {
-		reported[report.DID+"|"+report.RuleID] = true
+		reported[report.DID+"|"+report.RuleID] = report.Received
 	}
 	return missedDeadlineRisksFrom(contracts, reported, checkedAt), nil
 }
 
 // missedDeadlineRisksFrom flags every obligation whose deadline lies before
-// checkedAt and on which no report names the rule. The detail carries the rule
-// and the deadline only, so the same miss hashes the same on every sweep.
-func missedDeadlineRisksFrom(contracts []activeContract, reported map[string]bool, checkedAt time.Time) []event2.ComplianceRisk {
+// checkedAt and on which no report naming the rule arrived by the deadline
+// (reported holds the first receipt time per contract and rule). A late report
+// does not clear the miss. The detail carries the rule and the deadline only,
+// so the same miss hashes the same on every sweep.
+func missedDeadlineRisksFrom(contracts []activeContract, reported map[string]time.Time, checkedAt time.Time) []event2.ComplianceRisk {
 	risks := make([]event2.ComplianceRisk, 0)
 	for _, contract := range contracts {
 		var document map[string]any
@@ -55,7 +58,10 @@ func missedDeadlineRisksFrom(contracts []activeContract, reported map[string]boo
 			continue
 		}
 		for _, deadline := range obligationDeadlines(document) {
-			if !deadline.due.Before(checkedAt) || reported[contract.DID+"|"+deadline.ruleID] {
+			if !deadline.due.Before(checkedAt) {
+				continue
+			}
+			if received, ok := reported[contract.DID+"|"+deadline.ruleID]; ok && !received.After(deadline.due) {
 				continue
 			}
 			risks = append(risks, event2.ComplianceRisk{

@@ -42,6 +42,10 @@ func TestEveryAuditEndpointRequiresAJustification(t *testing.T) {
 			func(r *http.Request) error { return asErr(pacsrv.DecodeAccessAttemptsRequest(mux, dec)(r)) }},
 		{"case file", http.MethodGet, "/pac/case/c1?x=1", "",
 			func(r *http.Request) error { return asErr(pacsrv.DecodeCaseFileRequest(mux, dec)(r)) }},
+		{"archive delete", http.MethodDelete, "/archive/delete?did=did:x", "",
+			func(r *http.Request) error { return asErr(archivesrv.DecodeDeleteRequest(mux, dec)(r)) }},
+		{"workflow gate review", http.MethodPost, "/pac/workflow-gates/review", `{"run_id":"r","decision":"approve"}`,
+			func(r *http.Request) error { return asErr(pacsrv.DecodeWorkflowGateReviewRequest(mux, dec)(r)) }},
 	}
 	request := func(method, path, body string) *http.Request {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -55,17 +59,23 @@ func TestEveryAuditEndpointRequiresAJustification(t *testing.T) {
 		if err := e.decode(request(e.method, e.path, e.body)); err == nil || !strings.Contains(err.Error(), "justification") {
 			t.Errorf("%s audit without justification: got %v, want a missing-justification error", e.name, err)
 		}
-		path, body := e.path, e.body
-		if body == "" {
-			sep := "?"
-			if strings.Contains(path, "?") {
-				sep = "&"
+		with := func(query, json string) *http.Request {
+			path, body := e.path, e.body
+			if body == "" {
+				sep := "?"
+				if strings.Contains(path, "?") {
+					sep = "&"
+				}
+				path += sep + "justification=" + query
+			} else {
+				body = strings.TrimSuffix(body, "}") + `,"justification":"` + json + `"}`
 			}
-			path += sep + "justification=investigation"
-		} else {
-			body = strings.TrimSuffix(body, "}") + `,"justification":"investigation"}`
+			return request(e.method, path, body)
 		}
-		if err := e.decode(request(e.method, path, body)); err != nil {
+		if err := e.decode(with("%20%09", ` \t`)); err == nil || !strings.Contains(err.Error(), "justification") {
+			t.Errorf("%s audit with a blank justification: got %v, want a justification error", e.name, err)
+		}
+		if err := e.decode(with("investigation", "investigation")); err != nil {
 			t.Errorf("%s audit with justification: %v", e.name, err)
 		}
 	}

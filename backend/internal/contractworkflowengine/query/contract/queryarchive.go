@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -30,10 +32,14 @@ type GetArchivedContractsHandler struct {
 
 type GetArchivedContractsQry struct {
 	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type SearchArchivedContractsQry struct {
 	RetrievedBy     string
+	HolderDID       string
+	UserRoles       userrole.UserRoles
 	DID             string
 	ContractVersion int
 	State           *contractstate.ContractState
@@ -69,6 +75,8 @@ func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchi
 
 	evt := events.RetrieveArchivedEvent{
 		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
 		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
 		OccurredAt:   time.Now().UTC(),
 	}
@@ -103,15 +111,15 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		}
 	}(tx)
 
-	var state string
+	var states []string
 	if query.State != nil {
-		state = query.State.String()
+		states = []string{query.State.String()}
 	}
 
 	searchValues := db.SearchValues{
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
-		State:           state,
+		States:          states,
 		Name:            query.Name,
 		Description:     query.Description,
 		ContractData:    query.ContractData,
@@ -129,6 +137,8 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 
 	evt := events.SearchArchivedEvent{
 		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
 		Criteria:     searchCriteria(searchValues),
 		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
 		OccurredAt:   time.Now().UTC(),
@@ -171,7 +181,7 @@ func searchCriteria(v db.SearchValues) map[string]string {
 	if v.ContractVersion != 0 {
 		set("contract_version", strconv.Itoa(v.ContractVersion))
 	}
-	set("state", v.State)
+	set("state", strings.Join(v.States, ","))
 	set("name", v.Name)
 	set("description", v.Description)
 	set("contract_data", v.ContractData)

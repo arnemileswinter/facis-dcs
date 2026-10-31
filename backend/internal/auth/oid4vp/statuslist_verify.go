@@ -136,8 +136,20 @@ func PresentedCredentialState(ctx context.Context, presentation string, trust *T
 	if err != nil {
 		return "", err
 	}
-	chain, err := verifyPoAChain(parsed.IssuerJWT, parsed.Disclosures, trust, purpose)
-	if err != nil {
+	var chain []poaLink
+	if purpose == PurposePID {
+		// A PID names a natural person: no organization, no roles, no
+		// delegation.
+		claims, err := sdjwt.VerifyCredential(parsed.IssuerJWT, parsed.Disclosures, trust.For(purpose))
+		if err != nil {
+			return "", err
+		}
+		raw, err := json.Marshal(claims)
+		if err != nil {
+			return "", err
+		}
+		chain = []poaLink{{statusClaims: raw}}
+	} else if chain, err = verifyPoAChain(parsed.IssuerJWT, parsed.Disclosures, trust, purpose); err != nil {
 		return "", err
 	}
 	// A delegated credential is as revoked as the most severe state of any

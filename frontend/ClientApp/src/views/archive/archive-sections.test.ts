@@ -99,7 +99,7 @@ describe('archive sections', () => {
     await wrapper.get('[data-testid="archive-section-store"]').trigger('submit')
     await flushPromises()
 
-    expect(archive.storeSection).toHaveBeenCalledWith(entry.did, 'urn:c#payment', ['Org B'])
+    expect(archive.storeSection).toHaveBeenCalledWith(entry.did, 2, 'urn:c#payment', ['Org B'])
     expect(wrapper.get('[data-testid="archive-section-urn:c#payment"]').text()).toContain('Clause: Payment')
   })
 

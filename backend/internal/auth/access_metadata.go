@@ -54,12 +54,18 @@ func accessMetadataFromContext(ctx context.Context) accessMetadata {
 type accessFinalizerKey struct{}
 type accessFinalizer struct{ record func(error) }
 
+// accessOutcome maps the answer of an authenticated request to the access
+// log outcome (DCS-FR-CSA-18, DCS-FR-PACM-04): a refusal by the role or read
+// policy is DENIED, any other error is FAILED.
 func accessOutcome(err error) string {
+	if err == nil {
+		return db.AccessOutcomeSuccess
+	}
 	var named interface{ ErrorName() string }
 	if errors.As(err, &named) && (named.ErrorName() == "forbidden" || named.ErrorName() == "unauthorized") {
 		return db.AccessOutcomeDenied
 	}
-	return db.AccessOutcomeSuccess
+	return db.AccessOutcomeFailed
 }
 
 func metadataString(value reflect.Value, name string) string {

@@ -40,7 +40,8 @@ func TestAccessFinalizerRecordsFinalDecisionOnce(t *testing.T) {
 		{"success", nil, db.AccessOutcomeSuccess},
 		{"forbidden", goa.PermanentError("forbidden", "role"), db.AccessOutcomeDenied},
 		{"unauthorized", fmt.Errorf("wrapped: %w", goa.PermanentError("unauthorized", "scope")), db.AccessOutcomeDenied},
-		{"business error", goa.PermanentError("internal_error", "executor"), db.AccessOutcomeSuccess},
+		{"business error", goa.PermanentError("internal_error", "executor"), db.AccessOutcomeFailed},
+		{"bad request", goa.PermanentError("bad_request", "state"), db.AccessOutcomeFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0

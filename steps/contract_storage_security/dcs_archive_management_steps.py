@@ -501,7 +501,11 @@ def step_then_statistics_recent_action(context, name):
     deadline = time.time() + 90
     actions = []
     while time.time() < deadline:
-        response = get_with_headers(context, archive_statistics_url(context), headers=headers)
+        # The actors are shown only to a request that gives a justification
+        # (DCS-FR-PACM-04).
+        response = get_with_headers(
+            context, archive_statistics_url(context) + "?justification=BDD+recent+archive+actions", headers=headers
+        )
         if response.status_code == 200:
             actions = response.json().get("recent_actions", [])
             matching = [action for action in actions if action.get("did") == did]

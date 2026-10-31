@@ -16,6 +16,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
+	trustgate "digital-contracting-service/internal/dcstodcs"
 	smeventtype "digital-contracting-service/internal/signingmanagement/datatype/eventtype"
 )
 
@@ -42,6 +43,9 @@ var lifecycleActorField = map[string]string{
 	cweeventtype.PublishCatalogue.String(): "published_by",
 	smeventtype.Applied.String():           "applied_by",
 	smeventtype.Revoke.String():            "revoked_by",
+	// A counterparty instance refused a termination notice for good, so its
+	// copy is not terminated (DCS-NFR-BR-06).
+	trustgate.PeerExchangeRefusedEvent{}.EventType(): "peer_did",
 }
 
 var lifecycleComponents = []componenttype.ComponentType{

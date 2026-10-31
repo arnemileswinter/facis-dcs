@@ -45,7 +45,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	}
 	validator, token := qaSignedTokens(t)
 	attempts := &pg.PostgresAccessAttemptRepo{}
-	locks := &pg.PostgresIPLockoutRepo{}
+	locks := &pg.PostgresLockoutRepo{}
 	service := &processAuditAndCompliancesrvc{DB: database, JWTAuthenticator: auth.NewJWTAuthenticator(validator, database, attempts, locks)}
 	endpoints := pac.NewEndpoints(service)
 	endpoints.Use(auth.AccessMetadataMiddleware)
@@ -100,7 +100,7 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().Add(-conf.LoginLockoutDuration()))
+	failed, err := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().Add(-conf.LoginLockoutDuration()))
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		t.Fatal(rollbackErr)
 	}
@@ -119,16 +119,16 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	localCount, countErr := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("QA UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
-	utcCount, utcErr := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().UTC().Add(-conf.LoginLockoutDuration()))
+	localCount, countErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("QA UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
+	utcCount, utcErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().UTC().Add(-conf.LoginLockoutDuration()))
 	if countErr != nil || utcErr != nil || localCount != conf.LoginAttemptsThresholdInDuration() || utcCount != localCount {
 		t.Fatalf("failed credential counts differ: UTC+2=%d (%v), UTC=%d (%v)", localCount, countErr, utcCount, utcErr)
 	}
-	locked, _, err := locks.IsLocked(ctx, tx, "192.0.2.60")
+	until, err := locks.LockedUntil(ctx, tx, "192.0.2.60")
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		t.Fatal(rollbackErr)
 	}
-	if err != nil || !locked {
+	if locked := until.After(time.Now()); err != nil || !locked {
 		t.Fatalf("credential failures did not lock IP: %t %v", locked, err)
 	}
 	jwt := token(userrole.Auditor, time.Now().Add(time.Hour))
@@ -139,8 +139,8 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := locks.ClearLockout(ctx, tx, "192.0.2.60"); err != nil {
-		t.Fatal(err)
+	if lifted, err := locks.ClearLockout(ctx, tx, "192.0.2.60"); err != nil || !lifted {
+		t.Fatalf("unlock: %t %v", lifted, err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)

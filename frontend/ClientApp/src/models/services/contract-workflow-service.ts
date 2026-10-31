@@ -43,6 +43,7 @@ import type {
   ContractRejectResponse,
   ContractRenewResponse,
   ContractRetrieveResponse,
+  ContractReviewFinding,
   ContractReviewResponse,
   ContractSearchResponse,
   ContractSubmitResponse,
@@ -58,6 +59,7 @@ import type {
 export interface ContractWorkflowService {
   storeEvidence: (request: StoreContractEvidence) => Promise<{ did: string; evidence_id: string }>
   lifecycle: (did: string) => Promise<ContractLifecycleEvent[]>
+  reviewFindings: (did: string) => Promise<ContractReviewFinding[]>
   listEvidence: (did: string) => Promise<ContractEvidence[]>
   retrieveEvidence: (did: string, evidenceId: string) => Promise<ContractEvidence>
 

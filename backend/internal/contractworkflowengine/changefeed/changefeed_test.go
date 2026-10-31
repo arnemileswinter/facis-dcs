@@ -52,3 +52,41 @@ func TestFeedPassesTheActivation(t *testing.T) {
 	require.Len(t, changes, 1)
 	require.Equal(t, Change{DID: "did:contract:1", EventType: "ACTIVATE_CONTRACT"}, <-changes)
 }
+
+// DCS-FR-CWE-24, DCS-FR-CWE-27: a change that a counterparty instance sent
+// (an offer, a counteroffer, a signed copy) reaches the dashboards.
+func TestAReceivedPeerExchangeIsStreamed(t *testing.T) {
+	feed := New()
+	changes, stop := feed.Subscribe()
+	defer stop()
+
+	feed.Handle(busEvent(t, "PEER_EXCHANGE", `{"did":"did:contract:1","exchange":"post_pdf","direction":"RECEIVED"}`))
+
+	require.Len(t, changes, 1)
+	require.Equal(t, Change{DID: "did:contract:1", EventType: "PEER_EXCHANGE"}, <-changes)
+}
+
+// DCS-FR-CWE-24: a subscriber that falls behind loses changes, so its
+// subscription ends and it reloads; the other subscribers go on.
+func TestASubscriberThatFallsBehindIsClosed(t *testing.T) {
+	feed := New()
+	slow, stopSlow := feed.Subscribe()
+	defer stopSlow()
+	for i := 0; i < cap(slow)+1; i++ {
+		feed.Publish(Change{DID: "did:contract:1", EventType: "UPDATE_CONTRACT"})
+	}
+	for range cap(slow) {
+		<-slow
+	}
+	select {
+	case _, open := <-slow:
+		require.False(t, open, "a subscriber that lost a change is closed")
+	default:
+		t.Fatal("a subscriber that lost a change is closed")
+	}
+
+	fresh, stopFresh := feed.Subscribe()
+	defer stopFresh()
+	feed.Publish(Change{DID: "did:contract:2", EventType: "UPDATE_CONTRACT"})
+	require.Equal(t, "did:contract:2", (<-fresh).DID)
+}

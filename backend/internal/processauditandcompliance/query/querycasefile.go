@@ -66,6 +66,38 @@ type CaseEvent struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
+// CaseSummary is one incident case in the case list.
+type CaseSummary struct {
+	CaseID     string     `db:"case_id"`
+	DID        string     `db:"did"`
+	LinkedTo   string     `db:"linked_to"`
+	ReportedBy string     `db:"reported_by"`
+	ReportedAt time.Time  `db:"reported_at"`
+	Findings   int        `db:"findings"`
+	ExportedAt *time.Time `db:"exported_at"`
+}
+
+// Cases lists every incident case, newest first.
+func Cases(ctx context.Context, db sqlx.QueryerContext) ([]CaseSummary, error) {
+	var cases []CaseSummary
+	if err := sqlx.SelectContext(ctx, db, &cases, `
+        WITH reported AS (
+            SELECT event_data->>'case_id' AS case_id, COALESCE(min(did), '') AS did,
+                   COALESCE(min(event_data->>'reported_by'), '') AS reported_by, min(created_at) AS reported_at,
+                   count(*) AS findings
+            FROM outbox_events WHERE event_type = 'PAC_INCIDENT_REPORT'
+            GROUP BY event_data->>'case_id')
+        SELECT r.case_id, r.did, r.reported_by, r.reported_at, r.findings,
+               CASE WHEN EXISTS (SELECT 1 FROM contracts c WHERE c.did = r.did) THEN 'contract' ELSE 'template' END AS linked_to,
+               (SELECT max(x.created_at) FROM outbox_events x
+                 WHERE x.event_type = 'PAC_CASE_FILE_EXPORTED' AND x.event_data->>'case_id' = r.case_id) AS exported_at
+        FROM reported r
+        ORDER BY r.reported_at DESC, r.case_id`); err != nil {
+		return nil, fmt.Errorf("could not read incident cases: %w", err)
+	}
+	return cases, nil
+}
+
 type CaseFileQry struct {
 	CaseID        string
 	ExportedBy    string
@@ -76,6 +108,9 @@ type CaseFileQry struct {
 
 type CaseFileExporter struct {
 	DB *sqlx.DB
+	// Authorize refuses a caller who may not read the DID the case is linked
+	// to. Its error is returned unchanged.
+	Authorize func(ctx context.Context, did string) error
 }
 
 // Handle assembles the case file and records its export with the
@@ -102,6 +137,9 @@ func (h *CaseFileExporter) Handle(ctx context.Context, query CaseFileQry) ([]byt
 		return nil, ErrCaseNotFound
 	}
 	file.DID = file.Findings[0].DID
+	if err := h.Authorize(ctx, file.DID); err != nil {
+		return nil, err
+	}
 	if err := tx.SelectContext(ctx, &file.ComplianceRisks, `
         SELECT risk_type, detail, first_detected_at, last_seen_at, resolved_at
         FROM compliance_risk_findings WHERE contract_did = $1

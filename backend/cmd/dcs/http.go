@@ -44,7 +44,6 @@ import (
 	signaturemanagement "digital-contracting-service/gen/signature_management"
 	templatecatalogueintegration "digital-contracting-service/gen/template_catalogue_integration"
 	templaterepository "digital-contracting-service/gen/template_repository"
-	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/processauditandcompliance/workflowgate"
@@ -240,8 +239,8 @@ func handleHTTPServer(ctx context.Context, u *url.URL, authEndpoints *genauth.En
 
 	outerMux := newOuterMux(webhookPlatform, provenance.StatusListHandler(statusList), mux)
 
-	var handler http.Handler = outerMux
-	handler = middleware.RateLimitAuthenticated(db, conf.APIRateLimitPerMinute(), handler)
+	handler := recordRoute(outerMux)
+	handler = middleware.ResponseHeaders(handler)
 	handler = reportContentTypeMiddleware(handler)
 	handler = evidenceBodyLimit(handler)
 	handler = service.RequestContextMiddleware(handler)
@@ -390,7 +389,15 @@ func httpsMiddleware(publicBaseURL string, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+		// A proxy that appends adds its hop on the right; the entries to its
+		// left are sent by the client.
+		var proto string
+		if values := r.Header.Values("X-Forwarded-Proto"); len(values) > 0 {
+			proto = values[len(values)-1]
+			if i := strings.LastIndex(proto, ","); i >= 0 {
+				proto = proto[i+1:]
+			}
+		}
 		switch strings.ToLower(strings.TrimSpace(proto)) {
 		case "http":
 			// 308 keeps the method and the body of a POST.
@@ -545,23 +552,64 @@ func errorFormatter(ctx context.Context, err error) goahttp.Statuser {
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusServiceUnavailable}
 		case "conflict":
 			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusConflict}
+		case "too_many_requests":
+			return &errorResponse{ErrorResponse: resp.(*goahttp.ErrorResponse), statusCode: http.StatusTooManyRequests}
 		}
 	}
 
 	return resp
 }
 
+// metricsMiddleware labels the request metrics with values from bounded
+// sets only (DCS-NFR-PER-01): the route pattern that served the request, or
+// "unmatched", and a known HTTP method, or "OTHER". So requests to unknown
+// paths or with invented methods add no new series.
 func metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, status: 200}
-		next.ServeHTTP(wrapped, r)
+		route := new(string)
+		next.ServeHTTP(wrapped, r.WithContext(context.WithValue(r.Context(), routeKey{}, route)))
 		duration := time.Since(start).Seconds()
 		status := strconv.Itoa(wrapped.status)
+		method := metricsMethod(r.Method)
+		path := *route
+		if path == "" {
+			path = "unmatched"
+		}
 
-		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path, status).Observe(duration)
-		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, status).Inc()
+		httpRequestDuration.WithLabelValues(method, path, status).Observe(duration)
+		httpRequestsTotal.WithLabelValues(method, path, status).Inc()
 	})
+}
+
+type routeKey struct{}
+
+// recordRoute wraps the router. The routers set r.Pattern on the request they
+// get, so after the request it holds the pattern of the route that served it:
+// a Goa route ("/contract/{did}"), an outer route ("/orce/"), or "/" when no
+// route below the outer router matched.
+func recordRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		route, ok := r.Context().Value(routeKey{}).(*string)
+		if !ok {
+			return
+		}
+		pattern := r.Pattern
+		if i := strings.Index(pattern, "/"); i >= 0 {
+			pattern = pattern[i:]
+		}
+		*route = pattern
+	})
+}
+
+func metricsMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return "OTHER"
 }
 
 type responseWriter struct {

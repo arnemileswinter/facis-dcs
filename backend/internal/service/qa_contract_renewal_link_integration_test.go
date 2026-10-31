@@ -9,6 +9,7 @@ import (
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/pgtest"
+	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
 
@@ -25,7 +26,7 @@ func TestQAContractListNamesTheRenewedContractPostgres(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := (&cwepg.PostgresContractRepo{}).ReadAllMetaData(ctx, tx, datatype.Pagination{})
+	rows, err := (&cwepg.PostgresContractRepo{}).ReadAllMetaData(ctx, tx, datatype.Pagination{}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	renews := map[string]string{}
 	for _, row := range rows {

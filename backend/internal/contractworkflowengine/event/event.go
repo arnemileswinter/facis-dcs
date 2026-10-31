@@ -366,8 +366,10 @@ type RetrieveAllEvent struct {
 // RetrieveArchivedEvent is emitted when archive data is retrieved. It names
 // every archived contract the caller received (DCS-FR-CSA-18).
 type RetrieveArchivedEvent struct {
-	RetrievedBy  string   `json:"retrieved_by"`
-	ContractDIDs []string `json:"contract_dids"`
+	RetrievedBy  string             `json:"retrieved_by"`
+	HolderDID    string             `json:"holder_did"`
+	UserRoles    userrole.UserRoles `json:"user_roles"`
+	ContractDIDs []string           `json:"contract_dids"`
 	// SectionIDs names the archived sections the caller received
 	// (DCS-FR-CSA-26); empty for a read of whole contracts.
 	SectionIDs []string  `json:"section_ids,omitempty"`
@@ -377,10 +379,12 @@ type RetrieveArchivedEvent struct {
 // SearchArchivedEvent is emitted when the archive is searched. It names the
 // search criteria and every archived contract in the result (DCS-FR-CSA-18).
 type SearchArchivedEvent struct {
-	RetrievedBy  string            `json:"retrieved_by"`
-	Criteria     map[string]string `json:"criteria"`
-	ContractDIDs []string          `json:"contract_dids"`
-	OccurredAt   time.Time         `json:"occurred_at"`
+	RetrievedBy  string             `json:"retrieved_by"`
+	HolderDID    string             `json:"holder_did"`
+	UserRoles    userrole.UserRoles `json:"user_roles"`
+	Criteria     map[string]string  `json:"criteria"`
+	ContractDIDs []string           `json:"contract_dids"`
+	OccurredAt   time.Time          `json:"occurred_at"`
 }
 
 // EventType implements [event.Event].
@@ -518,6 +522,28 @@ func (e StoreArchivedEvent) EventType() string {
 
 // GetDID implements [event.Event].
 func (e StoreArchivedEvent) GetDID() string {
+	return e.DID
+}
+
+// StoreExecutionProofEvent is emitted when the proof of contract execution
+// over every signature is stored (DCS-FR-SM-10).
+type StoreExecutionProofEvent struct {
+	DID                string                `json:"did"`
+	ContentHash        string                `json:"content_hash"`
+	ArchiveContentHash string                `json:"archive_content_hash"`
+	PDFHash            string                `json:"pdf_hash"`
+	NotaryReceipt      *ArchiveNotaryReceipt `json:"notary_receipt,omitempty"`
+	TSAReceipt         *ArchiveTSAReceipt    `json:"tsa_receipt,omitempty"`
+	OccurredAt         time.Time             `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreExecutionProofEvent) EventType() string {
+	return eventtype.StoreExecutionProof.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreExecutionProofEvent) GetDID() string {
 	return e.DID
 }
 
@@ -855,6 +881,25 @@ func (e CataloguePublishEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e CataloguePublishEvent) GetDID() string {
+	return e.DID
+}
+
+// CatalogueWithdrawEvent is emitted when a contract's catalogue entry is
+// revoked (DCS-IR-CWE-10, DCS-FR-CWE-23).
+type CatalogueWithdrawEvent struct {
+	DID        string    `json:"did"`
+	AssetHash  string    `json:"asset_hash"`
+	State      string    `json:"state"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType implements the Event interface.
+func (e CatalogueWithdrawEvent) EventType() string {
+	return eventtype.WithdrawCatalogue.String()
+}
+
+// GetDID implements the Event interface.
+func (e CatalogueWithdrawEvent) GetDID() string {
 	return e.DID
 }
 

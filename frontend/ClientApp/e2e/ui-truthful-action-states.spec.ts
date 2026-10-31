@@ -49,6 +49,8 @@ test('Non-compliance monitoring renders mutually exclusive idle, loading, error,
   page,
 }) => {
   await authenticate(page, ['Compliance Officer'])
+  await page.route('**/pac/cases', (route) => json(route, []))
+  await page.route('**/pac/workflow-gates**', (route) => json(route, []))
   let monitor: Route | undefined
   await page.route('**/pac/monitor', (route) => {
     monitor = route

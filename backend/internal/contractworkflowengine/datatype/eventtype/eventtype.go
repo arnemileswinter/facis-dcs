@@ -42,14 +42,18 @@ const (
 	SearchArchived              EventType = "SEARCH_ARCHIVED_CONTRACTS"
 	StoreArchiveEvidence        EventType = "STORE_ARCHIVE_EVIDENCE"
 	StoreArchiveSection         EventType = "STORE_ARCHIVE_SECTION"
-	ArchiveOperationFailed      EventType = "ARCHIVE_OPERATION_FAILED"
-	RetrieveByID                EventType = "RETRIEVE_CONTRACT_BY_ID"
-	AccessDenied                EventType = "CONTRACT_ACCESS_DENIED"
-	RetrieveHistoryByDID        EventType = "RETRIEVE_CONTRACT_HISTORY_BY_DID"
-	Search                      EventType = "SEARCH_CONTRACT"
-	Review                      EventType = "REVIEW_CONTRACT"
-	Audit                       EventType = "AUDIT_CONTRACT"
-	Terminate                   EventType = "TERMINATE_CONTRACT"
+	// StoreExecutionProof records the proof of contract execution over every
+	// signature, written when the last counterparty signature arrives after
+	// the archive entry (DCS-FR-SM-10).
+	StoreExecutionProof    EventType = "STORE_EXECUTION_PROOF"
+	ArchiveOperationFailed EventType = "ARCHIVE_OPERATION_FAILED"
+	RetrieveByID           EventType = "RETRIEVE_CONTRACT_BY_ID"
+	AccessDenied           EventType = "CONTRACT_ACCESS_DENIED"
+	RetrieveHistoryByDID   EventType = "RETRIEVE_CONTRACT_HISTORY_BY_DID"
+	Search                 EventType = "SEARCH_CONTRACT"
+	Review                 EventType = "REVIEW_CONTRACT"
+	Audit                  EventType = "AUDIT_CONTRACT"
+	Terminate              EventType = "TERMINATE_CONTRACT"
 	// Activate records the deployment acknowledgement that moves a contract
 	// from SIGNED to ACTIVE.
 	Activate                 EventType = "ACTIVATE_CONTRACT"
@@ -64,6 +68,10 @@ const (
 	// PublishCatalogue records that a contract's metadata was registered in
 	// the Federated Catalogue (DCS-IR-CWE-10).
 	PublishCatalogue EventType = "PUBLISH_CONTRACT_TO_CATALOGUE"
+	// WithdrawCatalogue records that a contract's catalogue entry was revoked,
+	// because the contract left the published states or was registered again
+	// (DCS-IR-CWE-10, DCS-FR-CWE-23).
+	WithdrawCatalogue EventType = "WITHDRAW_CONTRACT_FROM_CATALOGUE"
 	// Export is emitted when a contract bundle (ZIP) is exported. An export
 	// is a retrieval-class action and is recorded in the audit log
 	// (FR-CSA-18). Kept as the bare "EXPORT" token so the audit trail

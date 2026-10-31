@@ -2,15 +2,21 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId, useTemplateRef, watch } from 'vue'
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
+import { isEditableContractState } from '@/types/contract-state'
 import { downloadBlob } from '@/utils/download-blob'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractEvidence } from '@/models/contract/contract-evidence'
 
 const props = defineProps<{ contract: Contract }>()
 const auth = useAuthStore()
-// The creator adds evidence while creating the contract (DCS-IR-CWE-02).
+// The creator adds evidence while the contract is a draft (DCS-IR-CWE-02); the
+// manager stores evidence in every lifecycle state (DCS-IR-CWE-12).
 const canStore = computed(
-  () => auth.user?.roles.some((role) => role === 'CONTRACT_MANAGER' || role === 'CONTRACT_CREATOR') ?? false,
+  () =>
+    auth.user?.roles.some(
+      (role) =>
+        role === 'CONTRACT_MANAGER' || (role === 'CONTRACT_CREATOR' && isEditableContractState(props.contract.state)),
+    ) ?? false,
 )
 const entries = ref<ContractEvidence[]>([])
 const loading = ref(false)

@@ -175,15 +175,17 @@ Feature: Real signing vertical - PAdES signature, wallet-driven signing ceremony
     Given contract "RSV Summary VC Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerFourteen"
     Then a ContractSigningSummaryCredential for contract "RSV Summary VC Contract" is embedded inside the PAdES ByteRange
 
-  # @skip — deferred BY DECISION. The wallet-driven remote-signing ceremony
-  # produces the PAdES signature over the PDF; a detached JAdES over the
-  # machine-readable JSON-LD is not yet emitted by the wallet/DSS path. The
-  # vertical takes precedence; wallet-JAdES is follow-up research. Un-skip once
-  # the ceremony emits the JAdES artifact.
-  @DCS-FR-SM-02 @DCS-FR-SM-11 @skip
+  # The wallet signs the published request's second document (the canonical
+  # JSON-LD payload) as a JAdES next to the PAdES over the PDF
+  # (testWallet/dcs_wallet/oid4vp_signing.py).
+  @DCS-FR-SM-02 @DCS-FR-SM-11
   Scenario: The ceremony also produces a JAdES signature over the machine-readable JSON-LD
-    Given contract "RSV JAdES Contract" has an AES-signed PDF via a completed ceremony for signatory "SignerJades"
-    Then the signature view for contract "RSV JAdES Contract" carries a JAdES signature that verifies over the contract JSON-LD
+    Given contract "RSV JAdES Contract" is APPROVED and has completed a signing ceremony for signatory "SignerJades"
+    When the signer publishes the OID4VP signing request for contract "RSV JAdES Contract"
+    Then get http 200:Success code
+    When the wallet signs contract "RSV JAdES Contract" by consuming the OID4VP signing request as "SignerJades"
+    Then the wallet callback reports the contract "RSV JAdES Contract" as SIGNED
+    And the signature view for contract "RSV JAdES Contract" carries a JAdES signature that verifies over the contract JSON-LD
 
   # Uses the IPFS CID-swap seam (steps/support/tamper_seam.py). See
   # steps/real_signing_vertical/dcs_real_signing_vertical_tamper_steps.py's

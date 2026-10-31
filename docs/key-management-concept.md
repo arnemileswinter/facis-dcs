@@ -14,8 +14,13 @@ rest and key-shredding erasure).
 
 ## 1. Custody model
 
-All DCS-held private keys live in one PKCS#11 token and never leave it. The
-backend opens the token via `PKCS11_MODULE_PATH`, `PKCS11_TOKEN_LABEL` and
+The private keys that the DCS attests and protects with — the DID identity,
+VC, OpenID4VP request, C2PA and ECDH keys of §2 — live in one PKCS#11 token
+and never leave it. Two groups of private keys are not in the token: the
+internal TLS CA key and the shared in-cluster TLS server key, which Helm
+generates into Kubernetes Secrets, and the keys that Hydra signs access
+tokens with, which Hydra keeps encrypted in its database
+([ADR-38](adr-38-recorded-deviations-of-the-pilot.md) §6). The backend opens the token via `PKCS11_MODULE_PATH`, `PKCS11_TOKEN_LABEL` and
 `PKCS11_PIN`; keys are located by `CKA_LABEL` and are generated
 non-extractable. Development, CI and staging use a SoftHSM2 software token;
 production points the same three variables at a real HSM's PKCS#11 module —

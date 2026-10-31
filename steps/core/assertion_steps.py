@@ -42,7 +42,7 @@ def step_then_denied_to_many_attempts(context):
     # proves the lockout itself (FR-UC-01-4).
     cursor = context.db.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM ip_lockouts WHERE locked_until > NOW()")
+        cursor.execute("SELECT COUNT(*) FROM lockouts WHERE locked_until > NOW()")
         locked = cursor.fetchone()[0]
     finally:
         cursor.close()

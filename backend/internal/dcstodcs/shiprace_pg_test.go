@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -78,6 +79,7 @@ type shipPeer struct {
 	did              string
 	url              string
 	refuseCredential bool
+	refusal          error
 	posts            atomic.Int32
 	inFlight         atomic.Int32
 	maxInFlight      atomic.Int32
@@ -85,6 +87,9 @@ type shipPeer struct {
 
 func (p *shipPeer) PostPdf(context.Context, *dcstodcs.DCSToDCSContractPdfRequest) (*dcstodcs.DCSToDCSContractPdfResponse, error) {
 	p.posts.Add(1)
+	if p.refusal != nil {
+		return nil, p.refusal
+	}
 	return &dcstodcs.DCSToDCSContractPdfResponse{}, nil
 }
 
@@ -236,4 +241,21 @@ func TestConcurrentShipsOfAnAcceptedOfferPostItOnce(t *testing.T) {
 	require.NoError(t, db.Get(&sent, `SELECT count(*) FROM outbox_events WHERE event_type = 'PEER_EXCHANGE' AND did = $1`, did))
 	require.Equal(t, 1, sent)
 	require.EqualValues(t, 1, peer.maxInFlight.Load(), "two ship attempts of one contract ran at the same time")
+}
+
+// CWE-7: a peer whose copy is closed answers gone. The sender records the
+// revision as delivered, so it posts it once and leaves no retry entry.
+func TestARevisionThePeerRefusesAsGoneIsShippedOnce(t *testing.T) {
+	db := pgtest.Open(t)
+	peer := startShipPeer(t, false)
+	peer.refusal = dcstodcs.MakeGone(errors.New("the local copy is TERMINATED"))
+	did := "ship-gone-" + strings.ToLower(rand.Text()[:8])
+	s := shipFixture(t, db, peer, did)
+
+	require.NoError(t, s.shipContractPDF(context.Background(), did))
+	require.NoError(t, s.shipContractPDF(context.Background(), did))
+	require.EqualValues(t, 1, peer.posts.Load())
+	var retryEntries int
+	require.NoError(t, db.Get(&retryEntries, `SELECT count(*) FROM sync_fails WHERE did = $1`, did))
+	require.Zero(t, retryEntries)
 }

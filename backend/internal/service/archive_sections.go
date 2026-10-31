@@ -25,8 +25,9 @@ import (
 	"github.com/lib/pq"
 )
 
-// storeSection archives one section of the latest archived version of a
-// contract for the parties assigned to it (DCS-FR-CSA-26). Each party must be
+// storeSection archives one section of the given archived version of a
+// contract, the latest when none is given, for the parties assigned to it
+// (DCS-FR-CSA-26). Each party must be
 // able to read the contract.
 func (s *contractStorageArchivesrvc) storeSection(ctx context.Context, p *contractstoragearchive.StorePayload) (*contractstoragearchive.ArchiveStoreResponse, error) {
 	sectionID := strings.TrimSpace(stringValue(p.SectionID))
@@ -56,10 +57,10 @@ func (s *contractStorageArchivesrvc) storeSection(ctx context.Context, p *contra
 	err = tx.GetContext(ctx, &entry, `
 		SELECT a.contract_version, a.contract_snapshot, COALESCE(c.origin, '') AS origin, c.created_by, c.contract_data
 		FROM contract_archive_entries a JOIN contracts c ON c.did = a.did
-		WHERE a.did = $1 AND a.archive_status <> 'DELETED'
-		ORDER BY a.contract_version DESC LIMIT 1`, p.Did)
+		WHERE a.did = $1 AND a.archive_status <> 'DELETED' AND ($2 = 0 OR a.contract_version = $2)
+		ORDER BY a.contract_version DESC LIMIT 1`, p.Did, intValue(p.ContractVersion))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, contractstoragearchive.MakeBadRequest(fmt.Errorf("no live archive entry for DID %q", p.Did))
+		return nil, contractstoragearchive.MakeBadRequest(fmt.Errorf("no live archive entry for DID %q and version %d", p.Did, intValue(p.ContractVersion)))
 	}
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
@@ -225,6 +226,8 @@ func (s *contractStorageArchivesrvc) Sections(ctx context.Context, p *contractst
 	}
 	evt := contractevents.RetrieveArchivedEvent{
 		RetrievedBy:  scope.Organization,
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 		ContractDIDs: []string{p.Did},
 		SectionIDs:   returned,
 		OccurredAt:   time.Now().UTC(),

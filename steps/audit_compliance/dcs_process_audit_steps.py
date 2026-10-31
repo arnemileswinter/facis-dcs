@@ -101,8 +101,13 @@ def step_when_compliance_officer_monitors(context):
     import requests as _requests  # noqa: PLC0415
 
     headers = AuthService.get_headers_for_roles(["Compliance Officer"])
+    # The denied actors are named only to a request that gives a
+    # justification (DCS-FR-PACM-04).
     context.requests_response = _requests.get(
-        pac_monitor_url(context), headers=headers, timeout=context.http_timeout_seconds
+        pac_monitor_url(context),
+        params={"justification": "BDD continuous monitoring"},
+        headers=headers,
+        timeout=context.http_timeout_seconds,
     )
 
 
