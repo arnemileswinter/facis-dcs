@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/reviewtaskstate"
@@ -96,6 +97,10 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 			return errors.New("invalid user permission")
 		}
 
+		if err := templatestructure.CheckTemplate(ctx, tx, cmd.DID); err != nil {
+			return err
+		}
+
 		err = createTasks(ctx, tx, h.RTRepo, h.ATRepo, cmd)
 		if err != nil {
 			return err
@@ -107,6 +112,10 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator, userrole.TemplateManager) {
 			return errors.New("invalid user permission")
+		}
+
+		if err := templatestructure.CheckTemplate(ctx, tx, cmd.DID); err != nil {
+			return err
 		}
 
 		err := h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)

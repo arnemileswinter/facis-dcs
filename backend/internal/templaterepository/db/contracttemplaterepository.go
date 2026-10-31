@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"digital-contracting-service/internal/base/datatype"
 )
@@ -26,6 +27,7 @@ type ContractTemplate struct {
 	TemplateData *datatype.JSON `db:"template_data"`
 	BaseTemplate *string        `db:"base_template"`
 	SearchableMetadata
+	Structure
 }
 
 // SearchableMetadata is the template metadata searched by DCS-FR-TR-10.
@@ -33,6 +35,13 @@ type SearchableMetadata struct {
 	Jurisdiction     *string `db:"jurisdiction"`
 	Industry         *string `db:"industry"`
 	ComplianceStatus string  `db:"compliance_status"`
+}
+
+// Structure is the hierarchy level of the template and the templates it
+// requires (DCS-FR-TR-02, DCS-FR-TR-23).
+type Structure struct {
+	TemplateLevel     string         `db:"template_level"`
+	RequiredTemplates pq.StringArray `db:"required_templates"`
 }
 
 type ContractTemplateMetadata struct {
@@ -50,6 +59,7 @@ type ContractTemplateMetadata struct {
 	Outdated     *bool     `db:"outdated"`
 	LatestDID    *string   `db:"latest_did"`
 	SearchableMetadata
+	Structure
 }
 
 type ContractTemplateProcessData struct {
@@ -77,6 +87,9 @@ type ContractTemplateUpdateData struct {
 	TemplateData *datatype.JSON `db:"template_data"`
 	Jurisdiction *string        `db:"jurisdiction"`
 	Industry     *string        `db:"industry"`
+	// TemplateLevel and RequiredTemplates are left unchanged when nil.
+	TemplateLevel     *string
+	RequiredTemplates []string
 }
 
 type ContractTemplateHistory struct {

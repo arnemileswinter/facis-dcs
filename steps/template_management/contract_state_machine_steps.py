@@ -475,6 +475,7 @@ def step_given_draft_with_open_placeholder(context, name):
             "@type": "dcs:ContractField",
             "dcs:label": "Payment Amount",
             "dcs:datatype": "xsd:decimal",
+            "dcs:shape": {"@id": "https://w3id.org/facis/dcs/taxonomy/v1#field-contract-payment-amount"},
             "dcs:required": True,
         }
     ]

@@ -34,8 +34,11 @@ type UpdateCmd struct {
 	TemplateData *datatype.JSON
 	Jurisdiction *string
 	Industry     *string
-	HolderDID    string
-	UserRoles    userrole.UserRoles
+	// TemplateLevel and RequiredTemplates are left unchanged when nil.
+	TemplateLevel     *string
+	RequiredTemplates []string
+	HolderDID         string
+	UserRoles         userrole.UserRoles
 }
 
 type Updater struct {
@@ -134,6 +137,9 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		TemplateData: cmd.TemplateData,
 		Jurisdiction: cmd.Jurisdiction,
 		Industry:     cmd.Industry,
+
+		TemplateLevel:     cmd.TemplateLevel,
+		RequiredTemplates: cmd.RequiredTemplates,
 	}
 	err = h.CTRepo.Update(ctx, tx, newData)
 	if err != nil {

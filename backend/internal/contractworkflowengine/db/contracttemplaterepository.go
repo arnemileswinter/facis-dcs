@@ -14,6 +14,8 @@ type ContractTemplateQueryResult struct {
 	TemplateVersion int            `db:"version"`
 	Name            *string        `db:"name"`
 	Description     *string        `db:"description"`
+	// ComplianceStatus is the result of the template policy audit at approval (DCS-FR-TR-07).
+	ComplianceStatus string `db:"compliance_status"`
 }
 
 type ContractTemplateMetadata struct {

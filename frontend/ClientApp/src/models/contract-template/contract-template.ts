@@ -14,7 +14,45 @@ export interface TemplateSearchableMetadata {
   compliance_status?: TemplateComplianceStatus
 }
 
-export interface ContractTemplate extends TemplateSearchableMetadata {
+export const templateLevels = ['FRAME_AGREEMENT', 'AGREEMENT', 'SUB_AGREEMENT', 'ADDENDUM'] as const
+export type TemplateLevel = (typeof templateLevels)[number]
+
+/** DCS-FR-TR-02, DCS-FR-TR-23: the hierarchy level and the templates a parent contract must come from. */
+export interface TemplateStructure {
+  template_level?: TemplateLevel
+  required_templates?: string[]
+}
+
+const templateLevelRank: Record<TemplateLevel, number> = {
+  FRAME_AGREEMENT: 0,
+  AGREEMENT: 1,
+  SUB_AGREEMENT: 1,
+  ADDENDUM: 2,
+}
+
+/** A template can require only a template of a higher level (backend templatestructure.CheckDependency). */
+export function canRequire(level: TemplateLevel, dependency: TemplateLevel): boolean {
+  return templateLevelRank[dependency] < templateLevelRank[level]
+}
+
+const requirableStates: ReadonlySet<ContractTemplateState> = new Set(['APPROVED', 'REGISTERED', 'PUBLISHED'])
+
+/** The templates a template of the given level can require: approved contract templates of a higher level. */
+export function requirableTemplates(
+  templates: ContractTemplate[],
+  level: TemplateLevel,
+  selfDid: string | null,
+): ContractTemplate[] {
+  return templates.filter(
+    (template) =>
+      template.did !== selfDid &&
+      template.template_type === 'CONTRACT_TEMPLATE' &&
+      requirableStates.has(template.state) &&
+      canRequire(level, template.template_level ?? 'AGREEMENT'),
+  )
+}
+
+export interface ContractTemplate extends TemplateSearchableMetadata, TemplateStructure {
   did: string
   created_by: string
   created_at: string

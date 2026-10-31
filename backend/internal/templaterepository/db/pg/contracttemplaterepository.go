@@ -48,6 +48,7 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 		WITH source AS (
 			SELECT
 				did, template_type, party_type, name, description, created_by, template_data, jurisdiction, industry,
+				template_level, required_templates,
 				CASE
 					WHEN state IN ('REGISTERED', 'PUBLISHED') THEN version + 1
 					ELSE 1
@@ -61,12 +62,13 @@ func (r *PostgresContractTemplateRepo) CopyFromDID(ctx context.Context, tx *sqlx
 		)
 		INSERT INTO contract_templates
 			(did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
-			 template_data, base_template, jurisdiction, industry)
+			 template_data, base_template, jurisdiction, industry, template_level, required_templates)
 		SELECT
 			$1,
 			source.new_version,
 			'DRAFT', source.template_type, source.party_type, source.name, source.description, source.created_by, NOW(), NOW(),
-			source.template_data, source.new_base_template, source.jurisdiction, source.industry
+			source.template_data, source.new_base_template, source.jurisdiction, source.industry,
+			source.template_level, source.required_templates
 		FROM source
 		WHERE source.new_base_template IS NULL
 		   OR NOT EXISTS (
@@ -125,14 +127,17 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 	statement := `
         INSERT INTO contract_templates (
             did, created_by, state, name,
-            description, template_data, template_type, party_type, base_template, jurisdiction, industry
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            description, template_data, template_type, party_type, base_template, jurisdiction, industry,
+            template_level, required_templates
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                  COALESCE(NULLIF($12, ''), 'AGREEMENT'), COALESCE($13::text[], '{}'))
         RETURNING created_at
     `
 	var createdAt time.Time
 	err := tx.GetContext(ctx, &createdAt, statement,
 		data.DID, data.CreatedBy, data.State, data.Name,
 		data.Description, data.TemplateData, data.TemplateType, data.PartyType, data.DID, data.Jurisdiction, data.Industry,
+		data.TemplateLevel, data.RequiredTemplates,
 	)
 	if err != nil {
 		return nil, err
@@ -144,7 +149,7 @@ func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sql
 	query := `
         SELECT did, version, state, name, description,
                created_by, created_at, updated_at, template_data, template_type, party_type,
-               base_template, jurisdiction, industry, compliance_status
+               base_template, jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates WHERE did = $1
     `
 	var ct db.ContractTemplate
@@ -177,7 +182,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 		SELECT
 			t.did, t.version, t.state, t.template_type, t.party_type, t.name,
 			t.description, t.created_by, t.created_at, t.updated_at,
-			t.base_template, t.jurisdiction, t.industry, t.compliance_status,
+			t.base_template, t.jurisdiction, t.industry, t.compliance_status, t.template_level, t.required_templates,
 			CASE
 				WHEN t.state NOT IN ('REGISTERED', 'PUBLISHED') THEN FALSE
 				ELSE t.version <> l.latest_version
@@ -208,7 +213,8 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values db.SearchValues, pagination datatype.Pagination) ([]db.ContractTemplateMetadata, error) {
 	query := `
         SELECT did, version, state, name, template_type, party_type, description,
-               created_by, created_at, updated_at, base_template, jurisdiction, industry, compliance_status
+               created_by, created_at, updated_at, base_template, jurisdiction, industry, compliance_status,
+               template_level, required_templates
         FROM contract_templates
     `
 
@@ -448,6 +454,12 @@ func createQuery(data db.ContractTemplateUpdateData) (*string, []interface{}, er
 	}
 	if data.Industry != nil {
 		addParam("industry", data.Industry)
+	}
+	if data.TemplateLevel != nil {
+		addParam("template_level", data.TemplateLevel)
+	}
+	if data.RequiredTemplates != nil {
+		addParam("required_templates", pq.Array(data.RequiredTemplates))
 	}
 	if len(columns) == 0 {
 		return nil, nil, errors.New("no fields to update")

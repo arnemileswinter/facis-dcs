@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tggo/goRDFlib/shacl"
+
 	"digital-contracting-service/internal/base/datatype"
 )
 
@@ -84,6 +86,8 @@ func AuditTemplatePolicies(raw *datatype.JSON, metadata TemplatePolicyAuditMetad
 		return nil, err
 	}
 
+	libraryFields := declaredLibraryFields(ctx, data)
+
 	findings := []PolicyFinding{}
 	if !isCanonicalEnvelope(data) {
 		findings = append(findings, templateStructureFinding(policySet, "template data must use the canonical dcs:documentStructure envelope"))
@@ -92,9 +96,39 @@ func AuditTemplatePolicies(raw *datatype.JSON, metadata TemplatePolicyAuditMetad
 		if !templatePolicyRuleApplies(rule, metadata.TemplateType) {
 			continue
 		}
-		findings = append(findings, evaluateTemplatePolicyRule(policySet, rule, data, metadata, ontology)...)
+		findings = append(findings, evaluateTemplatePolicyRule(policySet, rule, data, metadata, ontology, libraryFields)...)
 	}
 	return findings, nil
+}
+
+// declaredLibraryFields are the properties (sh:path) of the shapes libraries
+// the document declares in sh:shapesGraph, the canonical envelope excluded. A
+// library this hub does not hold adds no field, so a field bound to it stays
+// unknown.
+func declaredLibraryFields(ctx context.Context, data documentData) map[string]bool {
+	fields := map[string]bool{}
+	source, err := requireShapeSource()
+	if err != nil {
+		return fields
+	}
+	pathPredicate := shacl.IRI(shacl.SH + "path")
+	for _, anchor := range declaredShapesGraphs(data) {
+		if anchor.Name == source.CanonicalShapesName() {
+			continue
+		}
+		content, _, err := source.ShapesAt(ctx, anchor.Name, anchor.Version)
+		if err != nil {
+			continue
+		}
+		graph, err := shacl.LoadTurtleString(content, "urn:dcs:hub:"+anchor.Name)
+		if err != nil {
+			continue
+		}
+		for _, triple := range graph.All(nil, &pathPredicate, nil) {
+			fields[triple.Object.Value()] = true
+		}
+	}
+	return fields
 }
 
 func loadTemplatePolicySet() (*templatePolicySet, error) {
@@ -135,7 +169,7 @@ func resolveTemplatePolicyFile() (string, error) {
 	return "", errors.New("template policy file not found")
 }
 
-func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolicyRule, data documentData, metadata TemplatePolicyAuditMetadata, ontology *domainOntology) []PolicyFinding {
+func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolicyRule, data documentData, metadata TemplatePolicyAuditMetadata, ontology *domainOntology, libraryFields map[string]bool) []PolicyFinding {
 	switch rule.Builtin {
 	case "canonical_document_structure":
 		return auditCanonicalDocumentStructure(policySet, rule, data)
@@ -154,7 +188,7 @@ func evaluateTemplatePolicyRule(policySet *templatePolicySet, rule templatePolic
 	case "finished_template_state":
 		return auditFinishedTemplateState(policySet, rule, metadata)
 	case "canonical_domain_fields":
-		return auditCanonicalDomainFields(policySet, rule, data, ontology)
+		return auditCanonicalDomainFields(policySet, rule, data, ontology, libraryFields)
 	case "constrained_parameters_use_value_constraint":
 		return auditConstrainedParameters(policySet, rule, data, ontology)
 	case "required_domain_fields":
@@ -330,7 +364,13 @@ func auditPolicyOperandIntegrity(policySet *templatePolicySet, rule templatePoli
 	findings := []PolicyFinding{}
 	for _, policy := range policies {
 		policyID, _ := policy["@id"].(string)
-		constraints := policyConstraints(policy["odrl:constraint"])
+		// The leaves of a logical constraint and the constraints on the rule's
+		// duties are checked the same way as a direct constraint
+		// (ValidateContractClosed reads them the same way).
+		var constraints []map[string]any
+		for _, constraint := range append(policyConstraints(policy["odrl:constraint"]), dutyConstraints(policy["odrl:duty"])...) {
+			constraints = append(constraints, compactConstraintLeaves(constraint)...)
+		}
 		if len(constraints) == 0 {
 			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("policy %q requires odrl:constraint", policyID), "dcs:policies.odrl:constraint", ""))
 			continue
@@ -447,11 +487,14 @@ func auditFinishedTemplateState(policySet *templatePolicySet, rule templatePolic
 	return []PolicyFinding{newPolicyFinding(policySet, rule, fmt.Sprintf("template state %q is not one of the finished states: %s", metadata.State, strings.Join(states, ", ")), "state", "")}
 }
 
-func auditCanonicalDomainFields(policySet *templatePolicySet, rule templatePolicyRule, data documentData, ontology *domainOntology) []PolicyFinding {
+// auditCanonicalDomainFields accepts a field of the domain ontology and a
+// property of a shapes library the document declares (a data-object field,
+// ADR-23).
+func auditCanonicalDomainFields(policySet *templatePolicySet, rule templatePolicyRule, data documentData, ontology *domainOntology, libraryFields map[string]bool) []PolicyFinding {
 	findings := []PolicyFinding{}
 	forEachSemanticParameter(data, ontology, func(conditionID string, index int, param map[string]any) {
 		fieldIri, _ := param["fieldIri"].(string)
-		if _, ok := ontology.fields[fieldIri]; !ok {
+		if _, ok := ontology.fields[fieldIri]; !ok && !libraryFields[fieldIri] {
 			findings = append(findings, newPolicyFinding(policySet, rule, fmt.Sprintf("semantic condition %q uses unknown domain field %q", conditionID, fieldIri), fmt.Sprintf("semanticConditions.%s.parameters.%d", conditionID, index), fieldIri))
 		}
 	})

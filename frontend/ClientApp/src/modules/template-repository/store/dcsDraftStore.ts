@@ -34,7 +34,7 @@ import {
 } from '@/models/dcs-jsonld'
 import { declaredPartyRoles } from '@/utils/participant-selection'
 import type { SemanticConditionValue } from '@/models/contract/contract-data'
-import type { ContractTemplate } from '@/models/contract-template/contract-template'
+import type { ContractTemplate, TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateResponsible } from '@/models/contract-template/contract-template-responsible'
 import type {
   ContractTemplateCreateRequest,
@@ -68,6 +68,8 @@ export interface LoadDocumentMeta {
   partyType?: PartyType
   jurisdiction?: string
   industry?: string
+  templateLevel?: TemplateLevel
+  requiredTemplates?: string[]
   state?: ContractTemplateState | null
   version?: number | null
   created_at?: string | null
@@ -126,6 +128,8 @@ export const useDcsDraftStore = defineStore(storeId, {
         party_type: this.partyType,
         jurisdiction: this.jurisdiction || undefined,
         industry: this.industry || undefined,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -139,6 +143,8 @@ export const useDcsDraftStore = defineStore(storeId, {
         party_type: this.partyType,
         jurisdiction: this.jurisdiction,
         industry: this.industry,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -153,6 +159,8 @@ export const useDcsDraftStore = defineStore(storeId, {
         party_type: this.partyType,
         jurisdiction: this.jurisdiction,
         industry: this.industry,
+        template_level: this.templateLevel,
+        required_templates: this.requiredTemplates,
         template_data: this.templateDocument,
       }
     },
@@ -173,6 +181,8 @@ export const useDcsDraftStore = defineStore(storeId, {
           partyType: meta.partyType,
           jurisdiction: meta.jurisdiction ?? '',
           industry: meta.industry ?? '',
+          templateLevel: meta.templateLevel ?? 'AGREEMENT',
+          requiredTemplates: meta.requiredTemplates ?? [],
           did: meta.did,
           documentIri: rawDoc['@id'] ?? null,
           name: meta.name ? meta.name : (metadata['dcs:title'] ?? ''),
@@ -201,6 +211,8 @@ export const useDcsDraftStore = defineStore(storeId, {
         partyType: meta.partyType,
         jurisdiction: meta.jurisdiction ?? '',
         industry: meta.industry ?? '',
+        templateLevel: meta.templateLevel ?? 'AGREEMENT',
+        requiredTemplates: meta.requiredTemplates ?? [],
         did: meta.did,
         name: meta.name,
         description: meta.description,
@@ -1287,6 +1299,8 @@ const defaultState: Readonly<Omit<TemplateDraftState, 'blocks' | 'layout'>> = {
   partyType: undefined,
   jurisdiction: '',
   industry: '',
+  templateLevel: 'AGREEMENT',
+  requiredTemplates: [],
   templateType: TemplateType.component,
   state: undefined,
   version: null,
