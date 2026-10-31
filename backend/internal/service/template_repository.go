@@ -578,8 +578,20 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		CTRepo: s.CTRepo,
 	}
 	contractTemplate, err := queryHandler.Handle(ctx, qry)
+	if errors.Is(err, db.ErrContractTemplateNotFound) {
+		return nil, templaterepository.MakeNotFound(err)
+	}
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
+	}
+	var notes []*templaterepository.TemplateReviewNote
+	for _, note := range contractTemplate.ReviewNotes {
+		notes = append(notes, &templaterepository.TemplateReviewNote{
+			Kind:      note.Kind,
+			Text:      note.Text,
+			By:        &note.By,
+			CreatedAt: note.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	templateJSONLD, err := semanticmapper.BuildTemplateJSONLD(db.ContractTemplate{
 		DID:          contractTemplate.DID,
@@ -616,6 +628,7 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		ComplianceStatus:  &contractTemplate.ComplianceStatus,
 		TemplateLevel:     &contractTemplate.TemplateLevel,
 		RequiredTemplates: contractTemplate.RequiredTemplates,
+		ReviewNotes:       notes,
 	}, nil
 }
 
