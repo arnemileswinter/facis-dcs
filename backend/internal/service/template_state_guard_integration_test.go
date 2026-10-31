@@ -11,10 +11,14 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/command"
+	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
 	tpldb "digital-contracting-service/internal/templaterepository/db"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
+	"digital-contracting-service/internal/templaterepository/query"
 )
 
 // DCS-FR-TR-14: a state transition applies only from the state the command
@@ -81,6 +85,40 @@ func TestTemplateConcurrentSubmitCreatesOneTaskPairPostgres(t *testing.T) {
 	require.NoError(t, database.Get(&approvalTasks, `SELECT count(*) FROM contract_templates_approval_task WHERE did = 'tpl'`))
 	require.Equal(t, 1, reviewTasks)
 	require.Equal(t, 1, approvalTasks)
+}
+
+// DCS-IR-TR-03: a Template Manager edit of a template in review reopens the
+// review task, so the reviewer verifies the changed content before the
+// forward to approval.
+func TestTemplateManagerEditReopensReviewPostgres(t *testing.T) {
+	database := pgtest.Open(t)
+	ctx := context.Background()
+	require.NoError(t, semantichub.Seed(ctx, database))
+	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
+	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
+	const org = "did:web:org.example"
+	future := time.Now().Add(time.Hour)
+	data := datatype.JSON(compliantTemplateData)
+	require.NoError(t, (&command.Creator{DB: database, CTRepo: ctRepo}).Handle(ctx, command.CreateCmd{
+		DID: "tpl", CreatedBy: org, TemplateType: contracttemplatetype.ContractTemplate, PartyType: "SINGLE_PARTY",
+		TemplateData: &data, UserRoles: userrole.UserRoles{userrole.TemplateCreator},
+	}))
+	submitter := &command.Submitter{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}
+	require.NoError(t, submitter.Handle(ctx, command.SubmitCmd{DID: "tpl", UpdatedAt: future, SubmittedBy: org, UserRoles: userrole.UserRoles{userrole.TemplateCreator}}))
+	_, err := (&query.Verifier{DB: database, CTRepo: ctRepo, RTRepo: rtRepo}).Handle(ctx, query.VerifyQry{DID: "tpl", VerifiedBy: org, UserRoles: userrole.UserRoles{userrole.TemplateReviewer}})
+	require.NoError(t, err)
+
+	name := "changed by the manager"
+	require.NoError(t, (&command.UpdateManager{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}).Handle(ctx, command.UpdateManageCmd{
+		DID: "tpl", UpdatedAt: future, UpdatedBy: org, Name: &name, UserRoles: userrole.UserRoles{userrole.TemplateManager},
+	}))
+
+	var task string
+	require.NoError(t, database.Get(&task, `SELECT state FROM contract_templates_review_task WHERE did = 'tpl'`))
+	require.Equal(t, "OPEN", task)
+	forward := actionflag.Approval
+	err = submitter.Handle(ctx, command.SubmitCmd{DID: "tpl", UpdatedAt: future, SubmittedBy: org, ActionFlag: &forward, UserRoles: userrole.UserRoles{userrole.TemplateReviewer}})
+	require.ErrorContains(t, err, "needs to be verified")
 }
 
 // A write that does not change the content (here a state change) does not

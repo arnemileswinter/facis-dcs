@@ -44,6 +44,8 @@ type UpdateManageCmd struct {
 type UpdateManager struct {
 	DB     *sqlx.DB
 	CTRepo db.ContractTemplateRepo
+	RTRepo db.ReviewTaskRepo
+	ATRepo db.ApprovalTaskRepo
 }
 
 func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
@@ -87,6 +89,16 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		oldData.State == contracttemplatestate.Reviewed.String() ||
 		oldData.State == contracttemplatestate.Deleted.String() {
 		return errors.New("invalid contract template state")
+	}
+
+	// DCS-IR-TR-03: an edit in review needs a new verification.
+	if oldData.State == contracttemplatestate.Submitted.String() {
+		if err := h.RTRepo.ReopenTasks(ctx, tx, cmd.DID); err != nil {
+			return err
+		}
+		if err := h.ATRepo.ReopenTasks(ctx, tx, cmd.DID); err != nil {
+			return err
+		}
 	}
 
 	var templateType string

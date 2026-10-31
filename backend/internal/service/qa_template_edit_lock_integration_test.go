@@ -19,7 +19,7 @@ func TestQATemplateEditsLockedFromApprovedPostgres(t *testing.T) {
 	ctx := context.Background()
 	repo := &pg.PostgresContractTemplateRepo{}
 	updater := &command.Updater{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	future := time.Now().Add(time.Hour)
 
 	for _, state := range []string{"DRAFT", "REVIEWED", "APPROVED", "REGISTERED", "PUBLISHED", "DEPRECATED"} {

@@ -70,7 +70,7 @@ func TestQAPartyTypePostgres(t *testing.T) {
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "permission")
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "single", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "state")
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Time{}}), "reload")
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	require.ErrorContains(t, manager.Handle(ctx, command.UpdateManageCmd{DID: "single", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "state")
 	require.ErrorContains(t, manager.Handle(ctx, command.UpdateManageCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Time{}}), "reload")
 
@@ -98,7 +98,7 @@ func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
 	_, err = repo.Create(ctx, tx, db.ContractTemplate{DID: "managed", CreatedBy: "tester", State: "DRAFT", TemplateType: "CONTRACT_TEMPLATE", PartyType: "SINGLE_PARTY"})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	var expectedHistory []string
 	for index, change := range []struct{ value, expected, prior string }{
 		{"MULTI_PARTY", "MULTI_PARTY", "SINGLE_PARTY"},

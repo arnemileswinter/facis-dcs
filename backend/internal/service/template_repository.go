@@ -342,6 +342,8 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	handler := command.UpdateManager{
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
+		RTRepo: s.RTRepo,
+		ATRepo: s.ATRepo,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
