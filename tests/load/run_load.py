@@ -13,7 +13,8 @@ tests/bdd run_load_kind_once), which supplies the environment and the venv.
    capacity is the highest rate that held every limit; at that step the
    requests each replica served give its throughput at saturation. The test
    fails when two replicas hold less than one replica.
-5. Restores the replica count.
+5. Restores the replica count and the per-caller rate limit, which the run
+   lifts so that the phases measure the stack and not the limit of one caller.
 
 What one runner shows: the CI runner is one 4-vCPU node that also runs kind,
 PostgreSQL, IPFS, Keycloak, Hydra, ORCE, DSS, pdf-core and k6. Both replicas
@@ -150,6 +151,11 @@ def main():
     }
 
     original = int(kubectl("get", f"deployment/{DEPLOYMENT}", "-o", "jsonpath={.spec.replicas}"))
+    # k6 is one caller, and the per-caller budget (3000 requests a minute)
+    # would cap every phase at 50 requests/s. The load run lifts it, so the
+    # phases measure the stack; the 429 at the budget has its own scenario
+    # (features/12_system_based_contract_management/contract_lifecycle_via_api.feature).
+    kubectl("set", "env", f"deployment/{DEPLOYMENT}", "DCS_API_RATE_LIMIT_PER_MINUTE=1000000")
     ok = True
     try:
         scale(1)
@@ -173,6 +179,7 @@ def main():
             print(f"FAIL: two replicas held {capacities[2][0]} reads/s, less than one replica ({capacities[1][0]})", flush=True)
             ok = False
     finally:
+        kubectl("set", "env", f"deployment/{DEPLOYMENT}", "DCS_API_RATE_LIMIT_PER_MINUTE-")
         scale(original)
 
     lines = [
