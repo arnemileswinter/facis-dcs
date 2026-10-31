@@ -467,12 +467,25 @@ func auditFinishedTemplateHasClauseSemantics(policySet *templatePolicySet, rule 
 	structure, _ := topLevelValue(data, "documentStructure").(map[string]any)
 	blocks, _ := canonicalBlocks(structure)
 	fieldIDs := canonicalContractDataFieldIDs(data)
+	// A clause is also bound when the ODRL rule backed by its prose
+	// (dcs:prose) references a declared field.
+	ruleBound := map[string]bool{}
+	for _, rule := range collectODRLPolicyRules(topLevelValue(data, "policies")) {
+		prose, _ := rule["dcs:prose"].(map[string]any)
+		proseID, _ := prose["@id"].(string)
+		for _, ref := range collectClauseRefs(rule) {
+			if fieldIDs[ref] {
+				ruleBound[proseID] = true
+			}
+		}
+	}
 	for _, rawBlock := range blocks {
 		block, ok := rawBlock.(map[string]any)
 		if !ok || block["@type"] != "dcs:Clause" {
 			continue
 		}
-		if clauseHasContractDataBinding(block, fieldIDs) {
+		blockID, _ := block["@id"].(string)
+		if clauseHasContractDataBinding(block, fieldIDs) || ruleBound[blockID] {
 			return nil
 		}
 	}
@@ -553,11 +566,24 @@ func auditMetadataComplete(policySet *templatePolicySet, rule templatePolicyRule
 	return findings
 }
 
-// forEachSemanticParameter visits each top-level field. A field is
-// self-contained: its identity for domain-field audits is its dcs:shape @id
-// (falling back to its own @id), and it carries its value constraint inline
-// (dcs:valueConstraint).
+// forEachSemanticParameter visits each top-level field. The identity of a
+// field for domain-field audits is its dcs:shape @id. Without dcs:shape it is
+// the data-object property that references the field (a negotiable leaf,
+// ADR-23), else the field's own @id. A field carries its value constraint
+// inline (dcs:valueConstraint).
 func forEachSemanticParameter(data documentData, _ *domainOntology, visit func(conditionID string, index int, param map[string]any)) {
+	leafPaths := map[string]string{}
+	objects, _ := topLevelValue(data, "contractData").([]any)
+	for _, rawObject := range objects {
+		object, _ := rawObject.(map[string]any)
+		for path, value := range object {
+			if ref, ok := value.(map[string]any); ok && len(ref) == 1 && !strings.HasPrefix(path, "@") {
+				if id, _ := ref["@id"].(string); id != "" {
+					leafPaths[id] = path
+				}
+			}
+		}
+	}
 	contractFields, _ := topLevelValue(data, "contractFields").([]any)
 	for index, rawContractField := range contractFields {
 		field, ok := rawContractField.(map[string]any)
@@ -565,6 +591,9 @@ func forEachSemanticParameter(data documentData, _ *domainOntology, visit func(c
 			continue
 		}
 		fieldIRI, _ := field["@id"].(string)
+		if path, ok := leafPaths[fieldIRI]; ok {
+			fieldIRI = path
+		}
 		if shape, ok := field["dcs:shape"].(map[string]any); ok {
 			if shapeID, _ := shape["@id"].(string); shapeID != "" {
 				fieldIRI = shapeID
