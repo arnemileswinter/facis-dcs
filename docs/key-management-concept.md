@@ -14,12 +14,21 @@ rest and key-shredding erasure).
 
 ## 1. Custody model
 
-All DCS-held private keys live in one PKCS#11 token and never leave it. The
+The private keys of the DCS identity (DID), of the credentials it issues
+(VC, status list), of the OID4VP request objects (JAR), of C2PA and of the
+content-key agreement (ECDH) live in one PKCS#11 token and never leave it. The
 backend opens the token via `PKCS11_MODULE_PATH`, `PKCS11_TOKEN_LABEL` and
 `PKCS11_PIN`; keys are located by `CKA_LABEL` and are generated
 non-extractable. Development, CI and staging use a SoftHSM2 software token;
 production points the same three variables at a real HSM's PKCS#11 module —
 a configuration change, not a code change ([DCS-IR-HI-01]).
+
+Two platform keys are not in the token
+([ADR-38](adr-38-recorded-deviations-of-the-pilot.md) §8): the key of the
+in-cluster TLS CA and its server certificate, which the chart generates into
+the Secrets `<release>-internal-ca` and `<release>-internal-tls`, and the
+token signing keys of Hydra, which Hydra keeps in its database, encrypted
+with its system secret.
 
 The DCS holds **no contract-signing key**. Contract signatures are produced
 by the signatory's own wallet/QTSP ([ADR-12](adr-12-wallet-driven-signing.md),

@@ -320,6 +320,12 @@ spec:
             - name: DCS_DID
               value: {{ printf "%s/did.json" .Values.identity.mountPath | quote }}
             {{- end }}
+            {{- if .Values.identity.eidas.enforce }}
+            # The DID certificates of this instance and of every peer chain to
+            # the EU trust pool (identity.eidas.enforce).
+            - name: DCS_FORCE_EIDAS_CERT
+              value: "true"
+            {{- end }}
             {{- if .Values.federation.trustPdpURL }}
             # ADR-19 federation trust gate. Emitted only when set so a deployment
             # that configures it through extraEnv instead does not end up with two

@@ -106,6 +106,14 @@ enveloped signature of each list and reads only the signed content
   `INTEGRATION=1`, `TestEUTrustPoolLive` verifies the live LOTL and national
   lists.
 
+The EU trust pool, and with it the XAdES check of the lists, is built only
+when `DCS_FORCE_EIDAS_CERT` is set (chart value `identity.eidas.enforce`, off
+by default). It then also requires the x5c certificate of this instance's DID
+document, and of every peer's, to chain to a qualified trust service, so this
+instance needs a qualified certificate for its DID. Without it, the DID
+certificate must name the DID host and carry the DID key, and peer trust rests
+on the did:web document fetched over HTTPS.
+
 Reason: not every time-stamp authority offers TLS 1.3. Each member state
 publishes its national trusted list on its own server, and not all of these
 servers offer TLS 1.3. With TLS 1.3 only, the
@@ -155,6 +163,21 @@ credential that the user presents, and the signature on that credential is
 verified against a trusted issuer. An OIDC or SAML login has no credential
 behind it to verify roles and holder binding against.
 
+### 8. The in-cluster TLS keys and the Hydra signing keys are not in the PKCS#11 token (DCS-IR-HI-01)
+
+The service keys of the DCS are in the PKCS#11 token (key management concept,
+§1). Two platform keys are not: the in-cluster TLS CA key and the server key
+of the internal certificate, which the chart generates into the Secrets
+`<release>-internal-ca` and `<release>-internal-tls`
+(`deployment/helm/templates/internal-tls-secret.yaml`), and the keys Hydra
+signs its access and ID tokens with, which Hydra generates and keeps in its
+database, encrypted with its system secret (`hydra.secrets.systemSecretRef`).
+
+Reason: the internal certificate is read by nginx, PostgreSQL, NATS and Loki
+from a file, and none of them takes a PKCS#11 key. Hydra has no PKCS#11
+support. Both keys are protected by the Kubernetes Secret access control and,
+for Hydra, by its database and system secret.
+
 ## Consequences
 
 - A template user verifies the provenance credential against the instance
@@ -178,6 +201,9 @@ behind it to verify roles and holder binding against.
 - A revocation takes effect at the next token refresh, at most 5 minutes in
   prod and acceptance, at most 1 hour where `hydra.config.accessTokenTTL` is
   not set.
+- Read access to the Secrets of the release namespace, or to the Hydra
+  database and its system secret, gives access to the in-cluster TLS key or
+  the token signing keys; the operator restricts it.
 - An organization that uses an OIDC or SAML identity provider issues its
   users a credential (or has a trusted issuer do so); the DCS does not trust
   the identity provider directly.

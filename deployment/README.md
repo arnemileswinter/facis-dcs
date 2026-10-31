@@ -705,6 +705,7 @@ Values (production and acceptance):
 | `identity.existingSecret` (real HSM) or `identity.enabled: true` (SoftHSM2, acceptance) | `did.json` of the HSM key `dcs-did` (`DCS_DID`). With a real HSM, create it with `gendid` against that HSM: `PKCS11_MODULE_PATH=... PKCS11_TOKEN_LABEL=... PKCS11_PIN=... gendid -did did:web:dcs.example.org -endpoint https://dcs.example.org/digital-contracting-service/api -out did.json` (the tool is in the DCS image at `/app/gendid`), then `kubectl create secret generic dcs-prod-did --from-file=did.json`. |
 | `pkcs11.modulePath`, `pkcs11.tokenLabel` (real HSM) | The PKCS#11 module, mounted into the pod (`volumes`, `volumeMounts`), and the token. |
 | `signing.issuerX5ChainPath` (real HSM) | The certificate chain of the HSM key `dcs-c2pa`, mounted into the pod. |
+| `identity.eidas.enforce` (optional) | Builds the EU trust pool and requires the DID certificates of this instance and of every peer to chain to a qualified trust service (`DCS_FORCE_EIDAS_CERT`). It needs a qualified certificate for the DID of this instance; off by default ([ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §4). |
 | `image.repository`, `image.tag`, `pdfCore.image.*` | The images, pinned by tag and digest. |
 | `ingress.hosts`, `ingress.tls`, `route.publicBaseURL`, the Hydra URLs | Your hostname instead of `dcs.example.org`. |
 

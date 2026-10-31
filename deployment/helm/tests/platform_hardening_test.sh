@@ -134,6 +134,13 @@ grep -q '^storageclass_check "backup" *"${RELEASE}-digital-contracting-service-d
   && grep -q '^storageclass_check "loki" *"data-${RELEASE}-loki-0" "${RELEASE}-loki" "StatefulSet"$' "$CHART_DIR/deploy.sh" \
   || fail "deploy.sh does not check the backup and Loki claims"
 
+# DCS-IR-CI-01 (UC-IF-28): identity.eidas.enforce turns on the EU trust pool
+# and the qualified-certificate check of the DID certificates; off by default.
+render -f "$CHART_DIR/values.bdd.yml" --set identity.eidas.enforce=true --show-only templates/deployment.yaml \
+  | grep -A1 'name: DCS_FORCE_EIDAS_CERT$' | grep -q 'value: "true"' || fail "identity.eidas.enforce does not set DCS_FORCE_EIDAS_CERT"
+render -f "$CHART_DIR/values.bdd.yml" --show-only templates/deployment.yaml | grep -q DCS_FORCE_EIDAS_CERT \
+  && fail "DCS_FORCE_EIDAS_CERT set without identity.eidas.enforce"
+
 # DCS-NFR-SEC-04: configIntegrity.pins reach the backend as DCS_CONFIG_SHA256_PINS.
 a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

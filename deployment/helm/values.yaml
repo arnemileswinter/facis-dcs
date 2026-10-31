@@ -279,6 +279,15 @@ identity:
   secretName: ""
   existingSecret: ""
   mountPath: "/app/identity"
+  # eIDAS trust (DCS_FORCE_EIDAS_CERT, DCS-IR-CI-01): the backend builds the EU
+  # trust pool from the LOTL and the national trusted lists (XAdES signatures
+  # verified) and requires the x5c certificate of its own did:web document and
+  # of every peer to chain to a qualified trust service in it. It needs a
+  # qualified certificate for this instance's DID, or the backend does not
+  # start. Off: the certificate must name the DID host and carry the DID key,
+  # and peer trust rests on the did:web fetch over HTTPS (ADR-38).
+  eidas:
+    enforce: false
 
 # Application readiness is intentionally distinct from process liveness.
 # /readyz remains 503 on the bootstrap server until initialization, including
