@@ -331,10 +331,9 @@ custody surface for no additional protection beyond what the encrypted
 volume already gives against the relevant threat (a detached disk or
 volume snapshot).
 
-Database connections inside the cluster currently do not use TLS
-(`sslmode`); enabling in-transit encryption toward the database is a
-separate hardening item and is intentionally not part of this concept's
-scope.
+In-transit encryption toward the database is not part of this concept. The
+chart covers it with in-cluster TLS (`global.internalTLS`,
+deployment/README.md, "TLS").
 
 ## 10. Out of scope
 

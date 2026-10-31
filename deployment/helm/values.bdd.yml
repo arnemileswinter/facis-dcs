@@ -502,6 +502,11 @@ archiveNotary:
 
 global:
   archiveAuditToken: "bdd-archive-audit-token"
+  # In-cluster TLS off: the XFSC statuslist-service of this stack reads the
+  # shared PostgreSQL and NATS, and its image has no setting for the CA that
+  # verifies them (DCS-NFR-SEC-14: values.yaml, global.internalTLS).
+  internalTLS:
+    enabled: false
 
 route:
   basePath: "/digital-contracting-service"

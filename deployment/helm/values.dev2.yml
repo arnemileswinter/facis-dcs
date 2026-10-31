@@ -226,3 +226,8 @@ extraEnv:
 # In-cluster service credential for the background PDF regenerator, which runs on
 # NATS events with no user JWT. Never a shared or committed value in a real
 # deployment: the chart refuses to render without one.
+
+# In-cluster TLS off, as on instance A (values.bdd.yml / values.dev.yml).
+global:
+  internalTLS:
+    enabled: false

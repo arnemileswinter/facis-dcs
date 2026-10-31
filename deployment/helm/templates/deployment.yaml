@@ -150,7 +150,7 @@ spec:
             # a second copy. Without a DSS_URL the instance has no validator and
             # refuses every externally-produced signature.
             - name: DSS_URL
-              value: {{ .Values.dss.url | default (printf "http://%s-dss:8080" .Release.Name) | quote }}
+              value: {{ .Values.dss.url | default (include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-dss" .Release.Name) "port" 8080)) | quote }}
             {{- end }}{{- end }}
             {{- if and .Values.hydra.enabled .Values.hydra.clients }}
             {{- $hydraClient := index .Values.hydra.clients 0 }}
@@ -181,15 +181,13 @@ spec:
             - name: FC_KEYCLOAK_REALM_URL
               value: {{ include "digital-contracting-service.fcKeycloakRealmURL" . | quote }}
             {{- end }}
-            - name: DATABASE_URL
-              {{- if .Values.database.secretRef.name }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.database.secretRef.name | quote }}
-                  key: {{ .Values.database.secretRef.key | quote }}
-              {{- else }}
-              value: {{ include "digital-contracting-service.databaseURL" . | quote }}
-              {{- end }}
+            {{- include "digital-contracting-service.databaseEnv" . | nindent 12 }}
+            {{- if .Values.global.internalTLS.enabled }}
+            # Go clients trust the internal CA for TLS to NATS and the
+            # components (DCS-NFR-SEC-14).
+            - name: SSL_CERT_DIR
+              value: {{ printf "/etc/ssl/certs:%s" (include "digital-contracting-service.internalTLSDir" .) | quote }}
+            {{- end }}
             - name: NATS_URL
               {{- if .Values.messaging.secretRef.name }}
               valueFrom:
@@ -326,7 +324,7 @@ spec:
             # ---- Archive notary / ORCE ---------------------------------------------
             {{- $archiveNotaryBaseURL := .Values.archiveNotary.baseURL | default "" }}
             {{- if and (not $archiveNotaryBaseURL) .Values.orce.enabled }}
-            {{- $archiveNotaryBaseURL = printf "http://%s-orce:%v" .Release.Name (.Values.orce.service.port | default 1880) }}
+            {{- $archiveNotaryBaseURL = include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-orce" .Release.Name) "port" (.Values.orce.service.port | default 1880)) }}
             {{- end }}
             {{- $archiveNotaryURL := "" }}
             {{- $archiveAuditLogURL := "" }}
@@ -362,7 +360,7 @@ spec:
             # ---- Configurable PAC audit executor ---------------------------------
             {{- $auditExecutorURL := .Values.auditExecutor.url | default "" }}
             {{- if and (not $auditExecutorURL) .Values.orce.enabled }}
-            {{- $auditExecutorURL = printf "http://%s-orce:%v%s" .Release.Name (.Values.orce.service.port | default 1880) .Values.auditExecutor.path }}
+            {{- $auditExecutorURL = printf "%s%s" (include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-orce" .Release.Name) "port" (.Values.orce.service.port | default 1880))) .Values.auditExecutor.path }}
             {{- end }}
             - name: PAC_AUDIT_EXECUTOR_URL
               value: {{ $auditExecutorURL | quote }}
@@ -384,7 +382,7 @@ spec:
             # ---- Semantic workflow-gate executor -------------------------------
             {{- $workflowGateURL := .Values.workflowGateExecutor.url | default "" }}
             {{- if and (not $workflowGateURL) .Values.orce.enabled }}
-            {{- $workflowGateURL = printf "http://%s-orce:%v%s" .Release.Name (.Values.orce.service.port | default 1880) .Values.workflowGateExecutor.path }}
+            {{- $workflowGateURL = printf "%s%s" (include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-orce" .Release.Name) "port" (.Values.orce.service.port | default 1880))) .Values.workflowGateExecutor.path }}
             {{- end }}
             - name: PAC_WORKFLOW_GATE_EXECUTOR_URL
               value: {{ $workflowGateURL | quote }}
@@ -403,7 +401,7 @@ spec:
             {{- end }}
             # ---- PDF-Core (C2PA PDF compiler/verifier) --------------------------
             - name: PDF_CORE_URL
-              value: {{ include "digital-contracting-service.pdfCoreURL" . | quote }}
+              value: {{ include "digital-contracting-service.pdfCoreCallURL" . | quote }}
             - name: PDF_CORE_CONTEXT_IRI
               value: {{ include "digital-contracting-service.pdfCoreContextIRI" . | quote }}
             # ---- Status list this deployment serves (DCS-OR-C2PA-005, ADR-34) ----
@@ -443,8 +441,11 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.customCA.enabled .Values.volumeMounts .Values.pkcs11.provisioning.enabled .Values.identity.enabled .Values.signing.tsaTrustCertSecret }}
+          {{- if or .Values.customCA.enabled .Values.volumeMounts .Values.pkcs11.provisioning.enabled .Values.identity.enabled .Values.signing.tsaTrustCertSecret .Values.global.internalTLS.enabled }}
           volumeMounts:
+          {{- if .Values.global.internalTLS.enabled }}
+            {{- include "digital-contracting-service.internalCAVolumeMount" . | nindent 12 }}
+          {{- end }}
           {{- if .Values.customCA.enabled }}
             - name: custom-ca-certs
               mountPath: /usr/local/share/ca-certificates/custom
@@ -504,8 +505,11 @@ spec:
             limits:
               memory: 64Mi
         {{- end }}
-      {{- if or .Values.customCA.enabled .Values.volumes .Values.pkcs11.provisioning.enabled .Values.statusListLocalhostProxy.enabled .Values.identity.enabled .Values.signing.tsaTrustCertSecret (and .Values.dss .Values.dss.enabled) }}
+      {{- if or .Values.customCA.enabled .Values.volumes .Values.pkcs11.provisioning.enabled .Values.statusListLocalhostProxy.enabled .Values.identity.enabled .Values.signing.tsaTrustCertSecret (and .Values.dss .Values.dss.enabled) .Values.global.internalTLS.enabled }}
       volumes:
+      {{- if .Values.global.internalTLS.enabled }}
+        {{- include "digital-contracting-service.internalCAVolume" . | nindent 8 }}
+      {{- end }}
       {{- if .Values.customCA.enabled }}
         - name: custom-ca-certs
           configMap:

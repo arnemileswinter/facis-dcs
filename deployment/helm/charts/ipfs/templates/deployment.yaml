@@ -1,3 +1,4 @@
+{{- $tls := dig "internalTLS" "enabled" false (.Values.global | default dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -97,7 +98,13 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" 5001) | nindent 8 }}
+        {{- end }}
       volumes:
+        {{- if $tls }}
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}
         - name: ipfs-data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

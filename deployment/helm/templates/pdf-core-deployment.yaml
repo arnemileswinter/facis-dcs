@@ -56,4 +56,9 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+        {{- if .Values.global.internalTLS.enabled }}
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.pdfCore.service.port) | nindent 8 }}
+      volumes:
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- end }}
 {{- end }}
