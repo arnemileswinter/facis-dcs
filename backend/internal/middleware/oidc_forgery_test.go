@@ -133,3 +133,41 @@ func TestValidateTokenRefusesForgedTokens(t *testing.T) {
 		})
 	}
 }
+
+// The provider metadata names the JWKS under the public issuer URL, which a
+// pod need not reach. The validator fetches it from the internal issuer URL.
+func TestTheJWKSIsFetchedFromTheInternalIssuerURL(t *testing.T) {
+	t.Setenv("JWT_ALG_NONE_SUPPORTED", "")
+	t.Setenv("DCS_DEV_ACCESS_TOKEN_KEY", "")
+	const public = "http://public.invalid"
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	internal := httptest.NewServer(mux)
+	t.Cleanup(internal.Close)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                public,
+			"jwks_uri":                              public + "/.well-known/jwks.json",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]any{
+			"kty": "RSA", "kid": "hydra-key", "use": "sig", "alg": "RS256",
+			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}}})
+	})
+	validator, err := NewHydraJWTValidator(context.Background(), HydraJWTConfig{
+		PublicIssuerURL: public, InternalIssuerURL: internal.URL, ClientID: "dcs-client",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validator.ValidateToken(context.Background(), signRS256(t, key, accessTokenClaims(public, "Template Creator"))); err != nil {
+		t.Fatalf("a token the provider signed was refused: %v", err)
+	}
+}

@@ -90,31 +90,38 @@ func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWT
 		SkipClientIDCheck:          true,
 		InsecureSkipSignatureCheck: skipSignature,
 	}
-	newVerifier := provider.Verifier
+	var meta struct {
+		JWKSURL string   `json:"jwks_uri"`
+		Algs    []string `json:"id_token_signing_alg_values_supported"`
+	}
+	if err := provider.Claims(&meta); err != nil {
+		return nil, fmt.Errorf("read the OIDC provider metadata: %w", err)
+	}
+	// The metadata names the JWKS under the public issuer URL. The backend
+	// fetches it where it fetched the discovery document: the public URL need
+	// not be reachable from inside the cluster.
+	jwksURL := meta.JWKSURL
+	if discoveryURL != publicIssuer && strings.HasPrefix(jwksURL, publicIssuer+"/") {
+		jwksURL = discoveryURL + strings.TrimPrefix(jwksURL, publicIssuer)
+	}
+	var keys oidc.KeySet = oidc.NewRemoteKeySet(ctx, jwksURL)
+	oidcConfig.SupportedSigningAlgs = meta.Algs
+	if len(oidcConfig.SupportedSigningAlgs) == 0 {
+		oidcConfig.SupportedSigningAlgs = []string{oidc.RS256}
+	}
 	devKey, err := devAccessTokenKey()
 	if err != nil {
 		return nil, err
 	}
 	if devKey != nil {
-		var meta struct {
-			JWKSURL string   `json:"jwks_uri"`
-			Algs    []string `json:"id_token_signing_alg_values_supported"`
-		}
-		if err := provider.Claims(&meta); err != nil {
-			return nil, fmt.Errorf("read the OIDC provider metadata: %w", err)
-		}
-		keys := devKeySet{
+		keys = devKeySet{
 			dev:      &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{devKey}},
-			provider: oidc.NewRemoteKeySet(ctx, meta.JWKSURL),
+			provider: keys,
 		}
-		algs := meta.Algs
-		if len(algs) == 0 {
-			algs = []string{oidc.RS256}
-		}
-		oidcConfig.SupportedSigningAlgs = append(slices.Clone(algs), oidc.ES256)
-		newVerifier = func(config *oidc.Config) *oidc.IDTokenVerifier {
-			return oidc.NewVerifier(publicIssuer, keys, config)
-		}
+		oidcConfig.SupportedSigningAlgs = append(slices.Clone(oidcConfig.SupportedSigningAlgs), oidc.ES256)
+	}
+	newVerifier := func(config *oidc.Config) *oidc.IDTokenVerifier {
+		return oidc.NewVerifier(publicIssuer, keys, config)
 	}
 	verifier := newVerifier(oidcConfig)
 	expiredConfig := *oidcConfig
