@@ -80,7 +80,7 @@ var testCallers = map[string]Caller{
 		Roles: []string{"Template Manager", "Contract Manager"}},
 	"no-org": {HolderDID: "user-x", Roles: []string{"Integration Manager"}},
 	// A machine identity: HolderDID is its client_id (middleware/oidc.go).
-	"orce-a": {HolderDID: "dcs-orce-integration", ParticipantDID: orgA, Roles: []string{"Sys. Integration Manager"}},
+	"orce-a":        {HolderDID: "dcs-orce-integration", ParticipantDID: orgA, Roles: []string{"Sys. Integration Manager"}},
 	"orce-notary-a": {HolderDID: "dcs-orce-notary", ParticipantDID: orgA, Roles: []string{"Sys. Auditor"}},
 }
 
