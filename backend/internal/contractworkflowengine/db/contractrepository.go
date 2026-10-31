@@ -202,6 +202,16 @@ type ContractArchiveEntry struct {
 	DeletionReason       *string        `db:"deletion_reason"`
 }
 
+// ExecutionProof is the proof of contract execution over every signature
+// (DCS-FR-SM-10), with the notary and TSA receipts over its content hash.
+type ExecutionProof struct {
+	DID           string
+	ContentHash   string
+	Proof         datatype.JSON
+	NotaryReceipt *datatype.JSON
+	TSAReceipt    *datatype.JSON
+}
+
 type SearchValues struct {
 	DID             string
 	ContractVersion int
@@ -278,6 +288,12 @@ type ContractRepo interface {
 	// (a JSON array) that the entry does not hold yet. It returns false when
 	// did has no active archive entry or nothing was new.
 	AppendArchivePeerSignatures(ctx context.Context, tx *sqlx.Tx, did string, peerSignatures []byte) (bool, error)
+	// ReadLatestArchiveEntry returns the latest active archive entry of did,
+	// or nil when there is none.
+	ReadLatestArchiveEntry(ctx context.Context, tx *sqlx.Tx, did string) (*ContractArchiveEntry, error)
+	// StoreExecutionProof keeps a notarized proof of execution of did. It
+	// returns false when the same proof is already kept.
+	StoreExecutionProof(ctx context.Context, tx *sqlx.Tx, proof ExecutionProof) (bool, error)
 	ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]ContractArchiveEntry, error)
 	// MarkArchiveEntryDeleted soft-deletes every not-yet-deleted archive
 	// entry for did (DCS-FR-CSA-17): sets deleted_at/deleted_by/
@@ -311,7 +327,10 @@ type ContractRepo interface {
 	// returns false when another writer expired or ended the contract first,
 	// so the caller emits ContractExpired at most once.
 	ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState moves the contract from state from to state to. It fails
+	// with contractstate.ErrInvalidTransition when the contract is no longer
+	// in state from, so a concurrent writer is never overwritten.
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)

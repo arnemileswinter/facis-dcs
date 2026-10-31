@@ -188,7 +188,7 @@ func (h *DeploymentCallbackHandler) applyAcknowledgement(ctx context.Context, tx
 	if err := contractstate.ValidateTransition(contractstate.ContractState(processData.State), contractstate.EventDeploy); err != nil {
 		return err
 	}
-	if err := h.CRepo.UpdateState(ctx, tx, deployment.DID, contractstate.Active.String()); err != nil {
+	if err := h.CRepo.UpdateState(ctx, tx, deployment.DID, processData.State, contractstate.Active.String()); err != nil {
 		return fmt.Errorf("could not activate contract %s: %w", deployment.DID, err)
 	}
 

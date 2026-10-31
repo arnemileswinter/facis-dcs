@@ -521,6 +521,28 @@ func (e StoreArchivedEvent) GetDID() string {
 	return e.DID
 }
 
+// StoreExecutionProofEvent is emitted when the proof of contract execution
+// over every signature is stored (DCS-FR-SM-10).
+type StoreExecutionProofEvent struct {
+	DID                string                `json:"did"`
+	ContentHash        string                `json:"content_hash"`
+	ArchiveContentHash string                `json:"archive_content_hash"`
+	PDFHash            string                `json:"pdf_hash"`
+	NotaryReceipt      *ArchiveNotaryReceipt `json:"notary_receipt,omitempty"`
+	TSAReceipt         *ArchiveTSAReceipt    `json:"tsa_receipt,omitempty"`
+	OccurredAt         time.Time             `json:"occurred_at"`
+}
+
+// EventType implements [event.Event].
+func (e StoreExecutionProofEvent) EventType() string {
+	return eventtype.StoreExecutionProof.String()
+}
+
+// GetDID implements [event.Event].
+func (e StoreExecutionProofEvent) GetDID() string {
+	return e.DID
+}
+
 // DeleteArchivedEvent is emitted when an archive entry is soft-deleted
 // (DCS-FR-CSA-17: deletion requires a justification and MUST be logged with
 // timestamp and user identity).

@@ -210,7 +210,7 @@ func (r *taskContractRepoFake) CreateHistoryEntryForDID(_ context.Context, _ *sq
 	return nil
 }
 
-func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *taskContractRepoFake) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.states = append(r.states, state)
 	r.process.State = state
 	return nil

@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
@@ -390,6 +391,36 @@ func (r *PostgresContractRepo) AppendArchivePeerSignatures(ctx context.Context, 
 	return n == 1, nil
 }
 
+func (r *PostgresContractRepo) ReadLatestArchiveEntry(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractArchiveEntry, error) {
+	var entry db.ContractArchiveEntry
+	err := tx.GetContext(ctx, &entry, `
+        SELECT did, contract_version, archive_status, content_hash, signature_metadata
+        FROM contract_archive_entries
+        WHERE did = $1 AND archive_status IN ('STORED', 'RETAINED')
+        ORDER BY contract_version DESC
+        LIMIT 1`, did)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (r *PostgresContractRepo) StoreExecutionProof(ctx context.Context, tx *sqlx.Tx, proof db.ExecutionProof) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+        INSERT INTO contract_execution_proofs (did, content_hash, proof, notary_receipt, tsa_receipt)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (did, content_hash) DO NOTHING`,
+		proof.DID, proof.ContentHash, proof.Proof, proof.NotaryReceipt, proof.TSAReceipt)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func (r *PostgresContractRepo) ReadArchiveEntries(ctx context.Context, tx *sqlx.Tx) ([]db.ContractArchiveEntry, error) {
 	query := `
         SELECT did, contract_version, archive_status, stored_by, stored_at, contract_snapshot,
@@ -518,13 +549,27 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	return cts, nil
 }
 
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return UpdateContractState(ctx, tx, did, from, to)
+}
+
+// UpdateContractState is the write of a contract's lifecycle state: it moves
+// did from state from to state to, and fails with
+// contractstate.ErrInvalidTransition when another transaction changed the
+// state after the caller read it.
+func UpdateContractState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE contracts SET state = $3 WHERE did = $1 AND state = $2`, did, from, to)
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: contract %s is no longer %s", contractstate.ErrInvalidTransition, did, from)
+	}
+	return nil
 }
 
 func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {
