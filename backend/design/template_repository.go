@@ -385,7 +385,7 @@ var ContractTemplateRejectRequest = Type("ContractTemplateRejectRequest", func()
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("reason", String, "Reason for rejecting the contract template (DCS-IR-TR-05)", func() { MinLength(1) })
+	Attribute("reason", String, "Reason for rejecting the contract template (DCS-IR-TR-05)", func() { Pattern(`\S`) })
 
 	Required("did", "updated_at", "reason")
 })
@@ -426,7 +426,7 @@ var ContractTemplateArchiveRequest = Type("ContractTemplateArchiveRequest", func
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
-	Attribute("justification", String, "Why the template is archived; stored in the audit event (DCS-IR-TR-07)", func() { MinLength(1) })
+	Attribute("justification", String, "Why the template is archived; stored in the audit event (DCS-IR-TR-07)", func() { Pattern(`\S`) })
 
 	Required("did", "updated_at", "justification")
 })
