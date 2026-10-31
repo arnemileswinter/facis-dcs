@@ -109,6 +109,27 @@ func TestQAPeerTerminationNoticeTerminatesTheLocalCopyPostgres(t *testing.T) {
 	require.NoError(t, terminate("did:web:peer.example"))
 }
 
+// CWE-14: a notice for a copy that is already out of force (here EXPIRED) is
+// answered as delivered and leaves the copy as it is, so the sender stops
+// sending it.
+func TestPeerTerminationNoticeForAClosedCopyIsConfirmedPostgres(t *testing.T) {
+	database := pgtest.Open(t)
+	document := jadesTestDIDDocument(t, "local")
+	local, err := document.GetID()
+	require.NoError(t, err)
+	_, err = database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,responsible) VALUES ('c1','did:web:peer.example','Org B','EXPIRED','tpl',1,
+		jsonb_build_object('creator','did:web:peer.example','counterparty',$1::text))`, local)
+	require.NoError(t, err)
+	reason := "breach"
+
+	require.NoError(t, terminateForPeer(context.Background(), database, &cwepg.PostgresContractRepo{}, syncpg.PostgresSyncRepository{}, *document,
+		&dcstodcs.DCSToDCSContractTerminateRequest{FromPeerDid: "did:web:peer.example", ContractIri: "c1", Reason: &reason}))
+
+	var state string
+	require.NoError(t, database.Get(&state, `SELECT state FROM contracts WHERE did='c1'`))
+	require.Equal(t, "EXPIRED", state)
+}
+
 // A notice whose signed challenge names another contract is refused.
 func TestPeerTerminationNoticeMustNameTheContract(t *testing.T) {
 	peerDoc := eraseTestDIDDocument(t, "peer.example")

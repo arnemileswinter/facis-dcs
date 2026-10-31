@@ -479,7 +479,9 @@ func terminateForPeer(ctx context.Context, database *sqlx.DB, cRepo db.ContractR
 	if contract == nil || contract.Responsible == nil || !slices.Contains(contract.Responsible.GetParties(), req.FromPeerDid) {
 		return dcstodcs.MakeNotFound(fmt.Errorf("termination rejected: this instance holds no contract %s shared with peer %s", req.ContractIri, req.FromPeerDid))
 	}
-	if contract.State == contractstate.Terminated.String() {
+	// A copy that is no longer in force has nothing left to terminate: the
+	// notice is answered as delivered, so the sender does not retry it.
+	if contractstate.ContractState(contract.State).Erasable() {
 		return nil
 	}
 
