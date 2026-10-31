@@ -21,10 +21,13 @@ http.interceptors.response.use(
   async (err: Error | AxiosError) => {
     const errorStore = useErrorStore()
     if (axios.isAxiosError(err)) {
-      if (err.status === 401 && err.config) {
+      // One retry with a refreshed token; a second 401 is the server's answer.
+      const config = err.config as (typeof err.config & { retriedAfterRefresh?: boolean }) | undefined
+      if (err.status === 401 && config && !config.retriedAfterRefresh) {
         const isRefreshed = await authenticationService.refresh()
         if (isRefreshed) {
-          return http(err.config)
+          config.retriedAfterRefresh = true
+          return http(config)
         }
       }
     }
