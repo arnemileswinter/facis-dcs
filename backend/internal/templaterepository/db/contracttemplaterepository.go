@@ -17,16 +17,16 @@ var ErrContractTemplateNotFound = errors.New("template not found")
 var ErrInvalidTemplateState = errors.New("invalid contract template state")
 
 type ContractTemplate struct {
-	DID          string         `db:"did"`
-	Version      int            `db:"version"`
-	State        string         `db:"state"`
-	TemplateType string         `db:"template_type"`
-	PartyType    string         `db:"party_type"`
-	Name         *string        `db:"name"`
-	Description  *string        `db:"description"`
-	CreatedBy    string         `db:"created_by"`
-	CreatedAt    time.Time      `db:"created_at"`
-	UpdatedAt    time.Time      `db:"updated_at"`
+	DID          string    `db:"did"`
+	Version      int       `db:"version"`
+	State        string    `db:"state"`
+	TemplateType string    `db:"template_type"`
+	PartyType    string    `db:"party_type"`
+	Name         *string   `db:"name"`
+	Description  *string   `db:"description"`
+	CreatedBy    string    `db:"created_by"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
 	// ContentUpdatedAt moves only when the content changes (see ContractTemplateProcessData).
 	ContentUpdatedAt time.Time      `db:"content_updated_at"`
 	TemplateData     *datatype.JSON `db:"template_data"`
@@ -73,7 +73,8 @@ type ContractTemplateProcessData struct {
 	State     string    `db:"state"`
 	CreatedBy string    `db:"created_by"`
 	UpdatedAt time.Time `db:"updated_at"`
-	// ContentUpdatedAt moves only when template_data actually changes, so the
+	// ContentUpdatedAt moves only when the content (template data, name,
+	// description, classification or structure) changes, so the
 	// optimistic-lock guard distinguishes a real concurrent content edit from a
 	// benign write (a state transition, the background PDF write) that merely
 	// nudged updated_at.

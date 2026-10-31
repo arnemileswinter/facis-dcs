@@ -16,12 +16,12 @@ const (
 	RetrieveByID EventType = "RETRIEVE_CONTRACT_TEMPLATE_BY_ID"
 	// RetrieveProvenance is a read of the provenance credentials.
 	RetrieveProvenance EventType = "RETRIEVE_CONTRACT_TEMPLATE_PROVENANCE"
-	Search       EventType = "SEARCH_CONTRACT_TEMPLATE"
-	Archive      EventType = "ARCHIVE_CONTRACT_TEMPLATE"
-	Delete       EventType = "DELETE_CONTRACT_TEMPLATE"
-	Register     EventType = "REGISTER_CONTRACT_TEMPLATE"
-	Audit        EventType = "AUDIT_CONTRACT_TEMPLATE"
-	Publish      EventType = "PUBLISH_CONTRACT_TEMPLATE"
+	Search             EventType = "SEARCH_CONTRACT_TEMPLATE"
+	Archive            EventType = "ARCHIVE_CONTRACT_TEMPLATE"
+	Delete             EventType = "DELETE_CONTRACT_TEMPLATE"
+	Register           EventType = "REGISTER_CONTRACT_TEMPLATE"
+	Audit              EventType = "AUDIT_CONTRACT_TEMPLATE"
+	Publish            EventType = "PUBLISH_CONTRACT_TEMPLATE"
 )
 
 func (s EventType) String() string {
