@@ -252,10 +252,10 @@ const renew = async () => {
 
 // DCS-IR-CWE-10: the approver or manager decides catalogue availability with
 // this explicit action. design publish_catalogue accepts these states.
+const catalogueStates: ContractState[] = [ContractState.approved, ContractState.signed, ContractState.active]
+
 const canPublishCatalogue = computed(
-  () =>
-    (isApprover.value || isManager.value) &&
-    [ContractState.approved, ContractState.signed, ContractState.active].includes(props.contract.state),
+  () => (isApprover.value || isManager.value) && catalogueStates.includes(props.contract.state),
 )
 
 const publishing = ref(false)

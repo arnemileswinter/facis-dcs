@@ -28,6 +28,7 @@ import { contractWithAcceptedProposals } from '@/utils/contract-negotiations'
 import { claimReportedHttpError, reportActionError } from '@/utils/report-action-error'
 import type { Contract } from '@/models/contract/contract'
 import type { ContractEvidence } from '@/models/contract/contract-evidence'
+import type { UserRole } from '@/types/user-role'
 import type { VerificationResult } from '@contract-workflow-engine/composables/useSemanticValueVerification'
 
 const route = useRoute()
@@ -168,9 +169,8 @@ const renewals = computed(() => contracts.value.filter((c) => c.renews_contract_
 // Related documents (DCS-FR-CWE-29): the evidence documents stored for this
 // contract, for the roles that may list them.
 const relatedDocuments = ref<ContractEvidence[]>([])
-const canListDocuments = computed(() =>
-  [...contractAuditRoles, 'CONTRACT_CREATOR'].some((role) => authStore.user?.roles?.includes(role)),
-)
+const documentRoles: readonly UserRole[] = [...contractAuditRoles, 'CONTRACT_CREATOR']
+const canListDocuments = computed(() => documentRoles.some((role) => authStore.user?.roles?.includes(role)))
 watch(
   [activeTab, () => contract.value?.did],
   async ([tab, did]) => {
