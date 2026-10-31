@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 	basepg "digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	erasepg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
@@ -36,7 +37,7 @@ func (e *qaCapturingExecutor) Run(_ context.Context, request auditexecutor.Reque
 
 func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	t.Setenv("ORCE_ARCHIVE_AUDIT_LOG_URL", "")
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()

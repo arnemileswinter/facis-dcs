@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
@@ -27,7 +28,7 @@ const sodTemplateData = `{
 
 // DCS-FR-TR-06: the Template Manager neither reviews nor approves a template.
 func TestTemplateManagerDoesNotReviewOrApprovePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
 	submitter := &command.Submitter{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}

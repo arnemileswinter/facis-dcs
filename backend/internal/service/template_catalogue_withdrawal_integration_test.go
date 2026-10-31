@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
@@ -17,7 +18,7 @@ import (
 // DCS-NFR-BR-09: publishing records the catalogue asset; deprecating the
 // template revokes it, and a failed revocation keeps the template published.
 func TestTemplateDeprecationWithdrawsCatalogueAssetPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	revokeStatus := http.StatusOK
 	var revoked []string

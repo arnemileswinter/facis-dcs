@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
@@ -21,7 +22,7 @@ func (echoVCSigner) CreateCredential(_ context.Context, unsigned json.RawMessage
 
 // DCS-IR-TR-06, DCS-FR-TR-14, DCS-FR-TR-17: only an approved template is registered.
 func TestTemplateRegisterRequiresApprovedPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	registrar := &command.Registrar{
 		DB: database, CTRepo: &pg.PostgresContractTemplateRepo{}, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{},
@@ -52,7 +53,7 @@ func TestTemplateRegisterRequiresApprovedPostgres(t *testing.T) {
 
 // DCS-FR-TR-17, DCS-FR-TR-18: archive deprecates a live template and deletes a deprecated one.
 func TestTemplateArchiveDeletesDeprecatedPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	archiver := &command.Archiver{DB: database, CTRepo: &pg.PostgresContractTemplateRepo{}, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	future := time.Now().Add(time.Hour)

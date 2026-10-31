@@ -9,6 +9,7 @@ import (
 	goa "goa.design/goa/v3/pkg"
 
 	cwe "digital-contracting-service/gen/contract_workflow_engine"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
 )
 
@@ -16,7 +17,7 @@ import (
 // refused before any command runs. The service has no repositories here, so a
 // call that passed the check would panic.
 func TestQAContractWritesRequireReadAccessPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)

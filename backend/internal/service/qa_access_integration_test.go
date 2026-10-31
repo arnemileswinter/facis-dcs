@@ -9,17 +9,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq"
 	goa "goa.design/goa/v3/pkg"
 
 	pac "digital-contracting-service/gen/process_audit_and_compliance"
@@ -28,70 +23,24 @@ import (
 	pg "digital-contracting-service/internal/auth/db/pq"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/migrations"
 )
 
-// qaPostgresSchema owns only its temporary schema in the explicitly configured test database.
-func qaPostgresSchema(t *testing.T) (*sqlx.DB, string) {
-	t.Helper()
-	dsn := os.Getenv("QA_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set QA_DATABASE_URL to a disposable PostgreSQL database")
-	}
-	admin, err := sqlx.Connect("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := admin.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	schema := fmt.Sprintf("qa_access_%d", time.Now().UnixNano())
-	if _, err := admin.Exec("CREATE SCHEMA " + pq.QuoteIdentifier(schema)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP SCHEMA " + pq.QuoteIdentifier(schema) + " CASCADE"); err != nil {
-			t.Error(err)
-		}
-	})
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := parsed.Query()
-	params.Set("search_path", schema)
-	parsed.RawQuery = params.Encode()
-	database, err := sqlx.Connect("postgres", parsed.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := migrations.Run(database); err != nil {
-		t.Fatal(err)
-	}
-	return database, schema
-}
-
 func TestQAAccessAttemptsPostgres(t *testing.T) {
-	database, schema := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	if err := migrations.Run(database); err != nil {
 		t.Fatal(err)
 	}
 	for _, column := range []struct{ table, column string }{{"access_attempts", "outcome"}, {"pac_audit_runs", "snapshot_bytes"}} {
 		var nullable string
-		if err := database.Get(&nullable, `SELECT is_nullable FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name=$3`, schema, column.table, column.column); err != nil || nullable != "NO" {
+		if err := database.Get(&nullable, `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2`, column.table, column.column); err != nil || nullable != "NO" {
 			t.Fatalf("required column %+v: %s, %v", column, nullable, err)
 		}
 	}
 	var plaintext int
-	if err := database.Get(&plaintext, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name='pac_audit_runs' AND column_name IN ('response_bytes','response_json','receipt')`, schema); err != nil || plaintext != 0 {
+	if err := database.Get(&plaintext, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='pac_audit_runs' AND column_name IN ('response_bytes','response_json','receipt')`); err != nil || plaintext != 0 {
 		t.Fatalf("plaintext columns=%d: %v", plaintext, err)
 	}
 	validator, token := qaSignedTokens(t)

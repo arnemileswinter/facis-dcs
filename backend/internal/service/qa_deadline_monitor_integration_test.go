@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	pacpg "digital-contracting-service/internal/processauditandcompliance/db/pg"
 	qry "digital-contracting-service/internal/processauditandcompliance/query"
@@ -15,7 +16,7 @@ import (
 // in force whose deadline passed without a report, and stops once the target
 // reported on the rule.
 func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data) VALUES ('active','','Org A','ACTIVE','tpl',1,
 		'{"dcs:policies":{"odrl:obligation":[{"@id":"urn:uuid:report","odrl:constraint":[{"odrl:leftOperand":{"@id":"odrl:dateTime"},"odrl:operator":{"@id":"odrl:lt"},"odrl:rightOperand":"2026-01-01"}]}]}}')`)
 	require.NoError(t, err)

@@ -31,6 +31,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	basepg "digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
@@ -39,7 +40,7 @@ import (
 )
 
 func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
