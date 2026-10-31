@@ -53,6 +53,7 @@ import (
 	"digital-contracting-service/internal/base/hsm"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/ipfs"
+	"digital-contracting-service/internal/base/safehttp"
 	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/base/validation"
 	contractworkflowengine2 "digital-contracting-service/internal/contractworkflowengine"
@@ -82,6 +83,12 @@ import (
 	"goa.design/clue/debug"
 	"goa.design/clue/log"
 )
+
+// Every outbound HTTPS client of the service negotiates TLS 1.3 or later
+// (DCS-IR-CI-01, DCS-NFR-SEC-01).
+func init() {
+	safehttp.RequireTLS13()
+}
 
 // computeListenURL derives the HTTP listen address from the same flags/env
 // var handleHTTPServer's caller used to compute inline just before binding.
