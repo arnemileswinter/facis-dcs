@@ -20,5 +20,9 @@ export const useTemplatePermissions = () => {
     return authStore.user?.roles?.includes('TEMPLATE_MANAGER') ?? false
   })
 
-  return { isCreator, isReviewer, isApprover, isManager }
+  // The template list and history endpoints accept only these four roles. A
+  // Contract Creator reads the one template it instantiates by its ID.
+  const hasTemplateRole = computed(() => isCreator.value || isReviewer.value || isApprover.value || isManager.value)
+
+  return { isCreator, isReviewer, isApprover, isManager, hasTemplateRole }
 }

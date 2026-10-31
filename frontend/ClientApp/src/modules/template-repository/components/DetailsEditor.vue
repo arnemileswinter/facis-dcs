@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, useId } from 'vue'
+import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { TemplateType } from '@template-repository/models/contract-template'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -46,8 +47,10 @@ const levelLabels: Record<TemplateLevel, string> = {
   SUB_AGREEMENT: 'Sub-agreement',
   ADDENDUM: 'Addendum',
 }
+const { hasTemplateRole } = useTemplatePermissions()
 const allTemplates = ref<ContractTemplate[]>([])
 onMounted(async () => {
+  if (!hasTemplateRole.value) return
   allTemplates.value = (await contractTemplateService.retrieve()).contract_templates
 })
 const candidates = computed(() => requirableTemplates(allTemplates.value, store.templateLevel, store.did))
