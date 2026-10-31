@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -171,14 +172,21 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 }
 
 // Delete soft-deletes every not-yet-deleted archive entry for the given DID
-// (DCS-FR-CSA-17): the row is marked deleted_at/deleted_by/deletion_reason,
-// never physically removed, and the operation is itself logged as an audit
-// event under the ContractStorageArchive component so it shows up through
-// Audit below. Once the soft-delete is committed, the entries' archived
-// snapshots are removed from the IPFS store — secure data disposal per
-// DCS-NFR-SEC-13 — and a removal failure is a hard error.
+// (DCS-FR-CSA-17) and erases the contract. The caller must be able to read the
+// contract, and the contract must no longer be in force
+// (contractstate.Erasable). The row is marked deleted_at/deleted_by/
+// deletion_reason, never physically removed, and the operation is logged as an
+// audit event under the ContractStorageArchive component. After the commit the
+// contract's keys are shredded first: the archived objects are encrypted under
+// them, so the shred alone makes them unreadable. The removal of the objects
+// from IPFS (DCS-NFR-SEC-13) follows on a best-effort basis. A repeated delete
+// of an already deleted entry runs the erasure again, so an erasure that
+// failed can be completed.
 func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstoragearchive.DeletePayload) (res int, err error) {
 	defer func() { s.auditFailure(ctx, "delete", p.Did, err) }()
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return 0, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -189,21 +197,31 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The snapshot CIDs must be captured before the soft-delete: afterwards
-	// there is no other record of which IPFS objects the entries pointed at
-	// for this deletion.
-	// Delete is a role-authorized write; F03 party scoping applies to reads only.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM contracts WHERE did = $1 FOR UPDATE`, p.Did); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	var state contractstate.ContractState
+	if err := tx.GetContext(ctx, &state, `SELECT state FROM contracts_effective WHERE did = $1`, p.Did); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(err)
+	}
+	if !state.Erasable() {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
+			"contract %q is %s; only a TERMINATED, EXPIRED, REVOKED, REJECTED or WITHDRAWN contract can be deleted from the archive", p.Did, state))
+	}
+
+	// The object CIDs must be captured before the soft-delete: afterwards
+	// there is no other record of which IPFS objects the entries pointed at.
 	entries, err := s.CRepo.ReadArchiveEntries(contractreadpolicy.WithSystemScope(ctx), tx)
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
-	snapshotCIDs := snapshotCIDsForDeletion(entries, p.Did)
+	objectCIDs := snapshotCIDsForDeletion(entries, p.Did)
 	var evidenceCIDs []string
 	if err := tx.SelectContext(ctx, &evidenceCIDs, `SELECT content_cid FROM contract_archive_evidence WHERE did = $1
 		UNION SELECT content_cid FROM contract_archive_sections WHERE did = $1`, p.Did); err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
-	snapshotCIDs = append(snapshotCIDs, evidenceCIDs...)
+	objectCIDs = append(objectCIDs, evidenceCIDs...)
 	if until := retainedUntil(entries, p.Did, time.Now().UTC()); until != nil {
 		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf(
 			"archive entry for DID %q is retained until %s (retention policy)", p.Did, until.Format(time.RFC3339)))
@@ -214,40 +232,36 @@ func (s *contractStorageArchivesrvc) Delete(ctx context.Context, p *contractstor
 	if err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
-	if affected == 0 {
-		return 0, contractstoragearchive.MakeBadRequest(
-			fmt.Errorf("no archive entry found for DID %q (or it was already deleted)", p.Did))
+	if affected == 0 && !hasArchiveEntry(entries, p.Did) {
+		return 0, contractstoragearchive.MakeBadRequest(fmt.Errorf("no archive entry found for DID %q", p.Did))
 	}
-
-	evt := contractevents.DeleteArchivedEvent{
-		DID:           p.Did,
-		DeletedBy:     deletedBy,
-		Justification: p.Justification,
-		EntriesMarked: affected,
-		OccurredAt:    time.Now().UTC(),
+	if affected > 0 {
+		evt := contractevents.DeleteArchivedEvent{
+			DID:           p.Did,
+			DeletedBy:     deletedBy,
+			Justification: p.Justification,
+			EntriesMarked: affected,
+			OccurredAt:    time.Now().UTC(),
+		}
+		if err := baseevent.Create(ctx, tx, evt, componenttype.ContractStorageArchive); err != nil {
+			return 0, contractstoragearchive.MakeInternalError(err)
+		}
 	}
-	if err := baseevent.Create(ctx, tx, evt, componenttype.ContractStorageArchive); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return 0, contractstoragearchive.MakeInternalError(err)
 	}
 
-	// Secure disposal (DCS-NFR-SEC-13): the archived snapshots and evidence
-	// documents leave the IPFS store now that their entries are deleted.
-	if err := removeArchivedSnapshots(s.SnapshotStore, snapshotCIDs); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
+	// Erasure (DCS-NFR-COMP-03): the contract's wrapped CEKs are shredded
+	// locally with a KEY_SHREDDED event and via the peer erase handshake on
+	// every counterparty instance. The deletion justification is the recorded
+	// shred reason. An unreachable peer leaves a pending contract_erasures row
+	// for the retry scheduler. A repeated shred changes nothing.
+	if err := s.Eraser.EraseContract(ctx, p.Did, deletedBy, p.Justification); err != nil {
+		return 0, contractstoragearchive.MakeInternalError(fmt.Errorf("archive entry deleted, erasure failed (repeat the delete to retry): %w", err))
 	}
 
-	// Erasure (DCS-NFR-COMP-03): with the archive entries soft-deleted (so
-	// the integrity audit no longer covers them), the contract's wrapped CEKs
-	// are shredded — locally with a KEY_SHREDDED event, and via the peer
-	// erase handshake on every counterparty instance. The deletion
-	// justification is the recorded shred reason. An unreachable peer leaves
-	// a pending contract_erasures row for the retry scheduler.
-	if err := s.Eraser.EraseContract(ctx, p.Did, deletedBy, p.Justification); err != nil {
-		return 0, contractstoragearchive.MakeInternalError(err)
+	if err := removeArchivedSnapshots(s.SnapshotStore, objectCIDs); err != nil {
+		log.Printf(ctx, "archive delete of %s: IPFS disposal incomplete, the objects stay encrypted under the shredded key: %v", p.Did, err)
 	}
 
 	return affected, nil
@@ -358,10 +372,6 @@ type archiveSnapshotStore interface {
 	DeleteFile(cid string) error
 }
 
-// snapshotCIDsForDeletion collects the distinct snapshot CIDs of the given
-// DID's live (not yet soft-deleted) archive entries — the IPFS objects a
-// delete of that DID must dispose of. Entries without a stored snapshot CID
-// carry nothing in IPFS and are skipped.
 // retainedUntil returns the latest future retention_until of did's live
 // archive entries, or nil when the retention policy permits deletion
 // (DCS-FR-CSA-17). The archive trigger refuses the deletion as well; this
@@ -379,11 +389,25 @@ func retainedUntil(entries []db.ContractArchiveEntry, did string, now time.Time)
 	return latest
 }
 
+// hasArchiveEntry reports whether did has an archive entry, live or deleted.
+func hasArchiveEntry(entries []db.ContractArchiveEntry, did string) bool {
+	for _, entry := range entries {
+		if entry.DID == did {
+			return true
+		}
+	}
+	return false
+}
+
+// snapshotCIDsForDeletion collects the distinct snapshot CIDs of the given
+// DID's archive entries, deleted ones included, so that a repeated delete
+// removes what an earlier attempt left. Entries without a stored snapshot CID
+// carry nothing in IPFS and are skipped.
 func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []string {
 	seen := map[string]bool{}
 	cids := []string{}
 	for _, entry := range entries {
-		if entry.DID != did || entry.DeletedAt != nil || entry.SnapshotCID == "" {
+		if entry.DID != did || entry.SnapshotCID == "" {
 			continue
 		}
 		if seen[entry.SnapshotCID] {
@@ -395,15 +419,16 @@ func snapshotCIDsForDeletion(entries []db.ContractArchiveEntry, did string) []st
 	return cids
 }
 
-// removeArchivedSnapshots removes each snapshot CID from the IPFS store,
-// failing hard on the first removal error (DCS-NFR-SEC-13).
+// removeArchivedSnapshots removes every CID from the IPFS store
+// (DCS-NFR-SEC-13). It tries each CID and returns the joined removal errors.
 func removeArchivedSnapshots(store archiveSnapshotStore, cids []string) error {
+	var errs []error
 	for _, cid := range cids {
 		if err := store.DeleteFile(cid); err != nil {
-			return fmt.Errorf("remove archived snapshot %s from IPFS: %w", cid, err)
+			errs = append(errs, fmt.Errorf("remove archived object %s from IPFS: %w", cid, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Annotate sets an archived contract's summary and tags (DCS-FR-CSA-11).
@@ -415,6 +440,9 @@ func removeArchivedSnapshots(store archiveSnapshotStore, cids []string) error {
 // recorded in the archive audit log.
 func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractstoragearchive.AnnotatePayload) (res *contractstoragearchive.ArchiveAnnotationResponse, err error) {
 	defer func() { s.auditFailure(ctx, "annotate", p.Did, err) }()
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -425,7 +453,6 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Annotate is a role-authorized write; F03 party scoping applies to reads only.
 	rows, err := s.CRepo.ReadArchivedContractsByFilter(contractreadpolicy.WithSystemScope(ctx), tx, db.SearchValues{DID: p.Did})
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)

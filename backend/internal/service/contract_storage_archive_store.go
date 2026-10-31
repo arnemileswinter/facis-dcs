@@ -31,6 +31,9 @@ type archiveArtifacts interface {
 // contract (DCS-IR-CSA-02, DCS-FR-CSA-25).
 func (s *contractStorageArchivesrvc) Store(ctx context.Context, p *contractstoragearchive.StorePayload) (res *contractstoragearchive.ArchiveStoreResponse, err error) {
 	defer func() { s.auditFailure(ctx, "store", p.Did, err) }()
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
@@ -56,13 +59,6 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var known bool
-	if err := tx.GetContext(ctx, &known, `SELECT EXISTS (SELECT 1 FROM contracts WHERE did = $1)`, did); err != nil {
-		return nil, contractstoragearchive.MakeInternalError(err)
-	}
-	if !known {
-		return nil, contractstoragearchive.MakeBadRequest(fmt.Errorf("no contract with DID %q", did))
-	}
 	contract, err := s.CRepo.ReadDataByDID(ctx, tx, did)
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)

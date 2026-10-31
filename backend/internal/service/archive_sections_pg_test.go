@@ -97,6 +97,8 @@ func TestArchivedSectionsAreReadableOnlyByTheirParties(t *testing.T) {
 	require.NoError(t, db.Select(&sectionCIDs, `SELECT content_cid FROM contract_archive_sections WHERE did = $1`, did))
 	snapshots := &recordingSnapshotStore{}
 	svc.SnapshotStore, svc.Eraser = snapshots, noopEraser{}
+	_, err = db.Exec(`UPDATE contracts SET state = 'TERMINATED' WHERE did = $1`, did)
+	require.NoError(t, err)
 	_, err = svc.Delete(archiveManagerContext(), &contractstoragearchive.DeletePayload{Did: did, Justification: "retention ended"})
 	require.NoError(t, err)
 	require.Subset(t, snapshots.deleted, sectionCIDs)

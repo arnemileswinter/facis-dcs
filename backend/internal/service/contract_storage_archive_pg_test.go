@@ -363,9 +363,16 @@ func TestEvidenceNeedsALiveArchiveEntry(t *testing.T) {
 	svc := archiveTestService(t, db)
 	svc.Artifacts = newMemoryArtifacts()
 	name, mediaType := "note.txt", "text/plain"
+	did := "did:web:dcs.example:contract:unarchived"
+	_, err := db.Exec(`INSERT INTO contracts (did, origin, created_by, state, template_did, template_version) VALUES ($1, 'did:web:dcs.example', 'did:web:creator', 'SIGNED', 'did:web:tpl', 1)`, did)
+	require.NoError(t, err)
 
-	_, err := svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
-		Kind: "evidence", Did: "did:web:dcs.example:contract:none", Name: &name, MediaType: &mediaType, Content: []byte("x"),
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
+		Kind: "evidence", Did: did, Name: &name, MediaType: &mediaType, Content: []byte("x"),
 	})
 	require.ErrorContains(t, err, "no live archive entry")
+	_, err = svc.Store(archiveManagerContext(), &contractstoragearchive.StorePayload{
+		Kind: "evidence", Did: "did:web:dcs.example:contract:none", Name: &name, MediaType: &mediaType, Content: []byte("x"),
+	})
+	require.Equal(t, "not_found", errorName(err))
 }

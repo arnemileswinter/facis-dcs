@@ -288,12 +288,16 @@ var _ = Service("ContractStorageArchive", func() {
 		Result(ArchiveStoreResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "No contract has this DID")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/archive/store")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -379,7 +383,7 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("delete", func() {
-		Description("Permanently delete an archived contract entry (DCS-FR-CSA-17). This is a soft delete: the archive entry is marked deleted_at/deleted_by/deletion_reason rather than physically removed, so evidence remains discoverable for compliance/dispute resolution, and requires a justification that is logged with the deletion's audit event.")
+		Description("Delete an archived contract entry and erase the contract (DCS-FR-CSA-17). Only a TERMINATED, EXPIRED, REVOKED, REJECTED or WITHDRAWN contract that the caller may read can be deleted. This is a soft delete: the archive entry is marked deleted_at/deleted_by/deletion_reason rather than physically removed, and requires a justification that is logged with the deletion's audit event. The contract's keys are then shredded here and on every counterparty instance. A repeated delete runs the erasure again.")
 		Meta("dcs:requirements", "DCS-IR-CSA-03", "DCS-IR-CSA-06", "DCS-FR-CSA-17")
 		Security(JWTAuth, func() {
 			Scope("Archive Manager")
@@ -387,11 +391,13 @@ var _ = Service("ContractStorageArchive", func() {
 		Payload(func() {
 			Token("token", String, "JWT token")
 			Attribute("did", String, "Decentralized Identifier of the archived contract to delete")
-			Attribute("justification", String, "Justification for the deletion (DCS-FR-CSA-17); logged with the deletion audit event")
+			Attribute("justification", String, "Justification for the deletion (DCS-FR-CSA-17); logged with the deletion audit event", func() { Pattern(`\S`) })
 			Required("did", "justification")
 		})
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "No contract has this DID")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -400,6 +406,8 @@ var _ = Service("ContractStorageArchive", func() {
 			Param("justification")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 		Result(Int)
@@ -421,12 +429,16 @@ var _ = Service("ContractStorageArchive", func() {
 		Result(ArchiveAnnotationResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "No contract has this DID")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
 			POST("/archive/annotate")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -496,7 +508,7 @@ var _ = Service("ContractStorageArchive", func() {
 		Payload(func() {
 			Token("token", String, "JWT token")
 			Attribute("did", String, "Optional archived contract DID filter")
-			Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
+			Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 			Required("justification")
 		})
 
