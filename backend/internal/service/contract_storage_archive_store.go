@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	baseevent "digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/validation"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
@@ -313,12 +315,7 @@ func archiveComplianceChecks(entry db.ContractArchiveEntry, meta *db.ContractMet
 		retention = append(retention, "retention period ended on "+entry.RetentionUntil.UTC().Format("2006-01-02")+"; review the entry for deletion")
 	}
 
-	var signature []string
-	if archiveJSONStatus(entry.SignatureMeta) != "SIGNED" {
-		signature = append(signature, "no completed signature recorded")
-	} else if archiveJSONField(entry.SignatureMeta, "credential_type") == "" {
-		signature = append(signature, "signature credential type not recorded")
-	}
+	signature := archiveSignatureProblems(entry)
 	if !archiveEvidencePresent(entry.CredentialHashes) {
 		signature = append(signature, "no signer credential hashes recorded")
 	}
@@ -355,4 +352,51 @@ func archiveComplianceChecks(entry db.ContractArchiveEntry, meta *db.ContractMet
 		check("metadata_completeness", metadata),
 		check("evidence_completeness", evidence),
 	}
+}
+
+// archiveSignatureProblems judges the signatures an archive entry records
+// (cwecommand.BuildArchiveEntry): each signature this instance applied must
+// name its credential type, and that level must meet the level the archived
+// contract requires for its field. A signature a counterparty applied on its
+// own instance must name its party and signatory; its level is judged on that
+// instance (ADR-37).
+func archiveSignatureProblems(entry db.ContractArchiveEntry) []string {
+	var metadata struct {
+		Status     string `json:"status"`
+		Signatures []struct {
+			Signer         string `json:"signer"`
+			Field          string `json:"field"`
+			CredentialType string `json:"credential_type"`
+		} `json:"signatures"`
+		PeerSignatures []struct {
+			Party     string `json:"party"`
+			Signatory string `json:"signatory"`
+		} `json:"peer_signatures"`
+	}
+	if entry.SignatureMeta != nil {
+		_ = json.Unmarshal(*entry.SignatureMeta, &metadata)
+	}
+	if metadata.Status != "SIGNED" || len(metadata.Signatures)+len(metadata.PeerSignatures) == 0 {
+		return []string{"no completed signature recorded"}
+	}
+	var snapshot struct {
+		ContractData json.RawMessage `json:"contract_data"`
+	}
+	_ = json.Unmarshal(entry.ContractSnapshot, &snapshot)
+	var problems []string
+	for _, signature := range metadata.Signatures {
+		required := validation.RequiredCredentialType(snapshot.ContractData, signature.Field)
+		switch {
+		case signature.CredentialType == "":
+			problems = append(problems, fmt.Sprintf("signature of %s for %q records no credential type", signature.Signer, signature.Field))
+		case !validation.SignatureLevelSatisfies(signature.CredentialType, required):
+			problems = append(problems, fmt.Sprintf("signature of %s for %q reached %s, the contract requires %s", signature.Signer, signature.Field, signature.CredentialType, required))
+		}
+	}
+	for _, signature := range metadata.PeerSignatures {
+		if signature.Party == "" || signature.Signatory == "" {
+			problems = append(problems, "a counterparty signature records no party or signatory")
+		}
+	}
+	return problems
 }
