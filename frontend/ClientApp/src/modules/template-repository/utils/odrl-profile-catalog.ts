@@ -1,3 +1,4 @@
+import { getConfig } from '@/config'
 import { Parser, type Quad } from 'n3'
 
 /**
@@ -28,7 +29,7 @@ async function loadProfileQuads(): Promise<Quad[]> {
   // import time (top-level await below), before Pinia exists — and the http
   // client's auth interceptor needs an active Pinia. The hub's resolve
   // routes are public.
-  const response = await fetch('/api/semantic/ontology/dcs-odrl-profile', {
+  const response = await fetch(`${getConfig().API_BASE_URL}/semantic/ontology/dcs-odrl-profile`, {
     headers: { Accept: 'application/json' },
   })
   if (!response.ok) {
