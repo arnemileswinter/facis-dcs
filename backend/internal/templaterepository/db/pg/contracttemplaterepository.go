@@ -556,6 +556,21 @@ func (r *PostgresContractTemplateRepo) ReadEvents(ctx context.Context, tx *sqlx.
 	return events, nil
 }
 
+// CountOpenContracts reads the effective contract state, so an expired
+// contract counts as terminal.
+func (r *PostgresContractTemplateRepo) CountOpenContracts(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count,
+		`SELECT count(*) FROM contracts_effective_metadata
+		  WHERE template_did = $1 AND state NOT IN ('TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')`,
+		did,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("count open contracts of template %s: %w", did, err)
+	}
+	return count, nil
+}
+
 // UpdateCatalogueAssetHash records the Federated Catalogue asset of the published version (DCS-NFR-BR-09).
 func (r *PostgresContractTemplateRepo) UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET catalogue_asset_hash = $2 WHERE did = $1`, did, hash)

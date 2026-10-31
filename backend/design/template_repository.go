@@ -420,8 +420,9 @@ var ContractTemplateArchiveRequest = Type("ContractTemplateArchiveRequest", func
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
+	Attribute("justification", String, "Why the template is archived; stored in the audit event (DCS-IR-TR-07)", func() { MinLength(1) })
 
-	Required("did", "updated_at")
+	Required("did", "updated_at", "justification")
 })
 
 var ContractTemplateArchiveResponse = Type("ContractTemplateArchiveResponse", func() {
@@ -935,8 +936,8 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/archive
 	Method("archive", func() {
-		Description("archive obsolete template.")
-		Meta("dcs:requirements", "DCS-IR-TR-07")
+		Description("archive a template with a justification: a REGISTERED or PUBLISHED template becomes DEPRECATED (event ARCHIVE_CONTRACT_TEMPLATE); a DRAFT, REJECTED or DEPRECATED template becomes DELETED (event DELETE_CONTRACT_TEMPLATE), unless contracts that are not terminated were made from it. A template in review or approved is refused.")
+		Meta("dcs:requirements", "DCS-IR-TR-07", "DCS-FR-TR-17", "DCS-FR-TR-18")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")

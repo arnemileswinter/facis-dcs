@@ -82,7 +82,8 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 func mapTemplateCommandError(err error) error {
 	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
 		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) ||
-		errors.Is(err, db.ErrContractTemplateNotFound) {
+		errors.Is(err, db.ErrContractTemplateNotFound) || errors.Is(err, command.ErrInvalidRequest) ||
+		errors.Is(err, command.ErrTemplateInUse) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -832,11 +833,12 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 	}
 
 	cmd := command.ArchiveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ArchivedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		ArchivedBy:    middleware.GetParticipantID(ctx),
+		Justification: req.Justification,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
 	}
 	handler := command.Archiver{
 		DB:       s.DB,

@@ -57,11 +57,11 @@ func TestTemplateDeprecationWithdrawsCatalogueAssetPostgres(t *testing.T) {
 	}
 
 	revokeStatus = http.StatusInternalServerError
-	require.Error(t, archiver.Handle(ctx, command.ArchiveCmd{DID: "tpl", UpdatedAt: future, ArchivedBy: "manager"}))
+	require.Error(t, archiver.Handle(ctx, command.ArchiveCmd{DID: "tpl", UpdatedAt: future, ArchivedBy: "manager", Justification: "withdrawn"}))
 	require.Equal(t, "PUBLISHED", state())
 
 	revokeStatus = http.StatusOK
-	require.NoError(t, archiver.Handle(ctx, command.ArchiveCmd{DID: "tpl", UpdatedAt: future, ArchivedBy: "manager"}))
+	require.NoError(t, archiver.Handle(ctx, command.ArchiveCmd{DID: "tpl", UpdatedAt: future, ArchivedBy: "manager", Justification: "withdrawn"}))
 	require.Equal(t, "DEPRECATED", state())
 	require.Equal(t, []string{"hash-1", "hash-1"}, revoked)
 }

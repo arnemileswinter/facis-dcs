@@ -40,10 +40,18 @@ const { isManager } = useTemplatePermissions()
 
 const isPublishing = ref(false)
 
-// DCS-FR-TR-18: a deprecated template stays deletable; only a deleted one has no archive action.
-const canArchive = computed(() => isManager.value && props.template.state !== TemplateState.deleted)
+// DCS-FR-TR-17, DCS-FR-TR-18: a registered or published template is
+// deprecated; a draft, rejected or deprecated one is deleted. A template in
+// review or approved has no archive action.
+const deprecates = computed(() =>
+  [TemplateState.registered, TemplateState.published].includes(props.template.state),
+)
+const deletes = computed(() =>
+  [TemplateState.draft, TemplateState.rejected, TemplateState.deprecated].includes(props.template.state),
+)
+const canArchive = computed(() => isManager.value && (deprecates.value || deletes.value))
 
-const archiveLabel = computed(() => (props.template.state === TemplateState.deprecated ? 'Delete' : 'Archive'))
+const archiveLabel = computed(() => (deprecates.value ? 'Deprecate' : 'Delete'))
 
 const showPublishButton = computed(() => {
   return (
@@ -53,26 +61,37 @@ const showPublishButton = computed(() => {
   )
 })
 
+// DCS-IR-TR-06: only a template that passed the policy audit at approval is registered.
 const showRegisterButton = computed(() => {
   return (
     isManager.value &&
     props.template.state === TemplateState.approved &&
-    props.template.template_type === TemplateType.contractTemplate
+    props.template.template_type === TemplateType.contractTemplate &&
+    props.template.compliance_status === 'COMPLIANT'
   )
 })
 
 const archive = async () => {
   try {
     if (!confirmationModal.value) return
-    const { isCanceled } = await confirmationModal.value.reveal({
-      message: props.template.state === TemplateState.deprecated ? 'Proceed with deletion?' : 'Proceed with archiving?',
+    // DCS-IR-TR-07: an archival requires a justification.
+    const { isCanceled, data } = await confirmationModal.value.reveal({
+      message: deprecates.value
+        ? 'Deprecate this template? No new contract can be made from it.'
+        : 'Delete this template? Contracts that are not terminated block the deletion.',
+      confirmLabel: archiveLabel.value,
+      editor: { requiredText: true, label: 'Justification', placeholder: 'Why is the template archived?' },
     })
-    if (!isCanceled) {
-      await contractTemplateService.archive({ did: props.template.did, updated_at: props.template.updated_at })
+    if (!isCanceled && data) {
+      await contractTemplateService.archive({
+        did: props.template.did,
+        updated_at: props.template.updated_at,
+        justification: data.trim(),
+      })
       await router.push({ name: ROUTES.TEMPLATES.LIST })
     }
   } catch (err) {
-    reportActionError(err, 'Archive template')
+    reportActionError(err, `${archiveLabel.value} template`)
   }
 }
 

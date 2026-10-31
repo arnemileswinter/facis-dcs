@@ -41,6 +41,7 @@ var KnownEvents = []EventInfo{
 	{Name: "template.updated", Description: "A contract template was updated"},
 	{Name: "template.registered", Description: "A contract template version was registered (published)"},
 	{Name: "template.deprecated", Description: "A contract template was deprecated (archived)"},
+	{Name: "template.deleted", Description: "A contract template was deleted"},
 	// DCS-FR-PACM-02: the "alert" half of "flagged and reported in real-time
 	// via dashboards and alerts". Emitted by the continuous-monitoring sweep
 	// the first time it detects a given violation, not on every run — see
@@ -69,6 +70,7 @@ var DCSEventMap = map[string]string{
 	"UPDATE_CONTRACT_TEMPLATE":   "template.updated",
 	"REGISTER_CONTRACT_TEMPLATE": "template.registered",
 	"ARCHIVE_CONTRACT_TEMPLATE":  "template.deprecated",
+	"DELETE_CONTRACT_TEMPLATE":   "template.deleted",
 	"PAC_COMPLIANCE_RISK":        "compliance.risk_detected",
 }
 

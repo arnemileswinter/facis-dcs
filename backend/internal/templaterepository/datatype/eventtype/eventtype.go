@@ -18,6 +18,7 @@ const (
 	RetrieveProvenance EventType = "RETRIEVE_CONTRACT_TEMPLATE_PROVENANCE"
 	Search       EventType = "SEARCH_CONTRACT_TEMPLATE"
 	Archive      EventType = "ARCHIVE_CONTRACT_TEMPLATE"
+	Delete       EventType = "DELETE_CONTRACT_TEMPLATE"
 	Register     EventType = "REGISTER_CONTRACT_TEMPLATE"
 	Audit        EventType = "AUDIT_CONTRACT_TEMPLATE"
 	Publish      EventType = "PUBLISH_CONTRACT_TEMPLATE"

@@ -161,7 +161,7 @@ def step_given_template_deprecated_status(context, name):
     archive_resp = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
         headers=manager_headers,
     )
     assert archive_resp.status_code == 200, f"Template archive failed: {archive_resp.text}"
@@ -543,13 +543,18 @@ def step_when_attempt_verify_template(context, name):
     )
 
 
+def _archive_payload(t):
+    # DCS-IR-TR-07: an archival requires a justification.
+    return {"did": t["did"], "updated_at": t["updated_at"], "justification": "Replaced by a newer template"}
+
+
 @when('I deprecate template "{name}"')
 def step_when_deprecate_template(context, name):
     t = TemplateService.named(context, name)
     context.requests_response = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
     )
 
 
@@ -564,7 +569,7 @@ def step_when_delete_template(context, name):
     context.requests_response = post_json(
         context,
         template_archive_url(context),
-        {"did": t["did"], "updated_at": t["updated_at"]},
+        _archive_payload(t),
     )
 
 
@@ -644,6 +649,15 @@ def step_then_template_status(context, expected_status):
     )
 
 
+
+
+@then('template "{name}" is still in "{expected_status}" status')
+def step_then_template_still_in_status(context, name, expected_status):
+    t = TemplateService.named(context, name)
+    actual = TemplateService.fetch_template(context, t["did"]).get("state", "").upper()
+    assert actual == expected_status.upper(), (
+        f"Template state changed: expected '{expected_status.upper()}', got '{actual}'"
+    )
 
 
 @then('template "{name}" status remains "{expected_status}"')

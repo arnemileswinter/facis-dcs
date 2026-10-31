@@ -274,14 +274,17 @@ func (e RetrieveProvenanceEvent) GetDID() string {
 	return e.DID
 }
 
-// ArchiveEvent is emitted when template data is archived.
+// ArchiveEvent is emitted when a template is deprecated.
 type ArchiveEvent struct {
-	DID        string             `json:"did"`
-	Version    int                `json:"version"`
-	ArchivedBy string             `json:"archived_by"`
-	OccurredAt time.Time          `json:"occurred_at"`
-	HolderDID  string             `json:"holder_did"`
-	UserRoles  userrole.UserRoles `json:"user_roles"`
+	DID           string             `json:"did"`
+	Version       int                `json:"version"`
+	ArchivedBy    string             `json:"archived_by"`
+	PreviousState string             `json:"previous_state"`
+	NewState      string             `json:"new_state"`
+	Justification string             `json:"justification"`
+	OccurredAt    time.Time          `json:"occurred_at"`
+	HolderDID     string             `json:"holder_did"`
+	UserRoles     userrole.UserRoles `json:"user_roles"`
 }
 
 // EventType implements the Event interface.
@@ -291,6 +294,19 @@ func (e ArchiveEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e ArchiveEvent) GetDID() string {
+	return e.DID
+}
+
+// DeleteEvent is emitted when a template is deleted.
+type DeleteEvent ArchiveEvent
+
+// EventType implements the Event interface.
+func (e DeleteEvent) EventType() string {
+	return eventtype.Delete.String()
+}
+
+// GetDID implements the Event interface.
+func (e DeleteEvent) GetDID() string {
 	return e.DID
 }
 

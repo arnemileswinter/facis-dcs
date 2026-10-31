@@ -163,6 +163,9 @@ type ContractTemplateRepo interface {
 	UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error
 	// ReadEvents returns the template's audit events of the given types, oldest first.
 	ReadEvents(ctx context.Context, tx *sqlx.Tx, did string, eventTypes ...string) ([]TemplateEvent, error)
+	// CountOpenContracts counts the contracts made from the template that are
+	// not in a terminal state.
+	CountOpenContracts(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
 }
 
 // TemplateEvent is one audit event of a template.

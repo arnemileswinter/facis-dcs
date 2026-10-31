@@ -77,7 +77,7 @@ Feature: Authentication Endpoints
       | POST   | /template/approve              | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                        |
       | POST   | /template/reject               | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z','reason':'placeholder'} |
       | POST   | /template/register             | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                        |
-      | POST   | /template/archive              | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z'}                        |
+      | POST   | /template/archive              | {'did':'placeholder','updated_at':'2024-01-01T00:00:00Z','justification':'placeholder'} |
       | GET    | /template/audit                | did=placeholder&justification=placeholder                                        |
 
   Scenario Outline: Access restricted endpoint responds with access denied (Catalogue)
