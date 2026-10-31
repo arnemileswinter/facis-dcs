@@ -204,7 +204,7 @@ build_dcs_image:
 	@$(DOCKER_BUILD) $(DCS_BUILD_CACHE) \
 		--build-arg GIT_SHA="$$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
 		--build-arg BUILD_TIME="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		-f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
+		--target ci -f ../../deployment/docker/Dockerfile -t "$(DOCKER_IMAGE)" ../..
 
 build_pdf_core_image:
 	@$(DOCKER_BUILD) $(PDF_CORE_BUILD_CACHE) -f ../../pdf-core/Dockerfile -t "$(PDF_CORE_IMAGE)" ../..
