@@ -2192,6 +2192,9 @@ func (s *contractWorkflowEnginesrvc) CreateContractTarget(ctx context.Context, r
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
 	}
+	if err := command.ValidateTargetURL(req.URL); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
+	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -2225,6 +2228,9 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.URL) == "" {
 		return nil, contractworkflowengine.MakeBadRequest(errors.New("a target system needs a name and a URL"))
+	}
+	if err := command.ValidateTargetURL(req.URL); err != nil {
+		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)

@@ -75,6 +75,9 @@ func seedTargets(ctx context.Context, list listTargetsFn, create createTargetFn,
 		if known[name] {
 			continue
 		}
+		if err := ValidateTargetURL(url); err != nil {
+			return seeded, fmt.Errorf("configured contract target %q: %w", name, err)
+		}
 		enabled := true
 		if entry.Enabled != nil {
 			enabled = *entry.Enabled
