@@ -90,7 +90,7 @@ func newTestPlatform(subs Subscriptions) *Platform {
 		}
 		return c, nil
 	}
-	return New(subs, store, NewDispatcher(subs, store, admitAll), validate, nil)
+	return New(subs, store, NewDispatcher(subs, store, admitAll, nil), validate, nil)
 }
 
 func do(t *testing.T, p *Platform, method, path, token, body string) *httptest.ResponseRecorder {
@@ -236,7 +236,7 @@ func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
 	_ = store.AddDelivery(context.Background(), Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA})
 	_ = store.AddDelivery(context.Background(), Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB})
 	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
-	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll), validate, nil)
+	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll, nil), validate, nil)
 
 	rec := do(t, p, http.MethodGet, "/deliveries", "manager-a", "")
 	var got []map[string]any

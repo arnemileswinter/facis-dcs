@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -61,6 +62,19 @@ func ContractEventAudience(database *sqlx.DB, localPeer string) func(ctx context
 			return false
 		}
 		return contractreadpolicy.Scope{Organization: organization, LocalPeer: localPeer}.MayRead(row.Origin, row.CreatedBy, row.Data)
+	}
+}
+
+// ContractEventOwner returns the owner of a contract for its webhook events
+// (DCS-FR-CSA-23): the creating organization and the responsible parties. It
+// returns nil when the contract is unknown.
+func ContractEventOwner(database *sqlx.DB) func(ctx context.Context, did string) json.RawMessage {
+	return func(ctx context.Context, did string) json.RawMessage {
+		var owner []byte
+		if err := database.GetContext(ctx, &owner, `SELECT json_build_object('created_by', created_by, 'responsible', responsible) FROM contracts_effective WHERE did = $1`, did); err != nil {
+			return nil
+		}
+		return owner
 	}
 }
 
