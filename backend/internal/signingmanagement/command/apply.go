@@ -1474,7 +1474,11 @@ func (h *Applier) archiveSignedContract(ctx context.Context, tx *sqlx.Tx, did st
 		return fmt.Errorf("could not read signed contract for archive storage: %w", err)
 	}
 
-	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, appliedBy, signatures, peerSignatures)
+	history, err := h.ArchiveRepo.ReadHistoryByDID(ctx, tx, did)
+	if err != nil {
+		return fmt.Errorf("could not read the version history for archive storage: %w", err)
+	}
+	archiveEntry, err := cwecommand.BuildArchiveEntry(signedContract, history, appliedBy, signatures, peerSignatures)
 	if err != nil {
 		return fmt.Errorf("could not build archive entry: %w", err)
 	}

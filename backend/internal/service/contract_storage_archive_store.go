@@ -68,7 +68,11 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
 	storedBy := middleware.GetParticipantID(ctx)
-	entry, err := cwecommand.BuildManualArchiveEntry(contract, storedBy)
+	history, err := s.CRepo.ReadHistoryByDID(ctx, tx, did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	entry, err := cwecommand.BuildManualArchiveEntry(contract, history, storedBy)
 	if err != nil {
 		return nil, contractstoragearchive.MakeBadRequest(err)
 	}
