@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,12 +19,16 @@ import (
 
 // WebhookPayload is the JSON body sent to a subscriber's callback URL.
 type WebhookPayload struct {
-	EventID       string          `json:"event_id"`
-	CorrelationID string          `json:"correlation_id"`
-	Event         string          `json:"event"`
-	DID           string          `json:"did"`
-	OccurredAt    time.Time       `json:"occurred_at"`
-	Data          json.RawMessage `json:"data,omitempty"`
+	EventID       string    `json:"event_id"`
+	CorrelationID string    `json:"correlation_id"`
+	Event         string    `json:"event"`
+	DID           string    `json:"did"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	// Owner names who owns the contract (created_by and the responsible
+	// parties), so a receiving flow can route a contract event to them. It is
+	// absent for template events.
+	Owner json.RawMessage `json:"owner,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // Audience reports whether the organization ownerDID may receive event about
@@ -31,22 +36,28 @@ type WebhookPayload struct {
 // policy (F03).
 type Audience func(ctx context.Context, event, did, ownerDID string) bool
 
+// Owner returns the owner of the contract did as a JSON object, or nil.
+type Owner func(ctx context.Context, did string) json.RawMessage
+
 // Dispatcher fans out events to the registered subscribers asynchronously.
 type Dispatcher struct {
 	subs       Subscriptions
 	store      Deliveries
 	audience   Audience
+	owner      Owner
 	httpClient *http.Client
 }
 
 // NewDispatcher creates a Dispatcher that reads subscribers from subs, delivers
-// to those audience admits, and records outcomes in store. Callback URLs are
+// to those audience admits, adds the contract owner from owner (may be nil),
+// and records outcomes in store. Callback URLs are
 // caller-supplied, so the client refuses loopback, link-local and redirects.
-func NewDispatcher(subs Subscriptions, store Deliveries, audience Audience) *Dispatcher {
+func NewDispatcher(subs Subscriptions, store Deliveries, audience Audience, owner Owner) *Dispatcher {
 	return &Dispatcher{
 		subs:       subs,
 		store:      store,
 		audience:   audience,
+		owner:      owner,
 		httpClient: safehttp.Client(10*time.Second, safehttp.Policy{}),
 	}
 }
@@ -73,6 +84,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 		DID:           did,
 		OccurredAt:    time.Now().UTC(),
 		Data:          data,
+	}
+	if d.owner != nil && !strings.HasPrefix(event, "template.") {
+		payload.Owner = d.owner(ctx, did)
 	}
 
 	if err := d.store.TrackPending(ctx, PendingCallback{

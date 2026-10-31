@@ -37,6 +37,7 @@ var lifecycleActorField = map[string]string{
 	cweeventtype.Terminate.String():        "terminated_by",
 	cweeventtype.Renew.String():            "renewed_by",
 	cweeventtype.ContractExpired.String():  "",
+	cweeventtype.Activate.String():         "activated_by",
 	cweeventtype.StoreArchived.String():    "stored_by",
 	cweeventtype.PublishCatalogue.String(): "published_by",
 	smeventtype.Applied.String():           "applied_by",

@@ -29,7 +29,7 @@ var changeEvents = map[string]bool{
 	"CONTRACT_EXPIRED": true, "CONTRACT_RENEWAL_DUE": true, "REMOTE_SYNC": true,
 	"STORE_ARCHIVED_CONTRACT": true, "DELETE_ARCHIVED_CONTRACT": true, "ANNOTATE_ARCHIVED_CONTRACT": true,
 	"KEY_SHREDDED": true, "APPLIED_SIGNATURE": true, "REVOKE_SIGNATURE": true,
-	"PUBLISH_CONTRACT_TO_CATALOGUE": true,
+	"PUBLISH_CONTRACT_TO_CATALOGUE": true, "ACTIVATE_CONTRACT": true,
 }
 
 // Feed fans each change out to every subscriber.

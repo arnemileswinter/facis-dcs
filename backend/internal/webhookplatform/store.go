@@ -26,6 +26,13 @@ var KnownEvents = []EventInfo{
 	// DCS-FR-CWE-22 / DCS-FR-CSA-20: renewal-deadline alert; emitted by the
 	// expiry cron once per expiry date when the notice period starts.
 	{Name: "contract.renewal_due", Description: "The notice period before a contract's expiration date started"},
+	// DCS-FR-CSA-23: the other state changes a contract owner follows.
+	{Name: "contract.offered", Description: "A contract was offered to the counterparty"},
+	{Name: "contract.withdrawn", Description: "A contract offer was withdrawn"},
+	{Name: "contract.signature_applied", Description: "A signature was applied to a contract"},
+	{Name: "contract.signature_revoked", Description: "A contract signature was revoked"},
+	{Name: "contract.activated", Description: "The target system acknowledged the deployment and the contract is active"},
+	{Name: "contract.renewed", Description: "A contract was renewed"},
 	{Name: "template.created", Description: "A new contract template was created"},
 	{Name: "template.approved", Description: "A contract template was approved"},
 	// DCS-FR-TR-22: Template Users subscribe to these to learn that a
@@ -51,6 +58,12 @@ var DCSEventMap = map[string]string{
 	"TERMINATE_CONTRACT":         "contract.terminated",
 	"CONTRACT_EXPIRED":           "contract.expired",
 	"CONTRACT_RENEWAL_DUE":       "contract.renewal_due",
+	"OFFER_CONTRACT":             "contract.offered",
+	"WITHDRAW_CONTRACT":          "contract.withdrawn",
+	"APPLIED_SIGNATURE":          "contract.signature_applied",
+	"REVOKE_SIGNATURE":           "contract.signature_revoked",
+	"ACTIVATE_CONTRACT":          "contract.activated",
+	"RENEW_CONTRACT":             "contract.renewed",
 	"CREATE_CONTRACT_TEMPLATE":   "template.created",
 	"APPROVE_CONTRACT_TEMPLATE":  "template.approved",
 	"UPDATE_CONTRACT_TEMPLATE":   "template.updated",

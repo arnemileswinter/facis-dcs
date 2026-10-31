@@ -34,3 +34,35 @@ export function signingWorkflow(contractData: unknown): SigningWorkflow {
   }
   return { order, deadline }
 }
+
+/** The signatory names of the contract's signature fields, in document order. */
+export function signatureFieldNames(contractData: unknown): string[] {
+  const fields = ((contractData ?? {}) as Record<string, unknown>)['dcs:signatureFields']
+  if (!Array.isArray(fields)) return []
+  return fields
+    .map((node) => (node as Record<string, unknown>)['dcs:signatoryName'])
+    .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+}
+
+/**
+ * Sets the signing position of the signature field named field in the
+ * contract document. A position that is not a positive integer removes the
+ * field from the signing order.
+ */
+export function setSigningOrder(contractData: object, field: string, position: number | undefined): void {
+  const fields = (contractData as Record<string, unknown>)['dcs:signatureFields']
+  if (!Array.isArray(fields)) return
+  const node = fields.find((item) => (item as Record<string, unknown>)['dcs:signatoryName'] === field) as
+    | Record<string, unknown>
+    | undefined
+  if (!node) return
+  if (position !== undefined && Number.isInteger(position) && position >= 1) node['dcs:signingOrder'] = position
+  else delete node['dcs:signingOrder']
+}
+
+/** Sets the signing deadline (an xsd:date, YYYY-MM-DD) of the contract document; an empty date removes it. */
+export function setSigningDeadline(contractData: object, date: string): void {
+  const doc = contractData as Record<string, unknown>
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) doc['dcs:signingDeadline'] = { '@value': date, '@type': 'xsd:date' }
+  else delete doc['dcs:signingDeadline']
+}

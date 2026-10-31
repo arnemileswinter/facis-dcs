@@ -611,6 +611,27 @@ var ContractEventsRequest = Type("ContractEventsRequest", func() {
 	Token("token", String, "JWT token")
 })
 
+var ContractAttentionRequest = Type("ContractAttentionRequest", func() {
+	Description("List the contracts that need attention")
+
+	Token("token", String, "JWT token")
+})
+
+var ContractAttentionItem = Type("ContractAttentionItem", func() {
+	Description("A contract that needs its owner's attention (DCS-FR-CSA-23)")
+
+	Attribute("did", String, "Decentralized Identifier of the contract")
+	Attribute("name", String, "Contract name")
+	Attribute("state", String, "Current contract state")
+	Attribute("reason", String, "Why the contract needs attention", func() {
+		Enum("renewal_due", "expired", "terminated")
+	})
+	Attribute("exp_date", String, "Expiration date (RFC3339)")
+	Attribute("terminated_at", String, "Effective date of the termination (RFC3339)")
+
+	Required("did", "state", "reason")
+})
+
 var ContractCataloguePublishRequest = Type("ContractCataloguePublishRequest", func() {
 	Description("Register an approved, signed or active contract in the Federated Catalogue (DCS-IR-CWE-10). The catalogue entry carries the contract metadata only: identifier, name, state, version, template and validity period. It carries no contract content and no party.")
 
@@ -1776,6 +1797,35 @@ var _ = Service("ContractWorkflowEngine", func() {
 		HTTP(func() {
 			GET("/contract/events")
 			ServerSentEvents()
+			Response(StatusOK)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	Method("attention", func() {
+		Description("list the contracts the caller may read that need attention: the notice period before expiry has started, or the contract expired or was terminated in the last 30 days (DCS-FR-CSA-23). The list is computed from the contract data on each call.")
+		Meta("dcs:requirements", "DCS-FR-CSA-23", "DCS-FR-CWE-22")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(ContractAttentionRequest)
+		Result(ArrayOfRequired(ContractAttentionItem))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/contract/attention")
 			Response(StatusOK)
 			Response("internal_error", StatusInternalServerError)
 		})

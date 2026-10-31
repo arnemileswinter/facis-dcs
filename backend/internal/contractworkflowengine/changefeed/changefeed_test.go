@@ -39,3 +39,16 @@ func TestFeedPassesChangesAndDropsReads(t *testing.T) {
 	require.Empty(t, first)
 	require.Equal(t, "TERMINATE_CONTRACT", (<-second).EventType)
 }
+
+// DCS-FR-CWE-24: the deployment acknowledgement that activates a contract
+// reaches the dashboards.
+func TestFeedPassesTheActivation(t *testing.T) {
+	feed := New()
+	changes, stop := feed.Subscribe()
+	defer stop()
+
+	feed.Handle(busEvent(t, "ACTIVATE_CONTRACT", `{"did":"did:contract:1"}`))
+
+	require.Len(t, changes, 1)
+	require.Equal(t, Change{DID: "did:contract:1", EventType: "ACTIVATE_CONTRACT"}, <-changes)
+}

@@ -71,6 +71,11 @@ it('updates a changed contract in place and offers a reload for others', async (
   await flushPromises()
   expect(wrapper.find('[data-testid="contracts-outdated"]').exists()).toBe(true)
   expect(load).toHaveBeenCalledTimes(1)
+  // DCS-FR-CSA-23: the list passes each change on, so the attention list reloads.
+  expect(wrapper.emitted('change')).toEqual([
+    [{ did: 'a', event_type: 'TERMINATE_CONTRACT' }],
+    [{ did: 'new', event_type: 'CREATE_CONTRACT' }],
+  ])
   wrapper.unmount()
 })
 

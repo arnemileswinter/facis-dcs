@@ -486,6 +486,13 @@ var ContractTemplatePublishResponse = Type("ContractTemplatePublishResponse", fu
 })
 
 // Template Repository Service  (/template/...)
+// templateVerifyScopes are the roles that verify a template on either verify route.
+var templateVerifyScopes = func() {
+	Scope("Template Reviewer")
+	Scope("Template Manager")
+	Scope("Contract Creator")
+}
+
 var _ = Service("TemplateRepository", func() {
 	Description("Template Repository APIs (/template/...)")
 
@@ -800,11 +807,7 @@ var _ = Service("TemplateRepository", func() {
 		Description("run policy, schema, and semantic validations, verify the provenance credentials and compare the content hash with the registered one; return findings.")
 		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-FR-TR-09", "DCS-FR-TR-20")
 
-		Security(JWTAuth, func() {
-			Scope("Template Reviewer")
-			Scope("Template Manager")
-			Scope("Contract Creator")
-		})
+		Security(JWTAuth, templateVerifyScopes)
 
 		Payload(ContractTemplateVerifyRequest)
 		Result(ContractTemplateVerifyResponse)
@@ -814,6 +817,28 @@ var _ = Service("TemplateRepository", func() {
 
 		HTTP(func() {
 			POST("/template/verify")
+			Response(StatusOK)
+			Response("bad_request", StatusBadRequest)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// GET /template/verify/{did}
+	Method("verify_by_id", func() {
+		Description("verify the template the path names, with the same checks, scopes and audit as POST /template/verify; return findings.")
+		Meta("dcs:requirements", "DCS-FR-TR-20")
+
+		Security(JWTAuth, templateVerifyScopes)
+
+		Payload(ContractTemplateVerifyRequest)
+		Result(ContractTemplateVerifyResponse)
+
+		Error("bad_request", ErrorResult, "Bad request")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/template/verify/{did}")
+			Param("did")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

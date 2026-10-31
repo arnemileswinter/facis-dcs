@@ -646,7 +646,7 @@ func main() {
 		Secrets: webhookplatform.SecretBox{Agreement: hsmAgreement, MethodID: keyAgreementMethod.ID, Pub: keyAgreementPub},
 	}
 	webhookStore := webhookplatform.PostgresDeliveries{DB: db}
-	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did))
+	webhookDispatcher := webhookplatform.NewDispatcher(webhookSubs, webhookStore, service.ContractEventAudience(db, did), service.ContractEventOwner(db))
 	webhookPlatform := webhookplatform.New(
 		webhookSubs,
 		webhookStore,
