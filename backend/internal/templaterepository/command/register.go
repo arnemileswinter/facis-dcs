@@ -121,6 +121,26 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			return nil, fmt.Errorf("could not create event: %w", err)
 		}
 
+		// DCS-FR-TR-22: the users of the previous version are told of its successor.
+		predecessor, err := h.CTRepo.ReadPredecessorDID(ctx, tx, cmd.DID)
+		if err != nil {
+			return nil, err
+		}
+		if predecessor != nil {
+			err = event.Create(ctx, tx, templateevents.SuccessorRegisteredEvent{
+				DID:              *predecessor,
+				SuccessorDID:     cmd.DID,
+				SuccessorVersion: existing.Version,
+				RegisteredBy:     cmd.RegisteredBy,
+				OccurredAt:       time.Now().UTC(),
+				HolderDID:        cmd.HolderDID,
+				UserRoles:        cmd.UserRoles,
+			}, componenttype.ContractTemplateRepo)
+			if err != nil {
+				return nil, fmt.Errorf("could not create event: %w", err)
+			}
+		}
+
 		err = tx.Commit()
 		if err != nil {
 			return nil, fmt.Errorf("could not commit transaction: %w", err)

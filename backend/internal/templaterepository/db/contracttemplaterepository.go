@@ -166,6 +166,9 @@ type ContractTemplateRepo interface {
 	// CountOpenContracts counts the contracts made from the template that are
 	// not in a terminal state.
 	CountOpenContracts(ctx context.Context, tx *sqlx.Tx, did string) (int, error)
+	// ReadPredecessorDID returns the newest older version of the template's
+	// lineage that was registered, or nil.
+	ReadPredecessorDID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
 }
 
 // TemplateEvent is one audit event of a template.

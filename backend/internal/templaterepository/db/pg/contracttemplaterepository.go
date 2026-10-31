@@ -571,6 +571,27 @@ func (r *PostgresContractTemplateRepo) CountOpenContracts(ctx context.Context, t
 	return count, nil
 }
 
+func (r *PostgresContractTemplateRepo) ReadPredecessorDID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error) {
+	var predecessor string
+	err := tx.GetContext(ctx, &predecessor,
+		`SELECT older.did FROM contract_templates older
+		   JOIN contract_templates t ON t.did = $1
+		  WHERE older.base_template = t.base_template
+		    AND older.version < t.version
+		    AND older.state IN ('REGISTERED', 'PUBLISHED', 'DEPRECATED')
+		  ORDER BY older.version DESC
+		  LIMIT 1`,
+		did,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read predecessor of template %s: %w", did, err)
+	}
+	return &predecessor, nil
+}
+
 // UpdateCatalogueAssetHash records the Federated Catalogue asset of the published version (DCS-NFR-BR-09).
 func (r *PostgresContractTemplateRepo) UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET catalogue_asset_hash = $2 WHERE did = $1`, did, hash)

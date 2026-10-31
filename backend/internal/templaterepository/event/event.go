@@ -199,6 +199,29 @@ func (e UpdateManageEvent) GetDID() string {
 	return e.DID
 }
 
+// SuccessorRegisteredEvent is emitted for a registered template version when
+// a newer version of it is registered. Subscribers of "template.updated" for
+// the older version learn of the successor.
+type SuccessorRegisteredEvent struct {
+	DID              string             `json:"did"`
+	SuccessorDID     string             `json:"successor_did"`
+	SuccessorVersion int                `json:"successor_version"`
+	RegisteredBy     string             `json:"registered_by"`
+	OccurredAt       time.Time          `json:"occurred_at"`
+	HolderDID        string             `json:"holder_did"`
+	UserRoles        userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e SuccessorRegisteredEvent) EventType() string {
+	return eventtype.Update.String()
+}
+
+// GetDID implements the Event interface.
+func (e SuccessorRegisteredEvent) GetDID() string {
+	return e.DID
+}
+
 // SearchEvent is emitted when template data is searched.
 type SearchEvent struct {
 	RetrievedBy string             `json:"retrieved_by"`
