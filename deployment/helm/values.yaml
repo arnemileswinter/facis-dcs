@@ -932,7 +932,8 @@ complianceMonitor:
       memory: 256Mi
 
 # ---- Database backup (DCS-NFR-SF-03) ------------------------------------
-# A CronJob dumps the DCS database (DATABASE_URL) to a PersistentVolumeClaim.
+# A CronJob dumps the DCS database (DATABASE_URL) and a persistent Hydra
+# database to a PersistentVolumeClaim.
 # The schedule is the recovery point objective. Restore, the IPFS snapshot and
 # the erasure obligations of the retention: docs/backup-integration-guide.md.
 backup:

@@ -6,7 +6,9 @@ that never becomes ready. deployment/README.md, "Production prerequisites",
 lists them with the Secrets and their keys.
 */}}
 {{- $hydraDev := and .Values.hydra.enabled (eq (toString (dig "config" "dev" false .Values.hydra)) "true") }}
-{{- $production := or (not .Values.pkcs11.provisioning.enabled) (and .Values.hydra.enabled (not $hydraDev)) }}
+{{- /* replicaCount 0 (the dev profiles): the backend runs outside the cluster. */}}
+{{- $backendDeployed := or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 0) }}
+{{- $production := and $backendDeployed (or (not .Values.pkcs11.provisioning.enabled) (and .Values.hydra.enabled (not $hydraDev))) }}
 {{- $pg := dig "config" "coDeployedPostgresql" "enabled" false .Values.hydra }}
 {{- if and .Values.hydra.enabled $pg (not (and .Values.postgresql.enabled (has "hydra" .Values.postgresql.additionalDatabases))) }}
 {{- fail "hydra.config.coDeployedPostgresql needs postgresql.enabled and \"hydra\" in postgresql.additionalDatabases" }}

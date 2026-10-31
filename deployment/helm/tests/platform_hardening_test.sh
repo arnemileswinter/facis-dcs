@@ -92,11 +92,32 @@ assert pdb["spec"]["maxUnavailable"] >= dep["spec"]["replicas"], "PodDisruptionB
 for profile in prod acceptance; do
   backup="$(render -f "$CHART_DIR/values.$profile.yml" -f "$CHART_DIR/tests/$profile.prerequisites.yml" --show-only templates/backup-cronjob.yaml 2>/dev/null || true)"
   grep -q 'kind: CronJob' <<<"$backup" || fail "values.$profile.yml has no backup CronJob"
-  grep -q 'pg_dump --format=custom --dbname="$DATABASE_URL"' <<<"$backup" || fail "backup does not dump DATABASE_URL"
+  grep -q 'pg_dump --format=custom --dbname="$2"' <<<"$backup" && grep -q 'dump dcs "$DATABASE_URL"' <<<"$backup" \
+    || fail "backup does not dump DATABASE_URL"
   grep -A3 'name: DATABASE_URL' <<<"$backup" | grep -q "name: \"dcs-$profile-db-credentials\"" \
     || fail "backup does not read the $profile database Secret"
 done
 render "${ACK[@]}" | grep -q 'db-backup' && fail "backup rendered while backup.enabled is false"
+# The Hydra database (OAuth2 clients, issued machine credentials) is dumped
+# with the DCS database: from the DSN Secret in prod, from the co-deployed
+# PostgreSQL in the BDD profile.
+for prof in prod bdd; do
+  case "$prof" in
+    prod) args=(-f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml") ;;
+    bdd) args=(-f "$CHART_DIR/values.bdd.yml" --set backup.enabled=true) ;;
+  esac
+  backup="$(render "${args[@]}" --show-only templates/backup-cronjob.yaml)"
+  grep -q 'dump hydra "$HYDRA_DSN"' <<<"$backup" || fail "$prof backup does not dump the Hydra database"
+  grep -q "find /backup .*'hydra-\*.dump'" <<<"$backup" || fail "$prof backup keeps Hydra dumps forever"
+done
+grep -A4 'name: HYDRA_DSN' <<<"$(render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" --show-only templates/backup-cronjob.yaml)" \
+  | grep -q 'name: "dcs-prod-hydra-secrets"' || fail "prod backup does not read the Hydra DSN Secret"
+memory="$(render -f "$CHART_DIR/values.bdd.yml" --set backup.enabled=true --set hydra.config.coDeployedPostgresql.enabled=false \
+  --set hydra.config.dsn=memory --show-only templates/backup-cronjob.yaml)"
+grep -q 'dump dcs' <<<"$memory" || fail "no backup rendered for the in-memory Hydra check"
+grep -q HYDRA_DSN <<<"$memory" && fail "backup dumps an in-memory Hydra"
+# The dev profile runs the backend on the host (replicaCount 0) and renders.
+render -f "$CHART_DIR/values.dev.yml" >/dev/null || fail "values.dev.yml does not render"
 # deploy.sh asserts the StorageClass of the backup and Loki claims too: the
 # dumps hold the wrapped content keys, the logs can hold personal data.
 manifest="$(mktemp)"

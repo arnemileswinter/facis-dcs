@@ -15,7 +15,6 @@
 {{- if and $memory (gt (int .Values.replicaCount) 1) -}}
 {{- fail "hydra.replicaCount > 1 needs a persistent DSN: replicas with dsn memory do not share clients, keys or sessions" -}}
 {{- end -}}
-{{- $pg := .Values.config.coDeployedPostgresql -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,26 +53,7 @@ spec:
               hydra migrate sql --yes "$DSN"
               exec hydra serve all {{- if $dev }} --dev{{- end }}
           env:
-            {{- if .Values.config.dsnSecretRef.name }}
-            - name: DSN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.config.dsnSecretRef.name | quote }}
-                  key: {{ .Values.config.dsnSecretRef.key | quote }}
-            {{- else if $pg.enabled }}
-            # The "hydra" database of the co-deployed PostgreSQL. The password
-            # comes from its Secret and is put into the DSN by Kubernetes.
-            - name: HYDRA_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ printf "%s-postgresql" .Release.Name | quote }}
-                  key: postgres-password
-            - name: DSN
-              value: {{ printf "postgres://%s:$(HYDRA_DB_PASSWORD)@%s-postgresql:5432/%s?%s" $pg.user .Release.Name $pg.database (ternary "sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt" "sslmode=disable" $tls) | quote }}
-            {{- else }}
-            - name: DSN
-              value: {{ .Values.config.dsn | quote }}
-            {{- end }}
+            {{- include "hydra.dsnEnv" (dict "name" "DSN" "release" .Release.Name "config" .Values.config "tls" $tls) | nindent 12 }}
             - name: SECRETS_SYSTEM
               {{- if $systemRef.name }}
               valueFrom:
