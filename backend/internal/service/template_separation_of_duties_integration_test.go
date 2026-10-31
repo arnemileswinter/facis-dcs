@@ -9,6 +9,8 @@ import (
 
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/command"
 	"digital-contracting-service/internal/templaterepository/datatype/actionflag"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
@@ -30,6 +32,8 @@ const sodTemplateData = `{
 func TestTemplateManagerDoesNotReviewOrApprovePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
+	require.NoError(t, semantichub.Seed(ctx, database))
+	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
 	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
 	submitter := &command.Submitter{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}
 	verifier := &query.Verifier{DB: database, CTRepo: ctRepo, RTRepo: rtRepo}
@@ -39,7 +43,7 @@ func TestTemplateManagerDoesNotReviewOrApprovePostgres(t *testing.T) {
 
 	seed := func(did, state string) {
 		t.Helper()
-		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3)`, did, state, sodTemplateData)
+		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3)`, did, state, compliantTemplateData)
 		require.NoError(t, err)
 		_, err = database.Exec(`INSERT INTO contract_templates_review_task (did,state,reviewer,created_by) VALUES ($1,'OPEN',$2,$2)`, did, org)
 		require.NoError(t, err)

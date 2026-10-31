@@ -392,7 +392,8 @@ var ContractTemplateVerifyResponse = Type("ContractTemplateVerifyResponse", func
 	Description("Result for verifying a contract template")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("findings", ArrayOf(String), "A list of findings")
+	Attribute("findings", ArrayOf(String), "Findings that block the review: envelope errors, error findings of the template policy audit and of the Semantic Hub shapes, provenance and catalogue findings")
+	Attribute("warnings", ArrayOf(String), "Warning and information findings of the template policy audit and the Semantic Hub shapes; they do not block")
 
 	Required("did", "findings")
 })
@@ -804,7 +805,7 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/verify
 	Method("verify", func() {
-		Description("run policy, schema, and semantic validations, verify the provenance credentials and compare the content hash with the registered one; return findings.")
+		Description("check the canonical envelope, run the template policy audit of the approval and the Semantic Hub SHACL shapes the template declares, verify the provenance credentials and compare the content hash with the registered one; return findings and warnings. Every verification is logged with its result.")
 		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-FR-TR-09", "DCS-FR-TR-20")
 
 		Security(JWTAuth, templateVerifyScopes)

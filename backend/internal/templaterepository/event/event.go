@@ -132,6 +132,8 @@ type VerifyEvent struct {
 	DID        string             `json:"did"`
 	Version    int                `json:"version"`
 	VerifiedBy string             `json:"verified_by"`
+	Findings   []string           `json:"findings"`
+	Warnings   []string           `json:"warnings,omitempty"`
 	OccurredAt time.Time          `json:"occurred_at"`
 	HolderDID  string             `json:"holder_did"`
 	UserRoles  userrole.UserRoles `json:"user_roles"`
@@ -250,6 +252,25 @@ func (e RetrieveByIDEvent) EventType() string {
 
 // GetDID implements the Event interface.
 func (e RetrieveByIDEvent) GetDID() string {
+	return e.DID
+}
+
+// RetrieveProvenanceEvent is emitted when the provenance credentials of a template are read.
+type RetrieveProvenanceEvent struct {
+	DID         string             `json:"did"`
+	RetrievedBy string             `json:"retrieved_by"`
+	OccurredAt  time.Time          `json:"occurred_at"`
+	HolderDID   string             `json:"holder_did"`
+	UserRoles   userrole.UserRoles `json:"user_roles"`
+}
+
+// EventType implements the Event interface.
+func (e RetrieveProvenanceEvent) EventType() string {
+	return eventtype.RetrieveProvenance.String()
+}
+
+// GetDID implements the Event interface.
+func (e RetrieveProvenanceEvent) GetDID() string {
 	return e.DID
 }
 

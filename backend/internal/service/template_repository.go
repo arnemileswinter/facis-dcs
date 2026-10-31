@@ -11,7 +11,9 @@ import (
 	"digital-contracting-service/internal/base/validation"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
+	templateevents "digital-contracting-service/internal/templaterepository/event"
 
 	"digital-contracting-service/internal/templaterepository/query"
 
@@ -79,7 +81,8 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 // stays an internal error.
 func mapTemplateCommandError(err error) error {
 	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
-		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) {
+		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) ||
+		errors.Is(err, db.ErrContractTemplateNotFound) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -638,12 +641,13 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 	}
 	result, err := handler.Handle(ctx, qry)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, mapTemplateCommandError(err)
 	}
 
 	return &templaterepository.ContractTemplateVerifyResponse{
 		Did:      req.Did,
 		Findings: result.Findings,
+		Warnings: result.Warnings,
 	}, nil
 }
 
@@ -770,6 +774,17 @@ func (s *templateRepositorysrvc) Provenance(ctx context.Context, req *templatere
 
 	rows, err := s.CTRepo.ReadProvenanceCredentials(ctx, tx, req.Did)
 	if err != nil {
+		return nil, templaterepository.MakeInternalError(err)
+	}
+	// DCS-FR-TR-21: a provenance read is logged like any other template read.
+	evt := templateevents.RetrieveProvenanceEvent{
+		DID:         req.Did,
+		RetrievedBy: middleware.GetParticipantID(ctx),
+		OccurredAt:  time.Now().UTC(),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
+	}
+	if err := event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo); err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
 	if err := tx.Commit(); err != nil {
