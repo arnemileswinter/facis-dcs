@@ -27,6 +27,10 @@ type CatalogueSubject struct {
 	Version      string
 	TemplateType string
 	PartyType    string
+	// The searchable metadata an importing instance takes over (DCS-FR-TR-10, DCS-FR-TR-02).
+	Jurisdiction  string
+	Industry      string
+	TemplateLevel string
 }
 
 // BuildInput carries catalogue metadata required for an FC /assets JSON-LD payload.
@@ -55,7 +59,7 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		return nil, fmt.Errorf("issuer is empty")
 	}
 
-	return credential(input.Issuer, input.SubjectIRI, input.ValidFrom, "dcs:ContractTemplate", map[string]any{
+	claims := map[string]any{
 		"dcs:templateUuid":       input.Subject.ID,
 		"dcs:state":              input.Subject.State,
 		"dcs:templateType":       input.Subject.TemplateType,
@@ -64,7 +68,17 @@ func BuildPayload(input BuildInput) (map[string]any, error) {
 		"schema:description":     input.Subject.Description,
 		"schema:version":         input.Subject.Version,
 		"dcs:templateDataString": input.TemplateDataString,
-	}), nil
+	}
+	for key, value := range map[string]string{
+		"dcs:jurisdiction":  input.Subject.Jurisdiction,
+		"dcs:industry":      input.Subject.Industry,
+		"dcs:templateLevel": input.Subject.TemplateLevel,
+	} {
+		if value != "" {
+			claims[key] = value
+		}
+	}
+	return credential(input.Issuer, input.SubjectIRI, input.ValidFrom, "dcs:ContractTemplate", claims), nil
 }
 
 // ContractSubject is the contract metadata published to FC (DCS-IR-CWE-10). It

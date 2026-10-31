@@ -141,33 +141,16 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return "", fmt.Errorf("instance did is empty")
 	}
 
-	name := ""
-	description := ""
-	if fullTemplate.Name != nil {
-		name = *fullTemplate.Name
-	}
-	if fullTemplate.Description != nil {
-		description = *fullTemplate.Description
-	}
-
 	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
 		return "", fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:     cmd.InstanceDID,
-		SubjectIRI: base.ResourceIRI("template", cmd.DID),
-		ValidFrom:  fullTemplate.UpdatedAt,
-		Subject: fcasset.CatalogueSubjectFromRepository(
-			cmd.DID,
-			processData.Version,
-			processData.State,
-			name,
-			description,
-			fullTemplate.TemplateType,
-			fullTemplate.PartyType,
-		),
+		Issuer:             cmd.InstanceDID,
+		SubjectIRI:         base.ResourceIRI("template", cmd.DID),
+		ValidFrom:          fullTemplate.UpdatedAt,
+		Subject:            CatalogueSubject(processData, fullTemplate),
 		TemplateDataString: templateDataString,
 	})
 
@@ -180,4 +163,22 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return "", fmt.Errorf("publish template resource failed: %w", err)
 	}
 	return assetHash, nil
+}
+
+// CatalogueSubject is the catalogue metadata of a template, with the
+// searchable metadata an importing instance takes over (DCS-FR-TR-01).
+func CatalogueSubject(processData *db.ContractTemplateProcessData, template *db.ContractTemplate) fcasset.CatalogueSubject {
+	subject := fcasset.CatalogueSubjectFromRepository(
+		template.DID,
+		processData.Version,
+		processData.State,
+		base.DerefString(template.Name),
+		base.DerefString(template.Description),
+		template.TemplateType,
+		template.PartyType,
+	)
+	subject.Jurisdiction = base.DerefString(template.Jurisdiction)
+	subject.Industry = base.DerefString(template.Industry)
+	subject.TemplateLevel = template.TemplateLevel
+	return subject
 }

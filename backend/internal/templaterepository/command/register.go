@@ -15,6 +15,8 @@ import (
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
+	"digital-contracting-service/internal/base/templatestructure"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
 	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
@@ -209,6 +211,12 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		if err := requireDeclaredShapeLibraries(ctx, h.DB, templateData); err != nil {
 			return nil, err
 		}
+		// DCS-FR-TR-01: the imported template is stored in the canonical
+		// envelope under its own resource IRI, as a created one is.
+		templateData, err = validation.NormalizeTemplateDataForPersistence(templateData, *newDID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: the template from the Federated Catalogue is not valid: %v", ErrInvalidRequest, err)
+		}
 
 		tx, err := h.DB.BeginTxx(ctx, nil)
 		if err != nil {
@@ -229,6 +237,11 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			Description:  fcTemplate.Description,
 			CreatedBy:    cmd.RegisteredBy,
 			TemplateData: templateData,
+			SearchableMetadata: db.SearchableMetadata{
+				Jurisdiction: fcTemplate.Jurisdiction,
+				Industry:     fcTemplate.Industry,
+			},
+			Structure: db.Structure{TemplateLevel: knownLevel(base.DerefString(fcTemplate.TemplateLevel))},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("could not create registered contract template: %w", err)
@@ -359,6 +372,16 @@ func (h *Registrar) deciders(ctx context.Context, tx *sqlx.Tx, did string) (revi
 		approvers = []string{approver}
 	}
 	return reviewers, approvers, nil
+}
+
+// knownLevel keeps a template level of this deployment; any other value
+// gives the default level.
+func knownLevel(level string) string {
+	switch templatestructure.Level(level) {
+	case templatestructure.FrameAgreement, templatestructure.Agreement, templatestructure.SubAgreement, templatestructure.Addendum:
+		return level
+	}
+	return ""
 }
 
 func templateDataFromAny(raw any) (*datatype.JSON, error) {

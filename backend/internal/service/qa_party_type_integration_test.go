@@ -134,7 +134,7 @@ func TestQAPartyTypeCatalogueImport(t *testing.T) {
 				}
 				require.Equal(t, "/query/search", r.URL.Path)
 				require.Equal(t, "POST", r.Method)
-				row := map[string]interface{}{"did": source, "version": 1, "template_type": "CONTRACT_TEMPLATE", "name": "imported", "template_data_string": "{}"}
+				row := map[string]interface{}{"did": source, "version": 1, "template_type": "CONTRACT_TEMPLATE", "name": "imported", "template_data_string": compliantTemplateData}
 				if value != "" {
 					row["party_type"] = value
 				}
