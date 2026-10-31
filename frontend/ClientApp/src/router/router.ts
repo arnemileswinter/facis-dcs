@@ -369,6 +369,9 @@ const routes: RouteRecordRaw[] = [
         'CONTRACT_APPROVER',
         'CONTRACT_MANAGER',
         'CONTRACT_OBSERVER',
+        // Read-only inspection with the stored evidence (DCS-IR-CWE-12).
+        'AUDITOR',
+        'COMPLIANCE_OFFICER',
       ],
     },
   },

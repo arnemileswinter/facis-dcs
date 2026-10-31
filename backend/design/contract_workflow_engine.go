@@ -1488,10 +1488,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve/{did}
 	Method("retrieve_by_id", func() {
 		Description("fetch submitted contract. fetch reviewed contract. fetch contract(s).")
-		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24")
+		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24", "DCS-IR-CWE-12")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Compliance Officer")
 			Scope("Contract Creator")
 			Scope("Sys. Contract Creator")
 			Scope("Contract Negotiator")

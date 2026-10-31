@@ -163,7 +163,20 @@ export interface ContractLifecycleEvent {
   new_state?: string
 }
 
+/** One reviewer decision from GET /contract/review-findings/{did}. */
+export interface ContractReviewFinding {
+  submitted_by: string
+  holder_did?: string
+  occurred_at: string
+  contract_version: number
+  decision?: 'APPROVAL' | 'REJECT'
+  comments: string[]
+  annotations: { block_id: string; comment: string }[]
+}
+
 export interface ContractHistoryItem {
+  /** Identifier of the history entry; several entries can share one contract_version. */
+  id: string
   did: string
   contract_version: number
   state: ContractState
