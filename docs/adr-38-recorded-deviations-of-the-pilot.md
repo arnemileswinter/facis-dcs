@@ -197,6 +197,30 @@ Reason: these functions are what keeps several backend replicas from running
 the same job twice or forking a document. An abstraction over them would
 have one implementation.
 
+### 10. A locked client address refuses every access token from it (DCS-FR-UC-01-4)
+
+"Multiple invalid Credential Attempts MUST block out the user." An access
+token carries no identity the backend may trust before it has verified it, so
+the backend counts invalid access tokens per client address
+(`backend/internal/auth/jwt_auth.go`). After 5 invalid tokens from one address
+within 15 minutes, the address is locked for 15 minutes, and every request
+from it is refused, also one with a valid token. The BDD scenario "Locked
+account cannot authenticate even with valid credential" checks this. Refused
+login presentations lock the holder key of a credential that a trusted issuer
+signed, or else the posting address.
+
+Consequence: all users behind one address (a NAT, a corporate egress, an
+ingress that does not see the client address) share the lock, and one of
+them can lock out the others for 15 minutes. The operator:
+
+- gives the ingress controller the real client address:
+  `externalTrafficPolicy: Local` on its `LoadBalancer` or `NodePort`
+  Service, or the PROXY protocol between the load balancer and the ingress;
+- names the ingress controller in `DCS_TRUSTED_PROXIES`, so the backend reads
+  the client address from `X-Forwarded-For` and no other pod can choose it;
+- ends a lock with the admin unlock (**Admin > Lockouts**,
+  `POST /admin/lockouts/unlock`, audited as `LOCKOUT_LIFTED`).
+
 ## Consequences
 
 - A template user verifies the provenance credential against the instance
