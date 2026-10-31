@@ -145,10 +145,15 @@ export const archiveService = {
       .then((res) => res.data)
   },
 
-  /** Archives one section or clause block of the latest archived version for the parties that may read it (DCS-FR-CSA-26). */
-  async storeSection(did: string, section_id: string, parties: string[]): Promise<ArchiveStoreResult> {
+  /** Archives one section or clause block of an archived version for the parties that may read it (DCS-FR-CSA-26). */
+  async storeSection(
+    did: string,
+    contract_version: number,
+    section_id: string,
+    parties: string[],
+  ): Promise<ArchiveStoreResult> {
     return http
-      .post<ArchiveStoreResult>('/archive/store', { kind: 'section', did, section_id, parties })
+      .post<ArchiveStoreResult>('/archive/store', { kind: 'section', did, contract_version, section_id, parties })
       .then((res) => res.data)
   },
 

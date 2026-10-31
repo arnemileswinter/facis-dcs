@@ -293,7 +293,7 @@ const routes: RouteRecordRaw[] = [
       hideInSidebar: true,
       title: 'DCS - Archived contract',
       requiresAuth: true,
-      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
+      roles: ['ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'AUDITOR', 'COMPLIANCE_OFFICER'],
     },
   },
   {
@@ -306,7 +306,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Archive Dashboard',
       order: 6,
-      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER'],
+      roles: ['AUDITOR', 'ARCHIVE_MANAGER', 'CONTRACT_OBSERVER', 'COMPLIANCE_OFFICER'],
     },
   },
   {
@@ -516,7 +516,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       title: 'DCS - Non-Compliance Investigation',
       order: 9,
-      roles: ['COMPLIANCE_OFFICER'],
+      roles: ['COMPLIANCE_OFFICER', 'AUDITOR'],
     },
   },
   {

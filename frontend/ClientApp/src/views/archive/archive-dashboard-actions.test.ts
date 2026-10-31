@@ -110,6 +110,28 @@ describe('archive dashboard actions', () => {
     expect(wrapper.find('[data-testid="archive-terminate-did:web:example.com:contract:2"]').exists()).toBe(false)
   })
 
+  // DCS-FR-CSA-17: only a contract out of force can be deleted from the archive.
+  it('offers deletion only for a contract out of force', async () => {
+    const outOfForce = ['TERMINATED', 'EXPIRED', 'REVOKED', 'REJECTED', 'WITHDRAWN'].map((state, index) => ({
+      ...signed,
+      did: `did:web:example.com:contract:gone-${index}`,
+      state,
+    }))
+    const inForce = ['SIGNED', 'ACTIVE', 'APPROVED'].map((state, index) => ({
+      ...signed,
+      did: `did:web:example.com:contract:live-${index}`,
+      state,
+    }))
+    archive.retrieve.mockResolvedValue([...inForce, ...outOfForce])
+    const wrapper = await mountDashboard()
+    for (const entry of outOfForce) {
+      expect(wrapper.find(`[data-testid="archive-delete-${entry.did}"]`).exists(), entry.state).toBe(true)
+    }
+    for (const entry of inForce) {
+      expect(wrapper.find(`[data-testid="archive-delete-${entry.did}"]`).exists(), entry.state).toBe(false)
+    }
+  })
+
   it('shows the termination reason, date and initiating role of a terminated contract (DCS-FR-CSA-16)', async () => {
     const terminated = {
       ...signed,

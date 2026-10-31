@@ -36,6 +36,7 @@ async function archive(page: Page) {
       flagged_total: 0,
       recent_actions: [],
       expiring_contracts: [],
+      expiring_window_days: 30,
     }),
   )
   await page.route('**/archive/erasure-status**', (route) => json(route, { did, local_status: 'live', peers: [] }))
@@ -404,6 +405,7 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
           flagged_total: 1,
           deleted_total: 0,
           expiring_contracts: [{ did, name: longName, exp_date: '2026-11-01T00:00:00Z' }],
+          expiring_window_days: 30,
           recent_actions: [
             {
               did,
@@ -555,6 +557,7 @@ for (const [role, width] of [
         flagged_total: 0,
         deleted_total: 0,
         expiring_contracts: [],
+        expiring_window_days: 30,
         recent_actions: [],
       }),
     )
@@ -602,6 +605,7 @@ for (const width of [390, 1280, 3440]) {
           flagged_total: 0,
           deleted_total: 0,
           expiring_contracts: [],
+          expiring_window_days: 30,
           recent_actions: [],
         }),
       )
