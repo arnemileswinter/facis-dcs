@@ -166,10 +166,6 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		// The one exception is a revocation ship (DCS-NFR-BR-06): the
 		// counterparty voided the agreement, so the local copy hard-stops in
 		// REVOKED no matter where its own workflow stood.
-		data.State = existing.State
-		if cmd.AdoptRevoked {
-			data.State = contractstate.Revoked.String()
-		}
 		data.Origin = existing.Origin
 		data.CreatedBy = existing.CreatedBy
 		data.ContractVersion = existing.ContractVersion + 1
@@ -178,8 +174,19 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 		if err := h.CRepo.CreateHistoryEntryForDID(ctx, tx, cmd.ContractIRI, cmd.Counterparty); err != nil {
 			return fmt.Errorf("could not create history entry for did %s: %w", cmd.ContractIRI, err)
 		}
-		if err := h.CRepo.RemoteUpdate(ctx, tx, data); err != nil {
+		// The content update leaves the state column alone (an empty state is
+		// not written); the state changes only through the guarded transition.
+		content := data
+		content.State = ""
+		if err := h.CRepo.RemoteUpdate(ctx, tx, content); err != nil {
 			return fmt.Errorf("could not update local contract copy: %w", err)
+		}
+		data.State = existing.State
+		if cmd.AdoptRevoked && existing.State != contractstate.Revoked.String() {
+			if err := h.CRepo.UpdateState(ctx, tx, cmd.ContractIRI, existing.State, contractstate.Revoked.String()); err != nil {
+				return fmt.Errorf("could not adopt the revocation of %s: %w", cmd.ContractIRI, err)
+			}
+			data.State = contractstate.Revoked.String()
 		}
 		// A new document arrived, so the round it belongs to is a new one: any
 		// engagement this instance had with the superseded version is owed again

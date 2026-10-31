@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 
+	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
 
@@ -518,13 +519,27 @@ func (r *PostgresContractRepo) ReadArchivedContractsByFilter(ctx context.Context
 	return cts, nil
 }
 
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return UpdateContractState(ctx, tx, did, from, to)
+}
+
+// UpdateContractState is the write of a contract's lifecycle state: it moves
+// did from state from to state to, and fails with
+// contractstate.ErrInvalidTransition when another transaction changed the
+// state after the caller read it.
+func UpdateContractState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE contracts SET state = $3 WHERE did = $1 AND state = $2`, did, from, to)
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update state of contract %s: %w", did, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: contract %s is no longer %s", contractstate.ErrInvalidTransition, did, from)
+	}
+	return nil
 }
 
 func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error) {

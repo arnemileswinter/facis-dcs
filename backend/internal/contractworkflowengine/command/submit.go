@@ -450,7 +450,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		if err := contractstate.ValidateOutcome(currentState, contractstate.EventSubmit, nextState); err != nil {
 			return err
 		}
-		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, nextState.String())
+		err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, nextState.String())
 		if err != nil {
 			return fmt.Errorf("could not update contract state: %w", err)
 		}

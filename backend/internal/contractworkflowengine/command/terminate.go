@@ -87,7 +87,7 @@ func (h *Terminator) Handle(ctx context.Context, cmd TerminateCmd) error {
 	if err != nil {
 		return err
 	}
-	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Terminated.String())
+	err = h.CRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contractstate.Terminated.String())
 	if err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}

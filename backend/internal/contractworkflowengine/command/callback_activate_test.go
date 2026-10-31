@@ -21,7 +21,7 @@ func (r *activateContractRepo) ReadProcessDataByDID(context.Context, *sqlx.Tx, s
 	return &db.ContractProcessData{DID: kpiContractDID, State: "SIGNED", ContractVersion: 3}, nil
 }
 
-func (r *activateContractRepo) UpdateState(_ context.Context, _ *sqlx.Tx, _ string, state string) error {
+func (r *activateContractRepo) UpdateState(_ context.Context, _ *sqlx.Tx, _, _ string, state string) error {
 	r.state = state
 	return nil
 }

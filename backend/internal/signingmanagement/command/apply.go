@@ -844,6 +844,16 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		return err
 	}
 
+	// The state, read again under the lock: a revocation that committed during
+	// the DSS round trips above stops this signature here.
+	current, err := h.CRepo.ReadProcessDataByDID(ctx, tx, cmd.DID)
+	if err != nil {
+		return fmt.Errorf("could not re-read contract %s: %w", cmd.DID, err)
+	}
+	if err := contractstate.ValidateTransition(contractstate.ContractState(current.State), contractstate.EventSign); err != nil {
+		return err
+	}
+
 	// The already-signed guard, re-read now that the writers are serialised. The
 	// read above it runs before the DSS round trips, so two submits for the same
 	// field can both pass it: a field can have two verified unconsumed
@@ -900,6 +910,7 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		signedAt:        signedAt,
 		contractVersion: *ceremony.PinnedContractVersion,
 		localFields:     localSignatureFields(declaredFields, data.Responsible, h.LocalPeer),
+		fromState:       current.State,
 	}); err != nil {
 		return err
 	}
@@ -1346,6 +1357,8 @@ type finalizeInput struct {
 	contractVersion int
 	// localFields are the declared signature fields this instance signs.
 	localFields []string
+	// fromState is the contract state read under the per-contract lock.
+	fromState string
 }
 
 // finalize persists a completed signature: it stores the signed PDF in IPFS,
@@ -1418,7 +1431,7 @@ func (h *Applier) finalize(ctx context.Context, tx *sqlx.Tx, cmd ApplyCmd, in fi
 		return fmt.Errorf("could not create signature: %w", err)
 	}
 
-	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, contractstate.Signed.String()); err != nil {
+	if err := h.CRepo.UpdateState(ctx, tx, cmd.DID, in.fromState, contractstate.Signed.String()); err != nil {
 		return fmt.Errorf("could not update contract state: %w", err)
 	}
 

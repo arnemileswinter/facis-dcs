@@ -166,7 +166,9 @@ type ContractRepo interface {
 	ReadDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*Contract, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState moves the contract from state from to state to (see
+	// contractworkflowengine/db/pg.UpdateContractState).
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	UpdateContractData(ctx context.Context, tx *sqlx.Tx, did string, contractData datatype.JSON) error
 
 	CreateSignature(ctx context.Context, tx *sqlx.Tx, signature ContractSignature) error

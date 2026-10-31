@@ -18,6 +18,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/signingmanagement/db"
 )
 
@@ -99,16 +100,8 @@ func (r *PostgresContractRepo) ReadProcessDataByDID(ctx context.Context, tx *sql
 	return &processData, nil
 }
 
-// UpdateState is unconditional: the caller (command/apply.go) already
-// validated the transition against contractstate.Transitions before calling
-// this, so no hardcoded SQL state guard is needed here anymore.
-func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contracts SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
+func (r *PostgresContractRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error {
+	return cwepg.UpdateContractState(ctx, tx, did, from, to)
 }
 
 // UpdateContractData persists the sealed contract document the first

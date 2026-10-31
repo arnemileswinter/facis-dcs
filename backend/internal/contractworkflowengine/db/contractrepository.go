@@ -311,7 +311,10 @@ type ContractRepo interface {
 	// returns false when another writer expired or ended the contract first,
 	// so the caller emits ContractExpired at most once.
 	ExpireContract(ctx context.Context, tx *sqlx.Tx, did string) (bool, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState moves the contract from state from to state to. It fails
+	// with contractstate.ErrInvalidTransition when the contract is no longer
+	// in state from, so a concurrent writer is never overwritten.
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did, from, to string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractUpdateData) error
 	RemoteUpdate(ctx context.Context, tx *sqlx.Tx, data Contract) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractPDFState, error)
