@@ -155,6 +155,30 @@ func TestSigningWorkflowGateOnPrepareAndSubmit(t *testing.T) {
 	}
 }
 
+// DCS-FR-SM-07: the signature field decides whose Power of Attorney
+// authorizes a signature, so prepare refuses a declared field that names no
+// party of the contract.
+func TestPrepareRefusesAFieldThatNamesNoParty(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"@id":                 orderContractDID,
+		"dcs:parties":         []any{map[string]any{"@type": "dcs:CompanyParty", "dcs:legalName": "second"}},
+		"dcs:signatureFields": []any{map[string]any{"@type": "dcs:SignatureField", "dcs:signatoryName": "first"}},
+	})
+	require.NoError(t, err)
+	sqlDB, _ := outboxtest.Open(t)
+	h := &Applier{DB: sqlDB, CRepo: orderRepo{data: raw}, CeremonyRepo: orderCeremonies{}, Validator: unusedValidator{}, PDFCore: &pdfcore.Client{}}
+	_, err = h.Prepare(context.Background(), ApplyCmd{DID: orderContractDID, SignerDID: "did:jwk:signer", CeremonyID: "ceremony-first", CredentialType: "AES"})
+	require.ErrorIs(t, err, ErrUnknownSignatureField)
+	require.ErrorContains(t, err, "names no party")
+
+	local := "did:web:dcs-a.example"
+	require.True(t, fieldNamesAParty(local, raw, "Org A", local, nil))
+	require.True(t, fieldNamesAParty("did:web:dcs-b.example", raw, "Org A", local, &db.Responsible{Counterparty: "did:web:dcs-b.example"}))
+	require.True(t, fieldNamesAParty("Org A", raw, "Org A", local, nil))
+	require.True(t, fieldNamesAParty("second", raw, "Org A", local, nil))
+	require.False(t, fieldNamesAParty("first", raw, "Org A", local, nil))
+}
+
 func TestSigningOrderNamesTheFieldsStillToSign(t *testing.T) {
 	err := assertSigningOrder(orderedContract(t, ""), "second", map[string]bool{})
 	require.ErrorIs(t, err, ErrSigningOutOfOrder)
