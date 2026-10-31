@@ -25,7 +25,7 @@ func TestTemplateRegisterRequiresApprovedPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
 	registrar := &command.Registrar{
-		DB: database, CTRepo: &pg.PostgresContractTemplateRepo{}, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{},
+		DB: database, CTRepo: &pg.PostgresContractTemplateRepo{},
 		VCSigner: echoVCSigner{}, IssuerDID: "did:web:issuer.example",
 	}
 	cases := map[string]string{

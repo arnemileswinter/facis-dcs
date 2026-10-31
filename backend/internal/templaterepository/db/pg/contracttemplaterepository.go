@@ -540,6 +540,22 @@ func (r *PostgresContractTemplateRepo) UpdateComplianceStatus(ctx context.Contex
 	return err
 }
 
+// ReadEvents reads the template's events from the transactional outbox, which
+// keeps every event of the audit trail.
+func (r *PostgresContractTemplateRepo) ReadEvents(ctx context.Context, tx *sqlx.Tx, did string, eventTypes ...string) ([]db.TemplateEvent, error) {
+	var events []db.TemplateEvent
+	err := tx.SelectContext(ctx, &events,
+		`SELECT event_type, event_data, created_at FROM outbox_events
+		  WHERE did = $1 AND component = 'CONTRACT_TEMPLATE_REPOSITORY' AND event_type = ANY($2)
+		  ORDER BY id`,
+		did, pq.Array(eventTypes),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read events of template %s: %w", did, err)
+	}
+	return events, nil
+}
+
 // UpdateCatalogueAssetHash records the Federated Catalogue asset of the published version (DCS-NFR-BR-09).
 func (r *PostgresContractTemplateRepo) UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET catalogue_asset_hash = $2 WHERE did = $1`, did, hash)

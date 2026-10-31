@@ -741,8 +741,6 @@ func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepo
 	handler := command.Registrar{
 		DB:        s.DB,
 		CTRepo:    s.CTRepo,
-		RTRepo:    s.RTRepo,
-		ATRepo:    s.ATRepo,
 		FCClient:  s.FCClient,
 		VCSigner:  s.VCSigner,
 		IssuerDID: s.IssuerDID,

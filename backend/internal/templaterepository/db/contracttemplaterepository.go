@@ -161,6 +161,15 @@ type ContractTemplateRepo interface {
 	ReadLatestProvenanceVCID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error)
 	UpdateComplianceStatus(ctx context.Context, tx *sqlx.Tx, did string, status string) error
 	UpdateCatalogueAssetHash(ctx context.Context, tx *sqlx.Tx, did string, hash string) error
+	// ReadEvents returns the template's audit events of the given types, oldest first.
+	ReadEvents(ctx context.Context, tx *sqlx.Tx, did string, eventTypes ...string) ([]TemplateEvent, error)
+}
+
+// TemplateEvent is one audit event of a template.
+type TemplateEvent struct {
+	EventType string        `db:"event_type"`
+	EventData datatype.JSON `db:"event_data"`
+	CreatedAt time.Time     `db:"created_at"`
 }
 
 // TemplateProvenanceCredential is one registered template version's signed

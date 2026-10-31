@@ -20,6 +20,7 @@ import (
 	templatequery "digital-contracting-service/internal/templatecatalogueintegration/query/template"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatestate"
 	"digital-contracting-service/internal/templaterepository/datatype/contracttemplatetype"
+	"digital-contracting-service/internal/templaterepository/datatype/eventtype"
 	"digital-contracting-service/internal/templaterepository/datatype/partytype"
 	"digital-contracting-service/internal/templaterepository/db"
 	templateevents "digital-contracting-service/internal/templaterepository/event"
@@ -41,8 +42,6 @@ type RegisterCmd struct {
 type Registrar struct {
 	DB       *sqlx.DB
 	CTRepo   db.ContractTemplateRepo
-	RTRepo   db.ReviewTaskRepo
-	ATRepo   db.ApprovalTaskRepo
 	FCClient *fcclient.FederatedCatalogueClient
 	// VCSigner + IssuerDID issue the per-version template provenance VC
 	// (DCS-FR-TR-09) at registration — registration is the moment a version
@@ -243,9 +242,10 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 }
 
 // issueProvenanceCredential gathers the version's actor trail (creator from
-// the template row, reviewers/approvers from their decided tasks, registrar
-// from the command), issues the signed provenance VC, and stores it linked
-// to the previous version's credential (DCS-FR-TR-09).
+// the template row, the reviewer and the approver by holder DID from the
+// decision events, registrar from the command), issues the signed
+// provenance VC, and stores it linked to the previous version's credential
+// (DCS-FR-TR-09).
 func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, cmd RegisterCmd, existing *db.ContractTemplate) error {
 	if h.VCSigner == nil || h.IssuerDID == "" {
 		return errors.New("template provenance VC issuance is not configured (VCSigner/IssuerDID)")
@@ -264,29 +264,9 @@ func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, 
 		}
 	}
 
-	var reviewers []string
-	if h.RTRepo != nil {
-		tasks, err := h.RTRepo.ReadAllByDID(ctx, tx, cmd.DID)
-		if err != nil {
-			return fmt.Errorf("read review tasks: %w", err)
-		}
-		for _, t := range tasks {
-			if t.State == "VERIFIED" || t.State == "APPROVED" {
-				reviewers = append(reviewers, t.Reviewer)
-			}
-		}
-	}
-	var approvers []string
-	if h.ATRepo != nil {
-		tasks, err := h.ATRepo.ReadAllByDID(ctx, tx, cmd.DID)
-		if err != nil {
-			return fmt.Errorf("read approval tasks: %w", err)
-		}
-		for _, t := range tasks {
-			if t.State == "APPROVED" {
-				approvers = append(approvers, t.Approver)
-			}
-		}
+	reviewers, approvers, err := h.deciders(ctx, tx, cmd.DID)
+	if err != nil {
+		return err
 	}
 
 	previousVCID, err := h.CTRepo.ReadLatestProvenanceVCID(ctx, tx, cmd.DID)
@@ -326,6 +306,39 @@ func (h *Registrar) issueProvenanceCredential(ctx context.Context, tx *sqlx.Tx, 
 		PreviousVCID: previousVCID,
 		Credential:   datatype.JSON(signedVC),
 	})
+}
+
+// deciders returns the holder DIDs of the persons who made the review and
+// approval decisions of this version: the last forward to approval and the
+// last approval in the template's events.
+func (h *Registrar) deciders(ctx context.Context, tx *sqlx.Tx, did string) (reviewers, approvers []string, err error) {
+	events, err := h.CTRepo.ReadEvents(ctx, tx, did, eventtype.Submit.String(), eventtype.Approve.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	var reviewer, approver string
+	for _, evt := range events {
+		var data struct {
+			NewState  string `json:"new_state"`
+			HolderDID string `json:"holder_did"`
+		}
+		if err := json.Unmarshal(evt.EventData, &data); err != nil {
+			return nil, nil, fmt.Errorf("decode %s event of %s: %w", evt.EventType, did, err)
+		}
+		switch {
+		case evt.EventType == eventtype.Submit.String() && data.NewState == contracttemplatestate.Reviewed.String():
+			reviewer = data.HolderDID
+		case evt.EventType == eventtype.Approve.String():
+			approver = data.HolderDID
+		}
+	}
+	if reviewer != "" {
+		reviewers = []string{reviewer}
+	}
+	if approver != "" {
+		approvers = []string{approver}
+	}
+	return reviewers, approvers, nil
 }
 
 func templateDataFromAny(raw any) (*datatype.JSON, error) {

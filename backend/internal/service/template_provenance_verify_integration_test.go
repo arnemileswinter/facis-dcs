@@ -28,7 +28,7 @@ func TestTemplateVerifyAgainstProvenanceCredentialPostgres(t *testing.T) {
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
 	ctRepo := &pg.PostgresContractTemplateRepo{}
 	registrar := &command.Registrar{
-		DB: database, CTRepo: ctRepo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{},
+		DB: database, CTRepo: ctRepo,
 		VCSigner: echoVCSigner{}, IssuerDID: "did:web:issuer.example",
 	}
 	var proofErr error
