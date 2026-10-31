@@ -251,12 +251,17 @@ fi
 echo "Checking NetworkPolicy enforcement"
 ipfs_rpc_port="$("$KUBECTL_BIN" -n "$K8S_NAMESPACE" get service "${HELM_RELEASE}-ipfs" \
   -o jsonpath='{.spec.ports[?(@.name=="https")].port}')"
+# The probe runs detached and its log is read after it ends: "kubectl run -i"
+# attaches after the container starts and loses output written before that.
 np_probe() { # np_probe <name> [labels]
   "$KUBECTL_BIN" -n "$K8S_NAMESPACE" run "$1" --image=curlimages/curl:8.11.1 ${2:+--labels="$2"} \
-    --restart=Never --rm -i --quiet --command -- sh -c '
+    --restart=Never --command -- sh -c '
       curl -s -o /dev/null --connect-timeout 5 --max-time 10 -w "backend=%{http_code}\n" "http://$1:$2/"; echo "backend_exit=$?"
       curl -sk -o /dev/null --connect-timeout 5 "https://$3:$4/api/v0/version"; echo "ipfs_exit=$?"' \
-    probe "${DCS_SERVICE:-$DCS_DEPLOYMENT}" "${SERVICE_PORT:-8991}" "${HELM_RELEASE}-ipfs" "$ipfs_rpc_port" 2>&1 || true
+    probe "${DCS_SERVICE:-$DCS_DEPLOYMENT}" "${SERVICE_PORT:-8991}" "${HELM_RELEASE}-ipfs" "$ipfs_rpc_port" >/dev/null 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$1" --timeout=120s >/dev/null 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" logs "pod/$1" 2>&1 || true
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" delete pod "$1" --wait=false >/dev/null 2>&1 || true
 }
 probe_out="$(np_probe "np-probe-$$" "app.kubernetes.io/instance=${HELM_RELEASE}")"
 if ! grep -Eq '^backend=[1-5][0-9]{2}$' <<<"$probe_out"; then
