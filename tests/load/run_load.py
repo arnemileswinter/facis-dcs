@@ -5,9 +5,11 @@ tests/bdd run_load_kind_once), which supplies the environment and the venv.
 
 1. Creates an approved template and one contract through the API.
 2. Runs tests/load/dcs_load.js (k6 container) against one DCS replica.
-3. Scales the DCS deployment to two replicas and runs it again at twice the
+3. Scales the DCS deployment to two replicas and runs it again at the same
    arrival rate. The same limits apply, and each replica must serve at least
-   a quarter of the requests, so the added replica takes load.
+   a quarter of the requests, so the added replica takes load. Both replicas
+   share the runner's one kind node, so this phase proves the spread of the
+   load, not added capacity.
 4. Restores the replica count.
 
 The k6 summaries go to tests/bdd/.reports/load/. Exit code 1 when a limit is
@@ -121,7 +123,7 @@ def main():
         scale(2)
         pods = backend_pods()
         before = {pod: requests_served(pod) for pod in pods}
-        ok &= run_k6("replicas-2", setup, 2 * READ_RATE, 2 * WRITE_RATE)
+        ok &= run_k6("replicas-2", setup, READ_RATE, WRITE_RATE)
         served = {pod: requests_served(pod) - before[pod] for pod in pods}
         total = sum(served.values())
         print(f"== requests served per replica: {served}", flush=True)
@@ -138,7 +140,7 @@ def main():
         "| DCS replicas | load (reads/s, writes/s) | read p95 ms | write p95 ms |",
         "|---|---|---|---|",
     ]
-    for phase, replicas, factor in (("replicas-1", 1, 1), ("replicas-2", 2, 2)):
+    for phase, replicas, factor in (("replicas-1", 1, 1), ("replicas-2", 2, 1)):
         if (REPORTS / f"{phase}.json").exists():
             lines.append(f"| {replicas} | {factor * READ_RATE}, {factor * WRITE_RATE} | "
                          f"{p95(phase, 'read')} | {p95(phase, 'write')} |")
