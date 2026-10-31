@@ -64,7 +64,7 @@ func (j OutboxProcessor) startPublishingJob(ctx context.Context, interval time.D
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := schedulerLogic(); err != nil {
+		if err := trackRun("outbox-publishing", schedulerLogic); err != nil {
 			log.Printf("could not publish outbox entries: %v", err)
 		}
 	}
@@ -136,7 +136,7 @@ func publishInOrder(events []datatype.OutboxEvent, publish func(component, event
 func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if err := j.anchorPending(ctx); err != nil {
+		if err := trackRun("outbox-anchoring", func() error { return j.anchorPending(ctx) }); err != nil {
 			log.Printf("could not process outbox entries: %v", err)
 		}
 	}
@@ -643,7 +643,10 @@ func (j OutboxProcessor) startTimestampingJob(ctx context.Context, interval time
 
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		if _, err := db.RunExclusive(ctx, j.DB, "audit-checkpoint-timestamping", schedulerLogic); err != nil {
+		if err := trackRun("checkpoint-timestamping", func() error {
+			_, err := db.RunExclusive(ctx, j.DB, "audit-checkpoint-timestamping", schedulerLogic)
+			return err
+		}); err != nil {
 			log.Printf("could not timestamp pending checkpoints: %v", err)
 		}
 	}

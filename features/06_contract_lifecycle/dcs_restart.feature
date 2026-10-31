@@ -13,3 +13,12 @@ Feature: DCS restart
     Then the contract "Restart Survivor Contract" is in state "DRAFT"
     When the creator submits contract "Restart Survivor Contract" for review after the restart
     Then the contract "Restart Survivor Contract" is in state "SUBMITTED"
+
+  # A hard kill (no grace period) right after the submit leaves its outbox
+  # events unpublished and unanchored; the new pod delivers them.
+  @clean_db
+  Scenario: Work in flight when the DCS pod is killed continues on the new pod
+    Given contract "Killed Pod Contract" has reached contract state "DRAFT"
+    When the creator submits contract "Killed Pod Contract" for review and the DCS pod is killed at once
+    Then the contract "Killed Pod Contract" is in state "SUBMITTED"
+    And every outbox event of contract "Killed Pod Contract" is published and anchored
