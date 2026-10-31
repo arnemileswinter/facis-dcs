@@ -2,6 +2,7 @@ package provenance
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -55,6 +56,25 @@ type LifecycleAssertion struct {
 	// VCId is the identifier of the W3C VC that records this lifecycle event
 	// (DCS-OR-C2PA-004). Empty until the VC is issued.
 	VCId string `json:"vc_id,omitempty"`
+
+	// Timestamp is the RFC 3161 timestamp token (base64 DER) over
+	// TimestampedAssertionBytes of this assertion (DCS-OR-C2PA-009). Empty when
+	// no TSA is configured or the TSA did not answer.
+	Timestamp string `json:"rfc3161_timestamp,omitempty"`
+}
+
+// TimestampedAssertionBytes is what the RFC 3161 timestamp of a lifecycle
+// assertion covers: its contract_id, file_hash, status, reason and
+// effective_at, as the JSON object the credential subject carries them in.
+func TimestampedAssertionBytes(a LifecycleAssertion) []byte {
+	raw, _ := json.Marshal(struct {
+		ContractID  string `json:"contract_id"`
+		FileHash    string `json:"file_hash"`
+		Status      string `json:"status"`
+		Reason      string `json:"reason"`
+		EffectiveAt string `json:"effective_at"`
+	}{a.ContractID, a.FileHash, a.Status, a.Reason, a.EffectiveAt.UTC().Format(time.RFC3339)})
+	return raw
 }
 
 const lifecycleAssertionLabel = "org.facis.dcs.contract.lifecycle"
