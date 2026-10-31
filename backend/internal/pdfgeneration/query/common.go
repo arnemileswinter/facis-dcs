@@ -3,7 +3,9 @@ package query
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -12,9 +14,11 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	"digital-contracting-service/internal/signingmanagement/dss"
 )
 
 type PDFStateData struct {
@@ -26,13 +30,94 @@ type PDFStateData struct {
 
 type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PDFStateData) error
 
-// pdfSignatureNotAvailable is the honest PDF-signature check status reported
-// by the verify endpoint (DCS-OR-C2PA-006): the verify path does not
-// cryptographically re-verify the PAdES CMS signature over its /ByteRange
-// (pdf-core's /verify treats the signed span as an opaque suffix), and the
-// verifier must never falsely report a passed PDF signature check it did not
-// actually perform.
-const pdfSignatureNotAvailable = provenance.CheckNotAvailable
+// PDFSignatureValidator validates every PAdES signature a PDF carries. The EU
+// DSS client (signingmanagement/dss), which /signature/validate also uses, is
+// the implementation.
+type PDFSignatureValidator interface {
+	ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*dss.Report, error)
+}
+
+// SignerAnchors anchors the signer of each C2PA manifest (DCS-OR-C2PA-007):
+// the manifest's x5chain must verify against Roots and its leaf must identify
+// one of Issuers, the instances party to the document, the way a status list's
+// leaf is bound to its issuer (ADR-34 §3). Roots are the anchors this
+// deployment holds for peers, which include the root of its own C2PA chain.
+type SignerAnchors struct {
+	Roots   *x509.CertPool
+	Issuers []string
+}
+
+// anchorSigners returns the C2PA signer status and, per manifest, the party
+// its leaf is anchored to or why it is not.
+// ponytail: the chain is checked at the current time; a leaf that expired since
+// it signed reports invalid until manifests carry a trusted timestamp.
+func anchorSigners(signers []pdfcore.ManifestSigner, anchors SignerAnchors) (status, detail string) {
+	if len(signers) == 0 {
+		return provenance.CheckNotAvailable, ""
+	}
+	if anchors.Roots == nil || len(anchors.Issuers) == 0 {
+		return provenance.CheckIndeterminate, "no trust anchors or parties to anchor the C2PA signers to"
+	}
+	status = provenance.CheckValid
+	details := make([]string, 0, len(signers))
+	for _, signer := range signers {
+		chain := make([]any, 0, len(signer.Chain))
+		for _, cert := range signer.Chain {
+			chain = append(chain, cert)
+		}
+		anchoredTo := ""
+		var refusal error
+		for _, issuer := range anchors.Issuers {
+			if _, err := sdjwt.VerificationKeyFromX5C(chain, anchors.Roots, issuer); err != nil {
+				refusal = err
+				continue
+			}
+			anchoredTo = issuer
+			break
+		}
+		if anchoredTo == "" {
+			status = provenance.CheckInvalid
+			details = append(details, fmt.Sprintf("%s signed by %q is not anchored to a party: %v", signer.Manifest, signer.Subject, refusal))
+			continue
+		}
+		details = append(details, fmt.Sprintf("%s signed by %s", signer.Manifest, anchoredTo))
+	}
+	return status, strings.Join(details, "; ")
+}
+
+// pdfSignatureSourceDSS names the validator behind pdf_signature_status.
+const pdfSignatureSourceDSS = "eu-dss"
+
+// checkPDFSignatures is the PDF-signature check of the verifier
+// (DCS-OR-C2PA-006): every PAdES signature is validated by the EU DSS and must
+// be a sound advanced electronic signature, by the same criteria the signing
+// path accepts a signature with (dss.Report.AssertValidAES). It returns the
+// status, the source and the indication of each signature.
+func checkPDFSignatures(ctx context.Context, pdf []byte, validator PDFSignatureValidator) (status, source, detail string) {
+	if !provenance.CarriesPAdESSignature(pdf) {
+		return provenance.CheckNotAvailable, "", ""
+	}
+	if validator == nil {
+		return provenance.CheckIndeterminate, pdfSignatureSourceDSS, "no EU DSS validation service is configured (DSS_URL)"
+	}
+	reports, err := validator.ValidatePDFSignatures(ctx, pdf)
+	if err != nil {
+		return provenance.CheckIndeterminate, pdfSignatureSourceDSS, err.Error()
+	}
+	status = provenance.CheckValid
+	details := make([]string, 0, len(reports))
+	for i, report := range reports {
+		indication := report.Indication
+		if report.SubIndication != "" {
+			indication += "/" + report.SubIndication
+		}
+		details = append(details, fmt.Sprintf("signature %d by %q: %s", i+1, report.SignedBy, indication))
+		if report.AssertValidAES() != nil {
+			status = provenance.CheckInvalid
+		}
+	}
+	return status, pdfSignatureSourceDSS, strings.Join(details, "; ")
+}
 
 const (
 	statusPublicationConsistencyWait = 6 * time.Second
@@ -89,7 +174,7 @@ func stampLifecycle(
 	log.Printf("pdfgeneration: stampLifecycle %s state=%s c2paState=%s pdfLen=%d",
 		did, state, c2paState, len(pdfBytes))
 
-	reason := stateToReason(c2paState)
+	reason := provenance.DefaultLifecycleReason(c2paState)
 
 	h := sha256.Sum256(pdfBytes)
 	assetHash := hex.EncodeToString(h[:])
@@ -158,18 +243,19 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 		Match:               false,
 		C2paManifestFound:   false,
 		C2paSignatureStatus: provenance.CheckInvalid,
+		C2paSignerStatus:    provenance.CheckInvalid,
 		VcProofStatus:       provenance.CheckInvalid,
 		StatusListCheck:     "failed",
 		StatusListError:     ptrToString("stored artifact is not authentic"),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
-		PdfSignatureStatus:  pdfSignatureNotAvailable,
+		PdfSignatureStatus:  provenance.CheckInvalid,
 		Discrepancy:         ptrToString(discrepancyNotAuthentic),
 	}
 }
 
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
-	lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+	signatures PDFSignatureValidator, anchors SignerAnchors, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
@@ -204,6 +290,13 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	vcProofStatus := provenance.CheckNotAvailable
 	if result.VCPresent && len(result.VCBytes) > 0 {
 		vcProofStatus = provenance.CredentialCheck(credentials.Verify(result.VCBytes))
+	}
+	// The banner is the lifecycle state the verified credential asserts; the
+	// contract's own state stands in when there is no verified credential.
+	if vcProofStatus == provenance.CheckValid {
+		if asserted := assertedLifecycleStatus(result.VCBytes); asserted != "" {
+			lifecycleStatus = asserted
+		}
 	}
 
 	// The revocation lookup follows the credential's OWN credentialStatus, so it
@@ -246,6 +339,12 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		statusListStatus = "UNKNOWN (lifecycle credential proof not verified)"
 	}
 
+	pdfSignatureStatus, pdfSignatureSource, pdfSignatureDetail := checkPDFSignatures(ctx, pdfBytes, signatures)
+	signerStatus, signerDetail := provenance.CheckNotAvailable, ""
+	if verifyErr == nil {
+		signerStatus, signerDetail = anchorSigners(result.Signers, anchors)
+	}
+
 	return &pdfgen.PDFVerifyResult{
 		Match:             match,
 		C2paManifestFound: c2paManifestFound,
@@ -257,19 +356,33 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		BasePdfHash:         result.BasePDFHash,
 		StoredBasePdfHash:   result.StoredBasePDFHash,
 		C2paSignatureStatus: c2paSignatureStatus,
+		C2paSignerStatus:    signerStatus,
+		C2paSignerDetail:    ptrToString(signerDetail),
 		VcProofStatus:       vcProofStatus,
 		StatusListURI:       ptrToString(statusListURI),
 		StatusListStatus:    ptrToString(statusListStatus),
 		StatusListCheck:     statusListCheck,
 		StatusListError:     ptrToString(statusListError),
 		LifecycleStatus:     ptrToString(lifecycleStatus),
-		// DCS-OR-C2PA-006: the PDF-signature check is an independently named
-		// check, distinct from the C2PA COSE signature check. This path performs
-		// no cryptographic PAdES re-verification, so it honestly reports
-		// "not_available" rather than faking a passed PDF-signature verification.
-		PdfSignatureStatus: pdfSignatureNotAvailable,
-		Discrepancy:        ptrToString(discrepancy),
+		PdfSignatureStatus:  pdfSignatureStatus,
+		PdfSignatureSource:  ptrToString(pdfSignatureSource),
+		PdfSignatureDetail:  ptrToString(pdfSignatureDetail),
+		Discrepancy:         ptrToString(discrepancy),
 	}, nil
+}
+
+// assertedLifecycleStatus is the credentialSubject.status of a lifecycle
+// credential, or "".
+func assertedLifecycleStatus(vc []byte) string {
+	var credential struct {
+		CredentialSubject struct {
+			Status string `json:"status"`
+		} `json:"credentialSubject"`
+	}
+	if json.Unmarshal(vc, &credential) != nil {
+		return ""
+	}
+	return strings.TrimSpace(credential.CredentialSubject.Status)
 }
 
 func evaluateLiveStatusCheck(
@@ -299,7 +412,7 @@ func queryStatusWithPublicationBarrier(
 ) (string, error) {
 	status, err := query()
 	if err != nil || status != "active" ||
-		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended") {
+		(lifecycleStatus != "terminated" && lifecycleStatus != "suspended" && lifecycleStatus != "expired") {
 		return status, err
 	}
 
@@ -320,27 +433,6 @@ func queryStatusWithPublicationBarrier(
 				return status, err
 			}
 		}
-	}
-}
-
-func stateToReason(state string) string {
-	switch state {
-	case "draft":
-		return "Contract created as draft"
-	case "active":
-		return "Contract activated for execution"
-	case "amended":
-		return "Contract amended with new terms"
-	case "suspended":
-		return "Contract suspended pending review"
-	case "terminated":
-		return "Contract terminated by parties"
-	case "expired":
-		return "Contract reached expiration date"
-	case "replaced":
-		return "Contract replaced with newer version"
-	default:
-		return "Contract state changed to: " + state
 	}
 }
 

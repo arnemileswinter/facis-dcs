@@ -15,6 +15,7 @@ import (
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
 	dcstodcssvr "digital-contracting-service/gen/http/dcs_to_dcs/server"
 	"digital-contracting-service/internal/base/pgtest"
+	db2 "digital-contracting-service/internal/dcstodcs/db"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
 )
 
@@ -31,6 +32,9 @@ type refusingPeer struct {
 }
 
 func (p refusingPeer) PostPdf(context.Context, *dcstodcs.DCSToDCSContractPdfRequest) (*dcstodcs.DCSToDCSContractPdfResponse, error) {
+	if p.refusal == nil {
+		return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: conflictPeerDID}, nil
+	}
 	return nil, p.refusal
 }
 
@@ -52,7 +56,7 @@ func peerClient(t *testing.T, refusal error) *dcstodcs.Client {
 func shipOnce(t *testing.T, s *DCSToDCSSynchronizer, client *dcstodcs.Client) error {
 	t.Helper()
 	ctx := context.Background()
-	shipErr := s.deliverPdf(ctx, client, conflictPeerDID, &dcstodcs.DCSToDCSContractPdfRequest{
+	shipErr := s.deliverPdf(ctx, client, db2.PDFDelivery{DID: conflictContractDID, PeerDID: conflictPeerDID, ContractState: "SIGNED", PDFCID: "cid-a"}, &dcstodcs.DCSToDCSContractPdfRequest{
 		FromPeerDid: "did:web:dcs-a.example",
 		ContractIri: conflictContractDID,
 		Pdf:         []byte("%PDF-1.7 signed by A"),
@@ -96,6 +100,17 @@ func TestASignedCopyThePeerRefusesAsAConflictIsRecordedAndNotRetried(t *testing.
 
 	require.Zero(t, retryEntries(t, db), "a refused copy stays in the retry queue")
 	require.Equal(t, 1, sentConflicts(t, db))
+	require.Zero(t, deliveries(t, db), "a refused revision is offered again once the peer resolved the conflict")
+
+	require.NoError(t, shipOnce(t, s, peerClient(t, nil)))
+	require.Equal(t, 1, deliveries(t, db), "an accepted revision is not posted again")
+}
+
+func deliveries(t *testing.T, db *sqlx.DB) int {
+	t.Helper()
+	var count int
+	require.NoError(t, db.Get(&count, `SELECT count(*) FROM contract_pdf_deliveries WHERE did = $1`, conflictContractDID))
+	return count
 }
 
 // Any other refusal can change on a retry and stays in the retry queue.

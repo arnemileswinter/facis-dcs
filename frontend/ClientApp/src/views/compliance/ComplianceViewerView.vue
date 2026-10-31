@@ -21,11 +21,14 @@ import {
 } from '@/utils/credential-chain-evidence'
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
+import { auditFacts } from '@/utils/signature-audit'
 import {
   credentialStatusIndicator,
   dssIndicator,
   findingIndicator,
   findingsVerdict,
+  type FindingVerdict,
+  registryUnreachableReasons,
   signatureLevelBadgeClass as levelBadgeClass,
   signatureLevelLabel,
   signatureStatusIndicator,
@@ -61,9 +64,30 @@ const error = ref<string | null>(null)
 
 const search = ref('')
 const statusFilter = ref('')
+const complianceFilter = ref<'' | FindingVerdict | 'unchecked'>('')
 
 const searchId = useId()
 const statusFilterId = useId()
+const complianceFilterId = useId()
+
+// The verdict of the last validation or compliance check of each contract in
+// this session (DCS-IR-SM-08 filter by compliance status).
+const lastVerdicts = ref<Record<string, FindingVerdict>>({})
+const COMPLIANCE_FILTERS: { value: FindingVerdict | 'unchecked'; label: string }[] = [
+  { value: 'pass', label: 'Passed' },
+  { value: 'indeterminate', label: 'Not determined' },
+  { value: 'fail', label: 'Issues found' },
+  { value: 'unchecked', label: 'Not checked' },
+]
+const VERDICT_BADGES: Record<FindingVerdict, { label: string; cls: string }> = {
+  pass: { label: 'Passed', cls: 'badge-success' },
+  indeterminate: { label: 'Not determined', cls: 'badge-warning' },
+  fail: { label: 'Issues found', cls: 'badge-error' },
+}
+
+function recordVerdict(did: string, findings: string[] | undefined) {
+  lastVerdicts.value = { ...lastVerdicts.value, [did]: findingsVerdict(findings ?? []) }
+}
 
 const selected = ref<SignatureContract | null>(null)
 const activeTab = ref<Tab>('validation')
@@ -99,6 +123,7 @@ const filteredContracts = computed(() => {
   const q = search.value.trim().toLowerCase()
   return contracts.value.filter((c) => {
     if (statusFilter.value && c.state !== statusFilter.value) return false
+    if (complianceFilter.value && (lastVerdicts.value[c.did] ?? 'unchecked') !== complianceFilter.value) return false
     if (!q) return true
     return c.did.toLowerCase().includes(q) || (c.name ?? '').toLowerCase().includes(q)
   })
@@ -133,6 +158,7 @@ async function selectContract(contract: SignatureContract) {
     if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
     view.value = loadedView
     viewLoaded.value = true
+    recordVerdict(contract.did, loadedView.integrity_findings)
   } catch (e: unknown) {
     claimReportedHttpError(e)
     if (requestSequence !== viewRequestSequence || selected.value?.did !== contract.did) return
@@ -148,6 +174,7 @@ async function runValidate() {
   error.value = null
   try {
     validateResult.value = await signatureManagementService.validateSignature(selected.value.did)
+    recordVerdict(selected.value.did, validateResult.value.findings)
   } catch (e: unknown) {
     claimReportedHttpError(e)
     error.value = `Validation failed: ${e instanceof Error ? e.message : String(e)}`
@@ -162,6 +189,7 @@ async function runCompliance() {
   error.value = null
   try {
     complianceResult.value = await signatureManagementService.complianceCheck(selected.value.did)
+    recordVerdict(selected.value.did, complianceResult.value.findings)
   } catch (e: unknown) {
     claimReportedHttpError(e)
     error.value = `Compliance check failed: ${e instanceof Error ? e.message : String(e)}`
@@ -249,6 +277,14 @@ const integrityFindings = computed(() => validateResult.value?.findings ?? view.
 // undetermined one (a revocation state the status service could not answer)
 // withholds it exactly as a failure does.
 const integrityVerdict = computed(() => findingsVerdict(integrityFindings.value))
+
+// Credential states the trust registry or the status list could not provide.
+const registryUnreachable = computed(() =>
+  registryUnreachableReasons(
+    [...integrityFindings.value, ...(complianceResult.value?.findings ?? [])],
+    view.value?.signatures ?? [],
+  ),
+)
 
 const integritySummary = computed(() => {
   switch (integrityVerdict.value) {
@@ -523,6 +559,16 @@ function exportPdf() {
             <option value="">All statuses</option>
             <option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
           </select>
+          <select
+            :id="complianceFilterId"
+            v-model="complianceFilter"
+            aria-label="Select compliance status"
+            class="select-bordered select w-full select-sm"
+            data-testid="compliance-status-filter"
+          >
+            <option value="">All compliance results</option>
+            <option v-for="f in COMPLIANCE_FILTERS" :key="f.value" :value="f.value">{{ f.label }}</option>
+          </select>
         </div>
 
         <div v-if="loadingContracts" class="text-base-content/70" role="status">Loading contracts…</div>
@@ -547,6 +593,13 @@ function exportPdf() {
               <span class="max-w-full truncate font-medium">{{ contract.name ?? contract.did }}</span>
               <span class="flex w-full min-w-0 items-center gap-2 overflow-hidden">
                 <span class="badge shrink-0 badge-ghost badge-xs">{{ contract.state }}</span>
+                <span
+                  v-if="lastVerdicts[contract.did]"
+                  class="badge shrink-0 badge-xs"
+                  :class="VERDICT_BADGES[lastVerdicts[contract.did]!].cls"
+                >
+                  {{ VERDICT_BADGES[lastVerdicts[contract.did]!].label }}
+                </span>
                 <span class="w-0 flex-1 truncate font-mono text-[10px] opacity-70">{{ contract.did }}</span>
               </span>
             </button>
@@ -614,6 +667,17 @@ function exportPdf() {
           <div v-if="loadingView" class="text-base-content/60" role="status">Loading signature data…</div>
 
           <template v-else-if="viewLoaded && view">
+            <div v-if="registryUnreachable.length" class="mb-3 alert alert-warning" role="alert">
+              <div data-testid="registry-unreachable">
+                <p class="font-semibold">
+                  The trust registry or a revocation list could not be reached. The credential status of these
+                  signatures is not determined.
+                </p>
+                <ul class="list-disc pl-5 text-xs">
+                  <li v-for="reason in registryUnreachable" :key="reason">{{ reason }}</li>
+                </ul>
+              </div>
+            </div>
             <!-- Validation tab: trust anchors, crypto integrity, timestamps -->
             <div v-if="activeTab === 'validation'" class="space-y-4">
               <div class="flex items-center gap-2">
@@ -915,18 +979,28 @@ function exportPdf() {
                       <th>ID</th>
                       <th>Component</th>
                       <th>Event</th>
+                      <th>Signer</th>
+                      <th>Credential</th>
+                      <th>Outcome</th>
                       <th>Created</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="entry in auditEntries" :key="entry.id">
+                    <tr v-for="entry in auditEntries" :key="entry.id" data-testid="audit-entry">
                       <td>{{ entry.id }}</td>
                       <td>{{ entry.component }}</td>
                       <td>{{ entry.event_type }}</td>
+                      <td class="max-w-48 truncate font-mono text-xs">
+                        {{ auditFacts(entry.event_data).signer || '—' }}
+                      </td>
+                      <td>{{ auditFacts(entry.event_data).credential || '—' }}</td>
+                      <td :title="auditFacts(entry.event_data).error">
+                        {{ auditFacts(entry.event_data).outcome || '—' }}
+                      </td>
                       <td class="text-xs">{{ entry.created_at }}</td>
                     </tr>
                     <tr v-if="auditEntries.length === 0">
-                      <td colspan="4" class="text-base-content/60">No audit entries.</td>
+                      <td colspan="7" class="text-base-content/60">No audit entries.</td>
                     </tr>
                   </tbody>
                 </table>

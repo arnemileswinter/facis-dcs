@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/datatype/userrole"
 )
@@ -265,4 +267,28 @@ func evaluateLoginRoles(disclosedRoles []string) ([]string, error) {
 	}
 
 	return granted, nil
+}
+
+// HolderLockoutKey names the holder key a presentation is bound to (cnf.jwk,
+// as did:jwk), read without any verification. It only selects whose invalid
+// presentations count toward a lockout (FR-UC-01-4). It returns "" when the
+// presentation names no holder key.
+func HolderLockoutKey(vpToken string) string {
+	presentation, err := sdjwt.ParsePresentation(vpToken)
+	if err != nil {
+		return ""
+	}
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(presentation.IssuerJWT, claims); err != nil {
+		return ""
+	}
+	cnf, err := sdjwt.CNFJWKFromClaims(claims)
+	if err != nil {
+		return ""
+	}
+	did, err := sdjwt.DIDJWKFromPublicJWK(cnf)
+	if err != nil {
+		return ""
+	}
+	return "holder:" + did
 }

@@ -107,6 +107,25 @@ def step_then_history_response_shape(context):
     )
 
 
+@then('the C2PA manifest history of contract "{name}" ends with lifecycle status "{status}"')
+def step_then_history_ends_with_lifecycle_status(context, name, status):
+    did, _ = ContractService._contract_data(context, name)
+    resp = _requests.get(
+        c2pa_manifest_url(context, did),
+        params={"history": "true"},
+        timeout=context.http_timeout_seconds,
+    )
+    assert resp.status_code == 200, f"manifest history of '{name}' failed: {resp.status_code} {resp.text}"
+    statuses = [
+        (entry.get("lifecycle") or entry.get("dcs.lifecycle") or {}).get("status")
+        for entry in resp.json()
+    ]
+    statuses = [s for s in statuses if s]
+    assert statuses and statuses[-1] == status, (
+        f"Expected the provenance chain of '{name}' to end with lifecycle status {status!r}, got {statuses}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Then — dcs.remote_manifests assertion
 # ---------------------------------------------------------------------------
@@ -182,18 +201,15 @@ def step_then_verify_four_named_checks(context, name):
         )
 
 
-@then(
-    'the PDF signature check for contract "{name}" is marked as not yet available '
-    "rather than passed"
-)
-def step_then_pdf_signature_not_available(context, name):
+@then('the PDF signature check for contract "{name}" is reported valid by the EU DSS')
+def step_then_pdf_signature_valid_by_dss(context, name):
     body = context.requests_response.json()
-    status = body.get("pdf_signature_status")
-    assert status in ("pending", "not_available"), (
-        f"Expected pdf_signature_status to be 'pending' or 'not_available' for "
-        f"contract '{name}' (the verify path does not cryptographically re-verify the "
-        "PAdES CMS signature, and DCS-OR-C2PA-006 forbids the verifier from falsely "
-        f"showing a passed PDF signature check), got: {status!r} in response {body}"
+    assert body.get("pdf_signature_source") == "eu-dss", (
+        f"Expected the PDF signature of contract '{name}' to be checked by the EU DSS, got: {body}"
+    )
+    assert body.get("pdf_signature_status") == "valid", (
+        f"Expected the EU DSS to validate every PAdES signature of contract '{name}', "
+        f"got: {body.get('pdf_signature_status')!r} ({body.get('pdf_signature_detail')!r}) in response {body}"
     )
 
 

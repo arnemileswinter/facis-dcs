@@ -69,7 +69,12 @@ async function storeSection() {
   if (!sectionId.value || chosenParties.value.length === 0) return
   storing.value = true
   try {
-    await archiveService.storeSection(props.entry.did, sectionId.value, chosenParties.value)
+    await archiveService.storeSection(
+      props.entry.did,
+      props.entry.contract_version,
+      sectionId.value,
+      chosenParties.value,
+    )
     errorStore.add('Section archived.', 'info')
     sectionId.value = ''
     chosenParties.value = []

@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -20,6 +21,14 @@ type callbackCeremonyRepo struct {
 
 func (r callbackCeremonyRepo) GetCeremonyByID(context.Context, *sqlx.Tx, string) (*db.SignatureCeremony, error) {
 	return r.ceremony, nil
+}
+
+func (r callbackCeremonyRepo) RecordRefusal(context.Context, *sqlx.Tx, string, string, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (r callbackCeremonyRepo) MarkDocumentRetrieved(context.Context, *sqlx.Tx, string, string) (bool, error) {
+	return true, nil
 }
 
 // DCS-FR-SM-19: a wallet callback refused before the submit is audited against

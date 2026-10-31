@@ -198,3 +198,27 @@ func TestARevocationIsAdoptedWithoutReplacingTheLocalSignedCopy(t *testing.T) {
 	require.Equal(t, contractstate.Revoked.String(), state)
 	require.Empty(t, signingConflictEvents(t, database))
 }
+
+// The stored artifact answers whether it is signed: the flag is set when a
+// peer's signed copy is stored, and a later update that records another
+// asserted lifecycle state does not clear it, since an incremental update
+// keeps every signature.
+func TestAStoredSignedPeerCopyIsRecordedAsSigned(t *testing.T) {
+	receiver, database := signingConflictReceiver(t, unsignedBase)
+	ctx := context.Background()
+	signed := func() bool {
+		var flag bool
+		require.NoError(t, database.Get(&flag, `SELECT pdf_signed FROM contracts WHERE did = $1`, taskContractDID))
+		return flag
+	}
+	require.False(t, signed(), "an unsigned copy is recorded as signed")
+
+	require.NoError(t, receiver.Handle(ctx, shipOf(withSignature(unsignedBase, "A"))))
+	require.True(t, signed(), "the peer's signed copy is not recorded as signed")
+
+	tx, err := database.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, receiver.CRepo.UpdatePDFState(ctx, tx, taskContractDID, db.ContractPDFState{IPFSCID: "cid", C2PAState: "terminated"}))
+	require.NoError(t, tx.Commit())
+	require.True(t, signed(), "a lifecycle update cleared the signed flag")
+}

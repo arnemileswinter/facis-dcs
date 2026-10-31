@@ -41,7 +41,7 @@ func TestQARejectedContractEditKeepsTheSettlementGatePostgres(t *testing.T) {
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)
-	_, err = database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,name,contract_data,pdf_c2pa_state) VALUES ('c1',$1,'Org A','REJECTED','tpl',1,'old','{"@id":"c1"}','active')`, peer)
+	_, err = database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,name,contract_data,pdf_c2pa_state,pdf_signed) VALUES ('c1',$1,'Org A','REJECTED','tpl',1,'old','{"@id":"c1"}','active',true)`, peer)
 	require.NoError(t, err)
 
 	name := "reworked"

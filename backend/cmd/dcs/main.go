@@ -363,8 +363,9 @@ func main() {
 	ipfsAPIClient := ipfs.NewClient(mfsBaseURL).WithBearerToken(os.Getenv("IPFS_API_TOKEN"))
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
-	lockRepo := &pg.PostgresIPLockoutRepo{}
+	lockRepo := &pg.PostgresLockoutRepo{}
 	jwtAuth := auth.NewJWTAuthenticator(hydraJWTValidator, db, aAttemptRepo, lockRepo)
+	jwtAuth.Limiter = middleware.NewRateLimiter(db, conf.APIRateLimitPerMinute())
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
@@ -516,9 +517,10 @@ func main() {
 	eraseRepo := &pq2.PostgresEraseRepository{DB: db}
 	shredder := &dcstodcs2.AuditedShredder{DB: db, Keys: cekRepo, Artifacts: artifactStore}
 	contractEraser := &dcstodcs2.ContractEraser{
+		DB:          db,
 		DIDDocument: *didDocument,
 		Shredder:    shredder,
-		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo},
+		Parties:     &dcstodcs2.DBContractParties{DB: db, CRepo: &cweRepo, SRepo: &syncRepo},
 		ERepo:       eraseRepo,
 		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}
@@ -645,6 +647,9 @@ func main() {
 		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
+		// A terminated, expired or revoked contract is withdrawn from the
+		// catalogue (DCS-FR-CWE-23).
+		(&cwecommand.CatalogueWithdrawer{DB: db, FCClient: templateCatalogueClient}).Start(ctx, time.Minute)
 	}
 
 	// Initialize the webhook platform (ORCE integration).
@@ -869,7 +874,7 @@ func main() {
 		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
 
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
-		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
+		authSvc, err = service.NewAuth(db, presentationRepo, jwtAuth, authCfg)
 		if err != nil {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
@@ -877,7 +882,7 @@ func main() {
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder, archiveNotaryClient, tsaClient)
 		// The credentials this instance issued verify against its own published
 		// document without a round trip; a peer's lifecycle or signing-summary
 		// credential — carried inside a verbatim-stored inbound PDF — resolves to
@@ -890,10 +895,13 @@ func main() {
 		// uses, so an issuer trusted for a presented credential and an issuer
 		// trusted for a provenance credential cannot become two different sets.
 		credentialStatusVerifier := provenance.NewCredentialStatusVerifier(oid4vp.StatusListVerifier())
-		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), did, credentialVerifier, credentialStatusVerifier)
-		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher))
+		pdfGenerationSvc = service.NewPDFGeneration(db, jwtAuth, artifactStore, &cweRepo, &ctRepo, &smCRepo, pdfCoreClient, issuerDID, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), did, credentialVerifier, credentialStatusVerifier,
+			// The anchors a peer's chain is verified against, which include the
+			// root of this deployment's own C2PA chain (auth_config.go).
+			authCfg.Trust.For(oid4vp.PurposePeer).X5CTrustRoots())
+		c2paSvc = service.NewC2PAService(db, artifactStore, &cweRepo, pdfCoreClient)
 		processAuditAndComplianceSvc = service.NewProcessAuditAndCompliance(db, jwtAuth, auditTrailReader, &ctRepo, &cweRepo, &cweATRepo, &pacRiskRepo, auditExecutorClient, workflowGateCoordinator)
-		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher, *didDocument, &syncRepo)
+		signatureManagementSvc = service.NewSignatureManagement(db, jwtAuth, &smCRepo, &smrepo.PostgresCeremonyRepo{}, auditTrailReader, vcSigner, issuerDID, artifactStore, pdfCoreClient, &cweRepo, archiveNotaryClient, tsaClient, provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient), workflowGateCoordinator, requestSigner, oid4vpClientID, authCfg.PublicAPIBase, authCfg.PIDDCQLQuery, authCfg.DCQLQuery, authCfg.Trust, credentialVerifier, credentialStatusVerifier, statusListPublisher, *didDocument, &syncRepo)
 		templateCatalogueIntegrationSvc = service.NewTemplateCatalogueIntegration(db, jwtAuth, templateCatalogueClient)
 		templateRepositorySvc = service.NewTemplateRepository(db, jwtAuth, &ctRepo, &ctRTRepo, &ctATRepo, templateCatalogueClient, auditTrailReader, vcSigner, issuerDID, credentialVerifier)
 		didSrv = didService
@@ -926,7 +934,7 @@ func main() {
 		PDFCore:   pdfCoreClient,
 		IssuerDID: issuerDID,
 		LocalPeer: did,
-		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher),
+		VCIssuer:  provenance.NewLocalVCIssuer(vcSigner, issuerDID, statusListPublisher).WithTimestamper(tsaClient),
 	}
 	go func() {
 		if err := pdfSub.Start(pdfSubClient); err != nil {

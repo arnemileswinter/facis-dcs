@@ -29,7 +29,7 @@ it.each<[UserRole, boolean, boolean]>([
     wrapper.findComponent({ name: 'AccessAttempts' }).exists() &&
       wrapper.findComponent({ name: 'AccessAttempts' }).find('details').exists(),
   ).toBe(role === 'AUDITOR')
-  expect(wrapper.find('select').exists()).toBe(compliance)
+  expect(wrapper.find('#select-scope').exists()).toBe(compliance)
   const historyTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text() === 'Action History')
   if (historyTab) await historyTab.trigger('click')
   expect(wrapper.findComponent({ name: 'ActionHistoryPanel' }).exists()).toBe(history)

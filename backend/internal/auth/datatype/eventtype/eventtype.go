@@ -11,6 +11,8 @@ const (
 	MachineIdentityUpdated       EventType = "MACHINE_IDENTITY_UPDATED"
 	MachineIdentityDeleted       EventType = "MACHINE_IDENTITY_DELETED"
 	MachineIdentitySecretRotated EventType = "MACHINE_IDENTITY_SECRET_ROTATED"
+
+	LockoutLifted EventType = "LOCKOUT_LIFTED"
 )
 
 func (t EventType) String() string {

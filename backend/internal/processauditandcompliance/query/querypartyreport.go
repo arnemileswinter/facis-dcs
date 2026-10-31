@@ -2,7 +2,9 @@ package qry
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +13,11 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/validation"
+	event2 "digital-contracting-service/internal/processauditandcompliance/event"
 )
 
 // ErrContractNotFound is returned when the contract of a report does not exist.
@@ -58,6 +64,9 @@ type CredentialMetadata struct {
 	CertRevokedAt   *time.Time `json:"cert_revoked_at,omitempty" db:"cert_revoked_at"`
 	PoAOrganization *string    `json:"poa_organization,omitempty" db:"poa_organization"`
 	KbSdHash        *string    `json:"kb_sd_hash,omitempty" db:"kb_sd_hash"`
+	// Source is "peer" for a signature a counterparty applied on its own
+	// instance. Its level is judged there (ADR-37) and not recorded here.
+	Source string `json:"source" db:"-"`
 }
 
 type PartyCompliance struct {
@@ -69,7 +78,8 @@ type PartyCompliance struct {
 }
 
 // ContractCredentials returns the credential metadata of every signature of
-// the contract, oldest first.
+// the contract, oldest first: the signatures this instance applied, then the
+// signatures the counterparties applied on their instances.
 func ContractCredentials(ctx context.Context, db sqlx.QueryerContext, did string) ([]CredentialMetadata, error) {
 	var rows []struct {
 		CredentialMetadata
@@ -89,7 +99,52 @@ func ContractCredentials(ctx context.Context, db sqlx.QueryerContext, did string
 	credentials := make([]CredentialMetadata, 0, len(rows))
 	for _, row := range rows {
 		row.RequiredLevel = validation.RequiredCredentialType(row.ContractData, row.Party)
+		row.Source = "local"
 		credentials = append(credentials, row.CredentialMetadata)
+	}
+	peers, err := peerCredentials(ctx, db, did)
+	if err != nil {
+		return nil, err
+	}
+	return append(credentials, peers...), nil
+}
+
+// peerCredentials reads the peer signatures recorded when the counterparty's
+// signed PDF arrived (contract_sync_signatures.poa_evidence).
+func peerCredentials(ctx context.Context, db sqlx.QueryerContext, did string) ([]CredentialMetadata, error) {
+	var rows []struct {
+		Evidence     []byte    `db:"poa_evidence"`
+		ReceivedAt   time.Time `db:"received_at"`
+		ContractData []byte    `db:"contract_data"`
+	}
+	if err := sqlx.SelectContext(ctx, db, &rows, `
+        SELECT s.poa_evidence, s.received_at, k.contract_data
+        FROM contract_sync_signatures s JOIN contracts k ON k.did = s.did
+        WHERE s.did = $1 AND s.poa_evidence IS NOT NULL`, did); err != nil {
+		return nil, fmt.Errorf("could not read peer signatures: %w", err)
+	}
+	var credentials []CredentialMetadata
+	for _, row := range rows {
+		var signatures []struct {
+			Party           string `json:"party"`
+			Signatory       string `json:"signatory"`
+			PoAOrganization string `json:"poa_organization"`
+		}
+		if err := json.Unmarshal(row.Evidence, &signatures); err != nil {
+			return nil, fmt.Errorf("could not decode peer signatures: %w", err)
+		}
+		for _, signature := range signatures {
+			receivedAt := row.ReceivedAt
+			credential := CredentialMetadata{
+				Party: signature.Party, SignerDID: signature.Signatory, SignatureStatus: "SIGNED", SignedAt: &receivedAt,
+				RequiredLevel: validation.RequiredCredentialType(row.ContractData, signature.Party), Source: "peer",
+			}
+			if signature.PoAOrganization != "" {
+				organization := signature.PoAOrganization
+				credential.PoAOrganization = &organization
+			}
+			credentials = append(credentials, credential)
+		}
 	}
 	return credentials, nil
 }
@@ -97,33 +152,56 @@ func ContractCredentials(ctx context.Context, db sqlx.QueryerContext, did string
 type PartyReportQry struct {
 	DID         string
 	GeneratedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type PartyReporter struct {
 	DB *sqlx.DB
 }
 
-// Handle returns the party report as JSON.
+// Handle returns the party report as JSON and records its generation in the
+// contract's audit trail.
 func (h *PartyReporter) Handle(ctx context.Context, query PartyReportQry) ([]byte, error) {
+	tx, err := h.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not start transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	var contract struct {
 		State string `db:"state"`
 		Data  []byte `db:"contract_data"`
 	}
-	err := h.DB.GetContext(ctx, &contract, `SELECT state::text AS state, contract_data FROM contracts_effective WHERE did = $1`, query.DID)
+	err = tx.GetContext(ctx, &contract, `SELECT state::text AS state, contract_data FROM contracts_effective WHERE did = $1`, query.DID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrContractNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("could not read contract: %w", err)
 	}
-	credentials, err := ContractCredentials(ctx, h.DB, query.DID)
+	credentials, err := ContractCredentials(ctx, tx, query.DID)
 	if err != nil {
 		return nil, err
 	}
 	report := buildPartyReport(query.DID, contract.State, validation.RequiredSignatureFields(contract.Data), credentials)
 	report.GeneratedAt = time.Now().UTC()
 	report.GeneratedBy = query.GeneratedBy
-	return json.Marshal(report)
+	content, err := json.Marshal(report)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode party report: %w", err)
+	}
+	sum := sha256.Sum256(content)
+	if err := event.Create(ctx, tx, event2.PartyReportGeneratedEvent{
+		DID: query.DID, GeneratedBy: query.GeneratedBy, Status: report.Status,
+		ContentHash: "sha256:" + hex.EncodeToString(sum[:]), OccurredAt: report.GeneratedAt,
+		HolderDID: query.HolderDID, UserRoles: query.UserRoles,
+	}, componenttype.ProcessAuditAndCompliance); err != nil {
+		return nil, fmt.Errorf("could not record party report: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("could not commit transaction: %w", err)
+	}
+	return content, nil
 }
 
 // buildPartyReport judges every declared signature field and every party a
@@ -169,7 +247,7 @@ func nonConformances(credential CredentialMetadata) []string {
 	if credential.SignatureStatus == "REVOKED" {
 		found = append(found, "the signature is revoked")
 	}
-	if !validation.SignatureLevelSatisfies(credential.AchievedLevel, credential.RequiredLevel) {
+	if credential.Source != "peer" && !validation.SignatureLevelSatisfies(credential.AchievedLevel, credential.RequiredLevel) {
 		found = append(found, fmt.Sprintf("the signature achieved %s, the contract requires %s", credential.AchievedLevel, credential.RequiredLevel))
 	}
 	if credential.CertRevokedAt != nil {

@@ -17,7 +17,7 @@ import { type ArchiveStatistics, archiveStatisticsService } from '@/services/arc
 import { contractWorkflowService } from '@/services/contract-workflow-service'
 import { useAuthStore } from '@/stores/auth-store'
 import { useErrorStore } from '@/stores/error-store'
-import { contractStates } from '@/types/contract-state'
+import { contractStates, erasableContractStates } from '@/types/contract-state'
 import {
   activeFilters,
   archiveResultsToCsv,
@@ -42,9 +42,14 @@ import ArchiveSectionsPanel from './ArchiveSectionsPanel.vue'
  * compliance verdict per entry (DCS-FR-CSA-19) and search the archive
  * (DCS-FR-CSA-22). Readers of the entries open the per-party sections of an
  * archived contract, which the Archive Manager archives (DCS-FR-CSA-26).
+ * The Auditor and the Compliance Officer inspect the entries, their
+ * compliance verdict, evidence and sections read-only (DCS-FR-CSA-24).
  */
 
 const statistics = ref<ArchiveStatistics | null>(null)
+// The justification that shows the actors of the recent actions (DCS-FR-PACM-04).
+const actorsJustification = ref('')
+const actorsJustificationInput = ref('')
 const error = ref('')
 const loading = ref(true)
 
@@ -52,7 +57,13 @@ const authStore = useAuthStore()
 const errorStore = useErrorStore()
 const isArchiveManager = computed(() => authStore.user?.roles.includes('ARCHIVE_MANAGER') ?? false)
 
-const canReadEntries = computed(() => isArchiveManager.value || !!authStore.user?.roles.includes('CONTRACT_OBSERVER'))
+const isInspector = computed(
+  () => !!authStore.user?.roles.some((role) => role === 'AUDITOR' || role === 'COMPLIANCE_OFFICER'),
+)
+const canReadEntries = computed(
+  () => isArchiveManager.value || isInspector.value || !!authStore.user?.roles.includes('CONTRACT_OBSERVER'),
+)
+const canInspect = computed(() => isArchiveManager.value || isInspector.value)
 const canReadStatistics = computed(() => isArchiveManager.value || !!authStore.user?.roles.includes('AUDITOR'))
 const search = ref<ArchiveSearch>({})
 const showAdditionalFilters = ref(false)
@@ -72,9 +83,24 @@ const expandedErasureDid = ref<string | null>(null)
 const deleting = ref(false)
 const confirmationModal = useTemplateRef('confirmation-modal')
 
+function loadStatistics() {
+  return archiveStatisticsService.statistics(actorsJustification.value || undefined)
+}
+
+async function showActors() {
+  const justification = actorsJustificationInput.value.trim()
+  if (!justification) return
+  try {
+    actorsJustification.value = justification
+    statistics.value = await loadStatistics()
+  } catch {
+    // the shared http interceptor already surfaced the server's error
+  }
+}
+
 onMounted(async () => {
   try {
-    if (canReadStatistics.value) statistics.value = await archiveStatisticsService.statistics()
+    if (canReadStatistics.value) statistics.value = await loadStatistics()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -107,7 +133,10 @@ async function loadEntries() {
     const result = Object.keys(filters).length ? await archiveService.search(filters) : await archiveService.retrieve()
     if (request !== entriesRequest) return
     entries.value = result
-    if (isArchiveManager.value) await Promise.all([loadErasureStatuses(request), loadCompliance()])
+    await Promise.all([
+      isArchiveManager.value ? loadErasureStatuses(request) : undefined,
+      canInspect.value ? loadCompliance() : undefined,
+    ])
   } catch (err) {
     if (request === entriesRequest) entriesError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -226,8 +255,6 @@ function downloadEvidence(item: ArchiveEvidenceItem) {
   downloadBlob(new Blob([bytes], { type: item.media_type }), item.name)
 }
 
-// DCS-IR-CSA-03: the contract state machine decides which contracts can end.
-const terminalStates = ['TERMINATED', 'EXPIRED', 'REJECTED', 'WITHDRAWN', 'REVOKED']
 const terminating = ref(false)
 
 async function terminateEntry(entry: ArchivedContract) {
@@ -418,7 +445,7 @@ async function deleteEntry(entry: ArchivedContract) {
   try {
     await archiveService.delete(entry.did, justification)
     errorStore.add('Archive entry deleted. Encryption keys destroyed.', 'info')
-    if (canReadStatistics.value) statistics.value = await archiveStatisticsService.statistics()
+    if (canReadStatistics.value) statistics.value = await loadStatistics()
     await loadEntries()
   } catch {
     // the shared http interceptor already surfaced the server's error
@@ -661,7 +688,7 @@ function shortDid(did: string): string {
                 <th class="w-20">Version</th>
                 <th>State</th>
                 <th>Annotation</th>
-                <th v-if="isArchiveManager">Compliance</th>
+                <th v-if="canInspect">Compliance</th>
                 <th v-if="isArchiveManager">Encryption</th>
                 <th><span class="sr-only">Actions</span></th>
               </tr>
@@ -726,7 +753,7 @@ function shortDid(did: string): string {
                       </span>
                     </div>
                   </td>
-                  <td v-if="isArchiveManager" :data-testid="`archive-compliance-${entry.did}`">
+                  <td v-if="canInspect" :data-testid="`archive-compliance-${entry.did}`">
                     <span
                       v-if="complianceOf(entry)?.flagged"
                       class="badge badge-sm badge-warning"
@@ -767,13 +794,22 @@ function shortDid(did: string): string {
                     >
                       Sections
                     </button>
-                    <template v-if="isArchiveManager">
+                    <template v-if="canInspect">
                       <RouterLink
                         :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: entry.did } }"
                         class="btn btn-ghost btn-sm"
                       >
                         Audit
                       </RouterLink>
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        :data-testid="`archive-evidence-${entry.did}`"
+                        @click="toggleEvidence(entry.did)"
+                      >
+                        Evidence
+                      </button>
+                    </template>
+                    <template v-if="isArchiveManager">
                       <button
                         class="btn btn-ghost btn-sm"
                         :disabled="annotating"
@@ -783,14 +819,7 @@ function shortDid(did: string): string {
                         Annotate
                       </button>
                       <button
-                        class="btn btn-ghost btn-sm"
-                        :data-testid="`archive-evidence-${entry.did}`"
-                        @click="toggleEvidence(entry.did)"
-                      >
-                        Evidence
-                      </button>
-                      <button
-                        v-if="!terminalStates.includes(entry.state)"
+                        v-if="!erasableContractStates.includes(entry.state)"
                         class="btn btn-ghost btn-sm"
                         :disabled="terminating"
                         :data-testid="`archive-terminate-${entry.did}`"
@@ -799,6 +828,7 @@ function shortDid(did: string): string {
                         Terminate
                       </button>
                       <button
+                        v-if="erasableContractStates.includes(entry.state)"
                         class="btn text-error btn-ghost btn-sm"
                         :disabled="deleting"
                         :data-testid="`archive-delete-${entry.did}`"
@@ -876,10 +906,19 @@ function shortDid(did: string): string {
                             <td>
                               <span
                                 class="badge badge-sm"
-                                :class="peer.status === 'confirmed' ? 'badge-success' : 'badge-warning'"
+                                :class="
+                                  peer.status === 'confirmed'
+                                    ? 'badge-success'
+                                    : peer.status === 'refused'
+                                      ? 'badge-error'
+                                      : 'badge-warning'
+                                "
                               >
                                 {{ peer.status }}
                               </span>
+                              <div v-if="peer.last_error" class="mt-1 text-xs break-all opacity-70">
+                                {{ peer.last_error }}
+                              </div>
                             </td>
                             <td>{{ formatTimestamp(peer.requested_at) }}</td>
                             <td>{{ peer.confirmed_at ? formatTimestamp(peer.confirmed_at) : '—' }}</td>
@@ -961,13 +1000,13 @@ function shortDid(did: string): string {
         >
           <div class="card-body min-w-0 p-4 sm:p-6">
             <h2 class="card-title text-base">
-              Expiring within 30 days
+              Expiring within {{ statistics.expiring_window_days }} days
               <span v-if="statistics.expiring_contracts.length" class="badge badge-sm badge-warning">
                 {{ statistics.expiring_contracts.length }}
               </span>
             </h2>
             <p v-if="statistics.expiring_contracts.length === 0" class="text-sm opacity-70">
-              No archived contracts expire within the next 30 days.
+              No archived contracts expire within the next {{ statistics.expiring_window_days }} days.
             </p>
             <div v-else class="overflow-x-auto" tabindex="0" role="region" aria-label="Expiring contracts">
               <table class="table table-zebra table-sm">
@@ -1000,6 +1039,23 @@ function shortDid(did: string): string {
         <section class="card min-w-0 border border-base-300 bg-base-100" data-testid="archive-recent-actions">
           <div class="card-body min-w-0 p-4 sm:p-6">
             <h2 class="card-title text-base">Recent actions</h2>
+            <form
+              v-if="!actorsJustification"
+              class="flex flex-wrap items-end gap-2"
+              data-testid="archive-actors-form"
+              @submit.prevent="showActors"
+            >
+              <label class="form-control">
+                <span class="label-text text-sm">Justification to show the actors</span>
+                <input
+                  v-model="actorsJustificationInput"
+                  class="input-bordered input input-sm"
+                  data-testid="archive-actors-justification"
+                  required
+                />
+              </label>
+              <button class="btn btn-sm" type="submit" :disabled="!actorsJustificationInput.trim()">Show actors</button>
+            </form>
             <p v-if="statistics.recent_actions.length === 0" class="text-sm opacity-70">
               No archive operations recorded yet.
             </p>
@@ -1017,7 +1073,7 @@ function shortDid(did: string): string {
                   <tr v-for="(action, index) in statistics.recent_actions" :key="index">
                     <td>{{ formatTimestamp(action.occurred_at) }}</td>
                     <td>{{ action.event_type }}</td>
-                    <td class="max-w-40 truncate" :title="action.actor">{{ action.actor }}</td>
+                    <td class="max-w-40 truncate" :title="action.actor">{{ action.actor ?? '—' }}</td>
                     <td>
                       <RouterLink
                         v-if="action.did"

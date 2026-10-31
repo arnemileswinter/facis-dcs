@@ -811,7 +811,7 @@ const exportPDF = async () => {
           class="btn flex-1 btn-primary"
           data-testid="submit-negotiation"
           :disabled="
-            (!isCreator && !isReviewer && !isNegotiator) ||
+            (!isCreator && !isReviewer && !isNegotiator && !isManager) ||
             isSubmitting ||
             hasChangeRequest ||
             hasUnresolvedRound ||

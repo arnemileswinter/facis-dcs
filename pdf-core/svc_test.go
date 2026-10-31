@@ -363,6 +363,20 @@ func TestVerify_ValidPDF(t *testing.T) {
 	}
 }
 
+// A compiled base followed by a signature-shaped revision that was never
+// re-anchored is outside its only manifest's hard binding (ADR-26), so /verify
+// reports a mismatch rather than reading the trailer as a valid signature layer.
+func TestVerify_UnanchoredSignatureTrailerOnTheBaseIsAMismatch(t *testing.T) {
+	pdf := compilePDF(t)
+	trailer := append(append([]byte(nil), pdf...),
+		"\n4242 0 obj\n<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>\nendobj\nstartxref\n0\n%%EOF\n"...)
+
+	rec := doRequest(http.MethodPost, "/verify", bytes.NewReader(trailer), "application/pdf")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("verify: status %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestVerify_WrongContentType(t *testing.T) {
 	rec := doRequest(http.MethodPost, "/verify",
 		bytes.NewBufferString("{}"), "application/json")

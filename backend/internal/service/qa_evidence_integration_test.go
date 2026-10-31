@@ -90,7 +90,7 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 	require.ErrorContains(t, err, "no rows")
 	// The generated endpoints exercise signed JWT role checks before storage/read access.
 	validator, token := qaSignedTokens(t)
-	service.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	service.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(service)
 	endpoints.Use(auth.AccessMetadataMiddleware)
 	mux := goahttp.NewMuxer()

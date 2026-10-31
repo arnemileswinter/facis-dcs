@@ -374,6 +374,9 @@ type manifestSigner struct {
 	// Expected is true when this manifest was signed under the chain the request
 	// supplied — for a DCS verifying its own work, its own leaf.
 	Expected bool `json:"expected"`
+	// Chain is the manifest's x5chain, leaf first, base64 DER: what the caller
+	// anchors to its trust anchors and to the organization the leaf names.
+	Chain []string `json:"chain"`
 }
 
 // describeSigners fingerprints the leaf behind every manifest and marks the ones
@@ -389,6 +392,9 @@ func describeSigners(pdf []byte, expectedLeaf []byte) ([]manifestSigner, error) 
 			Manifest:   signer.Manifest,
 			LeafSHA256: sha256Hex(signer.LeafDER),
 			Expected:   bytes.Equal(signer.LeafDER, expectedLeaf),
+		}
+		for _, cert := range signer.Chain {
+			entry.Chain = append(entry.Chain, base64.StdEncoding.EncodeToString(cert))
 		}
 		if leaf, parseErr := x509.ParseCertificate(signer.LeafDER); parseErr == nil {
 			entry.Subject = leaf.Subject.String()
@@ -497,28 +503,20 @@ func (s *service) verify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		digests = reproductionDigests(payload, raw, recompiled)
-		// The compiled base must reproduce the leading bytes of the submitted
-		// PDF. A PAdES signature (and the signing evidence embedded before it)
-		// is an append-only incremental update written after the base's %%EOF —
-		// it leaves the base bytes untouched and is itself covered by its own
-		// /ByteRange — so the base is a byte-prefix of a signed PDF rather than
-		// byte-equal to it (DCS-OR-C2PA-010).
+		// The compiled base must reproduce the submitted PDF.
 		if !bytes.HasPrefix(compiler.ZeroCOSESignatures(raw), compiler.ZeroCOSESignatures(recompiled)) {
 			writeError(w, errConflict(errors.New("embedded payload does not reproduce the submitted PDF")).withDigests(digests))
 			return
 		}
-		// An unsigned base must be byte-EQUAL to its deterministic recompile. The
-		// only legitimate bytes appended after a compiled base are a PAdES
-		// signature layer (which makes the PDF signed) or a dcs incremental update
-		// (handled by the branch above via its marker). Trailing content on an
-		// otherwise-unsigned PDF is an offline amendment made outside /update —
-		// reject it (DCS-OR-C2PA-002 tamper-evidence).
+		// A PDF without a DCS revision is the compiled base and nothing else. Its
+		// only manifest binds the whole file, so any bytes after the base are
+		// outside the provenance: an offline amendment, or a PAdES signature that
+		// was never re-anchored (ADR-26). Both are reported as a mismatch.
 		//
 		// The digests agree here — the divergence is in the trailing bytes, not in
 		// the base the digests cover — so they are reported as the record of what
 		// was checked, and the message names what actually failed.
-		if !compiler.IsPAdESSigned(raw) &&
-			len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
+		if len(compiler.ZeroCOSESignatures(raw)) != len(compiler.ZeroCOSESignatures(recompiled)) {
 			writeError(w, errConflict(errors.New("submitted PDF was amended offline, outside the /update workflow")).withDigests(digests))
 			return
 		}
@@ -660,8 +658,14 @@ func (s *service) verifyContentMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "exact" compares the signature widgets too: for a copy that must show
+	// what the reference shows, rather than a submission that adds a signature.
+	match := compiler.MatchPageContent
+	if string(parts["exact"]) == "true" {
+		match = compiler.MatchPageContentExact
+	}
 	var mismatch string
-	if err := compiler.MatchPageContent(submitted, reference); err != nil {
+	if err := match(submitted, reference); err != nil {
 		mismatch = err.Error()
 	}
 

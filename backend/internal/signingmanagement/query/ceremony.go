@@ -39,10 +39,16 @@ func (h *CeremonyStatusHandler) Handle(ctx context.Context, qry CeremonyStatusQr
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit ceremony status: %w", err)
 	}
-	// A pending ceremony after its deadline does not accept a presentation.
-	// Its status is expired, which tells the signer to start a new ceremony
-	// (FR-SM-13 retry).
-	if ceremony != nil && ceremony.Status == db.CeremonyPending && !time.Now().UTC().Before(ceremony.ExpiresAt) {
+	// A pending ceremony after its deadline does not accept a presentation,
+	// and a published signing request after its expiry does not accept a
+	// signed document. Its status is expired, which tells the signer to retry
+	// (FR-SM-13).
+	now := time.Now().UTC()
+	if ceremony != nil && ceremony.Status == db.CeremonyPending && !now.Before(ceremony.ExpiresAt) {
+		ceremony.Status = db.CeremonyExpired
+	}
+	if ceremony != nil && ceremony.Status == db.CeremonyVerified && ceremony.ConsumedAt == nil &&
+		ceremony.RequestExpiresAt != nil && now.After(*ceremony.RequestExpiresAt) {
 		ceremony.Status = db.CeremonyExpired
 	}
 	return ceremony, nil

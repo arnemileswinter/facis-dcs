@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -33,6 +34,13 @@ type VerifyTemplatePdfHandler struct {
 	// CredentialStatus resolves that credential's revocation entry against the
 	// signed status list it names.
 	CredentialStatus *provenance.CredentialStatusVerifier
+	// SignerRoots anchor the C2PA manifest signers. A template is signed by this
+	// instance only.
+	SignerRoots *x509.CertPool
+}
+
+func (h *VerifyTemplatePdfHandler) signerAnchors() SignerAnchors {
+	return SignerAnchors{Roots: h.SignerRoots, Issuers: []string{h.IssuerDID}}
 }
 
 func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplatePdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -98,7 +106,7 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 			return nil, fmt.Errorf("commit pre-verify append tx for template %s: %w", qry.DID, err)
 		}
 
-		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
+		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, nil, h.signerAnchors(), currentC2PAState)
 	}
 
 	if latestCID == "" {
@@ -113,5 +121,5 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 		return nil, fmt.Errorf("fetch template PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
 
-	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, nil, h.signerAnchors(), currentC2PAState)
 }

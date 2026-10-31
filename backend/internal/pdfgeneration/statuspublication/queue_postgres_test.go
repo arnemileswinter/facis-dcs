@@ -77,3 +77,62 @@ func TestQueuedTerminationSetsTheServedRevocationBit(t *testing.T) {
 		t.Fatalf("revoked indices %v of list %d do not contain the terminated contract's index %d", revoked, entry.ListID, entry.Index)
 	}
 }
+
+// DCS-OR-C2PA-005: a revoked signature suspends the contract's entry, which is
+// not a revocation, and signing again ends the suspension. A terminated
+// contract's entry stays revoked whatever is published after.
+func TestQueuedSuspensionIsDistinctAndEndsWhenTheContractIsActiveAgain(t *testing.T) {
+	db := pgtest.Open(t)
+	ctx := context.Background()
+	const contract = "did:web:dcs.example:contract:suspended"
+
+	tx := db.MustBeginTx(ctx, nil)
+	if err := EnqueueTx(ctx, tx, contract, "suspended", "signature revoked", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	revocations := &provenance.PostgresStatusListRevocations{DB: db}
+	allocator := provenance.NewPostgresStatusListAllocator(db, provenance.DefaultListID)
+	publisher := provenance.NewDCSStatusListPublisher(
+		func(listID int) string { return provenance.StatusListURI("https://dcs.example", listID) }, allocator, revocations)
+	if processed, err := (&Worker{DB: db, Publisher: publisher}).ProcessOnce(ctx); err != nil || !processed {
+		t.Fatalf("delivery: processed=%v err=%v", processed, err)
+	}
+
+	entry, err := allocator.Allocate(ctx, contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := func() (revoked, suspended bool) {
+		r, err := revocations.RevokedIndices(ctx, entry.ListID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := revocations.SuspendedIndices(ctx, entry.ListID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.Contains(r, entry.Index), slices.Contains(s, entry.Index)
+	}
+	if revoked, suspended := states(); revoked || !suspended {
+		t.Fatalf("after suspension: revoked=%v suspended=%v, want suspended only", revoked, suspended)
+	}
+
+	if _, err := publisher.PublishStatus(ctx, contract, "active", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if revoked, suspended := states(); revoked || suspended {
+		t.Fatalf("after signing again: revoked=%v suspended=%v, want neither", revoked, suspended)
+	}
+
+	for _, status := range []string{"terminated", "suspended", "active"} {
+		if _, err := publisher.PublishStatus(ctx, contract, status, "", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if revoked, suspended := states(); !revoked || suspended {
+		t.Fatalf("after termination: revoked=%v suspended=%v, want revoked only", revoked, suspended)
+	}
+}

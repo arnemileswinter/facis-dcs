@@ -2,7 +2,6 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -242,8 +241,7 @@ func (s *DCSToDCSSynchronizer) deliverSettlement(ctx context.Context, settlement
 		return err
 	}
 
-	secretValue := rand.Text()
-	secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+	secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostSettlement, settlement.FromPeerDID, settlement.ToPeerDID, settlement.DID, []byte(settlement.JadesSignature))
 	if err != nil {
 		return err
 	}
@@ -302,8 +300,7 @@ func (s *DCSToDCSSynchronizer) deliverSettlementWithdrawal(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	secretValue := rand.Text()
-	secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+	secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostSettlementWithdrawal, withdrawal.FromPeerDID, withdrawal.ToPeerDID, withdrawal.DID, []byte(signature))
 	if err != nil {
 		return err
 	}

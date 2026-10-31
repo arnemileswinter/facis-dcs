@@ -54,6 +54,17 @@ func TestLifecycleEventsKeepsOnlyTransitionsWithActorAndTime(t *testing.T) {
 	}, got)
 }
 
+// CWE-14: a termination notice the counterparty refused for good shows on the
+// contract, naming the counterparty and not the refusal text.
+func TestLifecycleShowsARefusedTerminationNotice(t *testing.T) {
+	at := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	got := lifecycleEvents([]datatype.AuditLogEntry{lifecycleEntry("PEER_EXCHANGE_REFUSED", at,
+		`{"exchange":"terminate","peer_did":"did:web:peer.example","reason":"not_found","occurred_at":"2026-10-01T08:00:00Z"}`)})
+
+	peer := "did:web:peer.example"
+	require.Equal(t, []*cwe.ContractLifecycleEvent{{EventType: "PEER_EXCHANGE_REFUSED", Actor: &peer, OccurredAt: "2026-10-01T08:00:00Z"}}, got)
+}
+
 func TestLifecycleAuthorizesContractPartyOnly(t *testing.T) {
 	database := sqlx.NewDb(sql.OpenDB(lifecycleContractConnector{}), "postgres")
 	t.Cleanup(func() { require.NoError(t, database.Close()) })

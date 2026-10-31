@@ -217,11 +217,17 @@ func TestRenewalOfAnUnsignedContractReferencesNoSignatures(t *testing.T) {
 }
 
 // A countersignature on an already signed PDF stamps no party node, so the
-// signed artifact is the only reference to it. An unsigned render is not one.
+// signed artifact is the only reference to it. An unsigned render is not one,
+// whatever lifecycle state it asserts: a contract terminated or expired before
+// signing renders that state unsigned, and a signed one asserts it after signing.
 func TestSignedDocumentReferenceNamesOnlyASignedArtifact(t *testing.T) {
-	require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: "active"}))
-	require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-draft", C2PAState: "draft"}))
-	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active"}))
+	for _, asserted := range []string{"active", "suspended", "terminated", "expired"} {
+		require.Equal(t, "ipfs://bafy-signed", signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-signed", C2PAState: asserted, Signed: true}), asserted)
+	}
+	for _, asserted := range []string{"draft", "terminated", "expired"} {
+		require.Empty(t, signedDocumentReference(&db.ContractPDFState{IPFSCID: "bafy-unsigned", C2PAState: asserted}), asserted)
+	}
+	require.Empty(t, signedDocumentReference(&db.ContractPDFState{C2PAState: "active", Signed: true}))
 	require.Empty(t, signedDocumentReference(nil))
 }
 

@@ -115,7 +115,12 @@ func TestIncidentReportOpensACaseWithAnExportableCaseFile(t *testing.T) {
 		t.Fatalf("incident report: case %q, err %v", caseID, err)
 	}
 
-	exporter := qry.CaseFileExporter{DB: db}
+	refused := errors.New("refused")
+	denying := qry.CaseFileExporter{DB: db, Authorize: func(context.Context, string) error { return refused }}
+	if _, err := denying.Handle(ctx, qry.CaseFileQry{CaseID: caseID, Justification: "x"}); !errors.Is(err, refused) {
+		t.Fatalf("export without read access: err %v, want the authorization error", err)
+	}
+	exporter := qry.CaseFileExporter{DB: db, Authorize: func(context.Context, string) error { return nil }}
 	raw, err := exporter.Handle(ctx, qry.CaseFileQry{CaseID: caseID, ExportedBy: "did:web:auditor", Justification: "regulator request"})
 	if err != nil {
 		t.Fatalf("export: %v", err)

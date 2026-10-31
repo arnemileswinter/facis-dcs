@@ -112,10 +112,10 @@ Feature: C2PA remote manifest, verifier banner completeness
     Given I am authenticated with roles: "Contract Manager"
 
   @DCS-OR-C2PA-006
-  Scenario: The verify response carries four independently named checks, and PDF signature is honestly "not yet available"
+  Scenario: The verify response carries four independently named checks, and the PDF signature is validated by the EU DSS
     Given contract "C2PA Four Checks Contract" has reached contract state "SIGNED"
     And contract "C2PA Four Checks Contract" has an exported PDF
     When contract "C2PA Four Checks Contract" is exported and verified as PDF
     Then get http 200:Success code
     And the verify response for contract "C2PA Four Checks Contract" includes four named checks: PDF signature, C2PA manifest, VC signature, and status list
-    And the PDF signature check for contract "C2PA Four Checks Contract" is marked as not yet available rather than passed
+    And the PDF signature check for contract "C2PA Four Checks Contract" is reported valid by the EU DSS

@@ -59,3 +59,37 @@ func TestContractEventsFollowTheReadPolicy(t *testing.T) {
 	require.NoError(t, <-partyDone)
 	require.NoError(t, <-foreignDone)
 }
+
+// DCS-FR-CWE-24: a stream that lost changes tells the client to reload
+// (RESYNC) and ends, so the client does not show a stale list as current.
+func TestAStreamThatLostChangesAsksForAReload(t *testing.T) {
+	database := sqlx.NewDb(sql.OpenDB(lifecycleContractConnector{}), "postgres")
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	feed := changefeed.New()
+	engine := &contractWorkflowEnginesrvc{DB: database, DIDDocument: *jadesTestDIDDocument(t, "local"), Changes: feed}
+	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.ContractObserver.String()}, "holder", "Org B")
+	// The recorder takes CONNECTED and then blocks, so the subscription
+	// buffer fills while the stream is busy.
+	recorder := &contractEventsRecorder{sent: make(chan *cwe.ContractChangeEvent)}
+	done := make(chan error, 1)
+	go func() { done <- engine.Events(ctx, &cwe.ContractEventsRequest{}, recorder) }()
+	require.Equal(t, "CONNECTED", (<-recorder.sent).EventType)
+
+	for range 200 {
+		feed.Publish(changefeed.Change{DID: "did:contract:1", EventType: "UPDATE_CONTRACT"})
+	}
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case evt := <-recorder.sent:
+			if evt.EventType != "RESYNC" {
+				continue
+			}
+			require.Equal(t, &cwe.ContractChangeEvent{EventType: "RESYNC"}, evt)
+			require.NoError(t, <-done)
+			return
+		case <-timeout:
+			t.Fatal("the stream did not ask for a reload")
+		}
+	}
+}

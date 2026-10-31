@@ -226,6 +226,8 @@ const (
 	StepPrepare        = "PREPARE"
 	StepSubmit         = "SUBMIT"
 	StepWalletCallback = "WALLET_CALLBACK"
+	// StepPresentation is the PID and PoA presentation of a signing ceremony.
+	StepPresentation = "PRESENTATION"
 )
 
 // ApplyEvent is emitted when a signature is applied, and when a signing
