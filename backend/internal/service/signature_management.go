@@ -515,6 +515,12 @@ func (s *signatureManagementsrvc) newApplier() (command.Applier, error) {
 		Validator:     validator,
 		LocalPeer:     localPeer,
 		Settlements:   s.Settlements,
+		CredentialState: func(ctx context.Context, presentation string) (status.State, error) {
+			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposeLogin)
+		},
+		PIDState: func(ctx context.Context, presentation string) (status.State, error) {
+			return oid4vp.PresentedCredentialState(ctx, presentation, s.Trust, oid4vp.PurposePID)
+		},
 	}, nil
 }
 
