@@ -90,4 +90,18 @@ func TestArchivedSectionsAreReadableOnlyByTheirParties(t *testing.T) {
 
 	_, err = db.Exec(`UPDATE contract_archive_sections SET parties = '{"Org X"}'`)
 	require.ErrorContains(t, err, "append-only")
+
+	// The deletion of the archived contract removes the section content
+	// from IPFS with the snapshots (DCS-NFR-SEC-13).
+	var sectionCIDs []string
+	require.NoError(t, db.Select(&sectionCIDs, `SELECT content_cid FROM contract_archive_sections WHERE did = $1`, did))
+	snapshots := &recordingSnapshotStore{}
+	svc.SnapshotStore, svc.Eraser = snapshots, noopEraser{}
+	_, err = svc.Delete(archiveManagerContext(), &contractstoragearchive.DeletePayload{Did: did, Justification: "retention ended"})
+	require.NoError(t, err)
+	require.Subset(t, snapshots.deleted, sectionCIDs)
 }
+
+type noopEraser struct{}
+
+func (noopEraser) EraseContract(context.Context, string, string, string) error { return nil }
