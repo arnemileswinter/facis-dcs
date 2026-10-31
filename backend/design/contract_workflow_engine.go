@@ -142,6 +142,7 @@ var ContractHistoryRetrieveByIDRequest = Type("ContractHistoryRetrieveByIDReques
 })
 
 var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDResponse", func() {
+	Attribute("id", String, "Identifier of this history entry; several entries can share one contract_version")
 	Attribute("did", String, "DID of the contract")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "Current state of the contract")
@@ -173,6 +174,13 @@ var ContractRetrieveRequest = Type("ContractRetrieveRequest", func() {
 	Attribute("limit", Int, "Page size of results")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
+	Attribute("sort_by", String, "Sort key applied before the page is cut (DCS-IR-CWE-11). Default created_at", func() {
+		Enum("created_at", "updated_at", "state", "name")
+	})
+	Attribute("sort_order", String, "Sort direction. Default desc", func() {
+		Enum("asc", "desc")
+	})
 })
 
 var ContractItem = Type("ContractItem", func() {
@@ -368,7 +376,7 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("contract_version", Int, "The version number of the contract")
-	Attribute("state", String, "The state of the contract")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "A description for that contract")
 	Attribute("contract_data", String, "Search value for full text search in contract data")
@@ -1384,6 +1392,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("offset")
 			Param("limit")
 			Param("parent_did")
+			Param("state")
+			Param("sort_by")
+			Param("sort_order")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)

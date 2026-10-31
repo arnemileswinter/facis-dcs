@@ -99,12 +99,13 @@ func (r *PostgresContractRepo) ReadLastHistoryEntryByDID(ctx context.Context, tx
 
 func (r *PostgresContractRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractHistory, error) {
 	query := `
-        SELECT did, origin, state, name, description,
+        SELECT id, did, origin, state, name, description,
                created_by, created_at, updated_at, contract_version, contract_data, start_date,
                exp_date, exp_policy, exp_notice_period, responsible, template_did, template_version,
                modified_by, modified_at
         FROM contract_history
         WHERE did = $1
+        ORDER BY modified_at NULLS FIRST, contract_version, updated_at, id
     `
 	var ct []db.ContractHistory
 	err := tx.SelectContext(ctx, &ct, query, did)
@@ -165,7 +166,22 @@ func (r *PostgresContractRepo) ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx
 	return children, nil
 }
 
-func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]db.ContractMetadata, error) {
+// listSortColumns maps ListOptions.SortBy to its SQL expression. Only these
+// expressions reach the ORDER BY clause.
+var listSortColumns = map[string]string{
+	"":           "cem.created_at",
+	"created_at": "cem.created_at",
+	"updated_at": "cem.updated_at",
+	"state":      "cem.state::text",
+	"name":       "COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title')",
+}
+
+
+func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination, options db.ListOptions) ([]db.ContractMetadata, error) {
+	sortColumn, ok := listSortColumns[options.SortBy]
+	if !ok {
+		return nil, fmt.Errorf("unknown sort key %q", options.SortBy)
+	}
 	query := `
 		SELECT
 			cem.did, cem.origin, cem.state, cem.name, cem.description, cem.created_by, cem.created_at, cem.updated_at,
@@ -197,9 +213,22 @@ func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx,
 	`
 	var params []any
 	query += " WHERE " + contractreadpolicy.SQL(ctx, "cem.did", &params)
+	if len(options.States) > 0 {
+		params = append(params, pq.Array(options.States))
+		query += fmt.Sprintf(" AND cem.state::text = ANY($%d)", len(params))
+	}
+	if options.ParentDID != "" {
+		params = append(params, options.ParentDID)
+		query += fmt.Sprintf(" AND regexp_replace(ce.contract_data->'dcs:parentContract'->>'@id', '^.*/', '') = $%d", len(params))
+	}
+	direction := "DESC"
+	if options.Ascending {
+		direction = "ASC"
+	}
+	query += fmt.Sprintf(" ORDER BY %s %s, cem.did", sortColumn, direction)
 	if pagination.Limit > 0 {
 		offset := (pagination.Offset - 1) * pagination.Limit
-		query += fmt.Sprintf(" ORDER BY cem.created_at DESC, cem.did LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(params)+1, len(params)+2)
 		params = append(params, pagination.Limit, offset)
 	}
 
@@ -641,20 +670,23 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		params = append(params, values.ContractVersion)
 		paramIndex++
 	}
-	if len(values.State) > 0 {
-		conditions += ` state = $` + strconv.Itoa(paramIndex) + ` AND`
-		state := strings.ToUpper(values.State)
-		params = append(params, state)
+	if len(values.States) > 0 {
+		conditions += ` state::text = ANY($` + strconv.Itoa(paramIndex) + `) AND`
+		states := make([]string, len(values.States))
+		for i, state := range values.States {
+			states[i] = strings.ToUpper(state)
+		}
+		params = append(params, pq.Array(states))
 		paramIndex++
 	}
 	if len(values.Name) > 0 {
-		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Name+"%")
+		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Name))
 		paramIndex++
 	}
 	if len(values.Description) > 0 {
-		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Description+"%")
+		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Description))
 		paramIndex++
 	}
 	if len(values.ContractData) > 0 {
@@ -703,8 +735,8 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		conditions += ` did IN (SELECT c.did FROM contracts_effective c,
 			jsonb_array_elements(CASE WHEN jsonb_typeof(c.contract_data->'dcs:contractFields') = 'array' THEN c.contract_data->'dcs:contractFields' ELSE '[]'::jsonb END) f
 			WHERE f->'dcs:shape'->>'@id' LIKE '%#field-contract-jurisdiction'
-			AND COALESCE(f->'dcs:value'->>'@value', f->>'dcs:value') ILIKE $` + strconv.Itoa(paramIndex) + `) AND`
-		params = append(params, "%"+values.Jurisdiction+"%")
+			AND COALESCE(f->'dcs:value'->>'@value', f->>'dcs:value') ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\') AND`
+		params = append(params, containsPattern(values.Jurisdiction))
 	}
 	l := len(" AND")
 	if len(conditions) > l {
@@ -712,6 +744,14 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 	}
 
 	return &conditions, params, nil
+}
+
+// likeEscaper escapes the LIKE wildcards, so a search value matches as text.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// containsPattern is the ILIKE pattern for "contains value" (ESCAPE '\').
+func containsPattern(value string) string {
+	return "%" + likeEscaper.Replace(value) + "%"
 }
 
 func createQuery(data db.ContractUpdateData) (*string, []interface{}, error) {

@@ -606,11 +606,19 @@ func (s *contractWorkflowEnginesrvc) Retrieve(ctx context.Context, req *contract
 		Limit:  base.DerefInt(req.Limit),
 	}
 
+	states, err := parseContractStates(req.State)
+	if err != nil {
+		return nil, err
+	}
+
 	qry := contract.GetAllMetadataQry{
 		RetrievedBy: middleware.GetParticipantID(ctx),
 		HolderDID:   middleware.GetHolderDID(ctx),
 		UserRoles:   middleware.GetUserRoles(ctx),
 		ParentDID:   base.DerefString(req.ParentDid),
+		States:      states,
+		SortBy:      base.DerefString(req.SortBy),
+		Ascending:   base.DerefString(req.SortOrder) == "asc",
 		Pagination:  pagination,
 		DIDDocument: s.DIDDocument,
 	}
@@ -1110,6 +1118,7 @@ func (s *contractWorkflowEnginesrvc) RetrieveHistoryByID(ctx context.Context, re
 		}
 
 		contracts = append(contracts, &contractworkflowengine.ContractHistoryRetrieveByIDResponse{
+			ID:              &item.ID,
 			Did:             item.DID,
 			ContractVersion: item.ContractVersion,
 			State:           item.State.String(),
@@ -1462,6 +1471,20 @@ func (s *contractWorkflowEnginesrvc) Review(ctx context.Context, req *contractwo
 	}, nil
 }
 
+// parseContractStates checks each requested state filter value and returns
+// them in their stored form.
+func parseContractStates(values []string) ([]string, error) {
+	states := make([]string, 0, len(values))
+	for _, value := range values {
+		state, err := contractstate.NewContractState(value)
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
+		states = append(states, state.String())
+	}
+	return states, nil
+}
+
 func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractworkflowengine.ContractSearchRequest) (res []*contractworkflowengine.ContractSearchResponse, err error) {
 	ctx, err = contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
@@ -1471,14 +1494,9 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
-	var state *contractstate.ContractState
-	if req.State != nil {
-		tState, err := contractstate.NewContractState(*req.State)
-		if err != nil {
-			return nil, contractworkflowengine.MakeInternalError(err)
-		}
-
-		state = &tState
+	states, err := parseContractStates(req.State)
+	if err != nil {
+		return nil, err
 	}
 
 	validUntil, err := parseSearchTime("valid_until", req.ValidUntil)
@@ -1494,7 +1512,7 @@ func (s *contractWorkflowEnginesrvc) Search(ctx context.Context, req *contractwo
 	qry := contract.GetAllMetadataByFilterQry{
 		DID:             base.DerefString(req.Did),
 		ContractVersion: base.DerefInt(req.ContractVersion),
-		State:           state,
+		States:          states,
 		RetrievedBy:     middleware.GetParticipantID(ctx),
 		HolderDID:       middleware.GetHolderDID(ctx),
 		UserRoles:       middleware.GetUserRoles(ctx),

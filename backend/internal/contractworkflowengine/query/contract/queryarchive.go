@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -103,15 +104,15 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 		}
 	}(tx)
 
-	var state string
+	var states []string
 	if query.State != nil {
-		state = query.State.String()
+		states = []string{query.State.String()}
 	}
 
 	searchValues := db.SearchValues{
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
-		State:           state,
+		States:          states,
 		Name:            query.Name,
 		Description:     query.Description,
 		ContractData:    query.ContractData,
@@ -171,7 +172,7 @@ func searchCriteria(v db.SearchValues) map[string]string {
 	if v.ContractVersion != 0 {
 		set("contract_version", strconv.Itoa(v.ContractVersion))
 	}
-	set("state", v.State)
+	set("state", strings.Join(v.States, ","))
 	set("name", v.Name)
 	set("description", v.Description)
 	set("contract_data", v.ContractData)
