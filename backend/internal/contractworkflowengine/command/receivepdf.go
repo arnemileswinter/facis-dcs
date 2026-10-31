@@ -281,6 +281,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 			IPFSCID:     storedCID,
 			C2PAState:   c2paState,
 			PayloadHash: hex.EncodeToString(payloadSum[:]),
+			Signed:      provenance.CarriesPAdESSignature(cmd.Pdf),
 		}); err != nil {
 			return fmt.Errorf("could not record carried-over PDF state: %w", err)
 		}

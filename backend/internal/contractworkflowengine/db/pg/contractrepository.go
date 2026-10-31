@@ -545,8 +545,8 @@ func (r *PostgresContractRepo) ExpireContract(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractRepo) ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractPDFState, error) {
 	var state db.ContractPDFState
 	err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(pdf_ipfs_cid,''), COALESCE(pdf_renderer_version,''), COALESCE(pdf_c2pa_state,''), COALESCE(pdf_payload_hash,'') FROM contracts WHERE did=$1`, did,
-	).Scan(&state.IPFSCID, &state.RendererVersion, &state.C2PAState, &state.PayloadHash)
+		`SELECT COALESCE(pdf_ipfs_cid,''), COALESCE(pdf_renderer_version,''), COALESCE(pdf_c2pa_state,''), COALESCE(pdf_payload_hash,''), pdf_signed FROM contracts WHERE did=$1`, did,
+	).Scan(&state.IPFSCID, &state.RendererVersion, &state.C2PAState, &state.PayloadHash, &state.Signed)
 	if err != nil {
 		return nil, err
 	}
@@ -576,9 +576,14 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 	// COALESCE on the exclude list: an empty Go slice binds as SQL NULL, and
 	// "did <> ALL (NULL)" is NULL — which would filter out every row and stall
 	// the sweep.
+	//
+	// The last arm selects a signed PDF that does not yet assert the lifecycle
+	// state its contract reached after signing (provenance.
+	// SignedLifecycleAppendPending), so a lost suspend, terminate or expiry
+	// event still gets its lifecycle manifest appended.
 	err := tx.SelectContext(ctx, &dids,
 		`SELECT c.did FROM contracts c
-		 WHERE (
+		 WHERE ((
 		         (c.pdf_ipfs_cid IS NULL OR c.pdf_ipfs_cid = '')
 		      OR (
 		             COALESCE(c.pdf_c2pa_state, '') IN ('', 'draft')
@@ -590,6 +595,15 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 		   AND NOT EXISTS (
 		       SELECT 1 FROM contract_signatures s
 		        WHERE s.contract_did = c.did AND s.status = 'SIGNED')
+		    OR (
+		           c.pdf_signed
+		       AND COALESCE(c.pdf_ipfs_cid, '') <> ''
+		       AND COALESCE(c.pdf_c2pa_state, '') <> CASE c.state
+		               WHEN 'REVOKED' THEN 'suspended'
+		               WHEN 'TERMINATED' THEN 'terminated'
+		               WHEN 'EXPIRED' THEN 'expired'
+		               ELSE COALESCE(c.pdf_c2pa_state, '') END
+		       ))
 		   AND c.did <> ALL (COALESCE($2::text[], '{}'))
 		 ORDER BY c.created_at, c.did
 		 LIMIT $1`, limit, pq.Array(excludeDIDs),
@@ -602,8 +616,8 @@ func (r *PostgresContractRepo) ReadDIDsNeedingRegeneration(ctx context.Context, 
 
 func (r *PostgresContractRepo) UpdatePDFState(ctx context.Context, tx *sqlx.Tx, did string, data db.ContractPDFState) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE contracts SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4 WHERE did=$5`,
-		data.IPFSCID, data.RendererVersion, data.C2PAState, data.PayloadHash, did,
+		`UPDATE contracts SET pdf_ipfs_cid=$1, pdf_renderer_version=$2, pdf_c2pa_state=$3, pdf_payload_hash=$4, pdf_signed = pdf_signed OR $6 WHERE did=$5`,
+		data.IPFSCID, data.RendererVersion, data.C2PAState, data.PayloadHash, did, data.Signed,
 	)
 	return err
 }

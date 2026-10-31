@@ -154,7 +154,7 @@ func (r *PostgresContractRepo) SetSignedPDF(ctx context.Context, tx *sqlx.Tx, di
 	// stamping (no fresh renderer version) — keep the stored one.
 	_, err := tx.ExecContext(ctx, `
 		UPDATE contracts
-		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5
+		   SET pdf_ipfs_cid = $2, pdf_renderer_version = COALESCE(NULLIF($3, ''), pdf_renderer_version), pdf_c2pa_state = $4, pdf_payload_hash = $5, pdf_signed = true
 		 WHERE did = $1`,
 		did, ipfsCID, rendererVersion, c2paState, payloadHash,
 	)

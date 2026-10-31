@@ -20,7 +20,6 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
-	"digital-contracting-service/internal/pdfgeneration/provenance"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -363,7 +362,7 @@ func signatureReferences(raw *datatype.JSON) ([]any, error) {
 // PDF when that artifact holds a signature, else "". The PDF carries every
 // PAdES signature of the original, the counterparty's included.
 func signedDocumentReference(state *db.ContractPDFState) string {
-	if state == nil || state.IPFSCID == "" || !provenance.ArtifactCarriesSignature(state.C2PAState) {
+	if state == nil || state.IPFSCID == "" || !state.Signed {
 		return ""
 	}
 	return "ipfs://" + state.IPFSCID

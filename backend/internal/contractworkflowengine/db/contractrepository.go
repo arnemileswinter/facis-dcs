@@ -249,6 +249,9 @@ type ContractPDFState struct {
 	RendererVersion string `db:"pdf_renderer_version"`
 	C2PAState       string `db:"pdf_c2pa_state"`
 	PayloadHash     string `db:"pdf_payload_hash"`
+	// Signed is true when the stored PDF carries a PAdES signature. UpdatePDFState
+	// never clears it: an incremental update keeps every signature.
+	Signed bool `db:"pdf_signed"`
 }
 
 type ContractRepo interface {

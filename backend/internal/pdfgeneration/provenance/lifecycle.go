@@ -135,13 +135,22 @@ func IsFrozenC2PAState(c2paState string) bool {
 	return c2paState != "" && c2paState != "draft"
 }
 
-// ArtifactCarriesSignature reports whether a stored artifact's RECORDED C2PA
-// lifecycle state says the artifact itself holds a signature. ArtifactC2PAState
-// files a PAdES-carrying PDF as "active" whatever the local workflow state, so a
-// received copy whose own workflow is still OFFERED answers true here from the
-// moment the counterparty's signed bytes were stored — no re-parsing the PDF.
-func ArtifactCarriesSignature(c2paState string) bool {
-	return c2paState == "active"
+// IsPostSigningLifecycleState reports whether c2paState is a lifecycle state a
+// signed contract reaches after signing. Its lifecycle manifest and credential
+// are appended to the signed PDF as an incremental update, as the re-anchor is
+// (ADR-26), so every signature keeps verifying.
+func IsPostSigningLifecycleState(c2paState string) bool {
+	switch c2paState {
+	case "suspended", "terminated", "expired":
+		return true
+	}
+	return false
+}
+
+// SignedLifecycleAppendPending reports whether the signed PDF stored for a
+// contract does not yet assert the post-signing lifecycle state target.
+func SignedLifecycleAppendPending(signed bool, storedC2PAState, target string) bool {
+	return signed && IsPostSigningLifecycleState(target) && storedC2PAState != target
 }
 
 // CarriesPAdESSignature reports whether pdf already holds a PAdES signature: a
