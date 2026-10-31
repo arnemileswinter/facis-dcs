@@ -506,12 +506,11 @@ statusListLocalhostProxy:
   # published once at one origin (ADR-34), so its prefix names that origin
   # outright and stays right for a release answering on some other host.
   paths:
-    - prefix: /statuslist/
     - prefix: /issuer/
       host: localhost
-  # Functional HTTP route used by the sidecar readiness probe. Environments
-  # that require a particular seeded status list can override this path.
-  readinessPath: "/statuslist/health"
+  # Functional HTTP route used by the sidecar readiness probe: the status list
+  # the login credentials name (the credential issuer release, ADR-34).
+  readinessPath: "/issuer/status-list/1"
 
 # XFSC Status List Service.
 # Nothing points at it: the credentials this deployment issues name the status

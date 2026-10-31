@@ -49,7 +49,7 @@ extraEnv:
   # trust-pdp-flow.json), shared with instance B (values.bdd2.yml has no own
   # orce release).
   - name: DCS_TRUST_PDP_URL
-    value: "http://dcs-orce:1880/trust-pdp"
+    value: "https://dcs-orce:8443/trust-pdp"
   # did:web is https, and the resolver makes that exception only for loopback on
   # its own. The synthetic peers the ADR-19 scenarios use are in-cluster Services
   # on plain http under names that are not loopback, so they are named here
@@ -112,7 +112,7 @@ postgresql:
     username: dcs
     password: dcs
     database: dcs
-  additionalDatabases: ["fc", "hydra", "statuslist"]
+  additionalDatabases: ["fc", "hydra"]
   persistence:
     enabled: false
 
@@ -172,7 +172,9 @@ ingress:
 hydra:
   enabled: true
   config:
-    dsn: "postgres://dcs:dcs@dcs-postgresql:5432/hydra?sslmode=disable"
+    # In-cluster TLS (global.internalTLS): Hydra verifies the co-deployed
+    # PostgreSQL against the internal CA the chart mounts at this path.
+    dsn: "postgres://dcs:dcs@dcs-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt"
     dev: true
     selfIssuerURL: "http://localhost:18080"
     loginURL: "http://localhost:18080/digital-contracting-service/ui/"
@@ -293,48 +295,10 @@ pkcs11:
     enabled: true
     soPin: "12345678"
 
-# XFSC Status List Service: deployed, with nothing consuming it (ADR-34).
-statuslistService:
-  enabled: true
-  tenantID: c2pa
-  ingress:
-    enabled: true
-    className: traefik
-    stripPrefix: /statuslist
-    hosts:
-      - host: localhost
-        paths:
-          - path: /statuslist
-            pathType: Prefix
-  database:
-    enabled: true
-    host: "dcs-postgresql"
-    port: "5432"
-    name: "statuslist"
-    user: "dcs"
-    password: "dcs"
-    sslMode: "disable"
-  nats:
-    url: "nats://dcs-nats:4222"
-  bddListInit:
-    enabled: true
-    tenantIDs:
-      - c2pa
-      # Instance B shares this service but not this instance's database, and a
-      # revocation entry is allocated out of that database (migration 20260734).
-      # Two instances allocating into one list would hand the same bit to two
-      # unrelated contracts, so B gets its own tenant — see values.bdd2.yml.
-      - c2pa2
-
 statusListLocalhostProxy:
   enabled: true
   upstream: "http://traefik.kube-system.svc.cluster.local:18080"
   ingressHost: localhost
-  # A list this service actually serves, so Pod readiness requires the full
-  # proxy→Ingress→list route. Login credentials no longer live here — they name
-  # the ORCE issuer's own signed list — so the "credential" tenant is gone and
-  # the C2PA one this instance allocates from takes its place.
-  readinessPath: "/statuslist/v1/tenants/c2pa/status/1"
 
 # IPFS: required — IPFS_MFS_BASE_URL is fatal on startup.
 ipfs:
@@ -470,16 +434,16 @@ orce:
       # ever an unused fallback.
 
 auditExecutor:
-  url: "http://dcs-orce:1880/customer-audit/run"
+  url: "https://dcs-orce:8443/customer-audit/run"
   timeout: "2s"
 
 workflowGateExecutor:
-  url: "http://dcs-orce:1880/workflow-gate/run"
+  url: "https://dcs-orce:8443/workflow-gate/run"
   timeout: "2s"
 
 signing:
   # Wired as TSA_URL env var; fatal on startup if empty.
-  tsaURL: "http://dcs-orce:1880/tsa/"
+  tsaURL: "https://dcs-orce:8443/tsa/"
   # In-cluster dev TSA (orce chart localTSA): verify tokens against the
   # provisioned dev TSA cert instead of the embedded production cert.
   tsaTrustCertSecret: "dcs-orce-tsa-material"
@@ -502,11 +466,6 @@ archiveNotary:
 
 global:
   archiveAuditToken: "bdd-archive-audit-token"
-  # In-cluster TLS off: the XFSC statuslist-service of this stack reads the
-  # shared PostgreSQL and NATS, and its image has no setting for the CA that
-  # verifies them (DCS-NFR-SEC-14: values.yaml, global.internalTLS).
-  internalTLS:
-    enabled: false
 
 route:
   basePath: "/digital-contracting-service"

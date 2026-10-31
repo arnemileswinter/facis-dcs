@@ -50,7 +50,7 @@ done
 # An explicit password (values.bdd.yml) is used as given.
 render -f "$CHART_DIR/values.bdd.yml" >"$TMP/bdd.yaml"
 [[ "$(obj "$TMP/bdd.yaml" Secret dcs-postgresql "x['stringData']['postgres-password']")" == dcs ]] || fail "explicit postgres password not used"
-[[ "$(env_of "$TMP/bdd.yaml" Deployment $B $C DATABASE_URL)" == "host=dcs-postgresql port=5432 user=dcs password=dcs dbname=dcs sslmode=disable" ]] \
+[[ "$(env_of "$TMP/bdd.yaml" Deployment $B $C DATABASE_URL)" == "host=dcs-postgresql port=5432 user=dcs password=dcs dbname=dcs sslmode=verify-full sslrootcert=/etc/dcs-internal-tls/ca.crt" ]] \
   || fail "BDD DATABASE_URL changed: $(env_of "$TMP/bdd.yaml" Deployment $B $C DATABASE_URL)"
 [[ "$(env_of "$TMP/bdd.yaml" Deployment $B $C PGPASSWORD)" == None ]] || fail "PGPASSWORD with an explicit password"
 
@@ -109,10 +109,33 @@ done
 grep -q 'lookup "v1" "Secret" .Release.Namespace (printf "%s-internal-ca" .Release.Name)' "$CHART_DIR/templates/_helpers.tpl" \
   || fail "internal CA not read back on upgrade"
 
-# Off (values.bdd.yml): no certificates and the plain endpoints as before.
-grep -q 'internal-tls' "$TMP/bdd.yaml" && fail "internal TLS rendered while global.internalTLS.enabled=false"
-[[ "$(env_of "$TMP/bdd.yaml" Deployment $B $C NATS_URL)" == nats://dcs-nats:4222 ]] || fail "BDD NATS_URL changed"
-[[ "$(env_of "$TMP/bdd.yaml" Deployment $B $C IPFS_MFS_BASE_URL)" == http://dcs-ipfs:5001 ]] || fail "BDD IPFS URL changed"
+# Off: no certificates and the plain endpoints.
+render "${ALL[@]}" --set global.internalTLS.enabled=false >"$TMP/off.yaml"
+grep -q 'internal-tls' "$TMP/off.yaml" && fail "internal TLS rendered while global.internalTLS.enabled=false"
+[[ "$(env_of "$TMP/off.yaml" Deployment $B $C NATS_URL)" == nats://dcs-nats:4222 ]] || fail "NATS_URL without TLS changed"
+[[ "$(env_of "$TMP/off.yaml" Deployment $B $C IPFS_MFS_BASE_URL)" == http://dcs-ipfs:5001 ]] || fail "IPFS URL without TLS changed"
+
+# The kind CI (BDD and e2e: values.bdd.yml, values.bdd2.yml) runs the TLS paths
+# of prod, with no XFSC statuslist-service.
+for prof in "bdd dcs" "bdd2 dcs2"; do
+  read -r v r <<<"$prof"
+  helm template "$r" "$CHART_DIR" -n dcs -f "$CHART_DIR/values.$v.yml" >"$TMP/ci-$v.yaml"
+  f="$TMP/ci-$v.yaml"
+  rb="$r-digital-contracting-service"
+  obj "$f" Secret "$r-internal-tls" "x['type']" >/dev/null || fail "values.$v.yml: no internal TLS"
+  [[ "$(env_of "$f" Deployment "$rb" $C DATABASE_URL)" == *"sslmode=verify-full sslrootcert=/etc/dcs-internal-tls/ca.crt" ]] || fail "values.$v.yml: database without TLS"
+  [[ "$(env_of "$f" Deployment "$rb" $C NATS_URL)" == "tls://$r-nats:4222" ]] || fail "values.$v.yml: NATS without TLS"
+  [[ "$(env_of "$f" Deployment "$rb" $C IPFS_MFS_BASE_URL)" == "https://$r-ipfs:8443" ]] || fail "values.$v.yml: IPFS without TLS"
+  [[ "$(env_of "$f" Deployment "$rb" $C PDF_CORE_URL)" == "https://$rb-pdf-core:8443" ]] || fail "values.$v.yml: pdf-core without TLS"
+  [[ "$(env_of "$f" Deployment "$r-hydra" hydra DSN)" == *"@$r-postgresql:5432/hydra?sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt" ]] \
+    || fail "values.$v.yml: Hydra reaches the database without TLS"
+  grep -q 'name: statuslist-service' "$f" && fail "values.$v.yml deploys the XFSC statuslist-service"
+  proxy="$(obj "$f" Deployment "$rb" "next((c['readinessProbe']['httpGet']['path'] for c in x['spec']['template']['spec']['containers'] if c['name'] == 'statuslist-localhost-proxy'), None)")"
+  [[ "$proxy" == /issuer/status-list/1 ]] || fail "values.$v.yml: localhost proxy readiness depends on $proxy"
+done
+for v in DSS_URL PAC_AUDIT_EXECUTOR_URL PAC_WORKFLOW_GATE_EXECUTOR_URL TSA_URL DCS_TRUST_PDP_URL ORCE_ARCHIVE_NOTARY_URL; do
+  [[ "$(env_of "$TMP/ci-bdd.yaml" Deployment $B $C $v)" == https://dcs-*:8443* ]] || fail "values.bdd.yml: $v without TLS"
+done
 
 # The issuer release renders the orce chart on its own, without the parent.
 helm template dcs-issuer "$CHART_DIR/charts/orce" -f "$CHART_DIR/values.issuer-base.yml" -f "$CHART_DIR/values.issuer.bdd.yml" \

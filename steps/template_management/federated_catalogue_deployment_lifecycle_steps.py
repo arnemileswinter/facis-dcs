@@ -210,13 +210,6 @@ def _current_bdd_values(context, override_env_name):
                 }
             ],
         },
-        "statuslistService": {
-            "ingress": {
-                "hosts": [
-                    {"host": host, "paths": [{"path": "/statuslist", "pathType": "Prefix"}]}
-                ]
-            }
-        },
         "statusListLocalhostProxy": {"ingressHost": host},
         "orce": {"ingress": {"hosts": [{"host": host, "path": "/contract-target"}]}},
     }

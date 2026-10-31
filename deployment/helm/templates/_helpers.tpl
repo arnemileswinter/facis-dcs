@@ -274,7 +274,7 @@ Call: include "digital-contracting-service.internalTLSProxy" (dict "root" . "ups
           proxy_send_timeout 600s;
           location / {
             proxy_http_version 1.1;
-            proxy_set_header Host $host;
+            proxy_set_header Host $http_host;
             proxy_pass http://127.0.0.1:{{ .upstreamPort }};
           }
         }

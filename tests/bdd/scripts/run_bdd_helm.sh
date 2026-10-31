@@ -438,7 +438,12 @@ export BDD_DCS_BASE_URL
 echo "Checking the issuer status list at $ISSUER_BASE_URL"
 python "$PWD/scripts/check_status_list.py"
 
-export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=disable"
+# The database accepts TLS only (global.internalTLS). Through the port-forward
+# the host name is localhost, which the server certificate does not name, so the
+# harness verifies the chain against the release CA but not the name.
+"$KUBECTL_BIN" -n "$K8S_NAMESPACE" get secret dcs-internal-tls -o jsonpath='{.data.ca\.crt}' \
+  | base64 --decode > "$PWD/.tmp/internal-ca.crt"
+export DATABASE_URL="host=localhost port=5432 user=dcs password=dcs dbname=dcs sslmode=verify-ca sslrootcert=$PWD/.tmp/internal-ca.crt"
 
 # Canonical bdd-executor integration requires the package in the active environment.
 python -c 'import eu.xfsc.bdd.core' >/dev/null
