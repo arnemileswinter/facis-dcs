@@ -509,6 +509,10 @@ spec:
         - name: statuslist-localhost-proxy
           image: "{{ .Values.statusListLocalhostProxy.image.repository }}:{{ .Values.statusListLocalhostProxy.image.tag }}{{ with .Values.statusListLocalhostProxy.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.statusListLocalhostProxy.image.pullPolicy }}
+          # nginx directly: the configuration scripts of the image entrypoint
+          # edit /etc/nginx/conf.d, which this nginx.conf does not include, on
+          # a read-only root filesystem.
+          command: ["nginx", "-g", "daemon off;"]
           # The nginx user of the image; nginx.conf keeps pid and temp files in /tmp.
           securityContext:
             runAsUser: 101

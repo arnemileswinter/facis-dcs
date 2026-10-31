@@ -97,6 +97,21 @@ assert {"name": "tmp", "mountPath": "/tmp"} in c["volumeMounts"], c["volumeMount
 assert {"name": "tmp", "emptyDir": {}} in spec["volumes"], spec["volumes"]
 EOF
 
+# nginx containers start nginx directly: the configuration scripts of the
+# image entrypoint try to edit /etc/nginx/conf.d on the read-only filesystem.
+python3 - "$TMP/bdd.yaml" <<'EOF' || fail "nginx container runs the image entrypoint"
+import sys, yaml
+n = 0
+for x in yaml.safe_load_all(open(sys.argv[1])):
+    if not x or x["kind"] != "Deployment":
+        continue
+    for c in x["spec"]["template"]["spec"]["containers"]:
+        if c["image"].startswith("nginx:"):
+            n += 1
+            assert c.get("command", [""])[0] in ("nginx", "/bin/sh"), "%s/%s: %s" % (x["metadata"]["name"], c["name"], c.get("command"))
+assert n >= 6, n
+EOF
+
 # Image digests: a digest value pins the image as <repository>:<tag>@<digest>.
 D=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 digests=()
