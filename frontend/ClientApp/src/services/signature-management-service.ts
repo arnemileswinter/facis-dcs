@@ -52,8 +52,20 @@ export interface SignatureContract {
 
 export interface SignatureContractDetail {
   contract: SignatureContract
-  // Absent for an APPROVED-unsigned contract with no signature yet (ADR-12).
+  // The most recent signature record of any status; absent for an
+  // APPROVED-unsigned contract with no signature yet (ADR-12).
   signature_envelope?: SignatureEnvelope
+  // Signing status of every declared signature field (DCS-FR-SM-07/-24).
+  signature_fields?: SignatureFieldStatus[]
+}
+
+export interface SignatureFieldStatus {
+  field_name: string
+  status: 'SIGNED' | 'UNSIGNED'
+  // A counterparty signs this field on its own instance.
+  remote: boolean
+  signer_did?: string
+  signed_at?: string
 }
 
 export interface SignatureEnvelope {
@@ -209,6 +221,11 @@ export interface CeremonyStatusResult {
   expires_at?: string
   // Set once a signature submitted for this ceremony was accepted.
   signed_at?: string
+  // Set once a signing request is published for this ceremony.
+  request_expires_at?: string
+  // The last wallet response the DCS refused for this ceremony.
+  refusal_code?: string
+  refusal?: string
 }
 
 export interface SignatureRequestPublishResult {
