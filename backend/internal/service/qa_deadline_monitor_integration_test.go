@@ -13,8 +13,8 @@ import (
 )
 
 // DCS-FR-CWE-09 (ADR-33): the scheduled sweep flags an obligation of a contract
-// in force whose deadline passed without a report, and stops once the target
-// reported on the rule.
+// in force whose deadline passed without a report. A report received after the
+// deadline does not clear the miss; one received by the deadline does.
 func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	_, err := database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,contract_data) VALUES ('active','','Org A','ACTIVE','tpl',1,
@@ -36,6 +36,10 @@ func TestQADeadlineMonitorFlagsUnreportedPassedDeadlinePostgres(t *testing.T) {
 	require.Equal(t, 1, deadlineRisks())
 
 	_, err = database.Exec(`INSERT INTO contract_kpis (did,metric,value,verdict,rule_id) VALUES ('active','reported','yes','satisfied','urn:uuid:report')`)
+	require.NoError(t, err)
+	require.Equal(t, 1, deadlineRisks(), "a late report leaves the violation")
+
+	_, err = database.Exec(`INSERT INTO contract_kpis (did,metric,value,verdict,rule_id,observed_at) VALUES ('active','reported','yes','satisfied','urn:uuid:report','2025-12-31T12:00:00')`)
 	require.NoError(t, err)
 	require.Zero(t, deadlineRisks())
 }
