@@ -239,6 +239,11 @@ func main() {
 	if err := service.RefreshValidationAnchors(ctx, db); err != nil {
 		log.Fatalf(ctx, err, "Could not anchor validation to the Semantic Hub's active schemas")
 	}
+	if err := service.FollowHubActivations(ctx, os.Getenv("DATABASE_URL"), func(ctx context.Context) error {
+		return service.RefreshValidationAnchors(ctx, db)
+	}); err != nil {
+		log.Fatalf(ctx, err, "Could not follow Semantic Hub activations of other replicas")
+	}
 
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: db})
 
