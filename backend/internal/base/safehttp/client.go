@@ -52,6 +52,9 @@ type Policy struct {
 	// a real deployment never does — loopback there is the service's own
 	// admin surface.
 	AllowLoopback bool
+	// DenyPrivate refuses the private ranges (RFC 1918, RFC 4193) too, for a
+	// fetch of a public document whose URL a user types.
+	DenyPrivate bool
 }
 
 // Client returns an HTTP client that refuses redirects and applies p to every
@@ -99,6 +102,9 @@ func Client(timeout time.Duration, p Policy) *http.Client {
 			for _, ip := range ips {
 				if err := permitted(ip.IP, p.AllowLoopback); err != nil {
 					return nil, fmt.Errorf("dial %s: %w", host, err)
+				}
+				if p.DenyPrivate && ip.IP.IsPrivate() {
+					return nil, fmt.Errorf("dial %s: address %s is private", host, ip.IP)
 				}
 			}
 
