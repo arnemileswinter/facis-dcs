@@ -4,6 +4,7 @@ go 1.26.10
 
 require (
 	github.com/ThalesGroup/crypto11 v1.6.2
+	github.com/beevik/etree v1.7.0
 	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/digitorus/pkcs7 v0.0.0-20250730155240-ffadbf3f398c
@@ -23,6 +24,7 @@ require (
 	github.com/open-policy-agent/opa v1.18.2
 	github.com/piprate/json-gold v0.8.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tggo/goRDFlib v0.1.13
 	goa.design/clue v1.2.4
@@ -70,6 +72,7 @@ require (
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
