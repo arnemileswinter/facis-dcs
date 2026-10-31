@@ -27,6 +27,7 @@ import (
 	"digital-contracting-service/internal/base/contractreadpolicy"
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
@@ -35,7 +36,7 @@ import (
 )
 
 func TestQAContractReadScopePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	peer := "did:web:local"
 	repo := &cwepg.PostgresContractRepo{}
@@ -84,11 +85,11 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, archived)
 
-	rows, err := repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 1})
+	rows, err := repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 1}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "remote-party", rows[0].DID)
-	rows, err = repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 2})
+	rows, err = repo.ReadAllMetaData(scoped, tx, datatype.Pagination{Limit: 1, Offset: 2}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "party", rows[0].DID)
@@ -120,17 +121,17 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	require.Equal(t, "remote-party", signingRows[0].DID)
 	for _, role := range []userrole.UserRole{userrole.Auditor, userrole.SystemAdministrator, userrole.SystemContractManager} {
 		privileged := contractreadpolicy.WithScope(ctx, contractreadpolicy.Scope{Roles: userrole.UserRoles{role}, LocalPeer: peer})
-		rows, err = repo.ReadAllMetaData(privileged, tx, datatype.Pagination{})
+		rows, err = repo.ReadAllMetaData(privileged, tx, datatype.Pagination{}, cwedb.ListOptions{})
 		require.NoError(t, err)
 		require.Len(t, rows, len(fixtures))
 	}
-	rows, err = repo.ReadAllMetaData(ctx, tx, datatype.Pagination{})
+	rows, err = repo.ReadAllMetaData(ctx, tx, datatype.Pagination{}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	unscopedTasks, err := (&smpg.PostgresContractRepo{}).ReadAllSigningTasks(ctx, tx)
 	require.NoError(t, err)
 	require.Empty(t, unscopedTasks)
-	rows, err = repo.ReadAllMetaData(contractreadpolicy.WithSystemScope(ctx), tx, datatype.Pagination{})
+	rows, err = repo.ReadAllMetaData(contractreadpolicy.WithSystemScope(ctx), tx, datatype.Pagination{}, cwedb.ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, rows, len(fixtures))
 	require.NoError(t, tx.Commit())
@@ -164,7 +165,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 	require.ErrorContains(t, err, "not authorized")
 	// Real JWT -> generated HTTP handler -> authorization -> denied access row.
 	validator, token := qaSignedTokens(t)
-	engine.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	engine.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(engine)
 	endpoints.Use(auth.AccessMetadataMiddleware)
 	mux := goahttp.NewMuxer()
@@ -185,7 +186,7 @@ func TestQAContractReadScopePostgres(t *testing.T) {
 }
 
 func TestQAArchiveDetailPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
@@ -212,11 +213,19 @@ func TestQAArchiveDetailPostgres(t *testing.T) {
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
 	require.JSONEq(t, string(raw), string(encoded))
+	// DCS-FR-CSA-18: the read names the contract in the archive audit log.
+	retrieved := archiveEvents(t, database, "RETRIEVE_ARCHIVED_CONTRACTS")
+	require.Len(t, retrieved, 1)
+	require.Equal(t, []any{"archived"}, retrieved[0]["contract_dids"])
 	_, err = service.Detail(user, &archive.DetailPayload{Did: "archived", ContractVersion: 2})
 	require.Error(t, err)
 	outsider := middleware.InjectAuthContext(ctx, []string{userrole.ArchiveManager.String()}, "holder", "Org B")
 	_, err = service.Detail(outsider, payload)
 	require.ErrorContains(t, err, "not authorized")
+	failed := archiveEvents(t, database, "ARCHIVE_OPERATION_FAILED")
+	require.Len(t, failed, 2, "a failed archive read must be audited")
+	require.Equal(t, "detail", failed[1]["operation"])
+	require.Equal(t, "Org B", failed[1]["actor"])
 	originalBlob := append([]byte(nil), objects.blobs[cid]...)
 	tamperedCID, err := store.Put(ctx, artifactstore.ContractScope("archived"), []byte(`{"did":"archived","contract_version":1,"contract_data":{"tampered":true}}`))
 	require.NoError(t, err)

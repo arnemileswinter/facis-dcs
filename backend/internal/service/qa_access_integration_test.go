@@ -9,17 +9,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq"
 	goa "goa.design/goa/v3/pkg"
 
 	pac "digital-contracting-service/gen/process_audit_and_compliance"
@@ -28,75 +23,29 @@ import (
 	pg "digital-contracting-service/internal/auth/db/pq"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/middleware"
 	"digital-contracting-service/migrations"
 )
 
-// qaPostgresSchema owns only its temporary schema in the explicitly configured test database.
-func qaPostgresSchema(t *testing.T) (*sqlx.DB, string) {
-	t.Helper()
-	dsn := os.Getenv("QA_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set QA_DATABASE_URL to a disposable PostgreSQL database")
-	}
-	admin, err := sqlx.Connect("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := admin.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	schema := fmt.Sprintf("qa_access_%d", time.Now().UnixNano())
-	if _, err := admin.Exec("CREATE SCHEMA " + pq.QuoteIdentifier(schema)); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP SCHEMA " + pq.QuoteIdentifier(schema) + " CASCADE"); err != nil {
-			t.Error(err)
-		}
-	})
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := parsed.Query()
-	params.Set("search_path", schema)
-	parsed.RawQuery = params.Encode()
-	database, err := sqlx.Connect("postgres", parsed.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := migrations.Run(database); err != nil {
-		t.Fatal(err)
-	}
-	return database, schema
-}
-
 func TestQAAccessAttemptsPostgres(t *testing.T) {
-	database, schema := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	if err := migrations.Run(database); err != nil {
 		t.Fatal(err)
 	}
 	for _, column := range []struct{ table, column string }{{"access_attempts", "outcome"}, {"pac_audit_runs", "snapshot_bytes"}} {
 		var nullable string
-		if err := database.Get(&nullable, `SELECT is_nullable FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name=$3`, schema, column.table, column.column); err != nil || nullable != "NO" {
+		if err := database.Get(&nullable, `SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2`, column.table, column.column); err != nil || nullable != "NO" {
 			t.Fatalf("required column %+v: %s, %v", column, nullable, err)
 		}
 	}
 	var plaintext int
-	if err := database.Get(&plaintext, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name='pac_audit_runs' AND column_name IN ('response_bytes','response_json','receipt')`, schema); err != nil || plaintext != 0 {
+	if err := database.Get(&plaintext, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='pac_audit_runs' AND column_name IN ('response_bytes','response_json','receipt')`); err != nil || plaintext != 0 {
 		t.Fatalf("plaintext columns=%d: %v", plaintext, err)
 	}
 	validator, token := qaSignedTokens(t)
 	attempts := &pg.PostgresAccessAttemptRepo{}
-	locks := &pg.PostgresIPLockoutRepo{}
+	locks := &pg.PostgresLockoutRepo{}
 	service := &processAuditAndCompliancesrvc{DB: database, JWTAuthenticator: auth.NewJWTAuthenticator(validator, database, attempts, locks)}
 	endpoints := pac.NewEndpoints(service)
 	endpoints.Use(auth.AccessMetadataMiddleware)
@@ -151,16 +100,18 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().Add(-conf.LoginLockoutDuration()))
+	failed, err := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().Add(-conf.LoginLockoutDuration()))
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		t.Fatal(rollbackErr)
 	}
 	if err != nil || failed != 0 {
 		t.Fatalf("denials counted as credential failures: %d %v", failed, err)
 	}
-	expired := token(userrole.Auditor, time.Now().Add(-time.Hour))
+	// Only a token that is not genuine counts toward the lockout; an expired
+	// one is the normal end of its lifetime (FR-UC-01-4).
+	forged := token(userrole.Auditor, time.Now().Add(time.Hour)) + "x"
 	for range conf.LoginAttemptsThresholdInDuration() {
-		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &expired, Limit: 2, Justification: "QA expired credentials"}, "unauthorized")
+		call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &forged, Limit: 2, Justification: "QA forged credentials"}, "unauthorized")
 		total++
 		assertLast(authdb.AccessOutcomeFailed, false, total)
 	}
@@ -168,19 +119,32 @@ func TestQAAccessAttemptsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	localCount, countErr := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("QA UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
-	utcCount, utcErr := attempts.CountFailedAttemptsByIP(ctx, tx, "192.0.2.60", time.Now().UTC().Add(-conf.LoginLockoutDuration()))
+	localCount, countErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().In(time.FixedZone("QA UTC+2", 2*60*60)).Add(-conf.LoginLockoutDuration()))
+	utcCount, utcErr := attempts.CountLockoutAttempts(ctx, tx, "192.0.2.60", time.Now().UTC().Add(-conf.LoginLockoutDuration()))
 	if countErr != nil || utcErr != nil || localCount != conf.LoginAttemptsThresholdInDuration() || utcCount != localCount {
 		t.Fatalf("failed credential counts differ: UTC+2=%d (%v), UTC=%d (%v)", localCount, countErr, utcCount, utcErr)
 	}
-	locked, _, err := locks.IsLocked(ctx, tx, "192.0.2.60")
+	until, err := locks.LockedUntil(ctx, tx, "192.0.2.60")
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		t.Fatal(rollbackErr)
 	}
-	if err != nil || !locked {
+	if locked := until.After(time.Now()); err != nil || !locked {
 		t.Fatalf("credential failures did not lock IP: %t %v", locked, err)
 	}
 	jwt := token(userrole.Auditor, time.Now().Add(time.Hour))
+	call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA locked read"}, "unauthorized")
+	total++
+	assertLast(authdb.AccessOutcomeFailed, false, total)
+	tx, err = database.Beginx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lifted, err := locks.ClearLockout(ctx, tx, "192.0.2.60"); err != nil || !lifted {
+		t.Fatalf("unlock: %t %v", lifted, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	first := call("access_attempts", endpoints.AccessAttempts, &pac.AccessAttemptsPayload{Token: &jwt, Limit: 2, Justification: "QA read"}, "").(*pac.PACAccessAttempts)
 	total++
 	assertLast(authdb.AccessOutcomeSuccess, true, total)

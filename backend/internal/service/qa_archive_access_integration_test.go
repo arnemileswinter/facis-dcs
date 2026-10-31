@@ -19,6 +19,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/datatype"
 	basepg "digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	erasepg "digital-contracting-service/internal/dcstodcs/db/pg"
 	"digital-contracting-service/internal/middleware"
@@ -36,7 +37,7 @@ func (e *qaCapturingExecutor) Run(_ context.Context, request auditexecutor.Reque
 
 func TestQAArchiveAccessBypassesPostgres(t *testing.T) {
 	t.Setenv("ORCE_ARCHIVE_AUDIT_LOG_URL", "")
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
@@ -230,7 +231,7 @@ func TestArchiveRecentActionsFilterBeforeLimit(t *testing.T) {
 		entries = append(entries, datatype.AuditLogEntry{DID: &foreign, CreatedAt: time.Now()})
 	}
 	entries = append(entries, datatype.AuditLogEntry{CreatedAt: time.Now()})
-	actions := recentArchiveActions(filterContractAuditChains([][]datatype.AuditLogEntry{entries}, map[string]bool{own: true}), archiveRecentActionLimit)
+	actions := recentArchiveActions(filterContractAuditChains([][]datatype.AuditLogEntry{entries}, map[string]bool{own: true}), archiveRecentActionLimit, true)
 	require.Len(t, actions, 1)
 	require.Equal(t, own, actions[0].Did)
 }

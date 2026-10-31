@@ -57,6 +57,8 @@ Feature: QA fixes preserve archive, classification, organization scope and evide
       | /pdf/export/contract/{did}  |
       | /contract/export/{did}      |
 
+  # The archive deletion erases only a contract that is no longer in force, so
+  # the signed contract is terminated before the deletion.
   @REQ-qa-fixes-abschluss-AC6 @DCS-IR-CSA-02 @DCS-IR-CWE-12 @DCS-NFR-SEC-13
   Scenario: Contract Manager retrieves exact uploaded evidence until archive deletion shreds its key
     Given a dedicated QA contract "QA Evidence Contract" has reached SIGNED
@@ -64,6 +66,7 @@ Feature: QA fixes preserve archive, classification, organization scope and evide
     When the QA Contract Manager uploads the file to contract "QA Evidence Contract" with description "Confidential QA evidence description"
     And the QA Contract Manager downloads that evidence from contract "QA Evidence Contract"
     Then the QA evidence has the original file bytes, metadata and server SHA256 for contract "QA Evidence Contract"
-    When the QA Archive Manager deletes contract "QA Evidence Contract" with an erasure justification
+    When the QA Contract Manager terminates contract "QA Evidence Contract"
+    And the QA Archive Manager deletes contract "QA Evidence Contract" with an erasure justification
     Then the response status is 200
     And the QA contract "QA Evidence Contract" has a shredded key and its evidence is unreadable

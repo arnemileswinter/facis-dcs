@@ -31,6 +31,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	basepg "digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
@@ -39,7 +40,7 @@ import (
 )
 
 func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
@@ -51,7 +52,7 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	repo := &cwepg.PostgresContractRepo{}
 	reader := base.AuditTrailReader{Artifacts: store, ARepo: &basepg.PostgresAuditTrailRepository{}}
 	validator, token := qaSignedTokens(t)
-	authentication := auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	authentication := auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	for _, f := range []struct{ did, owner, data string }{
 		{"own", "did:example:participant", `{}`},
 		{"party", "other", `{"dcs:parties":[{"dcs:legalName":"did:example:participant"}]}`},
@@ -98,11 +99,11 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	}
 	for _, did := range []string{"own", "party"} {
 		get("/signature/request/"+ids[did], userrole.ContractObserver, 200)
-		get("/signature/audit?did="+did, userrole.ComplianceOfficer, 200)
+		get("/signature/audit?justification=review&did="+did, userrole.ComplianceOfficer, 200)
 	}
 	var before, after int
 	require.NoError(t, database.Get(&before, "SELECT count(*) FROM outbox_events"))
-	for _, path := range []string{"/signature/request/" + ids["foreign"], "/signature/audit?did=foreign", "/signature/clause-report?did=foreign"} {
+	for _, path := range []string{"/signature/request/" + ids["foreign"], "/signature/audit?justification=review&did=foreign", "/signature/clause-report?did=foreign"} {
 		role := userrole.ContractObserver
 		if path != "/signature/request/"+ids["foreign"] {
 			role = userrole.ComplianceOfficer
@@ -120,9 +121,9 @@ func TestQAReadHTTPRegressionsPostgres(t *testing.T) {
 	require.NoError(t, database.Get(&after, "SELECT count(*) FROM outbox_events"))
 	require.Equal(t, before, after)
 	get("/signature/request/"+ids["foreign"], userrole.SystemContractSigner, 200)
-	get("/signature/audit?did=foreign", userrole.Auditor, 200)
+	get("/signature/audit?justification=review&did=foreign", userrole.Auditor, 200)
 	get("/signature/request/10000000-0000-4000-8000-000000000099", userrole.ContractObserver, 404)
-	get("/signature/audit?did=missing", userrole.ComplianceOfficer, 404)
+	get("/signature/audit?justification=review&did=missing", userrole.ComplianceOfficer, 404)
 	body := get("/archive/detail?did=own&contract_version=1", userrole.ContractObserver, 200)
 	require.Contains(t, string(body), `"frozen":"own"`)
 	get("/archive/detail?did=foreign&contract_version=1", userrole.ContractObserver, 403)

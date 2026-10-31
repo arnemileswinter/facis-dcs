@@ -239,7 +239,11 @@ Pakete, `backend/design/`), Rendering-Dienst (`pdf-core/`) und Web-Client
 - **Was gilt:** Der EU-Trust-Pool wird aus der LOTL und den nationalen
   Trusted Lists gebaut (nur CA/QC mit Status "granted"), täglich
   aktualisiert; ein fehlgeschlagener Refresh behält den letzten guten Pool.
-  Selbstsignierte Zertifikate aus der übermittelten Kette werden nie als
+  Die XAdES-Signatur der LOTL wird gegen die im Amtsblatt veröffentlichten
+  LOTL-Signaturzertifikate geprüft (über die Pivot-LOTLs; `certs/lotl-oj.pem`,
+  überschreibbar per `DCS_LOTL_OJ_CERTS_FILE` und `DCS_LOTL_OJ_URL`), die
+  jeder nationalen Liste gegen die Zertifikate, die die LOTL für sie nennt;
+  eine Liste ohne gültige Signatur fließt nicht in den Pool ein. Selbstsignierte Zertifikate aus der übermittelten Kette werden nie als
   Trust-Anchor akzeptiert. Der Pool wird nur bei gesetztem
   `DCS_FORCE_EIDAS_CERT` gebaut; ohne ihn entfallen Kettenprüfung UND
   QCStatements-Prüfung, es bleiben Hostname- und JWK-Abgleich — das ist keine

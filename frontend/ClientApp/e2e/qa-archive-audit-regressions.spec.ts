@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, type Page, type Route, test } from '@playwright/test'
+import { withholdUnsignedToken } from './unsigned-token'
 
 // HTTP is mocked: these checks prove browser behavior, not backend persistence or authorization.
 const did = 'did:web:example.test:contract:qa'
@@ -14,6 +15,7 @@ async function json(route: Route, body: unknown, status = 200) {
 async function authenticate(page: Page, role: string) {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url')
   const token = `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ sub: 'did:web:auditor.test', exp: Math.floor(Date.now() / 1000) + 3600, roles: [role], ext: { iss: 'did:web:example.test', roles: [role] } })}.unsigned`
+  await withholdUnsignedToken(page)
   await page.addInitScript((token) => {
     localStorage.setItem('token_type', 'Bearer')
     localStorage.setItem('access_token', token)
@@ -34,6 +36,7 @@ async function archive(page: Page) {
       flagged_total: 0,
       recent_actions: [],
       expiring_contracts: [],
+      expiring_window_days: 30,
     }),
   )
   await page.route('**/archive/erasure-status**', (route) => json(route, { did, local_status: 'live', peers: [] }))
@@ -402,6 +405,7 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
           flagged_total: 1,
           deleted_total: 0,
           expiring_contracts: [{ did, name: longName, exp_date: '2026-11-01T00:00:00Z' }],
+          expiring_window_days: 30,
           recent_actions: [
             {
               did,
@@ -417,7 +421,8 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
           contracts: [1, 2].map((contract_version) => ({
             did,
             name: longName,
-            state: 'SIGNED',
+            // Delete is offered only for a contract out of force (DCS-FR-CSA-17).
+            state: contract_version === 1 ? 'TERMINATED' : 'SIGNED',
             contract_version,
             archive_summary: 'Long archive summary '.repeat(15),
             archive_tags: ['long-tag'.repeat(25)],
@@ -443,6 +448,19 @@ for (const role of ['Archive Manager', 'Contract Observer', 'Auditor']) {
         await expect(page.getByLabel('Tag', { exact: true })).not.toBeVisible()
         await page.keyboard.press('Tab')
         await expect(page.getByRole('button', { name: 'Reset search' })).toBeFocused()
+        // Saved queries and export (DCS-FR-CSA-22) follow the search; Save
+        // query stays disabled until the query has a name.
+        await page.keyboard.press('Tab')
+        await expect(page.getByLabel('Name for this query')).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Export CSV' })).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Export JSON' })).toBeFocused()
+        if (role === 'Archive Manager') {
+          // Row selection for bulk termination (DCS-FR-CSA-23).
+          await page.keyboard.press('Tab')
+          await expect(page.getByRole('checkbox', { name: `Select ${longName}` }).first()).toBeFocused()
+        }
         await page.keyboard.press('Tab')
         await expect(page.getByRole('link', { name: `${longName}, version 1`, exact: true })).toBeFocused()
         const open = page.locator('.archive-entry-link')
@@ -540,6 +558,7 @@ for (const [role, width] of [
         flagged_total: 0,
         deleted_total: 0,
         expiring_contracts: [],
+        expiring_window_days: 30,
         recent_actions: [],
       }),
     )
@@ -587,6 +606,7 @@ for (const width of [390, 1280, 3440]) {
           flagged_total: 0,
           deleted_total: 0,
           expiring_contracts: [],
+          expiring_window_days: 30,
           recent_actions: [],
         }),
       )
@@ -595,7 +615,8 @@ for (const width of [390, 1280, 3440]) {
           contracts: [1, 2].map((contract_version) => ({
             did,
             name,
-            state: 'SIGNED',
+            // Delete is offered only for a contract out of force (DCS-FR-CSA-17).
+            state: contract_version === 1 ? 'TERMINATED' : 'SIGNED',
             contract_version,
             archive_summary: contract_version === 1 ? 'Summary '.repeat(30) : undefined,
             archive_tags: ['long-tag'.repeat(30)],

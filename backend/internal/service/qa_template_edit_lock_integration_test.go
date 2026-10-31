@@ -8,17 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
 // P07: from Approved onwards a template is changed through a copy, never in place.
 func TestQATemplateEditsLockedFromApprovedPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	repo := &pg.PostgresContractTemplateRepo{}
 	updater := &command.Updater{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	future := time.Now().Add(time.Hour)
 
 	for _, state := range []string{"DRAFT", "REVIEWED", "APPROVED", "REGISTERED", "PUBLISHED", "DEPRECATED"} {

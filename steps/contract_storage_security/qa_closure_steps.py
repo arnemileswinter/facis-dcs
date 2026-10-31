@@ -194,6 +194,11 @@ def original_evidence(context, name):
     assert datetime.fromisoformat(body["recorded_at"].replace("Z", "+00:00")).tzinfo
 
 
+@when('the QA Contract Manager terminates contract "{name}"')
+def terminate_contract(context, name):
+    QA.terminate_contract(context, name)
+
+
 @when('the QA Archive Manager deletes contract "{name}" with an erasure justification')
 def delete_contract(context, name):
     context.requests_response = QA.delete_archived_contract(context, name)

@@ -24,6 +24,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	basepg "digital-contracting-service/internal/base/db/pq"
+	"digital-contracting-service/internal/base/pgtest"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
@@ -33,7 +34,7 @@ import (
 )
 
 func TestQAContractEvidencePostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
@@ -89,7 +90,7 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 	require.ErrorContains(t, err, "no rows")
 	// The generated endpoints exercise signed JWT role checks before storage/read access.
 	validator, token := qaSignedTokens(t)
-	service.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresIPLockoutRepo{})
+	service.JWTAuthenticator = auth.NewJWTAuthenticator(validator, database, &authpg.PostgresAccessAttemptRepo{}, &authpg.PostgresLockoutRepo{})
 	endpoints := cwe.NewEndpoints(service)
 	endpoints.Use(auth.AccessMetadataMiddleware)
 	mux := goahttp.NewMuxer()
@@ -151,12 +152,14 @@ func TestQAContractEvidencePostgres(t *testing.T) {
 			} else {
 				require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 			}
-			auditRequest := httptest.NewRequest(http.MethodPost, "/contract/audit", strings.NewReader(`{"did":"evidence-contract"}`))
+			auditRequest := httptest.NewRequest(http.MethodPost, "/contract/audit", strings.NewReader(`{"did":"evidence-contract","justification":"evidence review"}`))
 			auditRequest.Header.Set("Content-Type", "application/json")
 			auditRequest.Header.Set("Authorization", "Bearer "+token(role, time.Now().Add(time.Hour)))
 			auditResponse := httptest.NewRecorder()
 			mux.ServeHTTP(auditResponse, auditRequest)
-			if allowed {
+			// The audit trail is for the audit roles and the Contract Manager,
+			// not for a machine role (DCS-NFR-BR-05).
+			if allowed && role != userrole.SystemContractManager {
 				require.Equal(t, http.StatusOK, auditResponse.Code, auditResponse.Body.String())
 			} else {
 				require.Equal(t, http.StatusForbidden, auditResponse.Code, auditResponse.Body.String())

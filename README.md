@@ -53,7 +53,7 @@ bash dev-stack.sh
 
 The script is idempotent (`helm upgrade --install`) and, in order:
 
-1. Deploys the Helm dependency stack to your current Kubernetes context (PostgreSQL, Keycloak, Hydra, NATS, Neo4j, ORCE, Federated Catalogue, IPFS + document manager, statuslist-service, Traefik, kube-prometheus-stack) and waits for the slow pods.
+1. Deploys the Helm dependency stack to your current Kubernetes context (PostgreSQL, Keycloak, Hydra, NATS, Neo4j, ORCE, Federated Catalogue, IPFS + document manager, Traefik, kube-prometheus-stack) and waits for the slow pods.
 2. Installs testWallet dependencies and initializes the dev status list.
 3. Copies `backend/.env.dev1` → `backend/.env`, provisions the SoftHSM2 token (`~/.dcs/softhsm-8991`) and regenerates the instance DID document from the token key.
 4. Issues the C2PA and PAdES certificate chains for pdf-core and publishes the dev CA's initial CRL.
