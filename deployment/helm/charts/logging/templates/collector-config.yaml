@@ -40,7 +40,7 @@ data:
 
     loki.write "default" {
       endpoint {
-        url = "{{ if $tls }}https{{ else }}http{{ end }}://{{ .Release.Name }}-loki:3100/loki/api/v1/push"
+        url = "{{ if $tls }}https{{ else }}http{{ end }}://{{ .Release.Name }}-loki:3101/loki/api/v1/push"
         {{- if $tls }}
         tls_config {
           ca_file     = "/etc/dcs-internal-tls/ca.crt"
