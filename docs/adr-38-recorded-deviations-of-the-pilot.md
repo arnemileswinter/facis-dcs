@@ -106,6 +106,14 @@ enveloped signature of each list and reads only the signed content
   `INTEGRATION=1`, `TestEUTrustPoolLive` verifies the live LOTL and national
   lists.
 
+The backend builds this trust pool at startup and checks the DID certificate
+of each peer against it: chain to a qualified trust service provider and the
+QcCompliance statement (`identity.EUTrustPoolEnabled`,
+`TestEUTrustPoolIsOnByDefault`). `DCS_EU_TRUST_POOL=false` turns this off; a
+stack with `DCS_ALLOW_DEV_TRUST=true` has it off unless it sets
+`DCS_EU_TRUST_POOL=true`. The instance's own DID certificate is checked
+against the pool only when `DCS_FORCE_EIDAS_CERT=true`.
+
 Reason: not every time-stamp authority offers TLS 1.3. Each member state
 publishes its national trusted list on its own server, and not all of these
 servers offer TLS 1.3. With TLS 1.3 only, the
@@ -125,6 +133,52 @@ Reason: RFC 5280 CRLs are signed by the issuing CA, and a relying party
 verifies that signature. CRLs are served over plain HTTP so that revocation
 checking does not depend on TLS: a check over HTTPS needs the certificate
 of the CRL server, which can itself need a revocation check.
+
+### 6. The internal TLS keys and the Hydra token keys are not in the PKCS#11 token (DCS-IR-HI-01)
+
+The PKCS#11 token holds the keys that the DCS attests and protects with: the
+DID identity key, the VC key, the OpenID4VP request key, the C2PA key and the
+ECDH key ([key management concept](key-management-concept.md), §2). Two
+groups of private keys are held outside the token:
+
+- The internal TLS CA key and the one TLS server key that the in-cluster TLS
+  endpoints share (backend, Postgres, NATS, Hydra, ORCE, pdf-core, DSS,
+  Federated Catalogue). Helm generates them into the Kubernetes Secrets
+  `<release>-internal-ca` and `<release>-internal-tls`
+  (`deployment/helm/templates/internal-tls-secret.yaml`).
+- The keys that Hydra signs access and ID tokens with. Hydra keeps them in
+  its own database, encrypted with the `SECRETS_SYSTEM` value from a Secret
+  (`deployment/helm/charts/hydra/templates/deployment.yaml`).
+
+Reason: these keys belong to platform components. The TLS keys protect the
+transport inside the cluster; the Hydra keys sign session tokens that the
+backend checks against Hydra's JWKS. Hydra and the TLS endpoints read their
+keys from files, Secrets or a database, not from a PKCS#11 token. Access to
+the Secrets is controlled by Kubernetes RBAC.
+
+### 7. Identity providers of other organizations take part as credential issuers (DCS-NFR-SEC-16)
+
+A user logs in with an OpenID4VP presentation of a role credential, and the
+DCS's own Hydra issues the session (`backend/internal/service/auth_login.go`).
+The identity provider of an organization takes part as an issuer of that
+credential, admitted per purpose and organization in the trust configuration
+([ADR-31](adr-31-purpose-scoped-issuer-trust.md)). No external OIDC or SAML
+identity provider is federated into Hydra.
+
+Reason: product decision. Login is bound to a verifiable credential that the
+wallet holder presents; an OIDC or SAML assertion carries no such credential.
+
+### 8. A revoked login credential keeps its session until the access token expires (DCS-NFR-BR-06, DCS-IR-CI-09)
+
+The backend checks each access token locally: signature, issuer, client and
+expiry (`backend/internal/middleware/oidc.go`). It checks the status of the
+login credential at login and at each token refresh. So after a revocation,
+an access token issued before it stays valid until it expires: at most
+5 minutes in the prod and acceptance profiles (`hydra.config.accessTokenTTL`),
+and Hydra's default of 1 hour where the profile sets no lifetime.
+
+Reason: a status-list request per API call would make every call depend on
+the issuer's status list endpoint. The lifetime bounds the delay.
 
 ## Consequences
 
@@ -146,3 +200,10 @@ of the CRL server, which can itself need a revocation check.
   `DCS_LOTL_OJ_URL` to the current publication, or takes a release that
   pins it.
 - A CRL fetch is plain HTTP; the CRL signature protects its content.
+- Whoever can read the internal TLS Secrets of a release can read the
+  in-cluster transport of that release. The DCS attestation keys stay in
+  the token.
+- A login credential of an organization comes from an issuer that the trust
+  configuration admits for it, not from a federated identity provider.
+- An operator who needs a shorter delay after a revocation sets a shorter
+  access-token lifetime.
