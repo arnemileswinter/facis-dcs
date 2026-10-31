@@ -28,16 +28,6 @@ def step_then_denied_authorization(context):
 def step_then_denied_credential_invalid(context):
     response = context.requests_response.json()
     assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
-    # The refusal text is the same for any refused credential; the lock row
-    # proves the lockout itself (FR-UC-01-4).
-    cursor = context.db.cursor()
-    try:
-        cursor.execute("SELECT COUNT(*) FROM ip_lockouts WHERE locked_until > NOW()")
-        locked = cursor.fetchone()[0]
-    finally:
-        cursor.close()
-    context.db.rollback()
-    assert locked >= 1, "No active IP lockout after the refused attempts"
 
 
 @then("the request is denied")
@@ -48,6 +38,16 @@ def step_then_denied(context):
 def step_then_denied_to_many_attempts(context):
     response = context.requests_response.json()
     assert context.requests_response.status_code in (401, 403) and response["message"] == "Credential invalid or access revoked.", response
+    # The refusal text is the same for any refused credential; the lock row
+    # proves the lockout itself (FR-UC-01-4).
+    cursor = context.db.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM ip_lockouts WHERE locked_until > NOW()")
+        locked = cursor.fetchone()[0]
+    finally:
+        cursor.close()
+    context.db.rollback()
+    assert locked >= 1, "No active IP lockout after the refused attempts"
 
 # ---------------------------------------------------------------------------
 # Generic HTTP response assertions
