@@ -726,6 +726,8 @@ The chart generates the other credentials (the internal CA and certificate, the 
 
 A production cluster also needs a CNI that enforces NetworkPolicy ("Network policies") and a Grafana for the logs ("Logs").
 
+Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back. The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
+
 Other values for every profile:
 
 ```yaml
