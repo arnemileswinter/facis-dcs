@@ -49,6 +49,27 @@ grep -A4 'startupProbe:' <<<"$prod" | grep -q 'path: /livez' || fail "no startup
 grep -q 'kind: PodDisruptionBudget' <<<"$prod" || fail "no PodDisruptionBudget for 3 replicas"
 render "${ACK[@]}" | grep -q 'kind: PodDisruptionBudget' && fail "PodDisruptionBudget for a single replica blocks drains"
 
+# Acceptance runs 2 backend pods on the ReadWriteOnce SoftHSM2 token volume: they
+# must share one node, and the budget must let a drain evict both.
+render -f "$CHART_DIR/values.acceptance.yml" "${ACK[@]}" | python3 -c '
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+dep = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "dcs-digital-contracting-service")
+pod = dep["spec"]["template"]
+aff = pod["spec"].get("affinity") or {}
+terms = (aff.get("podAffinity") or {}).get("requiredDuringSchedulingIgnoredDuringExecution") or []
+ok = any(t.get("topologyKey") == "kubernetes.io/hostname"
+         and all(pod["metadata"]["labels"].get(k) == v for k, v in t["labelSelector"]["matchLabels"].items())
+         for t in terms)
+assert ok, "acceptance backend pods are not required on the node of the other backend pods"
+assert "podAntiAffinity" not in aff, "acceptance backend pods carry an anti-affinity"
+assert any(c["name"] == "hsm-token" and c["persistentVolumeClaim"] for c in pod["spec"]["volumes"] if "persistentVolumeClaim" in c), "no shared token volume"
+job = next(d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "dcs-digital-contracting-service-hsm-provision")
+assert job["spec"]["template"]["spec"].get("affinity") == aff, "the provisioning Job can land on another node than the token volume"
+pdb = next(d for d in docs if d["kind"] == "PodDisruptionBudget")
+assert pdb["spec"]["maxUnavailable"] >= dep["spec"]["replicas"], "PodDisruptionBudget blocks the drain of the shared node"
+' || fail "acceptance backend pods are not pinned to the node of their token volume"
+
 # DCS-NFR-SF-03: scheduled database backup in prod and acceptance, off by default.
 for profile in prod acceptance; do
   backup="$(render -f "$CHART_DIR/values.$profile.yml" "${ACK[@]}" --show-only templates/backup-cronjob.yaml 2>/dev/null || true)"

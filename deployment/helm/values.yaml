@@ -118,6 +118,7 @@ customCA:
 hostAliases: []
 nodeSelector: {}
 tolerations: []
+# Backend pods and the SoftHSM2 provisioning Job, which mounts their token volume.
 affinity: {}
 
 extraEnv: []

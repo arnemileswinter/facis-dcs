@@ -10,6 +10,25 @@
 
 replicaCount: 2
 
+# The co-deployed SoftHSM2 token (pkcs11.provisioning) is a ReadWriteOnce volume
+# that every backend pod mounts, so all backend pods run on one node: a pod on
+# another node could not attach the volume and would stay Pending. Prod uses a
+# real HSM and has no such volume.
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: digital-contracting-service
+            app.kubernetes.io/component: backend
+
+# A node drain must evict both pods: a replacement cannot start on another node
+# while the other pod still holds the token volume on the drained node, so a
+# budget of one would stop the drain.
+podDisruptionBudget:
+  maxUnavailable: 2
+
 image:
   repository: "[registry]/digital-contracting-service"
   tag: ""

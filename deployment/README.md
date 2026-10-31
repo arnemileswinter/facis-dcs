@@ -563,6 +563,8 @@ chain from `signing.issuerX5ChainPath`. pdf-core is configured with no signing
 material: the backend sends the chain with each render request in the
 `X-DCS-C2PA-X5Chain` header.
 
+The acceptance profile runs its 2 backend pods on one node (required `podAffinity` in `values.acceptance.yml`), because the SoftHSM2 token volume is ReadWriteOnce; prod uses a real HSM and has no such volume.
+
 SoftHSM2 is a software token and is NOT a production HSM. For production set
 `pkcs11.provisioning.enabled=false` and point `pkcs11` at a real external PKCS#11
 module whose token already holds the keys:
