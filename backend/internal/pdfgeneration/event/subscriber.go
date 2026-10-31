@@ -445,6 +445,13 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 		}
 	}(tx)
 
+	// Serialize regeneration per template, as appendC2PA does per contract: the
+	// event handler on one replica and the retry sweep on another must not both
+	// render from the same stored state and fork the C2PA chain.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", tplEvt.DID); err != nil {
+		return fmt.Errorf("acquire per-template PDF regeneration lock for %s: %w", tplEvt.DID, err)
+	}
+
 	tpl, err := s.TRepo.ReadDataByID(ctx, tx, tplEvt.DID)
 	if err != nil {
 		return fmt.Errorf("read template %s: %w", tplEvt.DID, err)
