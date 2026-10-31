@@ -1652,8 +1652,20 @@ _PDF_STAGE_ATTR = {
     "signed": "signed_pdf",
     "amended": "amended_pdf",
     "re-signed": "re_signed_pdf",
+    "re-anchored": "reanchored_pdf",
     "final": "final_pdf",
 }
+
+
+@when('I re-anchor the "{stage}" PDF through /render/reanchor')
+def step_reanchor_stage_pdf(context, stage):
+    """Append the provenance-only manifest that covers a signature (ADR-26)."""
+    _request(context, "POST", "/render/reanchor", _get_stage_pdf(context, stage), "application/pdf")
+    assert context.last_response["status"] == 200, (
+        f"re-anchor of {stage} PDF failed (HTTP {context.last_response['status']}): "
+        f"{context.last_response['body'][:300]}"
+    )
+    context.reanchored_pdf = context.last_response["body"]
 
 
 def _get_stage_pdf(context, stage):

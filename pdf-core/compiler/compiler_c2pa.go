@@ -1029,12 +1029,7 @@ func extractLifecycleEffectiveAt(c2paBytes []byte, manifestIdx int) (time.Time, 
 // (which embeds it) would fail the byte-for-byte determinism check. See
 // renderXMPMetadata's doc comment for why this replaced a C2PA claim field.
 func extractRemoteManifestURLFromXMP(pdf []byte) string {
-	const metadataObjID = 13
-	start, length, found := findLastObjectStreamRange(pdf, metadataObjID)
-	if !found {
-		return ""
-	}
-	xmp := pdf[start : start+length]
+	xmp := metadataStream(pdf)
 	marker := []byte(`dcterms:provenance="`)
 	idx := bytes.Index(xmp, marker)
 	if idx < 0 {

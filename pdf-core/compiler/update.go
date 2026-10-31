@@ -952,6 +952,12 @@ func VerifyIncrementalUpdate(ctx context.Context, pdf []byte) ([]byte, error) {
 		boundary = hopEnd
 		reproduced = freshUpdated
 	}
+	// Each replay above is a prefix check, so it says nothing about bytes after
+	// the last DCS revision. The last manifest's hard binding covers the whole
+	// file, so it is what rejects a revision appended after it.
+	if err := VerifyHardBinding(pdf); err != nil {
+		return reproduced, err
+	}
 	return reproduced, nil
 }
 
