@@ -41,6 +41,30 @@ cover the first one. Parallel signing needs a different container (for
 example detached CAdES signatures per signer), which the pilot does not
 provide.
 
+Concurrent signatures on two instances are detected and refused, never
+merged or overwritten. Each instance signs its own copy of the contract, so
+two instances can each sign the same revision before either copy reaches the
+other. The receiver of a peer's PDF (`PeerPdfReceiver`, under the same
+per-contract lock as the local signing path) replaces its copy only if the
+shipped PDF extends the signed revision that it holds
+(`provenance.ExtendsSignedRevision`, also used by `assertLatestRevision`):
+
+- An unsigned local copy accepts the peer's PDF.
+- A shipped PDF that starts with the local signed revision replaces it.
+- A shipped PDF that the local copy already contains changes nothing.
+- A revocation is adopted; the local signed copy stays.
+- Any other shipped PDF is refused with the `post_pdf` error `conflict`
+  (HTTP 409). The receiver keeps its copy and records a
+  `PAC_SIGNING_CONFLICT` audit event (direction `RECEIVED`).
+
+The sender keeps its copy too. It records a `PAC_SIGNING_CONFLICT` event
+(direction `SENT`) and gives the refused ship no retry entry, because a
+retry gets the same answer. The compliance monitor reports each recorded
+conflict as a `SIGNING_CONFLICT` risk on both instances
+(`TestAPeerCopyThatDoesNotExtendTheLocalSignatureIsRefused`,
+`TestASignedCopyThePeerRefusesAsAConflictIsRecordedAndNotRetried`,
+`TestMonitorFlagsSigningConflictsOnBothSides`).
+
 ### 3. Hardware roots of trust and secure boot are platform scope (DCS-IR-HI-03, DCS-NFR-SEC-17)
 
 The DCS does not seal service credentials to a TPM 2.0 or Secure Enclave, does
@@ -107,6 +131,9 @@ of the CRL server, which can itself need a revocation check.
 - A template user verifies the provenance credential against the instance
   key, not against a key of each role holder.
 - A multi-signer contract takes one signing turn per signer.
+- If two instances sign the same revision, each instance keeps its own
+  signed copy and reports a `SIGNING_CONFLICT` risk. No copy holds both
+  signatures.
 - An operator who needs a hardware root of trust or secure boot provides it
   in the platform that runs the DCS.
 - The time-stamp requests and the trusted-list download are the outbound

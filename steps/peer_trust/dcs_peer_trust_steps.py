@@ -2155,7 +2155,21 @@ def step_when_drive_to_approved_on_b(context):
 def step_when_countersign_on_b(context):
     """The counterparty's own signature, on its own copy, for its OWN seeded
     field (its peer DID) — the signature A's database will never hold a row
-    for."""
+    for.
+
+    Signatures are applied in sequence (ADR-38 §2): B signs over the copy that
+    carries A's signature. B's copy is "agreed" once it holds A's signed copy
+    and A's JAdES. A signature over the older revision is refused by A as a
+    signing conflict."""
+    deadline = time.monotonic() + 90
+    while True:
+        body, _ = _cross_instance_contract(context, context.base_url_b)
+        if body.get("extrinsic_lifecycle") == "agreed" or time.monotonic() > deadline:
+            break
+        time.sleep(2)
+    assert body.get("extrinsic_lifecycle") == "agreed", (
+        f"instance B did not receive the copy that instance A signed: {body.get('extrinsic_lifecycle')!r}"
+    )
     apply_resp = _run_ceremony_and_sign(
         context, context.base_url_b, "B", context.peer_did_b, "PeerCountersignature",
     )

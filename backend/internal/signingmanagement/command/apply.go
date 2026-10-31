@@ -110,7 +110,7 @@ var ErrStaleRevision = fmt.Errorf("%w: it was prepared from a revision that a la
 // revision was prepared before a later signature was applied. An unsigned
 // current revision holds no signature that the submission could drop.
 func assertLatestRevision(current, prepared []byte) error {
-	if provenance.CarriesPAdESSignature(current) && !bytes.HasPrefix(prepared, current) {
+	if !provenance.ExtendsSignedRevision(current, prepared) {
 		return ErrStaleRevision
 	}
 	return nil

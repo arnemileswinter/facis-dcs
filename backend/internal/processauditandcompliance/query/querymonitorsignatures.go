@@ -24,6 +24,11 @@ const RiskTypeInvalidCredential = "INVALID_CREDENTIAL" // #nosec G101 -- risk ty
 // the signing deadline its document states has passed (DCS-FR-SM-13).
 const RiskTypeSigningDeadlineMissed = "SIGNING_DEADLINE_MISSED"
 
+// RiskTypeSigningConflict flags a contract whose signed copy was refused
+// between this instance and a peer, because each instance holds a signature
+// over the same revision (ADR-38 §2).
+const RiskTypeSigningConflict = "SIGNING_CONFLICT"
+
 // unsignedStates are the states of a contract on its way to signature.
 var unsignedStates = []string{"OFFERED", "NEGOTIATION", "SUBMITTED", "REVIEWED", "APPROVED"}
 
@@ -67,8 +72,44 @@ func signatureRisks(ctx context.Context, tx *sqlx.Tx, checkedAt time.Time) ([]ev
         ORDER BY did`, pq.Array(unsignedStates)); err != nil {
 		return nil, fmt.Errorf("could not read contracts waiting for signatures: %w", err)
 	}
+	var conflicts []signingConflict
+	if err := tx.SelectContext(ctx, &conflicts, `
+        SELECT did, event_data ->> 'peer_did' AS peer_did, event_data ->> 'direction' AS direction
+        FROM outbox_events
+        WHERE event_type = $1
+        ORDER BY id`, event2.SigningConflictEvent{}.EventType()); err != nil {
+		return nil, fmt.Errorf("could not read signing conflicts: %w", err)
+	}
 	risks := signatureRisksFrom(late, revoked, checkedAt)
+	risks = append(risks, signingConflictRisksFrom(conflicts, checkedAt)...)
 	return append(risks, signingDeadlineRisksFrom(unsigned, checkedAt)...), nil
+}
+
+// signingConflict is one recorded refusal of a signed copy between this
+// instance and a peer.
+type signingConflict struct {
+	DID       string `db:"did"`
+	PeerDID   string `db:"peer_did"`
+	Direction string `db:"direction"`
+}
+
+// signingConflictRisksFrom flags each recorded signing conflict. A recorded
+// conflict stays an open risk.
+func signingConflictRisksFrom(conflicts []signingConflict, checkedAt time.Time) []event2.ComplianceRisk {
+	risks := make([]event2.ComplianceRisk, 0, len(conflicts))
+	for _, conflict := range conflicts {
+		detail := fmt.Sprintf("%s refused the signed copy of this instance: both instances hold a signature over the same revision", conflict.PeerDID)
+		if conflict.Direction == event2.SigningConflictReceived {
+			detail = fmt.Sprintf("this instance refused the signed copy of %s: both instances hold a signature over the same revision", conflict.PeerDID)
+		}
+		risks = append(risks, event2.ComplianceRisk{
+			DID:        conflict.DID,
+			RiskType:   RiskTypeSigningConflict,
+			Detail:     detail,
+			DetectedAt: checkedAt,
+		})
+	}
+	return risks
 }
 
 // signingDeadlineRisksFrom flags each contract whose signing deadline lies

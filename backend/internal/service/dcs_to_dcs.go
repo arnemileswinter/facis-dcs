@@ -289,17 +289,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 		Pdf:          req.Pdf,
 		AdoptRevoked: adoptRevoked,
 	}); err != nil {
-		if artifactstore.IsShredded(err) {
-			return nil, contractworkflowengine.MakeBadRequest(
-				fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", req.ContractIri, err))
-		}
-
-		if errors.Is(err, command.ErrShippedDisagreesWithLocalRound) {
-			return nil, contractworkflowengine.MakeBadRequest(
-				fmt.Errorf("post_pdf rejected: %w", err))
-		}
-
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, receiverError(req.ContractIri, err)
 	}
 
 	if syncSignature != nil {
@@ -317,6 +307,22 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	}
 
 	return &dcstodcs.DCSToDCSContractPdfResponse{FromPeerDid: localPeer}, nil
+}
+
+// receiverError maps an error of the local receiver to the post_pdf error the
+// peer gets. A signing conflict is a conflict, so the peer does not ship the
+// same copy again (ADR-38 §2).
+func receiverError(contractIRI string, err error) error {
+	switch {
+	case artifactstore.IsShredded(err):
+		return contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", contractIRI, err))
+	case errors.Is(err, command.ErrSigningConflict):
+		return dcstodcs.MakeConflict(fmt.Errorf("post_pdf rejected: %w", err))
+	case errors.Is(err, command.ErrShippedDisagreesWithLocalRound):
+		return contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
+	}
+	return contractworkflowengine.MakeInternalError(err)
 }
 
 // recordSyncSignature stores the verified signature a peer shipped. This

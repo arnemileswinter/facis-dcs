@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -17,6 +18,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
+	pacevent "digital-contracting-service/internal/processauditandcompliance/event"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -44,6 +46,12 @@ type PeerPdfReceiveCmd struct {
 	// (DCS-NFR-BR-06). The sole exception to intrinsic-state privacy.
 	AdoptRevoked bool
 }
+
+// ErrSigningConflict refuses a shipped PDF that does not extend the signed
+// revision the local copy holds. Signatures are applied in sequence (ADR-38
+// §2): two signatures over the same revision are refused, never merged, and
+// the local copy is not overwritten.
+var ErrSigningConflict = errors.New("the shipped PDF does not extend the signed revision this instance holds: signatures over the same revision are refused, never merged or overwritten")
 
 // PeerPdfReceiver upserts a peer-shipped contract into this instance's own
 // store and opens its own local workflow tasks (ADR-13): each DCS runs its own
@@ -88,6 +96,36 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	existing, err := h.CRepo.ReadProcessDataByDIDOrNil(ctx, tx, cmd.ContractIRI)
 	if err != nil {
 		return fmt.Errorf("could not read local contract copy: %w", err)
+	}
+
+	// A shipped PDF replaces the local copy only if it extends the signed
+	// revision this instance holds (ADR-38 §2). The local signing path takes
+	// the same lock, so this reads the latest local signature.
+	keepLocalPDF := false
+	if existing != nil && len(cmd.Pdf) > 0 {
+		current, err := h.currentPDF(ctx, tx, cmd.ContractIRI)
+		if err != nil {
+			return err
+		}
+		if !provenance.ExtendsSignedRevision(current, cmd.Pdf) {
+			switch {
+			case cmd.AdoptRevoked:
+				// The revocation voids the agreement; the local signed copy stays.
+				keepLocalPDF = true
+			case bytes.HasPrefix(current, cmd.Pdf):
+				// The local copy already contains the shipped revision.
+				return nil
+			default:
+				if err := pacevent.RecordSigningConflictTx(ctx, tx, cmd.ContractIRI, cmd.Counterparty,
+					pacevent.SigningConflictReceived, ErrSigningConflict.Error()); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("could not record the signing conflict on %s: %w", cmd.ContractIRI, err)
+				}
+				return ErrSigningConflict
+			}
+		}
 	}
 
 	// pdf-core carries the contract JSON-LD VERBATIM (ADR-13): the shipped payload
@@ -202,7 +240,7 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	// service verified the human-readable render matches the embedded JSON-LD
 	// before this; this instance's own later changes append to this base (so the
 	// C2PA chain grows rather than resetting).
-	if len(cmd.Pdf) > 0 {
+	if len(cmd.Pdf) > 0 && !keepLocalPDF {
 		// The receiver encrypts the peer's verbatim bytes with its OWN CEK; the
 		// inbound PDF stays authoritative and byte-identical after decrypt.
 		storedCID, err := h.Artifacts.Put(ctx, artifactstore.ContractScope(cmd.ContractIRI), cmd.Pdf)
@@ -249,6 +287,23 @@ func (h *PeerPdfReceiver) Handle(ctx context.Context, cmd PeerPdfReceiveCmd) err
 	}
 
 	return tx.Commit()
+}
+
+// currentPDF returns the PDF bytes of the local copy, or nil if no PDF is
+// stored yet.
+func (h *PeerPdfReceiver) currentPDF(ctx context.Context, tx *sqlx.Tx, did string) ([]byte, error) {
+	state, err := h.CRepo.ReadPDFState(ctx, tx, did)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the PDF state of the local copy of %s: %w", did, err)
+	}
+	if state == nil || state.IPFSCID == "" {
+		return nil, nil
+	}
+	current, err := h.Artifacts.Get(ctx, artifactstore.ContractScope(did), state.IPFSCID)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the PDF of the local copy of %s: %w", did, err)
+	}
+	return current, nil
 }
 
 func isSignedArtifactReship(cmd PeerPdfReceiveCmd) bool {
