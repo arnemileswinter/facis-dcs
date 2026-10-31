@@ -34,7 +34,7 @@ func TestTemplateVerifyAgainstProvenanceCredentialPostgres(t *testing.T) {
 
 	insert := func(did, base string, version int, state string) {
 		t.Helper()
-		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3,$4,$5)`, did, state, sodTemplateData, version, base)
+		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template,compliance_status) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3,$4,$5,'COMPLIANT')`, did, state, sodTemplateData, version, base)
 		require.NoError(t, err)
 	}
 	findings := func(did string) []string {

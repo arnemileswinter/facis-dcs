@@ -84,6 +84,9 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		default:
 			return nil, fmt.Errorf("%w: %s cannot be registered", ErrInvalidTemplateState, existing.State)
 		}
+		if existing.ComplianceStatus != Compliant {
+			return nil, fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, existing.ComplianceStatus)
+		}
 
 		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, existing.State, contracttemplatestate.Registered.String())
 		if err != nil {

@@ -72,7 +72,10 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
+	}
+	if fullTemplate.ComplianceStatus != Compliant {
+		return fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, fullTemplate.ComplianceStatus)
 	}
 
 	if h.FCClient == nil {
@@ -106,7 +109,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return nil
 	}
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
 	}
 
 	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Published.String())

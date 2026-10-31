@@ -35,7 +35,7 @@ func TestTemplateRegisterRequiresApprovedPostgres(t *testing.T) {
 	for state, want := range cases {
 		t.Run(state, func(t *testing.T) {
 			did := "register-" + state
-			_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n','{}')`, did, state)
+			_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,compliance_status) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n','{}','COMPLIANT')`, did, state)
 			require.NoError(t, err)
 			_, err = registrar.Handle(ctx, command.RegisterCmd{DID: did, RegisteredBy: "manager", UserRoles: userrole.UserRoles{userrole.TemplateManager}})
 			var stored string

@@ -41,7 +41,7 @@ func TestTemplateDeprecationWithdrawsCatalogueAssetPostgres(t *testing.T) {
 	require.NoError(t, err)
 
 	ctRepo := &pg.PostgresContractTemplateRepo{}
-	_, err = database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,description,template_data) VALUES ('tpl','creator','REGISTERED','CONTRACT_TEMPLATE','SINGLE_PARTY','n','d',$1)`, sodTemplateData)
+	_, err = database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,description,template_data,compliance_status) VALUES ('tpl','creator','REGISTERED','CONTRACT_TEMPLATE','SINGLE_PARTY','n','d',$1,'COMPLIANT')`, compliantTemplateData)
 	require.NoError(t, err)
 	future := time.Now().Add(time.Hour)
 	require.NoError(t, (&command.Publisher{DB: database, CTRepo: ctRepo, FCClient: fc}).Handle(ctx, command.PublishCmd{DID: "tpl", UpdatedAt: future, PublishedBy: "manager", InstanceDID: "did:web:dcs.example"}))
