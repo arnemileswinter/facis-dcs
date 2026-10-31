@@ -29,6 +29,7 @@ import {
 import { reportBulk, runBulk } from '@/utils/bulk-action'
 import { downloadBlob } from '@/utils/download-blob'
 import { claimReportedHttpError } from '@/utils/report-action-error'
+import ArchiveSectionsPanel from './ArchiveSectionsPanel.vue'
 
 /**
  * Contract Archive Dashboard (DCS-FR-CSA-21): an overview of archived
@@ -39,7 +40,8 @@ import { claimReportedHttpError } from '@/utils/report-action-error'
  * (DCS-FR-CSA-17, DCS-NFR-SEC-13), store contracts and evidence
  * (DCS-IR-CSA-02), terminate archived contracts (DCS-IR-CSA-03), see the
  * compliance verdict per entry (DCS-FR-CSA-19) and search the archive
- * (DCS-FR-CSA-22).
+ * (DCS-FR-CSA-22). Readers of the entries open the per-party sections of an
+ * archived contract, which the Archive Manager archives (DCS-FR-CSA-26).
  */
 
 const statistics = ref<ArchiveStatistics | null>(null)
@@ -208,6 +210,14 @@ async function toggleEvidence(did: string) {
   } catch {
     // the shared http interceptor already surfaced the server's error
   }
+}
+
+// DCS-FR-CSA-26: per-party sections of an archived contract.
+const expandedSectionsKey = ref<string | null>(null)
+
+function toggleSections(entry: ArchivedContract) {
+  const key = `${entry.did}#${entry.contract_version}`
+  expandedSectionsKey.value = expandedSectionsKey.value === key ? null : key
 }
 
 function downloadEvidence(item: ArchiveEvidenceItem) {
@@ -653,7 +663,7 @@ function shortDid(did: string): string {
                 <th>Annotation</th>
                 <th v-if="isArchiveManager">Compliance</th>
                 <th v-if="isArchiveManager">Encryption</th>
-                <th v-if="isArchiveManager"><span class="sr-only">Actions</span></th>
+                <th><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -748,45 +758,60 @@ function shortDid(did: string): string {
                       Keys live
                     </button>
                   </td>
-                  <td v-if="isArchiveManager" class="space-y-1">
-                    <RouterLink
-                      :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: entry.did } }"
-                      class="btn btn-ghost btn-sm"
-                    >
-                      Audit
-                    </RouterLink>
+                  <td class="space-y-1">
                     <button
                       class="btn btn-ghost btn-sm"
-                      :disabled="annotating"
-                      :data-testid="`archive-annotate-${entry.did}`"
-                      @click="annotateEntry(entry)"
+                      :aria-expanded="expandedSectionsKey === `${entry.did}#${entry.contract_version}`"
+                      :data-testid="`archive-sections-${entry.did}`"
+                      @click="toggleSections(entry)"
                     >
-                      Annotate
+                      Sections
                     </button>
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      :data-testid="`archive-evidence-${entry.did}`"
-                      @click="toggleEvidence(entry.did)"
-                    >
-                      Evidence
-                    </button>
-                    <button
-                      v-if="!terminalStates.includes(entry.state)"
-                      class="btn btn-ghost btn-sm"
-                      :disabled="terminating"
-                      :data-testid="`archive-terminate-${entry.did}`"
-                      @click="terminateEntry(entry)"
-                    >
-                      Terminate
-                    </button>
-                    <button
-                      class="btn text-error btn-ghost btn-sm"
-                      :disabled="deleting"
-                      :data-testid="`archive-delete-${entry.did}`"
-                      @click="deleteEntry(entry)"
-                    >
-                      Delete
-                    </button>
+                    <template v-if="isArchiveManager">
+                      <RouterLink
+                        :to="{ name: ROUTES.AUDIT.LIST, query: { scope: 'archive', did: entry.did } }"
+                        class="btn btn-ghost btn-sm"
+                      >
+                        Audit
+                      </RouterLink>
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        :disabled="annotating"
+                        :data-testid="`archive-annotate-${entry.did}`"
+                        @click="annotateEntry(entry)"
+                      >
+                        Annotate
+                      </button>
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        :data-testid="`archive-evidence-${entry.did}`"
+                        @click="toggleEvidence(entry.did)"
+                      >
+                        Evidence
+                      </button>
+                      <button
+                        v-if="!terminalStates.includes(entry.state)"
+                        class="btn btn-ghost btn-sm"
+                        :disabled="terminating"
+                        :data-testid="`archive-terminate-${entry.did}`"
+                        @click="terminateEntry(entry)"
+                      >
+                        Terminate
+                      </button>
+                      <button
+                        class="btn text-error btn-ghost btn-sm"
+                        :disabled="deleting"
+                        :data-testid="`archive-delete-${entry.did}`"
+                        @click="deleteEntry(entry)"
+                      >
+                        Delete
+                      </button>
+                    </template>
+                  </td>
+                </tr>
+                <tr v-if="expandedSectionsKey === `${entry.did}#${entry.contract_version}`">
+                  <td colspan="7">
+                    <ArchiveSectionsPanel :entry="entry" :can-store="isArchiveManager" />
                   </td>
                 </tr>
                 <tr v-if="expandedEvidenceDid === entry.did">

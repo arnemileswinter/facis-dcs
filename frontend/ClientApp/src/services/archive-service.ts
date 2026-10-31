@@ -50,10 +50,24 @@ export interface ArchiveErasureStatus {
 /** The record /archive/store wrote (DCS-IR-CSA-02). */
 export interface ArchiveStoreResult {
   did: string
-  kind: 'contract' | 'evidence'
+  kind: 'contract' | 'evidence' | 'section'
   contract_version?: number
   evidence_id?: string
+  section_id?: string
   content_hash: string
+}
+
+/** A contract section archived for the parties assigned to it (DCS-FR-CSA-26). `content` is absent once erased. */
+export interface ArchiveSectionItem {
+  id: string
+  did: string
+  contract_version: number
+  section_id: string
+  parties: string[]
+  content_hash: string
+  stored_by: string
+  stored_at: string
+  content?: Record<string, unknown>
 }
 
 /** An evidence document stored for an archived contract. `content` is base64 and absent once erased. */
@@ -129,6 +143,18 @@ export const archiveService = {
     return http
       .post<ArchiveStoreResult>('/archive/store', { kind: 'evidence', did, ...evidence })
       .then((res) => res.data)
+  },
+
+  /** Archives one section or clause block of the latest archived version for the parties that may read it (DCS-FR-CSA-26). */
+  async storeSection(did: string, section_id: string, parties: string[]): Promise<ArchiveStoreResult> {
+    return http
+      .post<ArchiveStoreResult>('/archive/store', { kind: 'section', did, section_id, parties })
+      .then((res) => res.data)
+  },
+
+  /** The archived sections of a contract that the caller's organization may read (DCS-FR-CSA-26). */
+  async sections(did: string): Promise<ArchiveSectionItem[]> {
+    return http.get<ArchiveSectionItem[]>('/archive/sections', { params: { did } }).then((res) => res.data ?? [])
   },
 
   async evidence(did: string): Promise<ArchiveEvidenceItem[]> {
