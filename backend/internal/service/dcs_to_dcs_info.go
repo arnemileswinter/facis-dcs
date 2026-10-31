@@ -2,14 +2,10 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
 
-	"goa.design/clue/log"
-
-	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	trustgate "digital-contracting-service/internal/dcstodcs"
@@ -22,30 +18,10 @@ import (
 // authenticated counterparty DCS (DCS-IR-SI-06). The peer passes the same
 // challenge-response and federation trust gate as post_pdf, and must be a
 // party of the contract.
-func (s *dcsToDcssrvc) GetContractInfo(ctx context.Context, req *dcstodcs.DCSToDCSContractInfoRequest) (*dcstodcs.DCSToDCSContractInfoResponse, error) {
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("requesting contract information from the same peer is not allowed"))
-	}
-	if err := s.TrustGate.Check(ctx, req.FromPeerDid, trustgate.Inbound, req.ContractIri, ""); err != nil {
-		var gateErr *trustgate.GateError
-		if errors.As(err, &gateErr) {
-			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
-				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
-			}
-		}
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("get_contract_info rejected: peer %s does not pass the federation trust gate: %w", req.FromPeerDid, err))
+func (s *dcsToDcssrvc) GetContractInfo(ctx context.Context, req *dcstodcs.DCSToDCSContractInfoRequest) (res *dcstodcs.DCSToDCSContractInfoResponse, err error) {
+	defer func() { s.auditReceivedExchange(ctx, "get_contract_info", req.ContractIri, req.FromPeerDid, err) }()
+	if _, _, err := s.admitPeer(ctx, trustgate.OpGetContractInfo, req.FromPeerDid, req.ContractIri, nil, req.SecretValue, req.SecretHash); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.DB.BeginTxx(ctx, nil)

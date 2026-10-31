@@ -22,11 +22,12 @@ var archivableStates = map[string]bool{
 
 // BuildManualArchiveEntry freezes the current version of a SIGNED, TERMINATED
 // or EXPIRED contract for an archive entry an Archive Manager stores, with the
-// signatures this instance applied and the signatures a peer applied
-// (DCS-FR-CSA-06, DCS-FR-CSA-07, DCS-FR-CSA-08). A contract that carries no
-// signature is not archived: the signing workflow ran its compliance gates
-// and the synchronization check of the signed PDF before any signature.
-func BuildManualArchiveEntry(contract *db.Contract, storedBy string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
+// signatures this instance applied, the signatures a peer applied and the
+// version history (ReadHistoryByDID) (DCS-FR-CSA-06, DCS-FR-CSA-07,
+// DCS-FR-CSA-08, DCS-FR-CWE-20). A contract that carries no signature is not
+// archived: the signing workflow ran its compliance gates and the
+// synchronization check of the signed PDF before any signature.
+func BuildManualArchiveEntry(contract *db.Contract, history []db.ContractHistory, storedBy string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
 	if contract == nil {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract is required")
 	}
@@ -36,5 +37,5 @@ func BuildManualArchiveEntry(contract *db.Contract, storedBy string, signatures 
 	if len(signatures) == 0 && len(peerSignatures) == 0 {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s was never signed; only a signed contract can be archived", contract.DID)
 	}
-	return buildSignedArchiveEntry(contract, storedBy, ArchiveManagerStoreSource, signatures, peerSignatures)
+	return buildSignedArchiveEntry(contract, history, storedBy, ArchiveManagerStoreSource, signatures, peerSignatures)
 }

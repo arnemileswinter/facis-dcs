@@ -26,7 +26,7 @@ type GetAllMetadataByFilterQry struct {
 	RetrievedBy     string
 	DID             string
 	ContractVersion int
-	State           *contractstate.ContractState
+	States          []string
 	Name            string
 	Description     string
 	ContractData    string
@@ -73,15 +73,10 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		}
 	}(tx)
 
-	var state string
-	if query.State != nil {
-		state = query.State.String()
-	}
-
 	searchValues := db.SearchValues{
 		DID:             query.DID,
 		ContractVersion: query.ContractVersion,
-		State:           state,
+		States:          query.States,
 		Name:            query.Name,
 		Description:     query.Description,
 		ContractData:    query.ContractData,

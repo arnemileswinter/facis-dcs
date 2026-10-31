@@ -39,7 +39,7 @@ func signedArchiveEntry(t *testing.T, signatures ...cwecommand.ArchiveSigningEvi
 	t.Helper()
 	data := datatype.JSON(`{"dcs:signatureFields":[{"dcs:signatoryName":"did:web:a","dcs:requiredCredentialType":"QES"},{"dcs:signatoryName":"did:web:b"}]}`)
 	entry, err := cwecommand.BuildArchiveEntry(&db.Contract{DID: "did:web:dcs:contract:c", State: "SIGNED", ContractVersion: 1, ContractData: &data},
-		"did:web:a", signatures, json.RawMessage(`[{"party":"did:web:peer","signatory":"did:key:peer"}]`))
+		nil, "did:web:a", signatures, json.RawMessage(`[{"party":"did:web:peer","signatory":"did:key:peer"}]`))
 	require.NoError(t, err)
 	entry.TSAReceipt = complianceJSON(t, map[string]any{"token": "t"})
 	return entry

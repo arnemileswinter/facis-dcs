@@ -906,10 +906,19 @@ function shortDid(did: string): string {
                             <td>
                               <span
                                 class="badge badge-sm"
-                                :class="peer.status === 'confirmed' ? 'badge-success' : 'badge-warning'"
+                                :class="
+                                  peer.status === 'confirmed'
+                                    ? 'badge-success'
+                                    : peer.status === 'refused'
+                                      ? 'badge-error'
+                                      : 'badge-warning'
+                                "
                               >
                                 {{ peer.status }}
                               </span>
+                              <div v-if="peer.last_error" class="mt-1 text-xs break-all opacity-70">
+                                {{ peer.last_error }}
+                              </div>
                             </td>
                             <td>{{ formatTimestamp(peer.requested_at) }}</td>
                             <td>{{ peer.confirmed_at ? formatTimestamp(peer.confirmed_at) : '—' }}</td>

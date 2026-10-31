@@ -21,7 +21,7 @@
 # backend/internal/auth/oid4vp/poa_chain_test.go generate such chains. The
 # testWallet issues no delegated credentials, and the local ceremony verifies
 # the signer's PoA against the login issuer of this instance (ADR-35), so the
-# scenarios below stay @skip.
+# delegated-authority scenario below stays @skip.
 
 @UC-14 @DCS-FR-SM-03 @DCS-FR-SM-04
 Feature: Power-of-Attorney credential verification at signing
@@ -37,12 +37,13 @@ Feature: Power-of-Attorney credential verification at signing
     Then the PoA credential chain is verified to a trusted root
     And the signature is bound to the delegated authority
 
-  # @skip: the testWallet presents no revoked PoA at the signing ceremony.
-  # A revoked link of a counterparty's chain is refused
-  # (TestVerifyCounterpartyPoA_RevokedLinkRefusesTheChain); plain revocation
-  # blocking is live in every verify path.
-  @skip @UC-14-01 @DCS-FR-SM-04
+  # The PoA presented at the ceremony has its status-list bit revoked on the
+  # issuer first; the refusal must name that bit. A revoked link of a
+  # counterparty's chain is refused in
+  # TestVerifyCounterpartyPoA_RevokedLinkRefusesTheChain.
+  @UC-14-01 @DCS-FR-SM-03 @DCS-FR-SM-04
   Scenario: A revoked PoA credential blocks signing
-    Given I hold a revoked PoA credential for organization "BDD Org"
-    When I attempt to initiate signing for contract "PoA Revoked Contract"
-    Then the request is denied with a client error
+    Given contract "PoA Revoked Contract" has reached contract state "APPROVED"
+    When a signing ceremony is started for the signing party of contract "PoA Revoked Contract"
+    And the ceremony presentation is completed with a revoked Power of Attorney
+    Then the ceremony presentation is refused for the revoked Power of Attorney

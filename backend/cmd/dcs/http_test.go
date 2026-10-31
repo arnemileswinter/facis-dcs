@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	goahttp "goa.design/goa/v3/http"
 
 	pdfgeneration "digital-contracting-service/gen/pdf_generation"
 )
@@ -112,4 +116,41 @@ func TestMetricsOnlyOnMetricsListener(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "# HELP") {
 		t.Errorf("metrics GET /metrics = %d, body %.80q; want 200 with Prometheus text", rec.Code, rec.Body.String())
 	}
+}
+
+// DCS-NFR-PER-01 (NFR-8): the request metrics are labelled with the route
+// pattern and a known method, so requests to unknown paths or with invented
+// methods add no new series.
+func TestMetricsLabelsStayBounded(t *testing.T) {
+	goaMux := goahttp.NewMuxer()
+	goaMux.Handle(http.MethodGet, "/contract/{did}", func(w http.ResponseWriter, _ *http.Request) {})
+	handler := metricsMiddleware(recordRoute(newOuterMux(http.NotFoundHandler(), http.NotFoundHandler(), goaMux)))
+	serve := func(method, path string) {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, nil))
+	}
+
+	before := seriesCount(httpRequestsTotal)
+	for i := range 100 {
+		serve(http.MethodPost, fmt.Sprintf("/scan/%d", i))
+		serve(http.MethodGet, fmt.Sprintf("/contract/did:example:%d", i))
+	}
+	serve("FOO", "/contract/did:example:1")
+	if added := seriesCount(httpRequestsTotal) - before; added > 3 {
+		t.Fatalf("201 requests added %d label sets, want at most 3", added)
+	}
+	for _, labels := range [][]string{{http.MethodGet, "/contract/{did}", "200"}, {"OTHER", "/", "405"}} {
+		if !httpRequestsTotal.DeleteLabelValues(labels...) {
+			t.Errorf("no series %v", labels)
+		}
+	}
+}
+
+func seriesCount(c prometheus.Collector) int {
+	ch := make(chan prometheus.Metric)
+	go func() { c.Collect(ch); close(ch) }()
+	n := 0
+	for range ch {
+		n++
+	}
+	return n
 }

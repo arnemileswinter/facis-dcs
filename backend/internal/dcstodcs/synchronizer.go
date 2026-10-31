@@ -11,7 +11,6 @@ package dcstodcs
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -529,13 +528,12 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 		if len(segments) > 0 {
 			peerPrefix = "/" + strings.Join(segments, "/")
 		}
-		secretValue := rand.Text()
-		secretHash, err := s.DIDDocument.Sign([]byte(secretValue))
+		secretValue, secretHash, err := SignPeerChallenge(&s.DIDDocument, OpPostPdf, localPeer, peer, did, pdfBytes)
 		if err != nil {
 			return err
 		}
 		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
-		if err := s.deliverPdf(ctx, client, peer, &dcstodcs.DCSToDCSContractPdfRequest{
+		if err := s.deliverPdf(ctx, client, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
 			Pdf:            pdfBytes,
@@ -547,12 +545,6 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			PinnedShapes:   WirePinnedShapes(pinnedShapes),
 		}); err != nil {
 			return err
-		}
-		// The peer accepted this revision, or refused it as a signing conflict,
-		// which it does again for every repeat. Either way the revision is not
-		// posted to this peer again.
-		if err := s.recordPDFDelivery(ctx, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}); err != nil {
-			log.Printf(ctx, "could not record the delivery of %s to %s: %v", did, peer, err)
 		}
 	}
 	return nil
@@ -570,28 +562,41 @@ func (s *DCSToDCSSynchronizer) recordPDFDelivery(ctx context.Context, delivery d
 	return tx.Commit()
 }
 
-// deliverPdf posts one PDF ship to one peer. A peer that refuses the copy as a
-// signing conflict (ADR-38 §2) refuses it again on every retry, so the
-// conflict is recorded on this instance and the ship gets no retry entry.
-func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, peer string, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+// deliverPdf posts one revision to delivery.PeerDID. A revision the peer
+// accepted is recorded as delivered and is not posted to that peer again. A
+// revision the peer refused as a signing conflict (ADR-38 §2) is recorded as a
+// conflict on this instance, gets no retry entry and is not recorded as
+// delivered, so the next ship offers it again once the peer resolved the
+// conflict. A peer whose copy is closed (TERMINATED, EXPIRED or WITHDRAWN)
+// takes no ship: the revision is recorded as delivered and not posted again.
+func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, delivery db2.PDFDelivery, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+	peer := delivery.PeerDID
 	if _, err := client.PostPdf(ctx, req); err != nil {
-		if !isSigningConflict(err) {
+		switch peerRefusal(err) {
+		case "conflict":
+			log.Printf(ctx, "peer %s refused the copy of %s as a signing conflict: %v", peer, req.ContractIri, err)
+			return s.recordSigningConflict(ctx, req.ContractIri, peer, err)
+		case "gone":
+			log.Printf(ctx, "peer %s holds a closed copy of %s and takes no ship: %v", peer, req.ContractIri, err)
+		default:
 			return err
 		}
-		log.Printf(ctx, "peer %s refused the copy of %s as a signing conflict: %v", peer, req.ContractIri, err)
-		return s.recordSigningConflict(ctx, req.ContractIri, peer, err)
-	}
-	if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
+	} else if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
 		log.Printf(ctx, "could not audit the ship of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	if err := s.recordPDFDelivery(ctx, delivery); err != nil {
+		log.Printf(ctx, "could not record the delivery of %s to %s: %v", req.ContractIri, peer, err)
 	}
 	return nil
 }
 
-// isSigningConflict reports whether a peer refused a shipped PDF because it
-// does not extend the signed revision the peer holds.
-func isSigningConflict(err error) bool {
+// peerRefusal returns the name of the error a peer answered with, or "".
+func peerRefusal(err error) string {
 	var serviceErr *goa.ServiceError
-	return errors.As(err, &serviceErr) && serviceErr.Name == "conflict"
+	if errors.As(err, &serviceErr) {
+		return serviceErr.Name
+	}
+	return ""
 }
 
 // recordSigningConflict records on this instance that the peer refused its

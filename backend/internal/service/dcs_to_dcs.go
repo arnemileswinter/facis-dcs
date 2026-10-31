@@ -10,14 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"goa.design/clue/log"
+	goa "goa.design/goa/v3/pkg"
 
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
+	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 
 	trustgate "digital-contracting-service/internal/dcstodcs"
@@ -52,11 +53,21 @@ type dcsToDcssrvc struct {
 	TrustPool   *identity.EUTrustPool
 	Artifacts   *artifactstore.Store
 	PDFCore     *pdfcore.Client
-	TrustGate   trustgate.TrustGate
+	TrustGate   peerGate
+	Nonces      trustgate.PeerNonces
 	PoAGate     trustgate.CounterpartyPoAGate
 	Shredder    trustgate.ScopeShredder
-	Parties     trustgate.ContractParties
+	Erasure     trustgate.PeerErasure
+	// ArchiveNotary and ArchiveTSA notarize and timestamp the execution proof
+	// written when the last counterparty signature arrives (DCS-FR-SM-10).
+	ArchiveNotary command.ArchiveNotary
+	ArchiveTSA    command.ArchiveTimestampIssuer
 	auth.JWTAuthenticator
+}
+
+// peerGate is the ADR-19 federation trust gate of the inbound peer requests.
+type peerGate interface {
+	Check(ctx context.Context, peerDID string, direction trustgate.Direction, contractDID, targetState string) error
 }
 
 func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
@@ -64,9 +75,12 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, syncRepo db2.SyncRepository,
 	trustPool *identity.EUTrustPool,
 	didDocument identity.DIDDocument, artifacts *artifactstore.Store, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate,
-	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder) dcstodcs.Service {
+	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder,
+	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient) dcstodcs.Service {
 
 	return &dcsToDcssrvc{
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
@@ -80,10 +94,11 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 		TrustPool:        trustPool,
 		Artifacts:        artifacts,
 		PDFCore:          pdfCore,
-		TrustGate:        trustGate,
+		TrustGate:        &trustGate,
+		Nonces:           trustgate.DBPeerNonces{DB: db},
 		PoAGate:          poaGate,
 		Shredder:         shredder,
-		Parties:          &trustgate.DBContractParties{DB: db, CRepo: cRepo},
+		Erasure:          trustgate.DBPeerErasure{DB: db, CRepo: cRepo},
 	}
 }
 
@@ -118,36 +133,9 @@ func (s *dcsToDcssrvc) assertionKeyOf(ownerDID, localPeer, peerDID string, peerD
 // the contract. No tasks cross the boundary — each DCS runs its own workflow.
 func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContractPdfRequest) (res *dcstodcs.DCSToDCSContractPdfResponse, err error) {
 	defer func() { s.auditReceivedExchange(ctx, "post_pdf", req.ContractIri, req.FromPeerDid, err) }()
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	remoteDIDDocument, localPeer, err := s.admitPeer(ctx, trustgate.OpPostPdf, req.FromPeerDid, req.ContractIri, req.Pdf, req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("shipping a contract PDF to the same peer is not allowed"))
-	}
-
-	// Federation trust gate (ADR-19): the peer's self-signed agreement
-	// credential must verify against its own did.json's dedicated VC key and
-	// name this instance's own embedded federation rules hash (layer 3a), and
-	// this instance's own local policy endpoint must allow the interaction
-	// (layer 3b). Any rejection is recorded as an incident in the audit trail.
-	if err := s.TrustGate.Check(ctx, req.FromPeerDid, trustgate.Inbound, req.ContractIri, ""); err != nil {
-		var gateErr *trustgate.GateError
-		if errors.As(err, &gateErr) {
-			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, req.ContractIri, trustgate.Inbound, gateErr); incidentErr != nil {
-				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", req.ContractIri, incidentErr)
-			}
-		}
-		return nil, contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("post_pdf rejected: peer %s does not pass the federation trust gate: %w", req.FromPeerDid, err))
+		return nil, err
 	}
 
 	// Legal gate: the received PDF's human-readable page content MUST be the
@@ -293,7 +281,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	}
 
 	if syncSignature != nil {
-		if err := s.recordSyncSignature(ctx, *syncSignature); err != nil {
+		if err := s.recordSyncSignature(ctx, *syncSignature, localPeer, req.Pdf); err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
 	}
@@ -319,6 +307,8 @@ func receiverError(contractIRI string, err error) error {
 			fmt.Errorf("post_pdf rejected: contract %s was erased on this instance (key shredded): %w", contractIRI, err))
 	case errors.Is(err, command.ErrSigningConflict):
 		return dcstodcs.MakeConflict(fmt.Errorf("post_pdf rejected: %w", err))
+	case errors.Is(err, command.ErrClosedCopy):
+		return dcstodcs.MakeGone(fmt.Errorf("post_pdf rejected: %w", err))
 	case errors.Is(err, command.ErrShippedDisagreesWithLocalRound):
 		return contractworkflowengine.MakeBadRequest(fmt.Errorf("post_pdf rejected: %w", err))
 	}
@@ -328,7 +318,7 @@ func receiverError(contractIRI string, err error) error {
 // recordSyncSignature stores the verified signature a peer shipped. This
 // instance archives the contract when its own signatures are complete, so a
 // counterparty signature that arrives later goes into that archive entry too.
-func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.SyncSignature) error {
+func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.SyncSignature, localPeer string, signedPDF []byte) error {
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -342,7 +332,23 @@ func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.Sy
 			return fmt.Errorf("add the peer signatures to the archive entry of %s: %w", signature.DID, err)
 		}
 	}
+	// The last counterparty signature completes the contract after this
+	// instance archived it: the proof of execution covers it (DCS-FR-SM-10).
+	if _, err := s.executionProofs().Record(ctx, tx, command.ExecutionProofInput{
+		DID: signature.DID, LocalPeer: localPeer, PeerDID: signature.FromPeerDID, PeerJAdES: signature.JadesSignature,
+		SignedPDF: signedPDF, StoredBy: signature.FromPeerDID,
+	}); err != nil {
+		return fmt.Errorf("record the execution proof of %s: %w", signature.DID, err)
+	}
 	return tx.Commit()
+}
+
+func (s *dcsToDcssrvc) executionProofs() command.ExecutionProofRecorder {
+	recorder := command.ExecutionProofRecorder{CRepo: s.CRepo, Notary: s.ArchiveNotary, TSA: s.ArchiveTSA}
+	if s.Artifacts != nil {
+		recorder.Storer = s.Artifacts
+	}
+	return recorder
 }
 
 // Erase shreds this instance's wrapped CEKs for a contract on request of the
@@ -354,26 +360,55 @@ func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.Sy
 // KEY_SHREDDED audit event naming the peer as actor. Idempotent: a repeated
 // request against an already-shredded contract just confirms again.
 func (s *dcsToDcssrvc) Erase(ctx context.Context, req *dcstodcs.DCSToDCSContractEraseRequest) (res *dcstodcs.DCSToDCSContractEraseResponse, err error) {
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	defer func() { s.auditReceivedExchange(ctx, "erase", req.ContractIri, req.FromPeerDid, err) }()
+	_, localPeer, err := s.admitPeer(ctx, trustgate.OpErase, req.FromPeerDid, req.ContractIri, nil, req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, err
 	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("requesting a contract erasure from the same peer is not allowed"))
-	}
-
-	if err := eraseForPeer(ctx, s.Shredder, s.Parties, req.FromPeerDid, req.ContractIri); err != nil {
+	if err := eraseForPeer(ctx, s.Shredder, s.Erasure, req.FromPeerDid, req.ContractIri); err != nil {
 		return nil, err
 	}
 	return &dcstodcs.DCSToDCSContractEraseResponse{FromPeerDid: localPeer}, nil
+}
+
+// admitPeer authenticates an inbound peer request (ADR-13) and runs the
+// federation trust gate (ADR-19) for it. Every peer endpoint calls it before
+// it reads or writes anything else. It returns the peer's DID document and the
+// DID of this instance.
+func (s *dcsToDcssrvc) admitPeer(ctx context.Context, op trustgate.PeerOp, fromDID, contractIRI string, body []byte, secretValue string, secretHash []byte) (*identity.DIDDocument, string, error) {
+	peerDocument, err := fetchPeerDIDDocument(fromDID)
+	if err != nil {
+		return nil, "", contractworkflowengine.MakeInternalError(err)
+	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, "", contractworkflowengine.MakeInternalError(err)
+	}
+	if identity.SameDIDWeb(fromDID, localPeer) {
+		return nil, "", contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("%s rejected: a request of this instance to itself is no peer exchange", op.Name))
+	}
+	if err := trustgate.VerifyPeerRequest(ctx, s.Nonces, peerDocument, s.TrustPool, localPeer, trustgate.PeerRequest{
+		Op: op, FromDID: fromDID, ContractIRI: contractIRI, Body: body, SecretValue: secretValue, SecretHash: secretHash,
+	}, time.Now()); err != nil {
+		if !errors.Is(err, trustgate.ErrPeerChallengeRefused) {
+			return nil, "", contractworkflowengine.MakeInternalError(err)
+		}
+		log.Printf(ctx, "%s from %s for %s refused: %v", op.Name, fromDID, contractIRI, err)
+		return nil, "", contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("%s rejected: peer %s did not authenticate: %w", op.Name, fromDID, err))
+	}
+	if err := s.TrustGate.Check(ctx, fromDID, trustgate.Inbound, contractIRI, ""); err != nil {
+		var gateErr *trustgate.GateError
+		if errors.As(err, &gateErr) {
+			if incidentErr := trustgate.RecordDenialIncident(ctx, s.DB, contractIRI, trustgate.Inbound, gateErr); incidentErr != nil {
+				log.Printf(ctx, "could not record trust gate denial incident for %s: %v", contractIRI, incidentErr)
+			}
+		}
+		return nil, "", contractworkflowengine.MakeBadRequest(
+			fmt.Errorf("%s rejected: peer %s does not pass the federation trust gate: %w", op.Name, fromDID, err))
+	}
+	return peerDocument, localPeer, nil
 }
 
 // auditReceivedExchange records a completed inbound peer exchange in the
@@ -390,23 +425,18 @@ func (s *dcsToDcssrvc) auditReceivedExchange(ctx context.Context, exchange, cont
 }
 
 // eraseForPeer authorizes and executes a peer-requested shred: only a party
-// of the contract may have its keys destroyed on the counterparty's request.
-func eraseForPeer(ctx context.Context, shredder trustgate.ScopeShredder, parties trustgate.ContractParties, peerDID, contractIRI string) error {
-	contractParties, err := parties.Parties(ctx, contractIRI)
-	if err != nil {
-		return contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("erase rejected: could not resolve parties of contract %s: %w", contractIRI, err))
-	}
-	isParty := false
-	for _, party := range contractParties {
-		if party == peerDID {
-			isParty = true
-			break
+// of the contract may have its keys destroyed on the counterparty's request,
+// and only when the local copy is no longer in force and no retention period
+// of its archive entries runs (DCS-FR-CWE-20, DCS-FR-CSA-17).
+func eraseForPeer(ctx context.Context, shredder trustgate.ScopeShredder, erasure trustgate.PeerErasure, peerDID, contractIRI string) error {
+	if err := erasure.AuthorizeErase(ctx, contractIRI, peerDID); err != nil {
+		switch {
+		case errors.Is(err, trustgate.ErrNoSharedCopy):
+			return dcstodcs.MakeNotFound(fmt.Errorf("erase rejected: %w", err))
+		case errors.Is(err, trustgate.ErrNotErasable):
+			return contractworkflowengine.MakeBadRequest(fmt.Errorf("erase rejected: %w", err))
 		}
-	}
-	if !isParty {
-		return contractworkflowengine.MakeBadRequest(
-			fmt.Errorf("erase rejected: peer %s is not a party of contract %s", peerDID, contractIRI))
+		return contractworkflowengine.MakeInternalError(err)
 	}
 
 	if _, err := shredder.Shred(ctx, contractIRI, peerDID, fmt.Sprintf("erasure requested by peer %s", peerDID)); err != nil {
@@ -418,22 +448,10 @@ func eraseForPeer(ctx context.Context, shredder trustgate.ScopeShredder, parties
 // Terminate applies a counterparty's termination notice to the local copy
 // (DCS-NFR-BR-06).
 func (s *dcsToDcssrvc) Terminate(ctx context.Context, req *dcstodcs.DCSToDCSContractTerminateRequest) (res *dcstodcs.DCSToDCSContractTerminateResponse, err error) {
-	if !strings.HasPrefix(req.SecretValue, trustgate.TerminationNoticePrefix(req.ContractIri)) {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("termination notice: the signed secret does not name this contract"))
-	}
-	remoteDIDDocument, err := fetchPeerDIDDocument(req.FromPeerDid)
+	defer func() { s.auditReceivedExchange(ctx, "terminate", req.ContractIri, req.FromPeerDid, err) }()
+	_, localPeer, err := s.admitPeer(ctx, trustgate.OpTerminate, req.FromPeerDid, req.ContractIri, trustgate.TerminationNoticeBody(req.Reason), req.SecretValue, req.SecretHash)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := remoteDIDDocument.VerifyPeerChallenge(s.TrustPool, []byte(req.SecretValue), req.SecretHash); err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	localPeer, err := s.DIDDocument.GetID()
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if identity.SameDIDWeb(req.FromPeerDid, localPeer) {
-		return nil, contractworkflowengine.MakeBadRequest(errors.New("a termination notice from the same peer is not allowed"))
+		return nil, err
 	}
 	if err := terminateForPeer(ctx, s.DB, s.CRepo, s.SRepo, s.DIDDocument, req); err != nil {
 		return nil, err
@@ -449,13 +467,17 @@ func terminateForPeer(ctx context.Context, database *sqlx.DB, cRepo db.ContractR
 	if err != nil {
 		return contractworkflowengine.MakeInternalError(err)
 	}
-	contract, err := cRepo.ReadDataByDID(ctx, tx, req.ContractIri)
+	exists, err := cRepo.ExistsByDID(ctx, tx, req.ContractIri)
+	var contract *db.Contract
+	if err == nil && exists {
+		contract, err = cRepo.ReadDataByDID(ctx, tx, req.ContractIri)
+	}
 	_ = tx.Rollback()
 	if err != nil {
-		return contractworkflowengine.MakeBadRequest(fmt.Errorf("termination rejected: could not read contract %s: %w", req.ContractIri, err))
+		return contractworkflowengine.MakeInternalError(fmt.Errorf("termination: could not read contract %s: %w", req.ContractIri, err))
 	}
-	if contract.Responsible == nil || !slices.Contains(contract.Responsible.GetParties(), req.FromPeerDid) {
-		return contractworkflowengine.MakeBadRequest(fmt.Errorf("termination rejected: peer %s is not a party of contract %s", req.FromPeerDid, req.ContractIri))
+	if contract == nil || contract.Responsible == nil || !slices.Contains(contract.Responsible.GetParties(), req.FromPeerDid) {
+		return dcstodcs.MakeNotFound(fmt.Errorf("termination rejected: this instance holds no contract %s shared with peer %s", req.ContractIri, req.FromPeerDid))
 	}
 	if contract.State == contractstate.Terminated.String() {
 		return nil
@@ -529,7 +551,17 @@ func verifyShippedJades(jadesSignature, contractIRI, fromPeerDID string, pdfPayl
 
 // GetProvenance returns the stored JAdES provenance artifact for a contract
 // this instance received from a peer (DCS-FR-SM-02).
+//
+// The caller must be allowed to read the contract (DCS-FR-CWE-07). A contract
+// the caller may not read answers not_found, like one without provenance.
 func (s *dcsToDcssrvc) GetProvenance(ctx context.Context, p *dcstodcs.GetProvenancePayload) (res *dcstodcs.DCSToDCSSyncProvenanceResponse, err error) {
+	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, p.Did); err != nil {
+		var serviceErr *goa.ServiceError
+		if errors.As(err, &serviceErr) && (serviceErr.Name == "forbidden" || serviceErr.Name == "not_found") {
+			return nil, dcstodcs.MakeNotFound(fmt.Errorf("no sync provenance stored for contract %s", p.Did))
+		}
+		return nil, err
+	}
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)

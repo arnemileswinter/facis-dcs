@@ -102,8 +102,9 @@ const compareOptions = computed<CompareOption[]>(() => {
   return opts
 })
 
+// Several saves can snapshot one contract version, so the entry id names the option.
 function historyOptionId(item: ContractHistoryItem): string {
-  return `h:${item.did}:${item.contract_version}:${item.updated_at ?? ''}`
+  return `h:${item.id}`
 }
 
 function formatDateTime(iso?: string): string {

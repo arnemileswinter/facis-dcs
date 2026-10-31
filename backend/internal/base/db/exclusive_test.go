@@ -40,6 +40,42 @@ func TestRunExclusiveRunsAJobOnOneReplicaAtATime(t *testing.T) {
 	}
 }
 
+// DCS-FR-SM-12: while one ship of a contract runs, the ships waiting for it
+// hold no pooled connection, so the running ship still gets the connections
+// its own transactions need.
+func TestRunLockedWaitersLeaveThePoolToTheHolder(t *testing.T) {
+	database := pgtest.Open(t)
+	database.SetMaxOpenConns(2)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	release := make(chan struct{})
+	holderErr := make(chan error, 1)
+	go func() {
+		holderErr <- RunLocked(ctx, database, "contract-ship:x", func() error {
+			<-release
+			_, err := database.ExecContext(ctx, `SELECT 1`)
+			return err
+		})
+	}()
+	time.Sleep(200 * time.Millisecond)
+	waiters := make(chan error, 3)
+	for range 3 {
+		go func() { waiters <- RunLocked(ctx, database, "contract-ship:x", func() error { return nil }) }()
+	}
+	time.Sleep(300 * time.Millisecond)
+	close(release)
+
+	if err := <-holderErr; err != nil {
+		t.Fatalf("the running ship could not get a connection for its own work: %v", err)
+	}
+	for range 3 {
+		if err := <-waiters; err != nil {
+			t.Fatalf("a waiting ship: %v", err)
+		}
+	}
+}
+
 // RunLocked makes replicas that start a job together run it one after the
 // other: each runs it, never two at once.
 func TestRunLockedRunsAJobOnEveryReplicaOneAfterTheOther(t *testing.T) {

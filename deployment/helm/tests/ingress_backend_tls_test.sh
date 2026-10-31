@@ -78,6 +78,10 @@ grep '^proxy-conf dcs-hydra' "$TMP/bdd.txt" | grep -q 'listen 8443 ssl; .* proxy
   || fail "Hydra TLS proxy: 8443 is not the admin API or 8444 is not the public API"
 grep '^proxy-conf fc-service' "$TMP/bdd.txt" | grep -q 'listen 8443 ssl; ssl_certificate /etc/dcs-internal-tls/tls.crt; .* ssl_protocols TLSv1.3; .* proxy_pass http://127.0.0.1:8081;' \
   || fail "fc-service has no TLS 1.3 proxy to its http port"
+# The TLS proxy passes the peer address on, so callers behind it do not all
+# share the loopback address the lockout is keyed on (FR-UC-01-4).
+grep '^proxy-conf fc-service' "$TMP/bdd.txt" | grep -q 'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_pass' \
+  || fail "the TLS proxy does not set X-Forwarded-For"
 # The backend calls the Hydra public API (discovery, token) on its TLS proxy too.
 grep -q '^env HYDRA_INTERNAL_ISSUER_URL https://dcs-hydra:8444$' "$TMP/bdd.txt" \
   || fail "the backend calls the Hydra public API on the plain port"

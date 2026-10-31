@@ -2,13 +2,14 @@ import { flushPromises, mount, RouterLinkStub, shallowMount } from '@vue/test-ut
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { defineComponent, reactive } from 'vue'
+import TemplatePreview from '@template-repository/components/builder-editor/preview/TemplatePreview.vue'
 import ContractListItem from '@/components/lists/contract/ContractListItem.vue'
 import { useAuthStore } from '@/stores/auth-store'
 import { ContractState } from '@/types/contract-state'
 import ApproveContractView from './ApproveContractView.vue'
 import type { Contract } from '@/models/contract/contract'
 
-const mocks = vi.hoisted(() => ({ retrieve: vi.fn(), approve: vi.fn(), submit: vi.fn() }))
+const mocks = vi.hoisted(() => ({ retrieve: vi.fn(), approve: vi.fn(), submit: vi.fn(), reviewFindings: vi.fn() }))
 const route = reactive({ params: { did: 'did:test:c1' } })
 vi.mock('vue-router', async (original) => ({
   ...(await original<typeof import('vue-router')>()),
@@ -16,7 +17,12 @@ vi.mock('vue-router', async (original) => ({
 }))
 vi.mock('@/services/did-service', () => ({ resolveLocalInstanceDid: () => Promise.resolve('local') }))
 vi.mock('@/services/contract-workflow-service', () => ({
-  contractWorkflowService: { retrieveById: mocks.retrieve, approve: mocks.approve, submit: mocks.submit },
+  contractWorkflowService: {
+    retrieveById: mocks.retrieve,
+    approve: mocks.approve,
+    submit: mocks.submit,
+    reviewFindings: mocks.reviewFindings,
+  },
 }))
 
 const revealed = vi.hoisted(() => ({ options: [] as unknown[] }))
@@ -54,6 +60,7 @@ beforeEach(() => {
   mocks.retrieve.mockResolvedValue(reviewed())
   mocks.approve.mockResolvedValue({})
   mocks.submit.mockResolvedValue({})
+  mocks.reviewFindings.mockResolvedValue([])
 })
 
 async function mountApprove() {
@@ -104,4 +111,27 @@ it('offers the creator to edit a rejected contract', () => {
     global: { plugins: [pinia], stubs: { RouterLink: RouterLinkStub } },
   })
   expect(wrapper.findAllComponents(RouterLinkStub).some((link) => link.text() === 'Edit')).toBe(true)
+})
+
+// DCS-IR-CWE-08, DCS-FR-CWE-25: the approver inspects the reviewer findings before deciding.
+it("a plain approver sees the reviewer's comments and highlighted blocks", async () => {
+  mocks.reviewFindings.mockResolvedValue([
+    {
+      submitted_by: 'org',
+      occurred_at: '2026-10-30T11:00:00Z',
+      contract_version: 1,
+      decision: 'APPROVAL',
+      comments: ['Liability cap checked'],
+      annotations: [{ block_id: 'clause-7', comment: 'Penalty wording is unusual' }],
+    },
+  ])
+  const wrapper = await mountApprove()
+  expect(mocks.reviewFindings).toHaveBeenCalledWith('did:test:c1')
+  const findings = wrapper.get('[data-testid="reviewer-findings"]').text()
+  expect(findings).toContain('Liability cap checked')
+  expect(findings).toContain('Penalty wording is unusual')
+  expect(wrapper.findComponent(TemplatePreview).props('highlightedBlockIds')).toEqual(['clause-7'])
+  expect(wrapper.findComponent({ name: 'NegotiationList' }).props('disabled')).toBe(true)
+  expect(wrapper.findComponent({ name: 'ContractHistoryDiffView' }).exists()).toBe(true)
+  wrapper.unmount()
 })

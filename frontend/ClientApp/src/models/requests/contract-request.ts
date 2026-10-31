@@ -50,9 +50,16 @@ export interface ContractSubmitRequest {
   negotiators?: string[]
 }
 
+export type ContractSortKey = 'created_at' | 'updated_at' | 'state' | 'name'
+
 export interface ContractRetrieveRequest {
   offset?: number
   limit?: number
+  parent_did?: string
+  /** Lifecycle states to keep; the server filters before it cuts the page. */
+  state?: ContractState[]
+  sort_by?: ContractSortKey
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface ContractRetrieveByIdRequest {
@@ -68,7 +75,7 @@ export interface ContractSearchRequest {
   limit?: number
   did?: string
   contract_version?: number
-  state?: ContractState
+  state?: ContractState[]
   name?: string
   description?: string
   contract_data?: string

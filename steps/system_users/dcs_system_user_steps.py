@@ -195,8 +195,8 @@ def step_given_ratelimit_credential(context):
     # A DEDICATED organization is what yields a distinct token: OID4VP login
     # derives identity from the presented VP (roles + organization), so only
     # those two discriminate. The hammer must burn ONLY this credential's
-    # one-minute budget (middleware.RateLimitAuthenticated keys per
-    # Authorization header) — the suite-shared role tokens keep theirs.
+    # one-minute budget (the authenticator keys it per validated holder and
+    # organization) — the suite-shared role tokens keep theirs.
     from steps.support.services.auth_service import AuthService  # noqa: PLC0415
 
     context.ratelimit_headers = AuthService.get_headers_for_roles(
@@ -213,8 +213,8 @@ def step_when_hammer_past_rate_limit(context):
     # cross it. The margin over the suite's own busiest per-token minute
     # (~600, measured in run 30194569615) is deliberate: shared cached role
     # tokens must never brush the ceiling. The probed endpoint 404s cheaply —
-    # the limiter counts every authenticated request before routing, so the
-    # response code is irrelevant to the budget.
+    # the limiter counts every request whose token the endpoint authenticates,
+    # before the handler runs, so the response code is irrelevant to the budget.
     total = 3300
     url = f"{context.base_url}/contract/retrieve/did:web:ratelimit-probe-nonexistent"
 

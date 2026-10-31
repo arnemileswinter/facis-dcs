@@ -79,7 +79,11 @@ func (s *contractStorageArchivesrvc) storeContract(ctx context.Context, did stri
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
 	storedBy := middleware.GetParticipantID(ctx)
-	entry, err := cwecommand.BuildManualArchiveEntry(contract, storedBy, signatures, peerSignatures)
+	history, err := s.CRepo.ReadHistoryByDID(ctx, tx, did)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	entry, err := cwecommand.BuildManualArchiveEntry(contract, history, storedBy, signatures, peerSignatures)
 	if err != nil {
 		return nil, contractstoragearchive.MakeBadRequest(err)
 	}
@@ -287,6 +291,8 @@ func (s *contractStorageArchivesrvc) Evidence(ctx context.Context, p *contractst
 	}
 	evt := contractevents.RetrieveArchivedEvent{
 		RetrievedBy:  middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 		ContractDIDs: []string{p.Did},
 		OccurredAt:   time.Now().UTC(),
 	}

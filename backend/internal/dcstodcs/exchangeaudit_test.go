@@ -16,6 +16,9 @@ func TestEveryOutboundPeerExchangeIsAudited(t *testing.T) {
 		{"synchronizer.go", "deliverPdf", "RecordPeerExchange"},
 		{"settlement.go", "deliverSettlement", "RecordPeerExchangeTx"},
 		{"settlement.go", "deliverSettlementWithdrawal", "RecordPeerExchangeTx"},
+		{"negotiation.go", "deliverNegotiationMessage", "RecordPeerExchangeTx"},
+		{"eraser.go", "attemptPeerErase", "RecordPeerExchange"},
+		{"terminationnotifier.go", "recordConfirmation", "RecordPeerExchangeTx"},
 	} {
 		if !calls(t, site.file, site.function, site.call) {
 			t.Errorf("%s does not audit the exchange it delivered", site.function)

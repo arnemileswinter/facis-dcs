@@ -226,6 +226,8 @@ func (s *contractStorageArchivesrvc) Sections(ctx context.Context, p *contractst
 	}
 	evt := contractevents.RetrieveArchivedEvent{
 		RetrievedBy:  scope.Organization,
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 		ContractDIDs: []string{p.Did},
 		SectionIDs:   returned,
 		OccurredAt:   time.Now().UTC(),

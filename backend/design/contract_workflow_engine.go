@@ -64,6 +64,18 @@ var ContractBlockAnnotation = Type("ContractBlockAnnotation", func() {
 	Required("block_id", "comment")
 })
 
+var ContractReviewFinding = Type("ContractReviewFinding", func() {
+	Description("One reviewer decision on a contract: forward to approval or return to negotiation, with the reviewer's comments and block annotations")
+	Attribute("submitted_by", String, "Organization of the reviewer")
+	Attribute("holder_did", String, "Holder DID of the reviewer")
+	Attribute("occurred_at", String, "Time of the decision, RFC3339")
+	Attribute("contract_version", Int, "Contract version the decision applies to")
+	Attribute("decision", String, "APPROVAL or REJECT")
+	Attribute("comments", ArrayOf(String), "Reviewer comments")
+	Attribute("annotations", ArrayOf(ContractBlockAnnotation), "Reviewer annotations on document blocks")
+	Required("submitted_by", "occurred_at", "contract_version", "comments", "annotations")
+})
+
 var ContractSubmitRequest = Type("ContractSubmitRequest", func() {
 	Description("Contract submit request")
 
@@ -142,6 +154,7 @@ var ContractHistoryRetrieveByIDRequest = Type("ContractHistoryRetrieveByIDReques
 })
 
 var ContractHistoryRetrieveByIDResponse = Type("ContractHistoryRetrieveByIDResponse", func() {
+	Attribute("id", String, "Identifier of this history entry; several entries can share one contract_version")
 	Attribute("did", String, "DID of the contract")
 	Attribute("contract_version", Int, "The version of the contract")
 	Attribute("state", String, "Current state of the contract")
@@ -173,6 +186,13 @@ var ContractRetrieveRequest = Type("ContractRetrieveRequest", func() {
 	Attribute("limit", Int, "Page size of results")
 
 	Attribute("parent_did", String, "Full-scope hierarchy filter: return only contracts whose dcs:parentContract references this DID (DCS-FR-CWE-29)")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
+	Attribute("sort_by", String, "Sort key applied before the page is cut (DCS-IR-CWE-11). Default created_at", func() {
+		Enum("created_at", "updated_at", "state", "name")
+	})
+	Attribute("sort_order", String, "Sort direction. Default desc", func() {
+		Enum("asc", "desc")
+	})
 })
 
 var ContractItem = Type("ContractItem", func() {
@@ -368,7 +388,7 @@ var ContractSearchRequest = Type("ContractSearchRequest", func() {
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
 	Attribute("contract_version", Int, "The version number of the contract")
-	Attribute("state", String, "The state of the contract")
+	Attribute("state", ArrayOf(String), "Return only contracts in one of these lifecycle states (DCS-IR-CWE-11)")
 	Attribute("name", String, "The name of the contract")
 	Attribute("description", String, "A description for that contract")
 	Attribute("contract_data", String, "Search value for full text search in contract data")
@@ -582,7 +602,9 @@ var ContractTerminateRequest = Type("ContractTerminateRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("reason", String, "Reason for terminating contract")
+	Attribute("reason", String, "Reason for terminating contract", func() {
+		MinLength(1)
+	})
 	Attribute("updated_at", String, "Updated at")
 
 	Required("did", "reason", "updated_at")
@@ -1382,6 +1404,9 @@ var _ = Service("ContractWorkflowEngine", func() {
 			Param("offset")
 			Param("limit")
 			Param("parent_did")
+			Param("state")
+			Param("sort_by")
+			Param("sort_order")
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
 			Response("internal_error", StatusInternalServerError)
@@ -1463,10 +1488,11 @@ var _ = Service("ContractWorkflowEngine", func() {
 	// GET /contract/retrieve/{did}
 	Method("retrieve_by_id", func() {
 		Description("fetch submitted contract. fetch reviewed contract. fetch contract(s).")
-		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24")
+		Meta("dcs:requirements", "DCS-IR-CWE-05", "DCS-IR-CWE-08", "DCS-IR-CWE-11", "DCS-IR-CWE-13", "DCS-FR-CSA-24", "DCS-IR-CWE-12")
 
 		Security(JWTAuth, func() {
 			Scope("Auditor")
+			Scope("Compliance Officer")
 			Scope("Contract Creator")
 			Scope("Sys. Contract Creator")
 			Scope("Contract Negotiator")
@@ -1914,6 +1940,39 @@ var _ = Service("ContractWorkflowEngine", func() {
 		Error("not_found", ErrorResult)
 		HTTP(func() {
 			GET("/contract/lifecycle/{did}")
+			Response(StatusOK)
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
+	// GET /contract/review-findings/{did}
+	Method("review_findings", func() {
+		Description("retrieve the reviewer decisions on a contract with their comments and block annotations, newest first, for every caller that may read the contract.")
+		Meta("dcs:requirements", "DCS-IR-CWE-08", "DCS-FR-CWE-25")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Creator")
+			Scope("Sys. Contract Creator")
+			Scope("Contract Negotiator")
+			Scope("Contract Reviewer")
+			Scope("Sys. Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Sys. Contract Approver")
+			Scope("Contract Manager")
+			Scope("Sys. Contract Manager")
+			Scope("Contract Observer")
+		})
+
+		Payload(func() { Token("token", String); Attribute("did", String); Required("did") })
+		Result(ArrayOf(ContractReviewFinding))
+
+		Error("internal_error", ErrorResult, "Internal server error")
+		Error("forbidden", ErrorResult, "Caller is not an authorized party of this contract")
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			GET("/contract/review-findings/{did}")
 			Response(StatusOK)
 			Response("forbidden", StatusForbidden)
 			Response("not_found", StatusNotFound)

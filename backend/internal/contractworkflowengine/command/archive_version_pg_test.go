@@ -25,7 +25,7 @@ func TestArchivedVersionStaysListedAfterAPeerVersionBump(t *testing.T) {
 	require.NoError(t, err)
 	contract, err := receiver.CRepo.ReadDataByDID(ctx, tx, taskContractDID)
 	require.NoError(t, err)
-	entry, err := BuildArchiveEntry(contract, "Org B", []ArchiveSigningEvidence{{
+	entry, err := BuildArchiveEntry(contract, nil, "Org B", []ArchiveSigningEvidence{{
 		Signer: "did:jwk:b", CredentialType: "AES", CeremonyID: "c1", Field: localPeerDID,
 		PDFCID: "cid", PDFHash: "abc", SignedAt: time.Now(),
 	}}, nil)

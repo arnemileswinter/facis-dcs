@@ -30,9 +30,10 @@ export interface ArchiveAnnotation {
 /** The erasure-handshake state of one counterparty instance (DCS-NFR-COMP-03). */
 export interface ArchiveErasurePeerStatus {
   peer_did: string
-  status: 'pending' | 'confirmed'
+  status: 'pending' | 'confirmed' | 'refused'
   requested_at: string
   confirmed_at?: string
+  last_error?: string
   retry_count: number
   last_tried_at?: string
 }

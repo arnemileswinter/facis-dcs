@@ -51,6 +51,7 @@ const views = [
   '/admin/targets',
   '/admin/system-users',
   '/admin/hsm-keys',
+  '/admin/lockouts',
   '/non-compliance',
   '/semantic-hub',
 ]
