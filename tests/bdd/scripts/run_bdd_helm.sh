@@ -475,7 +475,7 @@ fi
 # are live at this point and stay alive until this script exits (trap cleanup).
 # RUN_MODE selects what runs against them without tearing anything down:
 #   bdd (default) — the behave suite via the bdd-executor environment;
-#   e2e           — the Playwright suite (its own vite servers + the venv-backed
+#   e2e           — the Playwright suite (the built UI on vite preview + the venv-backed
 #                   signing helpers), so the frontend E2E gets the same live
 #                   two-instance stack + DSS forward the BDD suite uses.
 #   load          — the k6 load test (tests/load/run_load.py, NFR-PER-01/02).
@@ -486,10 +486,14 @@ if [[ "${RUN_MODE:-bdd}" == "load" ]]; then
 elif [[ "${RUN_MODE:-bdd}" == "e2e" ]]; then
   echo "Running Playwright E2E against the deployed stack"
   cd "$PROJECT_ROOT/frontend/ClientApp"
-  # DCS_HYDRA_TARGET routes the dev server's /oauth2 proxy at the deployed
+  # The suite runs against the production build (the same `build:docker` the
+  # DCS image runs), served by `vite preview` (E2E_BUILT_UI, playwright.config.ts).
+  npm run build:docker
+  # DCS_HYDRA_TARGET routes the UI server's /oauth2 proxy at the deployed
   # Hydra through the same ingress everything else uses. Left unset it defaults
   # to localhost:4444, where nothing listens in CI, so anything reaching for a
   # token gets a proxy error instead of an answer.
+  E2E_BUILT_UI=1 \
   E2E_DCS_API_BASE="${BDD_PUBLIC_ORIGIN}/digital-contracting-service/api" \
   E2E_BDD_PYTHON="$VENV_PATH/bin/python3" \
   DCS_HYDRA_TARGET="${BDD_PUBLIC_ORIGIN}" \

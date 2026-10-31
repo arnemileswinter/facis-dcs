@@ -1,5 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 
@@ -40,6 +42,19 @@ export default defineConfig(({ mode, command }) => {
         // In build mode, the backend replaces the placeholder when it serves index.html
         return html
       },
+    },
+    // `vite preview` serves the built index.html like the backend does
+    // (backend/cmd/dcs/frontend.go): the placeholder becomes the UI base path.
+    // The returned hook runs after the SPA fallback has rewritten the URL.
+    configurePreviewServer(server) {
+      return () => {
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.split('?')[0] !== '/index.html') return next()
+          const index = readFileSync(resolve(server.config.root, server.config.build.outDir, 'index.html'), 'utf-8')
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.end(index.replace('__DCS_UI_BASE_PATH__', basePath))
+        })
+      }
     },
   }
 
