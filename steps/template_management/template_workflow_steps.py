@@ -210,11 +210,10 @@ def step_when_submit_template(context, name):
 @when('I resubmit template "{name}"')
 def step_when_resubmit_template(context, name):
     t = TemplateService.named(context, name)
-    context.requests_response = post_json(
-        context,
-        template_submit_url(context),
-        TemplateService.template_submit_payload(context, t["did"], t["updated_at"]),
-    )
+    payload = TemplateService.template_submit_payload(context, t["did"], t["updated_at"])
+    # DCS-IR-TR-05: the approver states why the template goes back to review.
+    payload["comments"] = ["Clarify the liability clause"]
+    context.requests_response = post_json(context, template_submit_url(context), payload)
     if context.requests_response.status_code == 200:
         ua = TemplateService.fetch_template(context, t["did"]).get("updated_at", "draft")
         TemplateService.store_named(context, name, t["did"], ua)

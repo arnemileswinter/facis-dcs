@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -195,6 +197,11 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 		}
 		if !isValid {
 			return errors.New("user is not a valid approver for that contract template")
+		}
+
+		// DCS-IR-TR-05: the approver states why the template goes back to review.
+		if !slices.ContainsFunc(cmd.Comments, func(comment string) bool { return strings.TrimSpace(comment) != "" }) {
+			return fmt.Errorf("%w: a resubmission requires a comment", ErrInvalidRequest)
 		}
 
 		err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)

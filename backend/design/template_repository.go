@@ -61,7 +61,7 @@ var ContractTemplateSubmitRequest = Type("ContractTemplateSubmitRequest", func()
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("forward_to", String, "Action flag: approval | draft")
-	Attribute("comments", ArrayOf(String), "Optional comments")
+	Attribute("comments", ArrayOf(String), "Review comments; required when the approver returns a reviewed template to review (DCS-IR-TR-05)")
 
 	Required("did", "updated_at")
 })
@@ -384,7 +384,7 @@ var ContractTemplateRejectRequest = Type("ContractTemplateRejectRequest", func()
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("reason", String, "Reason for rejecting the contract template")
+	Attribute("reason", String, "Reason for rejecting the contract template (DCS-IR-TR-05)", func() { MinLength(1) })
 
 	Required("did", "updated_at", "reason")
 })

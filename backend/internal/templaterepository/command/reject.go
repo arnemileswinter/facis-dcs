@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"digital-contracting-service/internal/base"
@@ -60,7 +61,12 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	}
 
 	if processData.State != contracttemplatestate.Reviewed.String() {
-		return errors.New("invalid contract template state")
+		return fmt.Errorf("%w: %s cannot be rejected", ErrInvalidTemplateState, processData.State)
+	}
+
+	// DCS-IR-TR-05: a rejection states its reason.
+	if strings.TrimSpace(cmd.Reason) == "" {
+		return fmt.Errorf("%w: a rejection requires a reason", ErrInvalidRequest)
 	}
 
 	exist, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.RejectedBy)

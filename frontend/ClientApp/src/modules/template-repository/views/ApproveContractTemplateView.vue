@@ -121,14 +121,15 @@ async function resubmit() {
     return
   }
   try {
+    // DCS-IR-TR-05: a resubmission states its reason.
     const decisionNoteResult = await decisionNoteDialog.value?.reveal({
-      message: 'Add decision note?',
-      editor: { requiredText: false, placeholder: 'Decision Note' },
+      message: 'Why does the template go back to review?',
+      editor: { requiredText: true, label: 'Reason', placeholder: 'Reason for the resubmission' },
     })
     if (decisionNoteResult?.isCanceled) {
       return
     } else if (decisionNoteResult?.data) {
-      decisionNote.value = decisionNoteResult.data
+      decisionNote.value = decisionNoteResult.data.trim()
     }
     isSubmitting.value = true
     await contractTemplateService.submit({

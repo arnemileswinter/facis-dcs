@@ -21,6 +21,28 @@ import (
 	"digital-contracting-service/internal/templaterepository/query"
 )
 
+// DCS-IR-TR-05: a rejection and the approver's resubmission state a reason.
+func TestTemplateApproverDecisionsRequireAReasonPostgres(t *testing.T) {
+	database := pgtest.Open(t)
+	ctx := context.Background()
+	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
+	_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name) VALUES ('tpl','creator','REVIEWED','CONTRACT_TEMPLATE','SINGLE_PARTY','n')`)
+	require.NoError(t, err)
+	_, err = database.Exec(`INSERT INTO contract_templates_approval_task (did,state,approver,created_by) VALUES ('tpl','OPEN','org','org')`)
+	require.NoError(t, err)
+	future := time.Now().Add(time.Hour)
+	approver := userrole.UserRoles{userrole.TemplateApprover}
+
+	err = (&command.Rejecter{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}).Handle(ctx, command.RejectCmd{DID: "tpl", UpdatedAt: future, RejectedBy: "org", Reason: " ", UserRoles: approver})
+	require.ErrorIs(t, err, command.ErrInvalidRequest)
+
+	submitter := &command.Submitter{DB: database, CTRepo: ctRepo, RTRepo: rtRepo, ATRepo: atRepo}
+	err = submitter.Handle(ctx, command.SubmitCmd{DID: "tpl", UpdatedAt: future, SubmittedBy: "org", Comments: []string{""}, UserRoles: approver})
+	require.ErrorIs(t, err, command.ErrInvalidRequest)
+	require.Equal(t, "bad_request", errorName(mapTemplateCommandError(err)))
+	require.NoError(t, submitter.Handle(ctx, command.SubmitCmd{DID: "tpl", UpdatedAt: future, SubmittedBy: "org", Comments: []string{"Clarify the liability clause"}, UserRoles: approver}))
+}
+
 // DCS-IR-TR-04, DCS-IR-TR-05: the creator and the approver read the review
 // comments and the rejection reason with the template. DCS-FR-TR-19: a
 // template user without a template role reads registered templates only.
