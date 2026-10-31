@@ -12,6 +12,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/identity"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/validation"
 	cwecommand "digital-contracting-service/internal/contractworkflowengine/command"
@@ -57,7 +58,7 @@ func createStructuredTemplate(t *testing.T, creator *command.Creator, did, data 
 // DCS-FR-TR-02, DCS-FR-TR-23, DCS-FR-TR-26: a template has a level and the
 // templates it requires; submission and approval check them.
 func TestTemplateLevelsAndDependenciesPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	ctRepo, rtRepo, atRepo := &pg.PostgresContractTemplateRepo{}, &pg.PostgresReviewTaskRepo{}, &pg.PostgresApprovalTaskRepo{}
 	creator := &command.Creator{DB: database, CTRepo: ctRepo}
@@ -128,7 +129,7 @@ type contractsFromTemplates struct {
 }
 
 func newContractsFromTemplates(t *testing.T) *contractsFromTemplates {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	ctx := context.Background()
 	require.NoError(t, semantichub.Seed(ctx, database))
 	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
