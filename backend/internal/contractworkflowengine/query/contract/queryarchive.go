@@ -14,6 +14,7 @@ import (
 
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -31,10 +32,14 @@ type GetArchivedContractsHandler struct {
 
 type GetArchivedContractsQry struct {
 	RetrievedBy string
+	HolderDID   string
+	UserRoles   userrole.UserRoles
 }
 
 type SearchArchivedContractsQry struct {
 	RetrievedBy     string
+	HolderDID       string
+	UserRoles       userrole.UserRoles
 	DID             string
 	ContractVersion int
 	State           *contractstate.ContractState
@@ -70,6 +75,8 @@ func (h *GetArchivedContractsHandler) Handle(ctx context.Context, query GetArchi
 
 	evt := events.RetrieveArchivedEvent{
 		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
 		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
 		OccurredAt:   time.Now().UTC(),
 	}
@@ -130,6 +137,8 @@ func (h *GetArchivedContractsHandler) Search(ctx context.Context, query SearchAr
 
 	evt := events.SearchArchivedEvent{
 		RetrievedBy:  query.RetrievedBy,
+		HolderDID:    query.HolderDID,
+		UserRoles:    query.UserRoles,
 		Criteria:     searchCriteria(searchValues),
 		ContractDIDs: archivedContractDIDs(archivedContractsMetadata),
 		OccurredAt:   time.Now().UTC(),

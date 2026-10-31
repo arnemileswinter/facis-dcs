@@ -73,6 +73,9 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	require.Len(t, retrieved, 1)
 	require.Equal(t, archiveManager, retrieved[0]["retrieved_by"])
 	require.Equal(t, []any{"did:web:dcs.example:contract:a"}, retrieved[0]["contract_dids"])
+	// DCS-FR-CWE-21: the retrieval names the holder and the roles, not only the organization.
+	require.Equal(t, archiveManager, retrieved[0]["holder_did"])
+	require.Contains(t, retrieved[0], "user_roles")
 
 	did := "did:web:dcs.example:contract:a"
 	_, err = svc.Search(archiveManagerContext(), &contractstoragearchive.ArchiveSearchRequest{Did: &did})
@@ -81,6 +84,8 @@ func TestArchiveRetrievalIsAuditedWithTheContractIDs(t *testing.T) {
 	require.Len(t, searched, 1)
 	require.Equal(t, []any{did}, searched[0]["contract_dids"])
 	require.Equal(t, map[string]any{"did": did}, searched[0]["criteria"])
+	require.Equal(t, archiveManager, searched[0]["holder_did"])
+	require.Contains(t, searched[0], "user_roles")
 }
 
 // DCS-FR-CSA-10: the archive search filters by jurisdiction, and the audit

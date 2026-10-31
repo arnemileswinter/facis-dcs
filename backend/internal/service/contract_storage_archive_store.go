@@ -235,6 +235,8 @@ func (s *contractStorageArchivesrvc) Evidence(ctx context.Context, p *contractst
 	}
 	evt := contractevents.RetrieveArchivedEvent{
 		RetrievedBy:  middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 		ContractDIDs: []string{p.Did},
 		OccurredAt:   time.Now().UTC(),
 	}
