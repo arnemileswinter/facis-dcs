@@ -176,6 +176,18 @@ var listSortColumns = map[string]string{
 	"name":       "COALESCE(cem.name, ce.contract_data->'dcs:metadata'->>'dcs:title')",
 }
 
+func (r *PostgresContractRepo) ReadOpenRenewalDID(ctx context.Context, tx *sqlx.Tx, originalDID string) (string, error) {
+	var dids []string
+	err := tx.SelectContext(ctx, &dids, `
+		SELECT did FROM contracts_effective
+		WHERE regexp_replace(contract_data->'dcs:renewsContract'->>'@id', '^.*/', '') = $1
+		  AND state::text NOT IN ('WITHDRAWN', 'REVOKED', 'TERMINATED', 'EXPIRED')
+		ORDER BY did LIMIT 1`, originalDID)
+	if err != nil || len(dids) == 0 {
+		return "", err
+	}
+	return dids[0], nil
+}
 
 func (r *PostgresContractRepo) ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination, options db.ListOptions) ([]db.ContractMetadata, error) {
 	sortColumn, ok := listSortColumns[options.SortBy]

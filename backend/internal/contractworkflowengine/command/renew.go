@@ -34,6 +34,10 @@ var ErrContractNotRenewable = errors.New("contract is not in a renewable state")
 // inconsistent. Mapped to a client error by service.mapContractCommandError.
 var ErrInvalidRenewalTerm = errors.New("invalid renewal term")
 
+// ErrRenewalExists is returned when the original already has a renewal that
+// is not withdrawn, revoked, terminated or expired. It is mapped to 409.
+var ErrRenewalExists = errors.New("the contract already has an open renewal")
+
 // renewableStates are the original-contract states from which a renewal
 // instance may be created. A contract must at least have been agreed
 // (APPROVED) or be in its performance/archival lifecycle (SIGNED, ACTIVE,
@@ -113,6 +117,18 @@ func (h *Renewer) Handle(ctx context.Context, cmd RenewCmd) (*RenewResult, error
 	}
 	if !renewableStates[originalState] {
 		return nil, fmt.Errorf("%w: original contract is in state %s", ErrContractNotRenewable, originalState)
+	}
+	// One open renewal per original (DCS-FR-CWE-22). The lock serializes two
+	// renewals of the same original that run at the same time.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('contract-renewal:' || $1))`, cmd.OriginalDID); err != nil {
+		return nil, fmt.Errorf("could not lock the original contract: %w", err)
+	}
+	renewal, err := h.CRepo.ReadOpenRenewalDID(ctx, tx, cmd.OriginalDID)
+	if err != nil {
+		return nil, fmt.Errorf("could not look up open renewals: %w", err)
+	}
+	if renewal != "" {
+		return nil, fmt.Errorf("%w: %s", ErrRenewalExists, renewal)
 	}
 
 	localPeer, err := h.DIDDocument.GetID()

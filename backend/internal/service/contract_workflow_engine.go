@@ -318,6 +318,9 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, db.ErrNoMatchingDecision) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
+	if errors.Is(err, command.ErrRenewalExists) {
+		return goa.NewServiceError(err, "conflict", false, false, false)
+	}
 	// A contract whose own ODRL policies are not satisfied is a rejected
 	// request, not a server fault: the caller asked to approve a contract whose
 	// reported values violate its agreed boundaries, and the finding already

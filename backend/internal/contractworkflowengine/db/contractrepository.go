@@ -277,6 +277,9 @@ type ContractRepo interface {
 	// ReadChildrenDIDs returns the DIDs of all locally-known contracts whose
 	// dcs:parentContract references did, ordered by did.
 	ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadOpenRenewalDID returns a renewal of originalDID that is not
+	// withdrawn, revoked, terminated or expired, or "" when there is none.
+	ReadOpenRenewalDID(ctx context.Context, tx *sqlx.Tx, originalDID string) (string, error)
 	ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
 	// ReadRenewalDueContracts returns the SIGNED or ACTIVE contracts whose
 	// notice period before exp_date has started and that have no renewal
