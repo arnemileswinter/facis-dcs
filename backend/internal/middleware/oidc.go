@@ -2,9 +2,14 @@ package middleware
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 
 	"digital-contracting-service/internal/auth/machineidentity"
@@ -85,16 +90,84 @@ func NewHydraJWTValidator(ctx context.Context, config HydraJWTConfig) (*HydraJWT
 		SkipClientIDCheck:          true,
 		InsecureSkipSignatureCheck: skipSignature,
 	}
-	verifier := provider.Verifier(oidcConfig)
+	newVerifier := provider.Verifier
+	devKey, err := devAccessTokenKey()
+	if err != nil {
+		return nil, err
+	}
+	if devKey != nil {
+		var meta struct {
+			JWKSURL string   `json:"jwks_uri"`
+			Algs    []string `json:"id_token_signing_alg_values_supported"`
+		}
+		if err := provider.Claims(&meta); err != nil {
+			return nil, fmt.Errorf("read the OIDC provider metadata: %w", err)
+		}
+		keys := devKeySet{
+			dev:      &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{devKey}},
+			provider: oidc.NewRemoteKeySet(ctx, meta.JWKSURL),
+		}
+		algs := meta.Algs
+		if len(algs) == 0 {
+			algs = []string{oidc.RS256}
+		}
+		oidcConfig.SupportedSigningAlgs = append(slices.Clone(algs), oidc.ES256)
+		newVerifier = func(config *oidc.Config) *oidc.IDTokenVerifier {
+			return oidc.NewVerifier(publicIssuer, keys, config)
+		}
+	}
+	verifier := newVerifier(oidcConfig)
 	expiredConfig := *oidcConfig
 	expiredConfig.SkipExpiryCheck = true
 
 	return &HydraJWTValidator{
 		provider:        provider,
 		verifier:        verifier,
-		expiredVerifier: provider.Verifier(&expiredConfig),
+		expiredVerifier: newVerifier(&expiredConfig),
 		config:          config,
 	}, nil
+}
+
+// devAccessTokenKey reads DCS_DEV_ACCESS_TOKEN_KEY, a PEM-encoded ES256 public
+// key. A development or test stack accepts access tokens signed with it beside
+// the provider's keys: the BDD stack signs the expired tokens of its negative
+// credential scenarios with it, so it runs with the signature check on. Only a
+// stack that declares itself one with DCS_ALLOW_DEV_TRUST=true may set it.
+func devAccessTokenKey() (crypto.PublicKey, error) {
+	raw := strings.TrimSpace(os.Getenv("DCS_DEV_ACCESS_TOKEN_KEY"))
+	if raw == "" {
+		return nil, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DCS_ALLOW_DEV_TRUST")), "true") {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY admits access tokens signed with a development key; it is refused unless DCS_ALLOW_DEV_TRUST=true declares a development or test stack")
+	}
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY is not a PEM public key")
+	}
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY: %w", err)
+	}
+	if _, ok := key.(*ecdsa.PublicKey); !ok {
+		return nil, fmt.Errorf("DCS_DEV_ACCESS_TOKEN_KEY is not an ECDSA public key")
+	}
+	log.Printf("WARNING: DCS_DEV_ACCESS_TOKEN_KEY: access tokens signed with a development key are accepted. Development and test stacks only.")
+	return key, nil
+}
+
+// devKeySet verifies a token with the development key, else with the
+// provider's keys.
+type devKeySet struct {
+	dev      oidc.KeySet
+	provider oidc.KeySet
+}
+
+func (k devKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
+	if payload, err := k.dev.VerifySignature(ctx, jwt); err == nil {
+		return payload, nil
+	}
+	return k.provider.VerifySignature(ctx, jwt)
 }
 
 // algNoneAllowed reads JWT_ALG_NONE_SUPPORTED, which turns off the token
