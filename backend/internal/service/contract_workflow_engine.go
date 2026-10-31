@@ -40,6 +40,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationactionflag"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 	contractevents "digital-contracting-service/internal/contractworkflowengine/event"
+	"digital-contracting-service/internal/contractworkflowengine/negotiationmerging"
 	"digital-contracting-service/internal/contractworkflowengine/query/contract"
 	"digital-contracting-service/internal/middleware"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
@@ -316,7 +317,8 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, command.ErrCounterpartiesNotSettled) ||
 		errors.Is(err, command.ErrNegotiationNotSettled) ||
 		errors.Is(err, command.ErrNegotiationSyncPending) ||
-		errors.Is(err, db.ErrNoMatchingDecision) {
+		errors.Is(err, db.ErrNoMatchingDecision) ||
+		errors.Is(err, negotiationmerging.ErrInvalidChangeRequest) {
 		return contractworkflowengine.MakeBadRequest(err)
 	}
 	if errors.Is(err, command.ErrRenewalExists) {
