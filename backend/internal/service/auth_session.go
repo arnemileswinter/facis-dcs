@@ -15,9 +15,12 @@ import (
 	"digital-contracting-service/internal/auth"
 	authaudit "digital-contracting-service/internal/auth/audit"
 	authdb "digital-contracting-service/internal/auth/db"
+	authevents "digital-contracting-service/internal/auth/event"
 	"digital-contracting-service/internal/auth/hydra"
 	"digital-contracting-service/internal/auth/oid4vp"
 	oid4vprequest "digital-contracting-service/internal/auth/oid4vp/request"
+	"digital-contracting-service/internal/base/datatype/componenttype"
+	baseevent "digital-contracting-service/internal/base/event"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
@@ -64,6 +67,8 @@ type authSvc struct {
 	participantDID    string
 	// checkCredentialStatus checks a session's PoA status reference again.
 	checkCredentialStatus func(json.RawMessage) error
+	// recordSessionEnded writes a session end to the audit trail.
+	recordSessionEnded func(context.Context, authevents.SessionEndedEvent) error
 }
 
 func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg AuthConfig) (genauth.Service, error) {
@@ -91,8 +96,12 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		return nil, fmt.Errorf("oid4vp PID DCQL query is required")
 	}
 
+	var recordSessionEnded func(context.Context, authevents.SessionEndedEvent) error
 	if db != nil {
 		oid4vp.ConfigurePresentationAuditRecorder(&authaudit.Recorder{DB: db})
+		recordSessionEnded = func(ctx context.Context, evt authevents.SessionEndedEvent) error {
+			return baseevent.CreateInOwnTx(ctx, db, evt, componenttype.System)
+		}
 	}
 
 	oid4vpStateTTL := cfg.OID4VPStateTTL
@@ -115,6 +124,7 @@ func NewAuth(db *sqlx.DB, presentations authdb.PresentationAttemptRepo, cfg Auth
 		participantDID:    cfg.ParticipantDID,
 
 		checkCredentialStatus: oid4vp.CheckStatus,
+		recordSessionEnded:    recordSessionEnded,
 	}, nil
 }
 
@@ -190,6 +200,7 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 	// (NFR-BR-06, IR-CI-09): a revoked PoA ends it at the next refresh.
 	if err := s.checkSessionCredential(tokenResp.AccessToken); err != nil {
 		log.Printf(ctx, "auth.refresh refused: %v", err)
+		s.auditSessionEnd(ctx, tokenResp.AccessToken, err)
 		refreshToken := tokenResp.RefreshToken
 		if strings.TrimSpace(refreshToken) == "" {
 			refreshToken = cookie.Value
@@ -214,6 +225,27 @@ func (s *authSvc) Refresh(ctx context.Context) (*genauth.RefreshResult, error) {
 		TokenType:   tokenResp.TokenType,
 		ExpiresIn:   tokenResp.ExpiresIn,
 	}, nil
+}
+
+// auditSessionEnd writes the end of a session at token refresh to the audit
+// trail, with the subject, the participant and the reason (FR-UC-09-2).
+func (s *authSvc) auditSessionEnd(ctx context.Context, accessToken string, reason error) {
+	if s.recordSessionEnded == nil {
+		return
+	}
+	claims := jwt.MapClaims{}
+	_, _, _ = jwt.NewParser().ParseUnverified(accessToken, claims)
+	subject, _ := claims["sub"].(string)
+	ext, _ := claims["ext"].(map[string]any)
+	participant, _ := ext["iss"].(string)
+	if err := s.recordSessionEnded(ctx, authevents.SessionEndedEvent{
+		SubjectDID:     subject,
+		ParticipantDID: participant,
+		Reason:         reason.Error(),
+		OccurredAt:     time.Now().UTC(),
+	}); err != nil {
+		log.Printf(ctx, "auth.refresh could not audit the session end: %v", err)
+	}
 }
 
 // checkSessionCredential checks again the status of the PoA credential named

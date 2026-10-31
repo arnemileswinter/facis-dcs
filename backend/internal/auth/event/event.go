@@ -41,6 +41,23 @@ func (e PresentationFailedEvent) GetDID() string {
 	return e.PresentationState
 }
 
+// SessionEndedEvent is emitted when the DCS ends a login session at token
+// refresh, for example because the PoA credential of the session is revoked.
+type SessionEndedEvent struct {
+	SubjectDID     string    `json:"subject_did"`
+	ParticipantDID string    `json:"participant_did,omitempty"`
+	Reason         string    `json:"reason"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
+func (e SessionEndedEvent) EventType() string {
+	return eventtype.SessionEnded.String()
+}
+
+func (e SessionEndedEvent) GetDID() string {
+	return e.SubjectDID
+}
+
 // MachineIdentityChangedEvent is emitted when an administrator creates,
 // changes, deletes or issues a new secret for a machine identity. It records
 // the identity as it is after the change, and who made the change.
