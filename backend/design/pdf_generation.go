@@ -170,8 +170,8 @@ var _ = Service("PDFGeneration", func() {
 
 	// export_template_bundle — GET /template/export/{did}
 	Method("export_template_bundle", func() {
-		Description("Export a contract template as a ZIP bundle of flat artifacts: template JSON-LD, rendered PDF, and bundle manifest. No frame/parent chain directory (FR-TR-24/FR-TR-09 — templates are flat artifacts, no frame-type taxonomy).")
-		Meta("dcs:requirements", "DCS-FR-TR-24", "DCS-FR-TR-09")
+		Description("Export a contract template as a ZIP bundle: the template JSON-LD, its rendered PDF and its provenance credentials (provenance/v<n>.vc.json), and the same for every template it requires, directly or through a required template, under required/<did>/, with the bundle manifest that lists each component and the template that requires it.")
+		Meta("dcs:requirements", "DCS-FR-TR-24", "DCS-FR-TR-23", "DCS-FR-TR-09")
 		Security(JWTAuth, func() {
 			Scope("Template Manager")
 			Scope("Template Reviewer")
