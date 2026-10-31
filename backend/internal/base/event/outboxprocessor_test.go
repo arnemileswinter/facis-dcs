@@ -17,7 +17,7 @@ func TestPublishingStopsAtTheFirstFailedEvent(t *testing.T) {
 	events := []datatype.OutboxEvent{{ID: 1, EventType: "a"}, {ID: 2, EventType: "b"}, {ID: 3, EventType: "c"}}
 	var sent []string
 	var marked []int64
-	err := publishInOrder(events, func(_, eventType string, _ json.RawMessage) error {
+	err := publishInOrder(events, func(_, _, eventType string, _ json.RawMessage) error {
 		if eventType == "b" {
 			return errors.New("no connection")
 		}
@@ -32,6 +32,29 @@ func TestPublishingStopsAtTheFirstFailedEvent(t *testing.T) {
 	}
 	if len(sent) != 1 || sent[0] != "a" || len(marked) != 1 || marked[0] != 1 {
 		t.Fatalf("sent %v, marked %v; want only the event before the failed one", sent, marked)
+	}
+}
+
+// DCS-NFR-SF-01: a batch whose commit fails is published again. The event
+// keeps its CloudEvent id, so the stream stores it once and the consumers
+// recognize it.
+func TestRepublishedEventKeepsItsCloudEventID(t *testing.T) {
+	created := time.Date(2026, 10, 31, 12, 0, 0, 123456000, time.UTC)
+	event := datatype.OutboxEvent{ID: 7, CreatedAt: created}
+	var ids []string
+	publish := func(id, _, _ string, _ json.RawMessage) error {
+		ids = append(ids, id)
+		return nil
+	}
+	mark := func(int64) error { return nil }
+	for range 2 {
+		if err := publishInOrder([]datatype.OutboxEvent{event}, publish, mark); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := cloudEventID(datatype.OutboxEvent{ID: 8, CreatedAt: created})
+	if ids[0] == "" || ids[0] != ids[1] || ids[0] == other {
+		t.Fatalf("ids %v (other event %s); want one stable id per event", ids, other)
 	}
 }
 

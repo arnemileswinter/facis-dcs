@@ -115,19 +115,20 @@ const (
 	maxRegenerationRetryBackoff = time.Hour
 )
 
-// Start registers the event handler with the NATS sub-client and begins
-// consuming events, alongside the retry pass that reconciles entities whose
-// regeneration never completed. It returns immediately; both run in the
-// background until the sub-client is closed.
-func (s *Subscriber) Start(subClient *event.CloudEventSubClient) error {
+// Start starts the retry pass that reconciles entities whose regeneration
+// never completed, and consumes events until the sub-client is closed. A
+// failed regeneration is delivered again (event.DurableSubClient); every
+// handler short-circuits when the PDF is current, so a redelivery is safe.
+func (s *Subscriber) Start(subClient *event.DurableSubClient) error {
 	go s.retryPendingRegenerations(conf.PDFRegenerationRetryTimeOut())
 
-	return subClient.Subscribe(func(evt cloudevent.Event) {
+	return subClient.Subscribe(func(evt cloudevent.Event) error {
 		ctx, cancel := s.regenerationContext()
 		defer cancel()
 		if err := s.handle(ctx, evt); err != nil {
-			log.Printf("pdfgeneration: failed to handle event %s/%s: %v", evt.Source(), evt.Type(), err)
+			return fmt.Errorf("pdfgeneration: failed to handle event %s/%s: %w", evt.Source(), evt.Type(), err)
 		}
+		return nil
 	})
 }
 
@@ -140,9 +141,9 @@ func (s *Subscriber) regenerationContext() (context.Context, context.CancelFunc)
 
 // retryPendingRegenerations re-runs regeneration for entities whose stored PDF
 // is not a render of the document as it now stands. A lifecycle event is
-// delivered at most once and a failed regeneration is logged rather than
-// redelivered, so a transient pdf-core or artifact-store failure would
-// otherwise leave the entity stuck for good — not exportable, and, for a
+// delivered a bounded number of times, so a pdf-core or artifact-store failure
+// that outlasts them would otherwise leave the entity stuck for good — not
+// exportable, and, for a
 // cross-instance contract, not shippable, so the counterparty never receives it
 // however often the sync-fail scheduler retries the ship. That holds whether
 // the lost regeneration was the entity's FIRST (leaving no stored PDF at all)

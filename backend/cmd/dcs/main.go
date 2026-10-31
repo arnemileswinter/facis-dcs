@@ -476,11 +476,11 @@ func main() {
 		log.Fatalf(ctx, err, "failed to start outbox processor")
 	}
 
-	cepSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".dcstodcs")
+	cepSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".dcstodcs")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not connect to events bus")
 	}
-	defer func(client *event.CloudEventSubClient) {
+	defer func(client *event.DurableSubClient) {
 		err := client.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close cloud event bus client")
@@ -533,7 +533,7 @@ func main() {
 
 	if os.Getenv("DCS_DEBUG_EVENTING") == "true" {
 		// No queue group: every replica prints every event.
-		logSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, "")
+		logSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
 		if err != nil {
 			log.Fatalf(ctx, err, "Could not create event logger NATS subscriber")
 		}
@@ -544,7 +544,7 @@ func main() {
 	// Live dashboard updates (DCS-FR-CWE-24): no queue group, so every replica
 	// receives every event for the streams it serves.
 	contractChanges := changefeed.New()
-	changeSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, "")
+	changeSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL)
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create contract change NATS subscriber")
 	}
@@ -675,11 +675,11 @@ func main() {
 
 	// Start the NATS→Webhook bridge: automatically fans out to all registered
 	// webhook subscribers whenever a DCS lifecycle event fires on the event bus.
-	webhookSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
+	webhookSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".webhook")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create webhook NATS subscriber")
 	}
-	defer func(webhookSubClient *event.CloudEventSubClient) {
+	defer func(webhookSubClient *event.DurableSubClient) {
 		err := webhookSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "failed to close webhook subscriber")
@@ -916,11 +916,11 @@ func main() {
 	// Start the PDF lifecycle C2PA subscriber (appends C2PA assertions on state changes).
 	// Only start when a real signing URL is configured; without one, the subscriber
 	// would attempt signing on every CWE event and log spurious HTTP errors.
-	pdfSubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".pdfgeneration")
+	pdfSubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".pdfgeneration")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create PDF generation NATS subscriber")
 	}
-	defer func(pdfSubClient *event.CloudEventSubClient) {
+	defer func(pdfSubClient *event.DurableSubClient) {
 		err := pdfSubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close PDF subscriber")
@@ -945,11 +945,11 @@ func main() {
 	// Start the auto-deploy subscriber (DCS-FR-CWE-06): once the signing
 	// workflow completes (APPLIED_SIGNATURE), it calls the same
 	// cwecommand.Deployer the manual POST /contract/deploy endpoint uses.
-	deploySubClient, err := event.NewNatsSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
+	deploySubClient, err := event.NewDurableSubClient(conf.EventBusTopic(), natsURL, conf.EventBusTopic()+".deploy")
 	if err != nil {
 		log.Fatalf(ctx, err, "Could not create contract-deployment NATS subscriber")
 	}
-	defer func(deploySubClient *event.CloudEventSubClient) {
+	defer func(deploySubClient *event.DurableSubClient) {
 		err := deploySubClient.Close()
 		if err != nil {
 			log.Errorf(ctx, err, "Could not close contract-deployment subscriber")

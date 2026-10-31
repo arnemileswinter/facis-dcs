@@ -16,11 +16,14 @@ func newMemDeliveries() *memDeliveries {
 	return &memDeliveries{pending: make(map[string]PendingCallback)}
 }
 
-func (s *memDeliveries) TrackPending(_ context.Context, p PendingCallback) error {
+func (s *memDeliveries) TrackPending(_ context.Context, p PendingCallback) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.pending[p.EventID]; ok {
+		return false, nil
+	}
 	s.pending[p.EventID] = p
-	return nil
+	return true, nil
 }
 
 func (s *memDeliveries) ResolvePending(_ context.Context, eventID string) (PendingCallback, bool, error) {

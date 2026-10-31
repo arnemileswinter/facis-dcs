@@ -22,8 +22,12 @@ func TestPostgresDeliveriesAreSharedAcrossReplicas(t *testing.T) {
 	owner := "did:web:" + uuid.NewString()
 	pending := PendingCallback{EventID: uuid.NewString(), CorrelationID: uuid.NewString(), Event: "contract.created", DID: "did:x", SentAt: time.Now().UTC()}
 
-	if err := dispatching.TrackPending(ctx, pending); err != nil {
-		t.Fatalf("TrackPending: %v", err)
+	if tracked, err := dispatching.TrackPending(ctx, pending); err != nil || !tracked {
+		t.Fatalf("TrackPending = %v, %v; want a new dispatch", tracked, err)
+	}
+	// NFR-SF-01: a redelivered event carries the same id and is not dispatched again.
+	if tracked, err := receiving.TrackPending(ctx, pending); err != nil || tracked {
+		t.Fatalf("second TrackPending = %v, %v; want false: the event is dispatched already", tracked, err)
 	}
 	if err := dispatching.AddDelivery(ctx, Delivery{EventID: pending.EventID, CallbackURL: "https://a.example", OwnerDID: owner, StatusCode: 200, DeliveredAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("AddDelivery: %v", err)

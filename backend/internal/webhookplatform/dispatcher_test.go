@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 )
 
 func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
@@ -78,7 +80,9 @@ func TestDispatchDeliversOnlyToAdmittedOrganizations(t *testing.T) {
 	d := NewDispatcher(subs, newMemDeliveries(), audience, nil)
 	d.httpClient = receiver.Client()
 
-	d.Dispatch(context.Background(), "contract.created", "contract-1", json.RawMessage(`{"contract_data":{}}`))
+	if err := d.Dispatch(context.Background(), "event-1", "contract.created", "contract-1", json.RawMessage(`{"contract_data":{}}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case path := <-hits:
@@ -91,6 +95,53 @@ func TestDispatchDeliversOnlyToAdmittedOrganizations(t *testing.T) {
 	select {
 	case path := <-hits:
 		t.Fatalf("second delivery to %s: org B is not admitted", path)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// DCS-NFR-SF-01: JetStream delivers an event at least once. A redelivered
+// event has the same CloudEvent id, which is the webhook event id, and is not
+// sent to the subscriber a second time.
+func TestRedeliveredEventIsDispatchedOnce(t *testing.T) {
+	hits := make(chan string, 2)
+	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits <- r.Header.Get("webhook-id")
+	}))
+	defer receiver.Close()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := &fakeSubscriptions{subs: []Subscription{
+		{ID: "a", Event: "contract.created", CallbackURL: receiver.URL, Secret: secret, OwnerDID: orgA},
+	}}
+	d := NewDispatcher(subs, newMemDeliveries(), admitAll, nil)
+	d.httpClient = receiver.Client()
+
+	evt := cloudevent.New()
+	evt.SetID("event-7")
+	evt.SetSource("CONTRACT_WORKFLOW_ENGINE")
+	evt.SetType("CREATE_CONTRACT")
+	if err := evt.SetData(cloudevent.ApplicationJSON, json.RawMessage(`{"did":"contract-1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := handleNATSEvent(context.Background(), evt, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	select {
+	case id := <-hits:
+		if id != "event-7" {
+			t.Fatalf("webhook-id %q, want the CloudEvent id", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no delivery")
+	}
+	select {
+	case <-hits:
+		t.Fatal("the redelivered event was sent again")
 	case <-time.After(300 * time.Millisecond):
 	}
 }

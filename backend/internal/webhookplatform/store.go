@@ -213,8 +213,10 @@ const maxDeliveries = 512
 
 // Deliveries stores pending callbacks and the delivery log.
 type Deliveries interface {
-	// TrackPending records an in-flight dispatch so its callback can be correlated.
-	TrackPending(ctx context.Context, p PendingCallback) error
+	// TrackPending records an in-flight dispatch so its callback can be
+	// correlated. It returns false when a dispatch of p.EventID is recorded
+	// already.
+	TrackPending(ctx context.Context, p PendingCallback) (bool, error)
 	// ResolvePending marks the dispatch for eventID as acknowledged and returns
 	// it. Only the first callback for an event_id resolves it.
 	ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error)
@@ -232,14 +234,20 @@ type PostgresDeliveries struct {
 	DB *sqlx.DB
 }
 
-func (s PostgresDeliveries) TrackPending(ctx context.Context, p PendingCallback) error {
-	if _, err := s.DB.ExecContext(ctx, `
+func (s PostgresDeliveries) TrackPending(ctx context.Context, p PendingCallback) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `
         INSERT INTO webhook_dispatches (event_id, correlation_id, event, did, sent_at)
-        VALUES ($1, $2, $3, $4, $5)`,
-		p.EventID, p.CorrelationID, p.Event, p.DID, p.SentAt); err != nil {
-		return fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (event_id) DO NOTHING`,
+		p.EventID, p.CorrelationID, p.Event, p.DID, p.SentAt)
+	if err != nil {
+		return false, fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
+	}
+	return n == 1, nil
 }
 
 func (s PostgresDeliveries) ResolvePending(ctx context.Context, eventID string) (PendingCallback, bool, error) {

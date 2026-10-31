@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -63,22 +64,22 @@ func NewDispatcher(subs Subscriptions, store Deliveries, audience Audience, owne
 }
 
 // Dispatch sends event to every subscriber registered for that event whose
-// organization the audience admits.
-func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
+// organization the audience admits. eventID identifies the event: an event
+// that is dispatched already is not sent again.
+func (d *Dispatcher) Dispatch(ctx context.Context, eventID, event, did string, data json.RawMessage) error {
 	subs, err := d.subs.ByEvent(ctx, event)
 	if err != nil {
-		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
-		return
+		return fmt.Errorf("webhookplatform: load subscribers for %s: %w", event, err)
 	}
 	subs = slices.DeleteFunc(subs, func(sub Subscription) bool {
 		return !d.audience(ctx, event, did, sub.OwnerDID)
 	})
 	if len(subs) == 0 {
-		return
+		return nil
 	}
 
 	payload := WebhookPayload{
-		EventID:       uuid.New().String(),
+		EventID:       eventID,
 		CorrelationID: uuid.New().String(),
 		Event:         event,
 		DID:           did,
@@ -89,30 +90,34 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 		payload.Owner = d.owner(ctx, did)
 	}
 
-	if err := d.store.TrackPending(ctx, PendingCallback{
+	tracked, err := d.store.TrackPending(ctx, PendingCallback{
 		EventID:       payload.EventID,
 		CorrelationID: payload.CorrelationID,
 		Event:         event,
 		DID:           did,
 		SentAt:        payload.OccurredAt,
-	}); err != nil {
-		log.Printf("webhookplatform: %v", err)
-		return
+	})
+	if err != nil {
+		return fmt.Errorf("webhookplatform: %w", err)
+	}
+	if !tracked {
+		return nil
 	}
 
 	for _, sub := range subs {
 		go d.notify(sub, payload)
 	}
+	return nil
 }
 
 // DispatchFromDCS is a convenience wrapper that translates a raw DCS NATS
 // event type to its webhook event name before dispatching.
-func (d *Dispatcher) DispatchFromDCS(ctx context.Context, dcsEventType, did string, data json.RawMessage) {
+func (d *Dispatcher) DispatchFromDCS(ctx context.Context, eventID, dcsEventType, did string, data json.RawMessage) error {
 	event, ok := DCSEventMap[dcsEventType]
 	if !ok {
-		return
+		return nil
 	}
-	d.Dispatch(ctx, event, did, data)
+	return d.Dispatch(ctx, eventID, event, did, data)
 }
 
 func (d *Dispatcher) notify(sub Subscription, payload WebhookPayload) {

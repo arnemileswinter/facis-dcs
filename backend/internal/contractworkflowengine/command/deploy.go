@@ -50,7 +50,15 @@ type DeployCmd struct {
 	// one the contract designates (ADR-25). The designation itself is unchanged:
 	// this is the operator directing one delivery, not editing the contract.
 	TargetIDOverride string
+	// EventID is the id of the event that requests an automatic deployment. It
+	// is the correlation id of the deployment, so a redelivered event
+	// dispatches nothing (ErrAlreadyDispatched).
+	EventID string
 }
+
+// ErrAlreadyDispatched reports that the deployment of DeployCmd.EventID is
+// recorded already.
+var ErrAlreadyDispatched = errors.New("the deployment for this event is dispatched already")
 
 // DeployResult is what both the manual /contract/deploy endpoint and the
 // automatic post-signing subscriber receive back from Deployer.Handle.
@@ -167,6 +175,18 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		return nil, err
 	}
 
+	correlationID := uuid.NewString()
+	if cmd.EventID != "" {
+		correlationID = cmd.EventID
+		existing, err := h.DeploymentRepo.FindDeploymentByCorrelationID(ctx, tx, correlationID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return nil, ErrAlreadyDispatched
+		}
+	}
+
 	contractDataBytes := []byte(`{}`)
 	if data.ContractData != nil && data.ContractData.IsNotNullValue() {
 		contractDataBytes = []byte(*data.ContractData)
@@ -181,7 +201,6 @@ func (h *Deployer) Handle(ctx context.Context, cmd DeployCmd) (*DeployResult, er
 		return nil, fmt.Errorf("could not decode contract document for %s: %w", cmd.DID, err)
 	}
 
-	correlationID := uuid.NewString()
 	now := time.Now().UTC()
 
 	payload := map[string]any{

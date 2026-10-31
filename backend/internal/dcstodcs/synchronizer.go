@@ -76,7 +76,7 @@ var shippableStates = map[string]bool{
 	contractstate.Revoked.String():     true,
 }
 
-func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client *event.CloudEventSubClient) {
+func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client *event.DurableSubClient) {
 	syncHandler := func(evt cloudevent.Event) {
 		source, err := componenttype.NewComponentType(evt.Source())
 		if err != nil {
@@ -167,8 +167,14 @@ func (s *DCSToDCSSynchronizer) StartSynchronizerJob(ctx context.Context, client 
 		}
 	}
 
+	// Each ship records its failure for the retry scheduler and skips what a
+	// peer holds already, so every event is acknowledged and a redelivered one
+	// ships nothing twice.
 	go func() {
-		if err := client.Subscribe(syncHandler); err != nil {
+		if err := client.Subscribe(func(evt cloudevent.Event) error {
+			syncHandler(evt)
+			return nil
+		}); err != nil {
 			log.Errorf(ctx, err, "could not start syncHandler")
 		}
 	}()

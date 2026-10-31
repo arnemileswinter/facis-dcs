@@ -705,7 +705,7 @@ Values (production and acceptance):
 | `federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary: true` | A remote Federated Catalogue: its service account has `ADMIN_ALL`, so it is safe only inside one trusted administrative boundary ([ADR-18](../docs/adr-18-fc-catalogue-single-service-account.md)). Without it the chart refuses to render. |
 | `signing.issuerDID` (or `signing.issuerDIDSecretRef`) | The DID of this instance (`ISSUER_DID`), `did:web:<host>`. |
 | `signing.tsaURL` | The RFC 3161 timestamp authority (`TSA_URL`). The backend does not start without it. A deployment without its own TSA can use the ORCE TSA (`orce.enabled`, `http://<release>-orce:1880/tsa/`); `signing.tsaTrustCertSecret` then names the Secret with its certificate (key `tsa-cert.pem`). |
-| `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`). `values.prod.yml` co-deploys none. |
+| `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`), with JetStream enabled and a persistent store: the backend creates the stream `DCS_EVENTS` and a durable consumer per consumer group on it (ADR-39). `values.prod.yml` co-deploys none. |
 | `oid4vp.trust.enabled: true`, `oid4vp.trust.existingConfigMap` | The trusted credential issuers ("Credential issuers", "The trust document"). |
 | `configIntegrity.pins.oid4vp-trust-data` | The SHA-256 of that trust document (`sha256sum` of the ConfigMap key); the backend refuses to start when the ConfigMap differs (DCS-NFR-SEC-04). |
 | `hydra.clients` | The login client of the backend (`dcs-client`, redirect URIs under `route.publicBaseURL`); both profiles carry it with `client_secretSecretRef`. |
@@ -734,7 +734,7 @@ The chart generates the other credentials (the internal CA and certificate, the 
 
 A production cluster also needs a CNI that enforces NetworkPolicy ("Network policies") and a Grafana for the logs ("Logs").
 
-Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back. The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
+Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back, and JetStream keeps each event on the NATS volume (PersistentVolumeClaim `<release>-nats`) until every consumer group has it (ADR-39). The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
 
 Other values for every profile:
 
