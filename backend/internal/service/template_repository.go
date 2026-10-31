@@ -11,11 +11,12 @@ import (
 	"digital-contracting-service/internal/base/validation"
 
 	"digital-contracting-service/internal/base/datatype/componenttype"
+	"digital-contracting-service/internal/base/event"
 	qry2 "digital-contracting-service/internal/processauditandcompliance/query"
+	templateevents "digital-contracting-service/internal/templaterepository/event"
 
 	"digital-contracting-service/internal/templaterepository/query"
 
-	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
@@ -73,13 +74,15 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 	}
 }
 
-// Create a new template.
-// mapTemplateCommandError maps a client-input document error (a Semantic Hub
-// ontology-prefix conflict, DCS-FR-TR-03) to bad_request; everything else
-// stays an internal error.
+// mapTemplateCommandError maps the errors a client causes (invalid input, a
+// state that does not allow the command, a failed policy audit, an unknown
+// template) to bad_request and a stale view to conflict; everything else
+// stays an internal error (DCS-IR-TR-04).
 func mapTemplateCommandError(err error) error {
 	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
-		errors.Is(err, templatestructure.ErrInvalid) {
+		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) ||
+		errors.Is(err, db.ErrContractTemplateNotFound) || errors.Is(err, command.ErrInvalidRequest) ||
+		errors.Is(err, command.ErrTemplateInUse) {
 		return templaterepository.MakeBadRequest(err)
 	}
 	// Same optimistic-concurrency refusal the contract commands answer with a
@@ -102,12 +105,12 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	}
 	templateType, err := contracttemplatetype.NewContractTemplateType(req.TemplateType)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	templateData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	did, err := base.GenerateID()
@@ -185,14 +188,14 @@ func (s *templateRepositorysrvc) Submit(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var actionFlag *actionflag.ActionFlag
 	if req.ForwardTo != nil {
 		flag, err := actionflag.NewActionFlag(*req.ForwardTo)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		actionFlag = &flag
 	}
@@ -230,12 +233,12 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var partyType partytype.PartyType
@@ -250,7 +253,7 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
@@ -295,12 +298,12 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var partyType partytype.PartyType
@@ -315,7 +318,7 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
@@ -339,6 +342,8 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	handler := command.UpdateManager{
 		DB:     s.DB,
 		CTRepo: s.CTRepo,
+		RTRepo: s.RTRepo,
+		ATRepo: s.ATRepo,
 	}
 	err = handler.Handle(ctx, cmd)
 	if err != nil {
@@ -376,7 +381,7 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	if req.State != nil {
 		tState, err := contracttemplatestate.NewContractTemplateState(*req.State)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 
 		state = &tState
@@ -424,6 +429,7 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 			PartyType:         item.PartyType,
 			Name:              item.Name,
 			Description:       item.Description,
+			CreatedBy:         item.CreatedBy,
 			CreatedAt:         item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
 			Jurisdiction:      item.Jurisdiction,
@@ -454,7 +460,7 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 	}
 	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, templaterepository.MakeInternalError(err)
 	}
 
 	var contractTemplates []*templaterepository.ContractTemplateHistoryRetrieveByIDResponse
@@ -472,6 +478,12 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 			TemplateData: item.TemplateData,
 			TemplateType: item.TemplateType.String(),
 			PartyType:    item.PartyType,
+
+			Jurisdiction:      item.Jurisdiction,
+			Industry:          item.Industry,
+			ComplianceStatus:  &item.ComplianceStatus,
+			TemplateLevel:     &item.TemplateLevel,
+			RequiredTemplates: item.RequiredTemplates,
 		})
 	}
 
@@ -575,8 +587,20 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		CTRepo: s.CTRepo,
 	}
 	contractTemplate, err := queryHandler.Handle(ctx, qry)
+	if errors.Is(err, db.ErrContractTemplateNotFound) {
+		return nil, templaterepository.MakeNotFound(err)
+	}
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
+	}
+	var notes []*templaterepository.TemplateReviewNote
+	for _, note := range contractTemplate.ReviewNotes {
+		notes = append(notes, &templaterepository.TemplateReviewNote{
+			Kind:      note.Kind,
+			Text:      note.Text,
+			By:        &note.By,
+			CreatedAt: note.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	templateJSONLD, err := semanticmapper.BuildTemplateJSONLD(db.ContractTemplate{
 		DID:          contractTemplate.DID,
@@ -613,6 +637,7 @@ func (s *templateRepositorysrvc) RetrieveByID(ctx context.Context, req *template
 		ComplianceStatus:  &contractTemplate.ComplianceStatus,
 		TemplateLevel:     &contractTemplate.TemplateLevel,
 		RequiredTemplates: contractTemplate.RequiredTemplates,
+		ReviewNotes:       notes,
 	}, nil
 }
 
@@ -638,12 +663,13 @@ func (s *templateRepositorysrvc) Verify(ctx context.Context, req *templatereposi
 	}
 	result, err := handler.Handle(ctx, qry)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, mapTemplateCommandError(err)
 	}
 
 	return &templaterepository.ContractTemplateVerifyResponse{
 		Did:      req.Did,
 		Findings: result.Findings,
+		Warnings: result.Warnings,
 	}, nil
 }
 
@@ -660,7 +686,7 @@ func (s *templateRepositorysrvc) Approve(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ApproveCmd{
@@ -694,7 +720,7 @@ func (s *templateRepositorysrvc) Reject(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.RejectCmd{
@@ -737,8 +763,6 @@ func (s *templateRepositorysrvc) Register(ctx context.Context, req *templaterepo
 	handler := command.Registrar{
 		DB:        s.DB,
 		CTRepo:    s.CTRepo,
-		RTRepo:    s.RTRepo,
-		ATRepo:    s.ATRepo,
 		FCClient:  s.FCClient,
 		VCSigner:  s.VCSigner,
 		IssuerDID: s.IssuerDID,
@@ -772,6 +796,17 @@ func (s *templateRepositorysrvc) Provenance(ctx context.Context, req *templatere
 	if err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
+	// DCS-FR-TR-21: a provenance read is logged like any other template read.
+	evt := templateevents.RetrieveProvenanceEvent{
+		DID:         req.Did,
+		RetrievedBy: middleware.GetParticipantID(ctx),
+		OccurredAt:  time.Now().UTC(),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
+	}
+	if err := event.Create(ctx, tx, evt, componenttype.ContractTemplateRepo); err != nil {
+		return nil, templaterepository.MakeInternalError(err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, templaterepository.MakeInternalError(err)
 	}
@@ -800,15 +835,16 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ArchiveCmd{
-		DID:        req.Did,
-		UpdatedAt:  updatedAt,
-		ArchivedBy: middleware.GetParticipantID(ctx),
-		HolderDID:  middleware.GetHolderDID(ctx),
-		UserRoles:  middleware.GetUserRoles(ctx),
+		DID:           req.Did,
+		UpdatedAt:     updatedAt,
+		ArchivedBy:    middleware.GetParticipantID(ctx),
+		Justification: req.Justification,
+		HolderDID:     middleware.GetHolderDID(ctx),
+		UserRoles:     middleware.GetUserRoles(ctx),
 	}
 	handler := command.Archiver{
 		DB:       s.DB,
@@ -904,7 +940,7 @@ func (s *templateRepositorysrvc) Publish(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.PublishCmd{

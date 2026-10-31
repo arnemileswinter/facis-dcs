@@ -105,6 +105,8 @@ export interface ContractTemplateVerifyRequest {
 export interface ContractTemplateArchiveRequest {
   did: string
   updated_at: string
+  /** DCS-IR-TR-07: why the template is deprecated or deleted */
+  justification: string
 }
 
 export interface ContractTemplateRegisterRequest {

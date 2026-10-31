@@ -58,7 +58,7 @@ func TestQAPartyTypePostgres(t *testing.T) {
 	row, err = repo.ReadDataByID(ctx, tx, "copy")
 	require.NoError(t, err)
 	require.Equal(t, "MULTI_PARTY", row.PartyType)
-	require.NoError(t, repo.UpdateState(ctx, tx, "single", "REGISTERED"))
+	require.NoError(t, repo.UpdateState(ctx, tx, "single", "DRAFT", "REGISTERED"))
 	version, err := repo.CopyFromDID(ctx, tx, "single", "version-two")
 	require.NoError(t, err)
 	require.Equal(t, 2, version)
@@ -70,7 +70,7 @@ func TestQAPartyTypePostgres(t *testing.T) {
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "permission")
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "single", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "state")
 	require.ErrorContains(t, updater.Handle(ctx, command.UpdateCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Time{}}), "reload")
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	require.ErrorContains(t, manager.Handle(ctx, command.UpdateManageCmd{DID: "single", PartyType: "SINGLE_PARTY", UpdatedAt: time.Now().Add(time.Hour)}), "state")
 	require.ErrorContains(t, manager.Handle(ctx, command.UpdateManageCmd{DID: "copy", PartyType: "SINGLE_PARTY", UpdatedAt: time.Time{}}), "reload")
 
@@ -98,7 +98,7 @@ func TestQAPartyTypeUpdateManageHistory(t *testing.T) {
 	_, err = repo.Create(ctx, tx, db.ContractTemplate{DID: "managed", CreatedBy: "tester", State: "DRAFT", TemplateType: "CONTRACT_TEMPLATE", PartyType: "SINGLE_PARTY"})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	manager := &command.UpdateManager{DB: database, CTRepo: repo}
+	manager := &command.UpdateManager{DB: database, CTRepo: repo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{}}
 	var expectedHistory []string
 	for index, change := range []struct{ value, expected, prior string }{
 		{"MULTI_PARTY", "MULTI_PARTY", "SINGLE_PARTY"},
@@ -134,7 +134,7 @@ func TestQAPartyTypeCatalogueImport(t *testing.T) {
 				}
 				require.Equal(t, "/query/search", r.URL.Path)
 				require.Equal(t, "POST", r.Method)
-				row := map[string]interface{}{"did": source, "version": 1, "template_type": "CONTRACT_TEMPLATE", "name": "imported", "template_data_string": "{}"}
+				row := map[string]interface{}{"did": source, "version": 1, "template_type": "CONTRACT_TEMPLATE", "name": "imported", "template_data_string": compliantTemplateData}
 				if value != "" {
 					row["party_type"] = value
 				}

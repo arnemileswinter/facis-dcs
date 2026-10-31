@@ -6,6 +6,8 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
 import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateReviewNotes from '@template-repository/components/TemplateReviewNotes.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -121,14 +123,15 @@ async function resubmit() {
     return
   }
   try {
+    // DCS-IR-TR-05: a resubmission states its reason.
     const decisionNoteResult = await decisionNoteDialog.value?.reveal({
-      message: 'Add decision note?',
-      editor: { requiredText: false, placeholder: 'Decision Note' },
+      message: 'Why does the template go back to review?',
+      editor: { requiredText: true, label: 'Reason', placeholder: 'Reason for the resubmission' },
     })
     if (decisionNoteResult?.isCanceled) {
       return
     } else if (decisionNoteResult?.data) {
-      decisionNote.value = decisionNoteResult.data
+      decisionNote.value = decisionNoteResult.data.trim()
     }
     isSubmitting.value = true
     await contractTemplateService.submit({
@@ -200,6 +203,8 @@ const exportPDF = async () => {
           :narrative="story.narrative"
           :actions="toBannerActions(story.actionHints)"
         />
+        <TemplateReviewNotes :notes="contractTemplate?.review_notes" />
+        <TemplateVerificationPanel v-if="contractTemplate" :key="contractTemplate.did" :did="contractTemplate.did" />
       </template>
     </TemplateEditors>
 

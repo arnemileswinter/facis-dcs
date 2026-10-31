@@ -5,6 +5,8 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
 import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateReviewNotes from '@template-repository/components/TemplateReviewNotes.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -141,6 +143,8 @@ const exportPDF = async () => {
           :narrative="story.narrative"
           :actions="toBannerActions(story.actionHints)"
         />
+        <TemplateReviewNotes :notes="contractTemplate?.review_notes" />
+        <TemplateVerificationPanel v-if="!embedded && contractTemplate" :key="did" :did="did" />
         <slot name="before-tabs" />
       </template>
     </TemplateEditors>

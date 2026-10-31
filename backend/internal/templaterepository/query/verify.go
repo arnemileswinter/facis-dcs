@@ -38,7 +38,9 @@ type VerifyQry struct {
 }
 
 type VerifyResult struct {
+	// Findings block the review; Warnings do not.
 	Findings []string
+	Warnings []string
 }
 
 type Verifier struct {
@@ -71,14 +73,16 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 	if err != nil {
 		return nil, fmt.Errorf("could not read template data: %w", err)
 	}
-	if _, err := validation.NormalizeTemplateData(fullTemplate.TemplateData); err != nil {
-		return nil, fmt.Errorf("template data validation failed: %w", err)
-	}
 
-	findings, err := h.provenanceFindings(ctx, tx, fullTemplate)
+	findings, warnings, err := contentFindings(ctx, fullTemplate)
 	if err != nil {
 		return nil, err
 	}
+	provenance, err := h.provenanceFindings(ctx, tx, fullTemplate)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, provenance...)
 	if h.FCClient != nil {
 		catalogueFindings, err := h.verifyTemplateResourceSelfDescription(ctx, cmd, processData, fullTemplate)
 		if err != nil {
@@ -86,32 +90,28 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 		}
 		findings = append(findings, catalogueFindings...)
 	}
-	if len(findings) > 0 {
-		return &VerifyResult{
-			Findings: findings,
-		}, nil
-	}
 
-	// DCS-FR-TR-06: only a Template Reviewer's verification completes a review task.
-	hasTask := false
-	if cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
-		hasTask, err = h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
+	// DCS-FR-TR-06: only a Template Reviewer's verification completes a review
+	// task, and only when it has no findings. Warnings do not block.
+	if len(findings) == 0 && cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
+		hasTask, err := h.RTRepo.TaskExistsInState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Open.String())
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	if hasTask {
-		err := h.RTRepo.UpdateState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String())
-		if err != nil {
-			return nil, err
+		if hasTask {
+			if err := h.RTRepo.UpdateState(ctx, tx, cmd.DID, cmd.VerifiedBy, reviewtaskstate.Verified.String()); err != nil {
+				return nil, err
+			}
 		}
 	}
 
+	// DCS-FR-TR-21: every verification is logged with its result.
 	evt := templateevents.VerifyEvent{
 		DID:        cmd.DID,
 		Version:    processData.Version,
 		VerifiedBy: cmd.VerifiedBy,
+		Findings:   findings,
+		Warnings:   warnings,
 		OccurredAt: time.Now().UTC(),
 		HolderDID:  cmd.HolderDID,
 		UserRoles:  cmd.UserRoles,
@@ -128,7 +128,36 @@ func (h *Verifier) Handle(ctx context.Context, cmd VerifyQry) (*VerifyResult, er
 
 	return &VerifyResult{
 		Findings: findings,
+		Warnings: warnings,
 	}, nil
+}
+
+// contentFindings checks the template content (DCS-IR-TR-03, DCS-FR-TR-20):
+// the canonical envelope, the template policy audit the approval runs, and
+// the Semantic Hub shapes the template declares. Error findings are
+// findings; warnings and information do not block.
+func contentFindings(ctx context.Context, template *db.ContractTemplate) (findings, warnings []string, err error) {
+	if _, err := validation.NormalizeTemplateData(template.TemplateData); err != nil {
+		return []string{"template data is not valid: " + err.Error()}, nil, nil
+	}
+	results, err := command.ApprovalAudit(template)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not audit template policies: %w", err)
+	}
+	shapes, err := validation.AuditTemplateShapes(ctx, template.TemplateData)
+	if err != nil {
+		findings = append(findings, "Semantic Hub shapes validation failed: "+err.Error())
+	}
+	for _, result := range append(results, shapes...) {
+		text := result.RuleID + ": " + result.Message
+		switch result.Severity {
+		case validation.SeverityError:
+			findings = append(findings, text)
+		case validation.SeverityWarning, validation.SeverityInfo:
+			warnings = append(warnings, text)
+		}
+	}
+	return findings, warnings, nil
 }
 
 // provenanceFindings checks the template against its provenance credentials
@@ -244,33 +273,16 @@ func buildCatalogueVerificationPayload(
 	processData *db.ContractTemplateProcessData,
 	fullTemplate *db.ContractTemplate,
 ) (map[string]any, error) {
-	name := ""
-	description := ""
-	if fullTemplate.Name != nil {
-		name = *fullTemplate.Name
-	}
-	if fullTemplate.Description != nil {
-		description = *fullTemplate.Description
-	}
-
 	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
 		return nil, fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
 	return fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:     issuer,
-		SubjectIRI: base.ResourceIRI("template", did),
-		ValidFrom:  fullTemplate.UpdatedAt,
-		Subject: fcasset.CatalogueSubjectFromRepository(
-			did,
-			processData.Version,
-			processData.State,
-			name,
-			description,
-			fullTemplate.TemplateType,
-			fullTemplate.PartyType,
-		),
+		Issuer:             issuer,
+		SubjectIRI:         base.ResourceIRI("template", did),
+		ValidFrom:          fullTemplate.UpdatedAt,
+		Subject:            command.CatalogueSubject(processData, fullTemplate),
 		TemplateDataString: templateDataString,
 	})
 }

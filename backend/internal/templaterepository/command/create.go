@@ -56,7 +56,7 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	}
 	normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 	if err != nil {
-		return fmt.Errorf("template data validation failed: %w", err)
+		return fmt.Errorf("%w: template data validation failed: %w", ErrInvalidRequest, err)
 	}
 	cmd.TemplateData = normalizedTemplateData
 

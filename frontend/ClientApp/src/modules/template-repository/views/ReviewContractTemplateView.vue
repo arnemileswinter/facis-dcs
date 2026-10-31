@@ -6,6 +6,8 @@ import WorkflowStageBanner from '@core/components/WorkflowStageBanner.vue'
 import { templateStory, toBannerActions } from '@core/workflow-story'
 import CopyTemplateButton from '@template-repository/components/CopyTemplateButton.vue'
 import TemplateEditors from '@template-repository/components/TemplateEditors.vue'
+import TemplateReviewNotes from '@template-repository/components/TemplateReviewNotes.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useTemplatePermissions } from '@template-repository/composables/useTemplatePermissions'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -162,6 +164,14 @@ const exportPDF = async () => {
           :headline="story.headline"
           :narrative="story.narrative"
           :actions="toBannerActions(story.actionHints)"
+        />
+        <TemplateReviewNotes :notes="contractTemplate?.review_notes" />
+        <!-- The reviewer verifies with the Approve dialog, which completes the review. -->
+        <TemplateVerificationPanel
+          v-if="contractTemplate"
+          :key="contractTemplate.did"
+          :did="contractTemplate.did"
+          :actions="['provenance', 'pdf', 'export']"
         />
       </template>
     </TemplateEditors>

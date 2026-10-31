@@ -72,7 +72,10 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 	}
 
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
+	}
+	if fullTemplate.ComplianceStatus != Compliant {
+		return fmt.Errorf("%w: compliance status %s", ErrTemplateNotCompliant, fullTemplate.ComplianceStatus)
 	}
 
 	if h.FCClient == nil {
@@ -106,10 +109,10 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return nil
 	}
 	if processData.State != contracttemplatestate.Registered.String() {
-		return errors.New("contract template must be in registered state to publish")
+		return fmt.Errorf("%w: contract template must be in registered state to publish", ErrInvalidTemplateState)
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Published.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Published.String())
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}
@@ -138,33 +141,16 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return "", fmt.Errorf("instance did is empty")
 	}
 
-	name := ""
-	description := ""
-	if fullTemplate.Name != nil {
-		name = *fullTemplate.Name
-	}
-	if fullTemplate.Description != nil {
-		description = *fullTemplate.Description
-	}
-
 	templateDataString, err := fcasset.TemplateDataString(fullTemplate.TemplateData)
 	if err != nil {
 		return "", fmt.Errorf("serialize template data for Federated Catalogue: %w", err)
 	}
 
 	payload, err := fcasset.BuildPayload(fcasset.BuildInput{
-		Issuer:     cmd.InstanceDID,
-		SubjectIRI: base.ResourceIRI("template", cmd.DID),
-		ValidFrom:  fullTemplate.UpdatedAt,
-		Subject: fcasset.CatalogueSubjectFromRepository(
-			cmd.DID,
-			processData.Version,
-			processData.State,
-			name,
-			description,
-			fullTemplate.TemplateType,
-			fullTemplate.PartyType,
-		),
+		Issuer:             cmd.InstanceDID,
+		SubjectIRI:         base.ResourceIRI("template", cmd.DID),
+		ValidFrom:          fullTemplate.UpdatedAt,
+		Subject:            CatalogueSubject(processData, fullTemplate),
 		TemplateDataString: templateDataString,
 	})
 
@@ -177,4 +163,22 @@ func (h *Publisher) publishTemplateResourceToFC(ctx context.Context, cmd Publish
 		return "", fmt.Errorf("publish template resource failed: %w", err)
 	}
 	return assetHash, nil
+}
+
+// CatalogueSubject is the catalogue metadata of a template, with the
+// searchable metadata an importing instance takes over (DCS-FR-TR-01).
+func CatalogueSubject(processData *db.ContractTemplateProcessData, template *db.ContractTemplate) fcasset.CatalogueSubject {
+	subject := fcasset.CatalogueSubjectFromRepository(
+		template.DID,
+		processData.Version,
+		processData.State,
+		base.DerefString(template.Name),
+		base.DerefString(template.Description),
+		template.TemplateType,
+		template.PartyType,
+	)
+	subject.Jurisdiction = base.DerefString(template.Jurisdiction)
+	subject.Industry = base.DerefString(template.Industry)
+	subject.TemplateLevel = template.TemplateLevel
+	return subject
 }

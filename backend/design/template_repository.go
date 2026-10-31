@@ -61,7 +61,7 @@ var ContractTemplateSubmitRequest = Type("ContractTemplateSubmitRequest", func()
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("forward_to", String, "Action flag: approval | draft")
-	Attribute("comments", ArrayOf(String), "Optional comments")
+	Attribute("comments", ArrayOf(String), "Review comments; required when the approver returns a reviewed template to review (DCS-IR-TR-05)")
 
 	Required("did", "updated_at")
 })
@@ -171,11 +171,12 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
+	Attribute("created_by", String, "Identifier of who created the contract template (DCS-IR-TR-08)")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Required("did", "state", "template_type", "created_at", "updated_at", "version", "party_type")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version", "party_type")
 })
 
 var ContractTemplateRetrieveRequest = Type("ContractTemplateRetrieveRequest", func() {
@@ -291,6 +292,11 @@ var ContractTemplateHistoryRetrieveByIDResponse = Type("ContractTemplateHistoryR
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
 	Attribute("template_data", Any, "The template data of the contract template")
+	Attribute("jurisdiction", String, "Jurisdiction of the revision (DCS-FR-TR-10)")
+	Attribute("industry", String, "Industry of the revision (DCS-FR-TR-10)")
+	Attribute("compliance_status", String, "Compliance status of the revision (DCS-FR-TR-10)")
+	Attribute("template_level", String, "Hierarchy level of the revision (DCS-FR-TR-02)")
+	Attribute("required_templates", ArrayOf(String), "Templates the revision required (DCS-FR-TR-23)")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })
@@ -303,6 +309,19 @@ var ContractTemplateRetrieveByIDRequest = Type("ContractTemplateRetrieveByIDRequ
 	Attribute("did", String, "DID of the contract template")
 
 	Required("did")
+})
+
+var TemplateReviewNote = Type("TemplateReviewNote", func() {
+	Description("A comment of a review or approval decision, or a rejection reason (DCS-IR-TR-04, DCS-IR-TR-05)")
+
+	Attribute("kind", String, "The decision", func() {
+		Enum("RETURNED_TO_DRAFT", "FORWARDED_TO_APPROVAL", "RETURNED_TO_REVIEW", "REJECTED", "APPROVED")
+	})
+	Attribute("text", ArrayOf(String), "The comments, the rejection reason or the decision notes")
+	Attribute("by", String, "Holder DID of the person who decided")
+	Attribute("created_at", String, "When the decision was made")
+
+	Required("kind", "text", "created_at")
 })
 
 var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDResponse", func() {
@@ -330,6 +349,7 @@ var ContractTemplateRetrieveByIDResponse = Type("ContractTemplateRetrieveByIDRes
 	Attribute("template_level", String, "Hierarchy level of the template (DCS-FR-TR-02)", func() { Enum("FRAME_AGREEMENT", "AGREEMENT", "SUB_AGREEMENT", "ADDENDUM") })
 	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
+	Attribute("review_notes", ArrayOf(TemplateReviewNote), "Review comments, rejection reasons and decision notes of this version, oldest first; returned to the template roles only")
 
 	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "template_data", "version", "party_type")
 })
@@ -365,7 +385,7 @@ var ContractTemplateRejectRequest = Type("ContractTemplateRejectRequest", func()
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Attribute("reason", String, "Reason for rejecting the contract template")
+	Attribute("reason", String, "Reason for rejecting the contract template (DCS-IR-TR-05)", func() { Pattern(`\S`) })
 
 	Required("did", "updated_at", "reason")
 })
@@ -392,7 +412,8 @@ var ContractTemplateVerifyResponse = Type("ContractTemplateVerifyResponse", func
 	Description("Result for verifying a contract template")
 
 	Attribute("did", String, "Decentralized Identifier of the contract template")
-	Attribute("findings", ArrayOf(String), "A list of findings")
+	Attribute("findings", ArrayOf(String), "Findings that block the review: envelope errors, error findings of the template policy audit and of the Semantic Hub shapes, provenance and catalogue findings")
+	Attribute("warnings", ArrayOf(String), "Warning and information findings of the template policy audit and the Semantic Hub shapes; they do not block")
 
 	Required("did", "findings")
 })
@@ -405,8 +426,9 @@ var ContractTemplateArchiveRequest = Type("ContractTemplateArchiveRequest", func
 	Attribute("did", String, "Decentralized Identifier of the contract template")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
+	Attribute("justification", String, "Why the template is archived; stored in the audit event (DCS-IR-TR-07)", func() { Pattern(`\S`) })
 
-	Required("did", "updated_at")
+	Required("did", "updated_at", "justification")
 })
 
 var ContractTemplateArchiveResponse = Type("ContractTemplateArchiveResponse", func() {
@@ -486,9 +508,12 @@ var ContractTemplatePublishResponse = Type("ContractTemplatePublishResponse", fu
 })
 
 // Template Repository Service  (/template/...)
-// templateVerifyScopes are the roles that verify a template on either verify route.
+// templateVerifyScopes are the roles that verify a template on either verify
+// route. The Template Approver reads the validation results before the
+// decision (DCS-IR-TR-05); only a reviewer's verification completes a task.
 var templateVerifyScopes = func() {
 	Scope("Template Reviewer")
+	Scope("Template Approver")
 	Scope("Template Manager")
 	Scope("Contract Creator")
 }
@@ -757,6 +782,7 @@ var _ = Service("TemplateRepository", func() {
 		Result(Any)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "No template with this DID that the caller may read")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -765,6 +791,7 @@ var _ = Service("TemplateRepository", func() {
 
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
@@ -790,6 +817,7 @@ var _ = Service("TemplateRepository", func() {
 		Result(ContractTemplateRetrieveByIDResponse)
 
 		Error("bad_request", ErrorResult, "Bad request")
+		Error("not_found", ErrorResult, "No template with this DID that the caller may read; a caller without a template role reads registered, published and deprecated templates only")
 		Error("internal_error", ErrorResult, "Internal server error")
 
 		HTTP(func() {
@@ -798,13 +826,14 @@ var _ = Service("TemplateRepository", func() {
 
 			Response(StatusOK)
 			Response("bad_request", StatusBadRequest)
+			Response("not_found", StatusNotFound)
 			Response("internal_error", StatusInternalServerError)
 		})
 	})
 
 	// POST /template/verify
 	Method("verify", func() {
-		Description("run policy, schema, and semantic validations, verify the provenance credentials and compare the content hash with the registered one; return findings.")
+		Description("check the canonical envelope, run the template policy audit of the approval and the Semantic Hub SHACL shapes the template declares, verify the provenance credentials and compare the content hash with the registered one; return findings and warnings. Every verification is logged with its result.")
 		Meta("dcs:requirements", "DCS-IR-TR-03", "DCS-FR-TR-09", "DCS-FR-TR-20")
 
 		Security(JWTAuth, templateVerifyScopes)
@@ -916,8 +945,8 @@ var _ = Service("TemplateRepository", func() {
 
 	// POST /template/archive
 	Method("archive", func() {
-		Description("archive obsolete template.")
-		Meta("dcs:requirements", "DCS-IR-TR-07")
+		Description("archive a template with a justification: a REGISTERED or PUBLISHED template becomes DEPRECATED (event ARCHIVE_CONTRACT_TEMPLATE); a DRAFT, REJECTED or DEPRECATED template becomes DELETED (event DELETE_CONTRACT_TEMPLATE), unless contracts that are not terminated were made from it. A template in review or approved is refused.")
+		Meta("dcs:requirements", "DCS-IR-TR-07", "DCS-FR-TR-17", "DCS-FR-TR-18")
 
 		Security(JWTAuth, func() {
 			Scope("Template Manager")

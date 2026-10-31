@@ -12,6 +12,7 @@ import TemplatePreview from '@template-repository/components/builder-editor/prev
 import BuilderEditor from '@template-repository/components/BuilderEditor.vue'
 import ClausesEditor from '@template-repository/components/ClausesEditor.vue'
 import DataObjectsEditor from '@template-repository/components/data-objects/DataObjectsEditor.vue'
+import TemplateVerificationPanel from '@template-repository/components/TemplateVerificationPanel.vue'
 import { useDcsDraftStore } from '@template-repository/store/dcsDraftStore'
 import { buildContractDocument } from '@template-repository/store/dcsDraftStore'
 import { useTemplateEditorUiStore } from '@template-repository/store/templateEditorUiStore'
@@ -61,6 +62,7 @@ const did = ref<string | null>(null)
 const isEditMode = computed(() => !!route.params.did || !!did.value)
 const isSubmitting = ref(false)
 const selectedTemplate: Ref<PartialContractTemplate | null> = ref(null)
+const showTemplateCheck = ref(false)
 const templateLoadState = ref<'loading' | 'loaded' | 'error'>('loading')
 const verificationResult: Ref<VerificationResult | null> = ref(null)
 const detailsValidationAttempted = ref(false)
@@ -519,6 +521,23 @@ onBeforeRouteLeave(() => {
               </select>
             </div>
           </div>
+          <!-- DCS-FR-TR-19, DCS-FR-TR-20: the template user verifies the template before using it. -->
+          <div>
+            <button
+              type="button"
+              class="btn btn-outline btn-sm"
+              :aria-expanded="showTemplateCheck"
+              @click="showTemplateCheck = !showTemplateCheck"
+            >
+              Check template
+            </button>
+          </div>
+          <TemplateVerificationPanel
+            v-if="showTemplateCheck"
+            :key="selectedTemplate.did"
+            :did="selectedTemplate.did"
+            :actions="['verify', 'provenance']"
+          />
         </template>
       </ViewContractTemplateView>
     </div>

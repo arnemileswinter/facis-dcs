@@ -95,11 +95,11 @@ func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Cont
 	statement := `
         INSERT INTO contract_templates_history 
             (did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
-             template_data, base_template)
-        SELECT 
+             template_data, base_template, jurisdiction, industry, compliance_status, template_level, required_templates)
+        SELECT
             did, version, state, template_type, party_type, name, description, created_by, created_at, updated_at,
-            template_data, base_template
-        FROM contract_templates 
+            template_data, base_template, jurisdiction, industry, compliance_status, template_level, required_templates
+        FROM contract_templates
         WHERE did = $1
     `
 	_, err := tx.ExecContext(ctx, statement, did)
@@ -109,7 +109,8 @@ func (r *PostgresContractTemplateRepo) CreateHistoryEntryForDID(ctx context.Cont
 func (r *PostgresContractTemplateRepo) ReadHistoryByDID(ctx context.Context, tx *sqlx.Tx, did string) ([]db.ContractTemplateHistory, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type, party_type, base_template
+               created_by, created_at, updated_at, template_data, template_type, party_type, base_template,
+               jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates_history WHERE did = $1
     `
 	var ct []db.ContractTemplateHistory
@@ -148,7 +149,7 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplate, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type, party_type,
+               created_by, created_at, updated_at, content_updated_at, template_data, template_type, party_type,
                base_template, jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates WHERE did = $1
     `
@@ -197,7 +198,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 
 	var params []any
 	if pagination.Limit > 0 {
-		offset := (pagination.Offset - 1) * pagination.Limit
+		offset := max(pagination.Offset-1, 0) * pagination.Limit
 		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
 		params = append(params, pagination.Limit, offset)
 	}
@@ -227,7 +228,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Conte
 	}
 
 	if pagination.Limit > 0 {
-		offset := (pagination.Offset - 1) * pagination.Limit
+		offset := max(pagination.Offset-1, 0) * pagination.Limit
 		n := len(params) + 1
 		query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", n, n+1)
 		params = append(params, pagination.Limit, offset)
@@ -250,26 +251,19 @@ func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context,
 	err := tx.GetContext(ctx, &processData, query, did)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("contract template with DID %s", did)
+			return nil, fmt.Errorf("%w: did=%s", db.ErrContractTemplateNotFound, did)
 		}
 		return nil, err
 	}
 	return &processData, nil
 }
 
-func (r *PostgresContractTemplateRepo) UpdateStateForAllTasks(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contract_templates SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
-}
-
 // UpdateState keeps the replaced state as a history entry, so the template
 // provenance lists every lifecycle step (F04). A refused change returns an
-// error and the caller's rollback removes the entry.
-func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
+// error and the caller's rollback removes the entry. The update applies only
+// while the stored state is from: of two concurrent transitions, the second
+// waits for the first and then finds a changed state.
+func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string) error {
 	if err := r.CreateHistoryEntryForDID(ctx, tx, did); err != nil {
 		return fmt.Errorf("could not create history entry: %w", err)
 	}
@@ -277,6 +271,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
         UPDATE contract_templates ct
         SET state = $2::contract_template_state
         WHERE did = $1
+          AND state = $3::contract_template_state
           AND (
               $2::contract_template_state NOT IN ('REGISTERED', 'PUBLISHED')
               OR NOT EXISTS (
@@ -289,7 +284,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
               )
           )
     `
-	result, err := tx.ExecContext(ctx, statement, did, state)
+	result, err := tx.ExecContext(ctx, statement, did, to, from)
 	if err != nil {
 		return fmt.Errorf("could not update registered state: %w", err)
 	}
@@ -298,7 +293,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("could not update state for DID %q: not found or conflicting version already active", did)
+		return fmt.Errorf("%w: %s cannot change from %s to %s: the state changed or a version with that number is already active", db.ErrInvalidTemplateState, did, from, to)
 	}
 	return nil
 }
@@ -544,6 +539,58 @@ func (r *PostgresContractTemplateRepo) ReadLatestProvenanceVCID(ctx context.Cont
 func (r *PostgresContractTemplateRepo) UpdateComplianceStatus(ctx context.Context, tx *sqlx.Tx, did string, status string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE contract_templates SET compliance_status = $2 WHERE did = $1`, did, status)
 	return err
+}
+
+// ReadEvents reads the template's events from the transactional outbox, which
+// keeps every event of the audit trail.
+func (r *PostgresContractTemplateRepo) ReadEvents(ctx context.Context, tx *sqlx.Tx, did string, eventTypes ...string) ([]db.TemplateEvent, error) {
+	var events []db.TemplateEvent
+	err := tx.SelectContext(ctx, &events,
+		`SELECT event_type, event_data, created_at FROM outbox_events
+		  WHERE did = $1 AND component = 'CONTRACT_TEMPLATE_REPOSITORY' AND event_type = ANY($2)
+		  ORDER BY id`,
+		did, pq.Array(eventTypes),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read events of template %s: %w", did, err)
+	}
+	return events, nil
+}
+
+// CountOpenContracts reads the effective contract state, so an expired
+// contract counts as terminal.
+func (r *PostgresContractTemplateRepo) CountOpenContracts(ctx context.Context, tx *sqlx.Tx, did string) (int, error) {
+	var count int
+	err := tx.GetContext(ctx, &count,
+		`SELECT count(*) FROM contracts_effective_metadata
+		  WHERE template_did = $1 AND state NOT IN ('TERMINATED', 'REJECTED', 'EXPIRED', 'WITHDRAWN', 'REVOKED')`,
+		did,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("count open contracts of template %s: %w", did, err)
+	}
+	return count, nil
+}
+
+func (r *PostgresContractTemplateRepo) ReadPredecessorDID(ctx context.Context, tx *sqlx.Tx, did string) (*string, error) {
+	var predecessor string
+	err := tx.GetContext(ctx, &predecessor,
+		`SELECT older.did FROM contract_templates older
+		   JOIN contract_templates t ON t.did = $1
+		  WHERE older.base_template = t.base_template
+		    AND older.version < t.version
+		    AND older.state IN ('REGISTERED', 'PUBLISHED', 'DEPRECATED')
+		  ORDER BY older.version DESC
+		  LIMIT 1`,
+		did,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read predecessor of template %s: %w", did, err)
+	}
+	return &predecessor, nil
 }
 
 // UpdateCatalogueAssetHash records the Federated Catalogue asset of the published version (DCS-NFR-BR-09).

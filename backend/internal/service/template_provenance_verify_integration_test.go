@@ -11,6 +11,8 @@ import (
 
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/validation"
+	"digital-contracting-service/internal/semantichub"
 	"digital-contracting-service/internal/templaterepository/command"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 	"digital-contracting-service/internal/templaterepository/query"
@@ -22,9 +24,11 @@ import (
 func TestTemplateVerifyAgainstProvenanceCredentialPostgres(t *testing.T) {
 	database := pgtest.Open(t)
 	ctx := context.Background()
+	require.NoError(t, semantichub.Seed(ctx, database))
+	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
 	ctRepo := &pg.PostgresContractTemplateRepo{}
 	registrar := &command.Registrar{
-		DB: database, CTRepo: ctRepo, RTRepo: &pg.PostgresReviewTaskRepo{}, ATRepo: &pg.PostgresApprovalTaskRepo{},
+		DB: database, CTRepo: ctRepo,
 		VCSigner: echoVCSigner{}, IssuerDID: "did:web:issuer.example",
 	}
 	var proofErr error
@@ -34,7 +38,7 @@ func TestTemplateVerifyAgainstProvenanceCredentialPostgres(t *testing.T) {
 
 	insert := func(did, base string, version int, state string) {
 		t.Helper()
-		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3,$4,$5)`, did, state, sodTemplateData, version, base)
+		_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template,compliance_status) VALUES ($1,'creator',$2,'CONTRACT_TEMPLATE','SINGLE_PARTY','n',$3,$4,$5,'COMPLIANT')`, did, state, compliantTemplateData, version, base)
 		require.NoError(t, err)
 	}
 	findings := func(did string) []string {

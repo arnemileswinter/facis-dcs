@@ -11,14 +11,19 @@ import (
 	"digital-contracting-service/internal/semantichub"
 )
 
-// DCS-FR-TR-07: contract creation refuses a template the policy audit at
-// approval found NON_COMPLIANT and accepts a COMPLIANT one.
+// DCS-FR-TR-07: contract creation uses only a template that passed the
+// policy audit at approval. A registered template that is NON_COMPLIANT or
+// was never assessed (UNASSESSED) is refused.
 func TestContractCreationRefusesNonCompliantTemplatePostgres(t *testing.T) {
 	f := newContractsFromTemplates(t)
 
-	createStructuredTemplate(t, f.creator, "tpl-open", sodTemplateData, templatestructure.Agreement)
-	require.Equal(t, "NON_COMPLIANT", f.approveAndRegister("tpl-open"))
-	require.ErrorIs(t, f.createContract("c-open", "tpl-open"), cwecommand.ErrTemplateNotCompliant)
+	for _, status := range []string{"NON_COMPLIANT", "UNASSESSED"} {
+		did := "tpl-" + status
+		createStructuredTemplate(t, f.creator, did, compliantTemplateData, templatestructure.Agreement)
+		_, err := f.database.Exec(`UPDATE contract_templates SET state = 'REGISTERED', compliance_status = $2 WHERE did = $1`, did, status)
+		require.NoError(t, err)
+		require.ErrorIs(t, f.createContract("c-"+status, did), cwecommand.ErrTemplateNotCompliant)
+	}
 
 	createStructuredTemplate(t, f.creator, "tpl-bound", compliantTemplateData, templatestructure.Agreement)
 	require.Equal(t, "COMPLIANT", f.approveAndRegister("tpl-bound"))

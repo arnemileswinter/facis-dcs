@@ -14,7 +14,9 @@ import (
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
+	"digital-contracting-service/internal/base/validation"
 	"digital-contracting-service/internal/middleware"
+	"digital-contracting-service/internal/semantichub"
 	pg "digital-contracting-service/internal/templaterepository/db/pg"
 )
 
@@ -61,7 +63,9 @@ func TestTemplateVerifyByIDRoute(t *testing.T) {
 // DCS-FR-TR-20: the path route runs the checks of POST /template/verify.
 func TestTemplateVerifyByIDRunsTheVerifyChecksPostgres(t *testing.T) {
 	database := pgtest.Open(t)
-	_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template) VALUES ('tpl-unsealed','creator','REGISTERED','CONTRACT_TEMPLATE','SINGLE_PARTY','n',$1,1,'tpl-unsealed')`, sodTemplateData)
+	require.NoError(t, semantichub.Seed(context.Background(), database))
+	validation.SetShapeSource(semantichub.HubShapeSource{DB: database})
+	_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,template_data,version,base_template) VALUES ('tpl-unsealed','creator','REGISTERED','CONTRACT_TEMPLATE','SINGLE_PARTY','n',$1,1,'tpl-unsealed')`, compliantTemplateData)
 	require.NoError(t, err)
 	svc := &templateRepositorysrvc{DB: database, CTRepo: &pg.PostgresContractTemplateRepo{}, RTRepo: &pg.PostgresReviewTaskRepo{}}
 	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.ContractCreator.String()}, "holder", "org")
