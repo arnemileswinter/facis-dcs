@@ -38,8 +38,11 @@ was checked.
   certification, and a passed rule pack is not a legal opinion.
 - No QTSP is operated, so `DCS_TSA_QUALIFIED` is unset by default and a
   contract that requires QES cannot be executed.
-- The retention rule is info only, because no archive entry receives a
-  retention period yet. It becomes a review rule when the archive assigns one.
+- The retention rule is info only. The archive sets the retention period of
+  an entry from `DCS_ARCHIVE_RETENTION_YEARS` (`conf.ArchiveRetentionYears`):
+  `retention_until` is the contract's expiry date, or the archival date when
+  the contract has no expiry, plus that number of years (at most 100). The
+  default 0 sets no retention period, and deletion stays permitted.
 - The PID rule matches whole string values. A PID value inside a longer text,
   and the PoA presentation embedded as signing evidence, are not checked.
 - Signatures a peer applied are judged on the peer that applied them.

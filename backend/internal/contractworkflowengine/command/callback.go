@@ -281,7 +281,7 @@ var (
 	// this contract deployed to the target.
 	ErrKPIRuleUnknown = errors.New("KPI verdict names a rule this contract does not carry")
 	// ErrKPIContractTerminated is returned for a report on a terminated
-	// contract, which is no longer monitored (DCS-FR-CWE-23).
+	// contract: a terminated contract is not monitored (DCS-FR-CWE-23).
 	ErrKPIContractTerminated = errors.New("KPI report for a terminated contract")
 )
 

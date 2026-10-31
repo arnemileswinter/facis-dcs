@@ -103,15 +103,12 @@ Feature: C2PA remote manifest, verifier banner completeness
     And the C2PA lifecycle_status for contract "C2PA Banner Expired" is "expired"
 
   @DCS-OR-C2PA-006 @skip
-  Scenario: Replaced lifecycle banner is a documented gap, not a BDD result
+  Scenario: Replaced lifecycle banner is a recorded deviation, not a BDD result
     # "Replaced" is not a reachable ContractState in
-    # contractstate/transition.go at all (only a lowercase pass-through
-    # string in lifecycle.go for callers that already use SRS vocabulary
-    # directly), and no ad hoc trigger is invented here to force it. This
-    # scenario intentionally documents the gap without asserting anything —
-    # the @skip keeps it out of both the green and red result counts, so it
-    # cannot be misread as a genuine pass or a genuine failure. Tracked as
-    # a recorded deviation, not as a BDD result.
+    # contractstate/transition.go (lifecycle.go passes the lowercase string
+    # through for callers that already use SRS vocabulary), and no trigger
+    # forces it here. The @skip keeps the scenario out of both the passed and
+    # the failed counts. The state is a recorded deviation.
     Given I am authenticated with roles: "Contract Manager"
 
   @DCS-OR-C2PA-006

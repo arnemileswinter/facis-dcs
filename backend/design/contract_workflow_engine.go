@@ -1046,7 +1046,7 @@ var _ = Service("ContractWorkflowEngine", func() {
 	})
 
 	Method("offer", func() {
-		Description("Transmit a draft contract to the counterparty for the first time (DRAFT -> OFFERED, SRS 2.2.6). Triggers the DCS-to-DCS PostSync broadcast. Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
+		Description("Transmit a draft contract to the counterparty for the first time (DRAFT -> OFFERED, SRS 2.2.6). The OFFER event makes the DCS-to-DCS synchronizer ship the contract PDF to every counterparty peer (ADR-13). Requires updated_at for optimistic concurrency and is forwarded to the contract's origin peer if the local node is not the origin.")
 		Meta("dcs:requirements", "DCS-IR-CWE-01")
 
 		Security(JWTAuth, func() {

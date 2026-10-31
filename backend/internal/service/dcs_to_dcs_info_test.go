@@ -83,12 +83,12 @@ func TestGetContractInfoReadsNothingBeforeTheGates(t *testing.T) {
 	}
 	read := callSites(body, "ExistsByDID")
 	if len(read) == 0 {
-		t.Fatal("GetContractInfo no longer reads the contract")
+		t.Fatal("GetContractInfo does not read the contract")
 	}
 	for _, gate := range []string{"VerifyPeerChallenge", "Check", "contractInfoForPeer"} {
 		sites := callSites(body, gate)
 		if len(sites) == 0 {
-			t.Errorf("GetContractInfo no longer calls %s", gate)
+			t.Errorf("GetContractInfo does not call %s", gate)
 		} else if gate != "contractInfoForPeer" && sites[0] > read[0] {
 			t.Errorf("%s runs after the contract is read", gate)
 		}
