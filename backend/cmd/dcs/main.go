@@ -508,7 +508,7 @@ func main() {
 		ERepo:       eraseRepo,
 		Sender:      dcstodcs2.HTTPPeerEraseSender{},
 	}
-	contractEraser.StartEraseRetryJob(ctx, conf.SyncFailCronJobTimeOut())
+	contractEraser.StartEraseRetryJob(ctx, db, conf.SyncFailCronJobTimeOut())
 
 	// Termination propagation (DCS-NFR-BR-06): notices queued by the terminate
 	// command go to every counterparty instance and are retried until confirmed.

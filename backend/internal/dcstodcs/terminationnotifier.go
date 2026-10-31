@@ -10,6 +10,7 @@ import (
 	"goa.design/clue/log"
 
 	dcstodcs "digital-contracting-service/gen/dcs_to_dcs"
+	basedb "digital-contracting-service/internal/base/db"
 	"digital-contracting-service/internal/base/identity"
 )
 
@@ -113,7 +114,9 @@ func (n *TerminationNotifier) Start(ctx context.Context, interval time.Duration)
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				n.DeliverPending(ctx)
+				if _, err := basedb.RunExclusive(ctx, n.DB, "peer-termination-notices", func() error { n.DeliverPending(ctx); return nil }); err != nil {
+					log.Printf(ctx, "could not deliver pending termination notices: %v", err)
+				}
 			}
 		}
 	}()
