@@ -12,6 +12,7 @@ from steps.support.api_client import (
     put_json,
     template_audit_url,
     template_approve_url,
+    template_create_url,
     template_register_url,
     template_reject_url,
     template_retrieve_by_id_url,
@@ -818,16 +819,50 @@ def step_then_template_links_latest_version(context, base_name, successor_name):
 
 @then("contract creation from the unapproved template is denied")
 def step_then_contract_creation_from_unapproved_template_denied(context):
-    # contract/create resolves templates against REGISTERED/PUBLISHED rows
-    # only; the miss surfaces via MakeInternalError today, so the assertion
-    # accepts any error status rather than pinning the 4xx class.
+    # contract/create uses only the newest REGISTERED/PUBLISHED version of a
+    # lineage; any other template is a client error (400).
     resp = context.requests_response
-    assert resp.status_code >= 400, (
-        f"Expected contract creation from a Draft template to be denied, got "
+    assert resp.status_code == 400, (
+        f"Expected contract creation from a Draft template to be denied with 400, got "
         f"{resp.status_code}: {resp.text}"
     )
-    assert "could not find contract template" in resp.text.lower(), (
+    assert "no usable contract template" in resp.text.lower(), (
         f"Expected the denial to name the unusable template, got: {resp.text}"
     )
     body = resp.json()
     assert "did" not in body, f"No contract identifier may be issued on denial: {body}"
+
+
+@given('a registered frame template "{name}"')
+def step_given_registered_frame_template(context, name):
+    from steps.pdf_generation.dcs_bundle_export_steps import step_given_template_for_bundle_export
+
+    step_given_template_for_bundle_export(context, name, {"template_level": "FRAME_AGREEMENT"})
+    _register_named_template(context, name)
+
+
+@when('I submit a frame template "{name}" that requires template "{required}"')
+def step_when_submit_frame_requiring(context, name, required):
+    # DCS-FR-TR-02, DCS-FR-TR-26: a template requires only a template of a
+    # higher level, so a frame agreement cannot require a frame agreement.
+    headers = AuthService.get_headers_for_roles(["Template Creator"])
+    create = post_json(
+        context,
+        template_create_url(context),
+        {
+            "template_type": TemplateService.CONTRACT_TEMPLATE_TYPE,
+            "party_type": TemplateService.MULTI_PARTY_TYPE,
+            "name": name,
+            "template_data": TemplateService.canonical_document_data(name, clause_text="Frame clause"),
+            "template_level": "FRAME_AGREEMENT",
+            "required_templates": [TemplateService.named(context, required)["did"]],
+        },
+        headers=headers,
+    )
+    assert create.status_code == 200, f"Template create failed: {create.text}"
+    did = create.json()["did"]
+    updated_at = TemplateService.fetch_template(context, did, headers=headers).get("updated_at")
+    TemplateService.store_named(context, name, did, updated_at)
+    context.requests_response = post_json(
+        context, template_submit_url(context), TemplateService.template_submit_payload(context, did, updated_at), headers=headers
+    )
