@@ -28,6 +28,7 @@ import (
 	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/base/datatype/componenttype"
 	"digital-contracting-service/internal/base/datatype/userrole"
+	baseevent "digital-contracting-service/internal/base/event"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/templatestructure"
 	"digital-contracting-service/internal/base/tsa"
@@ -36,6 +37,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/actionflag"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
+	cweeventtype "digital-contracting-service/internal/contractworkflowengine/datatype/eventtype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/expirationpolicy"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationactionflag"
 	"digital-contracting-service/internal/contractworkflowengine/db"
@@ -2244,10 +2246,32 @@ func (s *contractWorkflowEnginesrvc) CreateContractTarget(ctx context.Context, r
 	if err != nil {
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
+	if err := auditContractTarget(ctx, tx, cweeventtype.CreateContractTarget, created.ID, nil, created); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
 	}
 	return contractTargetView(created), nil
+}
+
+// auditContractTarget writes an administrator's change to a contract target
+// system to the audit trail in tx (FR-UC-09-2).
+func auditContractTarget(ctx context.Context, tx *sqlx.Tx, change cweeventtype.EventType, targetID string, before, after *db.ContractTarget) error {
+	err := baseevent.Create(ctx, tx, contractevents.ContractTargetChangedEvent{
+		Change:              change,
+		TargetID:            targetID,
+		Before:              contractevents.NewContractTargetSettings(before),
+		After:               contractevents.NewContractTargetSettings(after),
+		ActorDID:            middleware.GetHolderDID(ctx),
+		ActorParticipantDID: middleware.GetParticipantID(ctx),
+		UserRoles:           middleware.GetUserRoles(ctx),
+		OccurredAt:          time.Now().UTC(),
+	}, componenttype.System)
+	if err != nil {
+		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not audit the target system change: %w", err))
+	}
+	return nil
 }
 
 func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, req *contractworkflowengine.ContractTargetUpdateRequest) (res *contractworkflowengine.ContractTarget, err error) {
@@ -2271,6 +2295,10 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	before, err := s.TargetRepo.ReadTarget(ctx, tx, req.ID)
+	if err != nil {
+		return nil, contractworkflowengine.MakeInternalError(err)
+	}
 	updated, err := s.TargetRepo.UpdateTarget(ctx, tx, db.ContractTarget{
 		ID:          req.ID,
 		Name:        strings.TrimSpace(req.Name),
@@ -2283,6 +2311,9 @@ func (s *contractWorkflowEnginesrvc) UpdateContractTarget(ctx context.Context, r
 	}
 	if updated == nil {
 		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no target system %s is registered", req.ID))
+	}
+	if err := auditContractTarget(ctx, tx, cweeventtype.UpdateContractTarget, updated.ID, before, updated); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, contractworkflowengine.MakeInternalError(err)
@@ -2325,6 +2356,11 @@ func (s *contractWorkflowEnginesrvc) DeleteContractTarget(ctx context.Context, r
 	}
 	if err := s.TargetRepo.DeleteTarget(ctx, tx, req.ID); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
+	}
+	if target != nil {
+		if err := auditContractTarget(ctx, tx, cweeventtype.DeleteContractTarget, target.ID, target, nil); err != nil {
+			return err
+		}
 	}
 	if target != nil && target.OAuthClientID != nil && strings.TrimSpace(*target.OAuthClientID) != "" {
 		clientID := strings.TrimSpace(*target.OAuthClientID)

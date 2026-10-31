@@ -1114,3 +1114,53 @@ func (e SearchEvent) EventType() string {
 func (e SearchEvent) GetDID() string {
 	return "*"
 }
+
+// ContractTargetSettings is the configuration of a contract target system as
+// the audit trail records it.
+type ContractTargetSettings struct {
+	Name          string  `json:"name"`
+	URL           string  `json:"url"`
+	Description   *string `json:"description,omitempty"`
+	Enabled       bool    `json:"enabled"`
+	OAuthClientID *string `json:"oauth_client_id,omitempty"`
+}
+
+// NewContractTargetSettings returns the settings of target, or nil when there
+// is no target.
+func NewContractTargetSettings(target *db.ContractTarget) *ContractTargetSettings {
+	if target == nil {
+		return nil
+	}
+	return &ContractTargetSettings{
+		Name:          target.Name,
+		URL:           target.URL,
+		Description:   target.Description,
+		Enabled:       target.Enabled,
+		OAuthClientID: target.OAuthClientID,
+	}
+}
+
+// ContractTargetChangedEvent records an administrator's change to a contract
+// target system (FR-UC-09-2): the settings before and after the change, and
+// the administrator with the roles they acted in. Before is nil on create,
+// After is nil on delete.
+type ContractTargetChangedEvent struct {
+	Change              eventtype.EventType     `json:"-"`
+	TargetID            string                  `json:"target_id"`
+	Before              *ContractTargetSettings `json:"before,omitempty"`
+	After               *ContractTargetSettings `json:"after,omitempty"`
+	ActorDID            string                  `json:"actor_did"`
+	ActorParticipantDID string                  `json:"actor_participant_did"`
+	UserRoles           userrole.UserRoles      `json:"user_roles"`
+	OccurredAt          time.Time               `json:"occurred_at"`
+}
+
+func (e ContractTargetChangedEvent) EventType() string {
+	return e.Change.String()
+}
+
+// GetDID keys the audit chain by the target, so the chain is the history of
+// its configuration.
+func (e ContractTargetChangedEvent) GetDID() string {
+	return "contract-target:" + e.TargetID
+}

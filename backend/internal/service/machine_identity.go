@@ -110,16 +110,28 @@ func auditMachineIdentity(ctx context.Context, tx *sqlx.Tx, change autheventtype
 	}, componenttype.System)
 }
 
-// recordMachineIdentityChange is auditMachineIdentity in its own transaction,
-// for the registry writes that do not take one.
-func (s *contractWorkflowEnginesrvc) recordMachineIdentityChange(ctx context.Context, change autheventtype.EventType, identity *machineidentity.Identity) error {
+// changeMachineIdentity runs write and the audit event of its result in one
+// transaction (FR-UC-09-2): the change commits only with its audit record.
+// write returns the error to answer with and the identity to audit. hydra, if
+// not nil, changes the OAuth2 client after the audit and before the commit,
+// so a failed write or audit leaves the client as it is.
+func (s *contractWorkflowEnginesrvc) changeMachineIdentity(ctx context.Context, change autheventtype.EventType, write func(tx *sqlx.Tx) (*machineidentity.Identity, error), hydra func() error) error {
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return contractworkflowengine.MakeInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	identity, err := write(tx)
+	if err != nil {
+		return err
+	}
 	if err := auditMachineIdentity(ctx, tx, change, identity); err != nil {
 		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not audit the machine identity change: %w", err))
+	}
+	if hydra != nil {
+		if err := hydra(); err != nil {
+			return contractworkflowengine.MakeInternalError(err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return contractworkflowengine.MakeInternalError(err)
@@ -178,25 +190,29 @@ func (s *contractWorkflowEnginesrvc) CreateMachineIdentity(ctx context.Context, 
 	}
 
 	issuedAt := time.Now().UTC()
-	created, err := s.MachineIdentities.Create(ctx, machineidentity.Identity{
-		Name:           name,
-		OAuthClientID:  clientID,
-		ParticipantDID: strings.TrimSpace(req.ParticipantDid),
-		RolesJSON:      rolesJSON,
-		Description:    req.Description,
-		Enabled:        true,
-		SecretIssuedAt: &issuedAt,
-		CreatedBy:      middleware.GetParticipantID(ctx),
-	})
+	var created *machineidentity.Identity
+	err = s.changeMachineIdentity(ctx, autheventtype.MachineIdentityCreated, func(tx *sqlx.Tx) (*machineidentity.Identity, error) {
+		created, err = s.MachineIdentities.Create(ctx, tx, machineidentity.Identity{
+			Name:           name,
+			OAuthClientID:  clientID,
+			ParticipantDID: strings.TrimSpace(req.ParticipantDid),
+			RolesJSON:      rolesJSON,
+			Description:    req.Description,
+			Enabled:        true,
+			SecretIssuedAt: &issuedAt,
+			CreatedBy:      middleware.GetParticipantID(ctx),
+		})
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
+		return created, nil
+	}, nil)
 	if err != nil {
 		// Leaving the client behind would let a credential exist that no
 		// registry entry accounts for, which is exactly what this replaces.
 		if cleanup := s.HydraAdmin.DeleteMachineClient(ctx, clientID); cleanup != nil {
 			return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not register the identity (%w) and could not remove its OAuth2 client: %v", err, cleanup))
 		}
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityCreated, created); err != nil {
 		return nil, err
 	}
 
@@ -235,21 +251,25 @@ func (s *contractWorkflowEnginesrvc) UpdateMachineIdentity(ctx context.Context, 
 		return nil, contractworkflowengine.MakeBadRequest(err)
 	}
 
-	updated, err := s.MachineIdentities.Update(ctx, machineidentity.Identity{
-		ID:             req.ID,
-		Name:           strings.TrimSpace(req.Name),
-		ParticipantDID: strings.TrimSpace(req.ParticipantDid),
-		RolesJSON:      rolesJSON,
-		Description:    req.Description,
-		Enabled:        req.Enabled,
-	})
+	var updated *machineidentity.Identity
+	err = s.changeMachineIdentity(ctx, autheventtype.MachineIdentityUpdated, func(tx *sqlx.Tx) (*machineidentity.Identity, error) {
+		updated, err = s.MachineIdentities.Update(ctx, tx, machineidentity.Identity{
+			ID:             req.ID,
+			Name:           strings.TrimSpace(req.Name),
+			ParticipantDID: strings.TrimSpace(req.ParticipantDid),
+			RolesJSON:      rolesJSON,
+			Description:    req.Description,
+			Enabled:        req.Enabled,
+		})
+		if err != nil {
+			return nil, contractworkflowengine.MakeBadRequest(err)
+		}
+		if updated == nil {
+			return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no machine identity %s", req.ID))
+		}
+		return updated, nil
+	}, nil)
 	if err != nil {
-		return nil, contractworkflowengine.MakeBadRequest(err)
-	}
-	if updated == nil {
-		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no machine identity %s", req.ID))
-	}
-	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityUpdated, updated); err != nil {
 		return nil, err
 	}
 
@@ -272,15 +292,19 @@ func (s *contractWorkflowEnginesrvc) DeleteMachineIdentity(ctx context.Context, 
 		return contractworkflowengine.MakeBadRequest(fmt.Errorf("no machine identity %s", req.ID))
 	}
 
-	// The client goes first: a registry row without a client is inert, but a
-	// client without a row is a credential nothing accounts for.
-	if err := s.HydraAdmin.DeleteMachineClient(ctx, identity.OAuthClientID); err != nil {
-		return contractworkflowengine.MakeInternalError(fmt.Errorf("could not remove the OAuth2 client: %w", err))
-	}
-	if err := s.MachineIdentities.Delete(ctx, req.ID); err != nil {
-		return contractworkflowengine.MakeInternalError(err)
-	}
-	return s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentityDeleted, identity)
+	// The client goes before the commit: a registry row without a client is
+	// inert, but a client without a row is a credential nothing accounts for.
+	return s.changeMachineIdentity(ctx, autheventtype.MachineIdentityDeleted, func(tx *sqlx.Tx) (*machineidentity.Identity, error) {
+		if err := s.MachineIdentities.Delete(ctx, tx, req.ID); err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		return identity, nil
+	}, func() error {
+		if err := s.HydraAdmin.DeleteMachineClient(ctx, identity.OAuthClientID); err != nil {
+			return fmt.Errorf("could not remove the OAuth2 client: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *contractWorkflowEnginesrvc) RotateMachineIdentitySecret(ctx context.Context, req *contractworkflowengine.MachineIdentityRotateRequest) (res *contractworkflowengine.MachineCredential, err error) {
@@ -295,16 +319,20 @@ func (s *contractWorkflowEnginesrvc) RotateMachineIdentitySecret(ctx context.Con
 		return nil, contractworkflowengine.MakeBadRequest(fmt.Errorf("no machine identity %s", req.ID))
 	}
 
-	secret, err := s.HydraAdmin.RotateMachineClientSecret(ctx, identity.OAuthClientID)
-	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(fmt.Errorf("could not rotate the secret: %w", err))
-	}
-
 	issuedAt := time.Now().UTC()
-	if err := s.MachineIdentities.TouchSecretIssuedAt(ctx, identity.ID, issuedAt); err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
-	}
-	if err := s.recordMachineIdentityChange(ctx, autheventtype.MachineIdentitySecretRotated, identity); err != nil {
+	var secret string
+	err = s.changeMachineIdentity(ctx, autheventtype.MachineIdentitySecretRotated, func(tx *sqlx.Tx) (*machineidentity.Identity, error) {
+		if err := s.MachineIdentities.TouchSecretIssuedAt(ctx, tx, identity.ID, issuedAt); err != nil {
+			return nil, contractworkflowengine.MakeInternalError(err)
+		}
+		return identity, nil
+	}, func() (err error) {
+		if secret, err = s.HydraAdmin.RotateMachineClientSecret(ctx, identity.OAuthClientID); err != nil {
+			return fmt.Errorf("could not rotate the secret: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
