@@ -162,7 +162,7 @@ it('keeps the filter controls mounted while a filter reloads the page', async ()
   const wrapper = await mountList()
   const filterUid = () => wrapper.findComponent({ name: 'ListStateFilter' }).vm.$.uid
   const mounted = filterUid()
-  let resolve: (value: unknown) => void = () => {}
+  let resolve!: (value: unknown) => void
   mocks.retrieve.mockReturnValue(new Promise((done) => (resolve = done)))
   useContractStateFilterStore().setFilter('DRAFT')
   await flushPromises()
