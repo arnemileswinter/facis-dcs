@@ -1320,7 +1320,12 @@ def _run_ceremony_and_sign(context, base_url, label, field_name, given_name, awa
             gate_refusal = resp.status_code == 400 and "counterparty_not_settled" in resp.text
             waiting_for_own = gate_refusal and "this instance has not settled" in resp.text
             waiting_for_peer = gate_refusal and "no settlement from" in resp.text
-            keep_waiting = waiting_for_own or (await_settlement and waiting_for_peer)
+            # The peer's signed copy can land on this instance between prepare
+            # and submit. Submit then refuses the signature over the older
+            # revision (apply.go ErrStaleRevision), and the client prepares
+            # again from the copy that carries the peer's signature.
+            stale_revision = resp.status_code == 422 and "a later signature has superseded" in resp.text
+            keep_waiting = waiting_for_own or stale_revision or (await_settlement and waiting_for_peer)
             if not keep_waiting or time.monotonic() > deadline:
                 return resp
             time.sleep(3)
