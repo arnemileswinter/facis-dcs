@@ -63,14 +63,31 @@ configured TSA certificate. The client that downloads the EU List of Trusted
 Lists and the national trusted lists also accepts TLS 1.2 and TLS 1.3 and
 verifies the server certificate (`tslClient` in
 `backend/internal/base/identity/eutrustpool.go`,
-`TestTrustedListClientAcceptsTLS12`). It does not verify the XAdES signatures
-of the lists.
+`TestTrustedListClientAcceptsTLS12`). The backend also verifies the XAdES
+enveloped signature of each list and reads only the signed content
+(`verifyTSL` in `eutrustpool.go`, `verifyEnvelopedSignature` in
+`backend/internal/base/identity/tslsignature.go`):
+
+- The LOTL: against the LOTL signing certificates of the Official Journal
+  publication C/2026/1944 (`backend/internal/base/identity/certs/lotl-oj.pem`;
+  `DCS_LOTL_OJ_CERTS_FILE` and `DCS_LOTL_OJ_URL` replace them when a new
+  publication appears). The backend follows the pivot LOTLs that the LOTL
+  lists before that publication; each pivot names the signing certificates
+  of the next LOTL (`TestFetchLOTLFollowsThePivotLOTLs`).
+- Each national list: against the signing certificates that the LOTL names
+  in its pointer to that list. A list whose signature does not verify is
+  not used; the lists of the other member states stay in the trust pool
+  (`TestBuildEUTrustPoolRejectsANationalListWithAWrongSignature`,
+  `TestVerifyTSLAcceptsOnlyTheNamedSignerAndUntamperedContent`). With
+  `INTEGRATION=1`, `TestEUTrustPoolLive` verifies the live LOTL and national
+  lists.
 
 Reason: not every time-stamp authority offers TLS 1.3. Each member state
 publishes its national trusted list on its own server, and not all of these
 servers offer TLS 1.3. With TLS 1.3 only, the
 lists of these member states are not available, and the signer certificates
-of their trust service providers are not trusted.
+of their trust service providers are not trusted. The signature of each list
+protects its content whatever the TLS version.
 
 ### 5. The CRL distribution point is an `http://` URL (DCS-IR-CI-01, DCS-NFR-SEC-01)
 
@@ -93,5 +110,12 @@ of the CRL server, which can itself need a revocation check.
 - An operator who needs a hardware root of trust or secure boot provides it
   in the platform that runs the DCS.
 - The time-stamp requests and the trusted-list download are the outbound
-  HTTPS connections of the backend that can use TLS 1.2.
+  HTTPS connections of the backend that can use TLS 1.2. The signature of
+  each token and of each list protects its content.
+- A change of the LOTL signing certificates is followed through the pivot
+  LOTLs while the LOTL lists the pinned Official Journal publication. When
+  it no longer lists it, the trust-pool refresh fails and keeps the last
+  good pool; the operator then sets `DCS_LOTL_OJ_CERTS_FILE` and
+  `DCS_LOTL_OJ_URL` to the current publication, or takes a release that
+  pins it.
 - A CRL fetch is plain HTTP; the CRL signature protects its content.
