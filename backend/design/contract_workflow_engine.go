@@ -683,7 +683,7 @@ var ContractAuditRequest = Type("ContractAuditRequest", func() {
 	Token("token", String, "JWT token")
 
 	Attribute("did", String, "Decentralized Identifier of the contract")
-	Attribute("justification", String, "Required audit justification", func() { MinLength(1) })
+	Attribute("justification", String, "Required audit justification", func() { Pattern(`\S`) })
 
 	Required("did", "justification")
 })
