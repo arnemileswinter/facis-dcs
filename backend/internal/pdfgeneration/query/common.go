@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	pdfgen "digital-contracting-service/gen/pdf_generation"
+	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
@@ -32,6 +34,54 @@ type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PD
 // the implementation.
 type PDFSignatureValidator interface {
 	ValidatePDFSignatures(ctx context.Context, pdf []byte) ([]*dss.Report, error)
+}
+
+// SignerAnchors anchors the signer of each C2PA manifest (DCS-OR-C2PA-007):
+// the manifest's x5chain must verify against Roots and its leaf must identify
+// one of Issuers, the instances party to the document, the way a status list's
+// leaf is bound to its issuer (ADR-34 §3). Roots are the anchors this
+// deployment holds for peers, which include the root of its own C2PA chain.
+type SignerAnchors struct {
+	Roots   *x509.CertPool
+	Issuers []string
+}
+
+// anchorSigners returns the C2PA signer status and, per manifest, the party
+// its leaf is anchored to or why it is not.
+// ponytail: the chain is checked at the current time; a leaf that expired since
+// it signed reports invalid until manifests carry a trusted timestamp.
+func anchorSigners(signers []pdfcore.ManifestSigner, anchors SignerAnchors) (status, detail string) {
+	if len(signers) == 0 {
+		return provenance.CheckNotAvailable, ""
+	}
+	if anchors.Roots == nil || len(anchors.Issuers) == 0 {
+		return provenance.CheckIndeterminate, "no trust anchors or parties to anchor the C2PA signers to"
+	}
+	status = provenance.CheckValid
+	details := make([]string, 0, len(signers))
+	for _, signer := range signers {
+		chain := make([]any, 0, len(signer.Chain))
+		for _, cert := range signer.Chain {
+			chain = append(chain, cert)
+		}
+		anchoredTo := ""
+		var refusal error
+		for _, issuer := range anchors.Issuers {
+			if _, err := sdjwt.VerificationKeyFromX5C(chain, anchors.Roots, issuer); err != nil {
+				refusal = err
+				continue
+			}
+			anchoredTo = issuer
+			break
+		}
+		if anchoredTo == "" {
+			status = provenance.CheckInvalid
+			details = append(details, fmt.Sprintf("%s signed by %q is not anchored to a party: %v", signer.Manifest, signer.Subject, refusal))
+			continue
+		}
+		details = append(details, fmt.Sprintf("%s signed by %s", signer.Manifest, anchoredTo))
+	}
+	return status, strings.Join(details, "; ")
 }
 
 // pdfSignatureSourceDSS names the validator behind pdf_signature_status.
@@ -192,6 +242,7 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 		Match:               false,
 		C2paManifestFound:   false,
 		C2paSignatureStatus: provenance.CheckInvalid,
+		C2paSignerStatus:    provenance.CheckInvalid,
 		VcProofStatus:       provenance.CheckInvalid,
 		StatusListCheck:     "failed",
 		StatusListError:     ptrToString("stored artifact is not authentic"),
@@ -203,7 +254,7 @@ func tamperedVerifyResult(lifecycleStatus string) *pdfgen.PDFVerifyResult {
 
 func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	credentials *provenance.CredentialVerifier, statuses *provenance.CredentialStatusVerifier,
-	signatures PDFSignatureValidator, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
+	signatures PDFSignatureValidator, anchors SignerAnchors, lifecycleStatus string) (*pdfgen.PDFVerifyResult, error) {
 	result, verifyErr := pdfCore.Verify(ctx, pdfBytes)
 	match := verifyErr == nil
 	c2paManifestFound := verifyErr == nil
@@ -281,6 +332,10 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 	}
 
 	pdfSignatureStatus, pdfSignatureSource, pdfSignatureDetail := checkPDFSignatures(ctx, pdfBytes, signatures)
+	signerStatus, signerDetail := provenance.CheckNotAvailable, ""
+	if verifyErr == nil {
+		signerStatus, signerDetail = anchorSigners(result.Signers, anchors)
+	}
 
 	return &pdfgen.PDFVerifyResult{
 		Match:             match,
@@ -293,6 +348,8 @@ func runVerify(ctx context.Context, pdfBytes []byte, pdfCore *pdfcore.Client,
 		BasePdfHash:         result.BasePDFHash,
 		StoredBasePdfHash:   result.StoredBasePDFHash,
 		C2paSignatureStatus: c2paSignatureStatus,
+		C2paSignerStatus:    signerStatus,
+		C2paSignerDetail:    ptrToString(signerDetail),
 		VcProofStatus:       vcProofStatus,
 		StatusListURI:       ptrToString(statusListURI),
 		StatusListStatus:    ptrToString(statusListStatus),

@@ -964,6 +964,9 @@ func ExtractSigningChain(pdf []byte) ([][]byte, error) {
 type ManifestSigner struct {
 	Manifest string
 	LeafDER  []byte
+	// Chain is the x5chain the manifest carries, leaf first, so a caller can
+	// anchor the leaf to a trust anchor and an organization.
+	Chain [][]byte
 }
 
 // ManifestSigners lists, in chain order, the leaf each of a PDF's manifests was
@@ -987,7 +990,7 @@ func ManifestSigners(pdf []byte) ([]ManifestSigner, error) {
 		if err != nil {
 			return nil, fmt.Errorf("manifest %s: %w", label, err)
 		}
-		signers = append(signers, ManifestSigner{Manifest: label, LeafDER: chain[0]})
+		signers = append(signers, ManifestSigner{Manifest: label, LeafDER: chain[0], Chain: chain})
 	}
 	return signers, nil
 }

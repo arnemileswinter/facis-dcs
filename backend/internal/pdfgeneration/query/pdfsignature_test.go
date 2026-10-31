@@ -47,7 +47,7 @@ func TestRunVerifyReportsPAdESIndicationFromDSS(t *testing.T) {
 		{"no DSS configured", signedTestPDF, nil, provenance.CheckIndeterminate, "DSS_URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := runVerify(context.Background(), []byte(tc.pdf), pdfCore, nil, nil, tc.validator, "active")
+			result, err := runVerify(context.Background(), []byte(tc.pdf), pdfCore, nil, nil, tc.validator, SignerAnchors{}, "active")
 			if err != nil {
 				t.Fatalf("runVerify: %v", err)
 			}
@@ -70,7 +70,7 @@ func TestRunVerifyReportsAnUnsignedPDFSignatureAsNotAvailable(t *testing.T) {
 	pdfCore := newStubPDFCore(t, http.StatusOK, map[string]any{"match": true, "c2pa_signature_valid": true})
 	validator := &fakeDSS{}
 
-	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, validator, "draft")
+	result, err := runVerify(context.Background(), []byte("%PDF-"), pdfCore, nil, nil, validator, SignerAnchors{}, "draft")
 	if err != nil {
 		t.Fatalf("runVerify: %v", err)
 	}

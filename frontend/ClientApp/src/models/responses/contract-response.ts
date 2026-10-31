@@ -241,6 +241,8 @@ export interface ContractPdfVerifyResult {
   stored_base_pdf_hash: string
   c2pa_manifest_found: boolean
   c2pa_signature_status: string
+  c2pa_signer_status: string
+  c2pa_signer_detail?: string
   vc_proof_status: string
   status_list_uri?: string
   lifecycle_status?: string

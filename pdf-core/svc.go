@@ -374,6 +374,9 @@ type manifestSigner struct {
 	// Expected is true when this manifest was signed under the chain the request
 	// supplied — for a DCS verifying its own work, its own leaf.
 	Expected bool `json:"expected"`
+	// Chain is the manifest's x5chain, leaf first, base64 DER: what the caller
+	// anchors to its trust anchors and to the organization the leaf names.
+	Chain []string `json:"chain"`
 }
 
 // describeSigners fingerprints the leaf behind every manifest and marks the ones
@@ -389,6 +392,9 @@ func describeSigners(pdf []byte, expectedLeaf []byte) ([]manifestSigner, error) 
 			Manifest:   signer.Manifest,
 			LeafSHA256: sha256Hex(signer.LeafDER),
 			Expected:   bytes.Equal(signer.LeafDER, expectedLeaf),
+		}
+		for _, cert := range signer.Chain {
+			entry.Chain = append(entry.Chain, base64.StdEncoding.EncodeToString(cert))
 		}
 		if leaf, parseErr := x509.ParseCertificate(signer.LeafDER); parseErr == nil {
 			entry.Subject = leaf.Subject.String()

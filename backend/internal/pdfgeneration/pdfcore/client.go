@@ -407,6 +407,16 @@ type VerifyResult struct {
 	JSONLDHash        string
 	BasePDFHash       string
 	StoredBasePDFHash string
+	// Signers names, per manifest in chain order, the x5chain (base64 DER, leaf
+	// first) its claim signature was made under.
+	Signers []ManifestSigner
+}
+
+// ManifestSigner is the signing certificate chain of one C2PA manifest.
+type ManifestSigner struct {
+	Manifest string   `json:"manifest"`
+	Subject  string   `json:"subject"`
+	Chain    []string `json:"chain"`
 }
 
 // verifyBodyLimit caps the /verify response read. The body carries a
@@ -440,14 +450,15 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	}
 
 	var body struct {
-		Match              bool   `json:"match"`
-		C2PASignatureValid bool   `json:"c2pa_signature_valid"`
-		C2PASignatureError string `json:"c2pa_signature_error"`
-		VCBytes            string `json:"vc_bytes"`
-		VCPresent          bool   `json:"vc_present"`
-		JSONLDHash         string `json:"jsonld_hash"`
-		BasePDFHash        string `json:"base_pdf_hash"`
-		StoredBasePDFHash  string `json:"stored_base_pdf_hash"`
+		Match              bool             `json:"match"`
+		C2PASignatureValid bool             `json:"c2pa_signature_valid"`
+		C2PASignatureError string           `json:"c2pa_signature_error"`
+		VCBytes            string           `json:"vc_bytes"`
+		VCPresent          bool             `json:"vc_present"`
+		JSONLDHash         string           `json:"jsonld_hash"`
+		BasePDFHash        string           `json:"base_pdf_hash"`
+		StoredBasePDFHash  string           `json:"stored_base_pdf_hash"`
+		Signers            []ManifestSigner `json:"signers"`
 	}
 	// A non-2xx body is pdf-core's Error schema carrying those same digest fields,
 	// so it is decoded before the status is turned into an error. What decodes is
@@ -471,6 +482,7 @@ func (c *Client) Verify(ctx context.Context, pdf []byte) (VerifyResult, error) {
 	result.C2PASignatureValid = body.C2PASignatureValid
 	result.C2PASignatureError = body.C2PASignatureError
 	result.VCPresent = body.VCPresent
+	result.Signers = body.Signers
 	if body.VCBytes != "" {
 		decoded, err := base64.StdEncoding.DecodeString(body.VCBytes)
 		if err != nil {

@@ -22,6 +22,8 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// so, and never borrows the vocabulary of one that passed.
 	Attribute("c2pa_manifest_found", Boolean, "True when a C2PA JUMBF manifest was found in the PDF")
 	Attribute("c2pa_signature_status", String, "C2PA COSE_Sign1 claim-signature verification status (DCS-OR-C2PA-006): 'valid' when every manifest's claim signature verified against its x5chain leaf and the assertions the signed claim commits to still hash to the recorded values, 'invalid' when one did not, 'not_available' when the PDF carries no manifest to check.")
+	Attribute("c2pa_signer_status", String, "C2PA signer anchoring (DCS-OR-C2PA-007): 'valid' when the x5chain of every manifest verified against this deployment's trust anchors and its leaf identifies an instance party to the document, 'invalid' when one did not, 'indeterminate' when no anchors or parties are known, 'not_available' when no manifest was verified.")
+	Attribute("c2pa_signer_detail", String, "Per manifest, the party its signing leaf is anchored to, or why it is not.")
 	Attribute("vc_proof_status", String, "Embedded contract-lifecycle credential proof status: 'valid' when its Data Integrity proof verified against a key the credential's issuer publishes for assertions, 'invalid' when it did not, 'indeterminate' when the issuer could not be resolved, 'not_available' when the PDF carries no such credential. Never reports a pass for a credential that was only parsed.")
 	Attribute("status_list_uri", String, "URI of the status list service queried for revocation check")
 	Attribute("lifecycle_status", String, "Contract lifecycle state from the latest C2PA assertion (DCS-OR-C2PA-006 banner: draft, active, amended, suspended, terminated, expired, replaced)")
@@ -46,7 +48,7 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// Set only by the verification of a submitted copy (DCS-OR-C2PA-008).
 	Attribute("c2pa_manifest_source", String, "Which C2PA manifest the verification of a submitted copy used: 'embedded' when the copy carries its manifest, 'remote' when the copy carries no embedded manifest and the remote manifest it references was used (DCS-OR-C2PA-008). Empty when no manifest was used.")
 
-	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
+	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "c2pa_signer_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
 })
 
 // BundleExportRefusedError is returned when the FR-PACM-06 structural-integrity

@@ -24,6 +24,8 @@ function verified(overrides: Partial<ContractPdfVerifyResult> = {}): ContractPdf
     stored_base_pdf_hash: 'b',
     c2pa_manifest_found: true,
     c2pa_signature_status: 'valid',
+    c2pa_signer_status: 'valid',
+    c2pa_signer_detail: 'urn:c2pa:1 signed by did:web:dcs-a.example',
     vc_proof_status: 'valid',
     status_list_check: 'passed',
     status_list_status: 'active',
@@ -64,6 +66,8 @@ describe('ContractPdfVerifierPanel', () => {
     expect(rows[0]).toContain('Valid')
     expect(rows[0]).toContain('Checked by eu-dss')
     expect(rows[1]).toContain('C2PA manifest')
+    expect(rows[1]).toContain('Signers: Valid')
+    expect(rows[1]).toContain('signed by did:web:dcs-a.example')
     expect(rows[2]).toContain('VC signature')
     expect(rows[3]).toContain('Status list')
     expect(rows[3]).toContain('revoked')

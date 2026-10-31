@@ -55,7 +55,7 @@ func (h *VerifyContractPdfCopyHandler) Handle(ctx context.Context, qry VerifyCon
 		return io.ReadAll(pdf)
 	}
 	return verifyCopy(ctx, h.Stored.PDFCore, h.Stored.Credentials, h.Stored.CredentialStatus, h.Stored.Signatures,
-		qry, parties, stored, storedPDF)
+		SignerAnchors{Roots: h.Stored.SignerRoots, Issuers: parties}, qry, parties, stored, storedPDF)
 }
 
 // parties returns the DIDs of the DCS instances that are party to the contract.
@@ -98,6 +98,7 @@ func verifyCopy(
 	credentials *provenance.CredentialVerifier,
 	statuses *provenance.CredentialStatusVerifier,
 	signatures PDFSignatureValidator,
+	anchors SignerAnchors,
 	qry VerifyContractPdfCopyQry,
 	parties []string,
 	stored *pdfgen.PDFVerifyResult,
@@ -114,7 +115,7 @@ func verifyCopy(
 	}
 
 	if manifest, err := pdfCore.ExtractManifest(ctx, qry.PDF); err == nil && len(manifest) > 0 && bytes.HasPrefix(original, qry.PDF) {
-		result, err := runVerify(ctx, qry.PDF, pdfCore, credentials, statuses, signatures, lifecycle)
+		result, err := runVerify(ctx, qry.PDF, pdfCore, credentials, statuses, signatures, anchors, lifecycle)
 		if err != nil {
 			return nil, err
 		}
@@ -131,6 +132,7 @@ func verifyCopy(
 			Match:               false,
 			C2paManifestFound:   false,
 			C2paSignatureStatus: provenance.CheckNotAvailable,
+			C2paSignerStatus:    provenance.CheckNotAvailable,
 			VcProofStatus:       provenance.CheckNotAvailable,
 			StatusListCheck:     "not_available",
 			LifecycleStatus:     stored.LifecycleStatus,

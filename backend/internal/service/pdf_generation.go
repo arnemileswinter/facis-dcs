@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +41,8 @@ type pdfGenerationSrvc struct {
 	// CredentialStatus resolves that credential's revocation entry against the
 	// signed status list it names.
 	CredentialStatus *provenance.CredentialStatusVerifier
+	// SignerRoots anchor the C2PA manifest signers at verify (DCS-OR-C2PA-007).
+	SignerRoots *x509.CertPool
 	auth.JWTAuthenticator
 }
 
@@ -56,6 +59,7 @@ func NewPDFGeneration(
 	localPeer string,
 	credentials *provenance.CredentialVerifier,
 	credentialStatus *provenance.CredentialStatusVerifier,
+	signerRoots *x509.CertPool,
 ) pdfgen.Service {
 	if vcIssuer == nil {
 		panic("VCIssuer is required for DCS-OR-C2PA-004 compliance")
@@ -86,6 +90,7 @@ func NewPDFGeneration(
 		LocalPeer:        localPeer,
 		Credentials:      credentials,
 		CredentialStatus: credentialStatus,
+		SignerRoots:      signerRoots,
 		JWTAuthenticator: jwtAuth,
 	}
 }
@@ -211,6 +216,7 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
 		Signatures:       pdfSignatureValidator(),
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfQry{DID: p.Did})
 	if err != nil {
@@ -236,6 +242,7 @@ func (s *pdfGenerationSrvc) VerifyContractPdfCopy(ctx context.Context, p *pdfgen
 			Credentials:      s.Credentials,
 			CredentialStatus: s.CredentialStatus,
 			Signatures:       pdfSignatureValidator(),
+			SignerRoots:      s.SignerRoots,
 		},
 		Export: &pdfquery.ExportContractPdfHandler{
 			DB:        s.DB,
@@ -262,8 +269,11 @@ func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.Ver
 		TRepo:            s.TRepo,
 		Artifacts:        s.Artifacts,
 		PDFCore:          s.PDFCore,
+		VCIssuer:         s.VCIssuer,
+		IssuerDID:        s.IssuerDID,
 		Credentials:      s.Credentials,
 		CredentialStatus: s.CredentialStatus,
+		SignerRoots:      s.SignerRoots,
 	}
 	result, err := handler.Handle(ctx, pdfquery.VerifyTemplatePdfQry{DID: p.Did})
 	if err != nil {

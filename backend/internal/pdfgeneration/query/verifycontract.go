@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -34,6 +35,18 @@ type VerifyContractPdfHandler struct {
 	// Signatures validates the PAdES signatures of the PDF; nil when no EU DSS
 	// is configured, which the verifier reports as indeterminate.
 	Signatures PDFSignatureValidator
+	// SignerRoots anchor the C2PA manifest signers.
+	SignerRoots *x509.CertPool
+}
+
+// signerAnchors anchors the manifest signers of contract to the instances
+// party to it.
+func (h *VerifyContractPdfHandler) signerAnchors(contract *cwedb.Contract) SignerAnchors {
+	anchors := SignerAnchors{Roots: h.SignerRoots}
+	if contract.Responsible != nil {
+		anchors.Issuers = contract.Responsible.GetParties()
+	}
+	return anchors
 }
 
 func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContractPdfQry) (*pdfgen.PDFVerifyResult, error) {
@@ -77,5 +90,5 @@ func (h *VerifyContractPdfHandler) Handle(ctx context.Context, qry VerifyContrac
 	if err != nil || len(pdf) == 0 {
 		return nil, fmt.Errorf("fetch contract PDF %s from IPFS for verify: %w", qry.DID, err)
 	}
-	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, h.Signatures, currentC2PAState)
+	return runVerify(ctx, pdf, h.PDFCore, h.Credentials, h.CredentialStatus, h.Signatures, h.signerAnchors(contract), currentC2PAState)
 }

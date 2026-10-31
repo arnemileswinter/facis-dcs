@@ -98,7 +98,7 @@ func verifyTestCopy(t *testing.T, copyPDF string) (*pdfgen.PDFVerifyResult, bool
 		fetched = true
 		return []byte(storedTestPDF), nil
 	}
-	result, err := verifyCopy(context.Background(), newCopyPDFCore(t), nil, nil, nil,
+	result, err := verifyCopy(context.Background(), newCopyPDFCore(t), nil, nil, nil, SignerAnchors{},
 		VerifyContractPdfCopyQry{DID: copyTestDID, PDF: []byte(copyPDF)}, copyTestParties, storedVerification(), original)
 	if err != nil {
 		t.Fatalf("verifyCopy: %v", err)

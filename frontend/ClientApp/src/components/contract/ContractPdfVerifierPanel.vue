@@ -91,7 +91,13 @@ const checks = computed(() => {
     {
       name: 'C2PA manifest',
       status: manifest,
-      detail: r.c2pa_manifest_source ? `${r.c2pa_manifest_source} manifest` : '',
+      detail: [
+        r.c2pa_manifest_source ? `${r.c2pa_manifest_source} manifest` : '',
+        r.c2pa_signer_status ? `Signers: ${statusLabel[r.c2pa_signer_status] ?? r.c2pa_signer_status}` : '',
+        r.c2pa_signer_detail ?? '',
+      ]
+        .filter(Boolean)
+        .join('. '),
     },
     { name: 'VC signature', status: r.vc_proof_status, detail: '' },
     {
