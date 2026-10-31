@@ -106,13 +106,14 @@ enveloped signature of each list and reads only the signed content
   `INTEGRATION=1`, `TestEUTrustPoolLive` verifies the live LOTL and national
   lists.
 
-The backend builds this trust pool at startup and checks the DID certificate
-of each peer against it: chain to a qualified trust service provider and the
-QcCompliance statement (`identity.EUTrustPoolEnabled`,
-`TestEUTrustPoolIsOnByDefault`). `DCS_EU_TRUST_POOL=false` turns this off; a
-stack with `DCS_ALLOW_DEV_TRUST=true` has it off unless it sets
-`DCS_EU_TRUST_POOL=true`. The instance's own DID certificate is checked
-against the pool only when `DCS_FORCE_EIDAS_CERT=true`.
+Peer trust is decided by the federation trust gate (ADR-19: the agreement
+credential and the trust policy the operator configures in ORCE) with the
+peer issuers anchored per ADR-35. The EU trust pool is an additional eIDAS
+check that `DCS_FORCE_EIDAS_CERT=true` turns on: the backend then builds the
+pool at startup, checks the DID certificate of each peer and of this
+instance against it (chain to a qualified trust service provider and the
+QcCompliance statement), and needs outbound HTTPS to the EU trusted-list
+servers.
 
 Reason: not every time-stamp authority offers TLS 1.3. Each member state
 publishes its national trusted list on its own server, and not all of these
