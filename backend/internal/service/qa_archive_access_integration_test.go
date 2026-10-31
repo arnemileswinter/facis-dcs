@@ -231,7 +231,7 @@ func TestArchiveRecentActionsFilterBeforeLimit(t *testing.T) {
 		entries = append(entries, datatype.AuditLogEntry{DID: &foreign, CreatedAt: time.Now()})
 	}
 	entries = append(entries, datatype.AuditLogEntry{CreatedAt: time.Now()})
-	actions := recentArchiveActions(filterContractAuditChains([][]datatype.AuditLogEntry{entries}, map[string]bool{own: true}), archiveRecentActionLimit)
+	actions := recentArchiveActions(filterContractAuditChains([][]datatype.AuditLogEntry{entries}, map[string]bool{own: true}), archiveRecentActionLimit, true)
 	require.Len(t, actions, 1)
 	require.Equal(t, own, actions[0].Did)
 }

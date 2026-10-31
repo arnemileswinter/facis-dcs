@@ -21,7 +21,7 @@ const archiveRecentActionLimit = 10
 // archived-contract statistics, recent actions, storage volume, expiring
 // contracts, and compliance status. The compliance counts use the per-entry
 // verdict of GET /archive/compliance (DCS-FR-CSA-19).
-func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
+func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, p *contractstoragearchive.StatisticsPayload) (*contractstoragearchive.ArchiveStatisticsResponse, error) {
 	ctx, err := contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (s *contractStorageArchivesrvc) Statistics(ctx context.Context, _ *contract
 		return res.ExpiringContracts[i].ExpDate < res.ExpiringContracts[j].ExpDate
 	})
 
-	res.RecentActions = recentArchiveActions(filterContractAuditChains(auditChains, allowed), archiveRecentActionLimit)
+	res.RecentActions = recentArchiveActions(filterContractAuditChains(auditChains, allowed), archiveRecentActionLimit, p.Justification != nil)
 	return res, nil
 }
 
@@ -150,8 +150,10 @@ func archiveEvidencePresent(blob *datatype.JSON) bool {
 }
 
 // recentArchiveActions flattens the component's per-resource audit chains
-// into the newest-first action list the dashboard shows.
-func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int) []*contractstoragearchive.ArchiveRecentAction {
+// into the newest-first action list the dashboard shows. The actor of each
+// action is audit-log content: it is shown only to a request that gives a
+// justification (DCS-FR-PACM-04), which the access log records.
+func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int, withActor bool) []*contractstoragearchive.ArchiveRecentAction {
 	flat := []datatype.AuditLogEntry{}
 	for _, chain := range chains {
 		flat = append(flat, chain...)
@@ -166,12 +168,16 @@ func recentArchiveActions(chains [][]datatype.AuditLogEntry, limit int) []*contr
 		if entry.DID != nil {
 			did = *entry.DID
 		}
-		actions = append(actions, &contractstoragearchive.ArchiveRecentAction{
-			Actor:      auditEntryActor(entry.EventData),
+		action := &contractstoragearchive.ArchiveRecentAction{
 			OccurredAt: entry.CreatedAt.UTC().Format(time.RFC3339),
 			EventType:  entry.EventType,
 			Did:        did,
-		})
+		}
+		if withActor {
+			actor := auditEntryActor(entry.EventData)
+			action.Actor = &actor
+		}
+		actions = append(actions, action)
 	}
 	return actions
 }

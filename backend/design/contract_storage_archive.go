@@ -36,12 +36,12 @@ var ArchiveSearchRequest = Type("ArchiveSearchRequest", func() {
 var ArchiveRecentAction = Type("ArchiveRecentAction", func() {
 	Description("One recent archive-affecting audit event")
 
-	Attribute("actor", String, "Who performed the operation")
+	Attribute("actor", String, "Who performed the operation; present only when the request gave a justification")
 	Attribute("occurred_at", String, "When the operation happened (RFC3339)")
 	Attribute("event_type", String, "The archive operation (store/retrieve/search/delete/annotate)")
 	Attribute("did", String, "The archived contract the operation concerned")
 
-	Required("actor", "occurred_at", "event_type", "did")
+	Required("occurred_at", "event_type", "did")
 })
 
 var ArchiveExpiringContract = Type("ArchiveExpiringContract", func() {
@@ -500,6 +500,7 @@ var _ = Service("ContractStorageArchive", func() {
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
+			Attribute("justification", String, "Why the caller reads who performed the recent actions (DCS-FR-PACM-04); without it the recent actions carry no actor", func() { Pattern(`\S`) })
 		})
 
 		Error("internal_error", ErrorResult, "Internal server error")
@@ -510,6 +511,7 @@ var _ = Service("ContractStorageArchive", func() {
 			Response("not_found", StatusNotFound)
 			Response("forbidden", StatusForbidden)
 			GET("/archive/statistics")
+			Param("justification")
 			Response(StatusOK)
 			Response("internal_error", StatusInternalServerError)
 		})

@@ -142,3 +142,27 @@ func TestComplianceOfficerReviewsGateRunsAndCasesOfItsOrganization(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, cases[0].ExportedAt)
 }
+
+// DCS-FR-PACM-04: the identity of a denied actor is audit-log content; the
+// monitor names it only to a request that gives a justification.
+func TestMonitorNamesDeniedActorsOnlyWithAJustification(t *testing.T) {
+	s, database := pacOrganizationFixture(t)
+	_, err := database.Exec(`INSERT INTO outbox_events (component, event_type, event_data, did)
+		VALUES ('CONTRACT_WORKFLOW_ENGINE', 'CONTRACT_ACCESS_DENIED', '{"retrieved_by":"Org Z"}', 'y-contract')`)
+	require.NoError(t, err)
+	y := complianceOfficer("Org Y")
+	denial := func(p *pac.MonitorPayload) string {
+		monitor, err := s.Monitor(y, p)
+		require.NoError(t, err)
+		for _, risk := range monitor.Risks {
+			if risk.RiskType == "UNAUTHORIZED_ACCESS" {
+				return risk.Detail
+			}
+		}
+		t.Fatal("no unauthorized-access risk")
+		return ""
+	}
+	require.NotContains(t, denial(&pac.MonitorPayload{}), "Org Z")
+	justification := "investigation of the denied access"
+	require.Contains(t, denial(&pac.MonitorPayload{Justification: &justification}), "Org Z")
+}

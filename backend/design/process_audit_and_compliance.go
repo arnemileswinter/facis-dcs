@@ -317,6 +317,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 		})
 		Payload(func() {
 			Token("token", String, "JWT token")
+			Attribute("justification", String, "Why the caller reads the identities of denied actors (DCS-FR-PACM-04); without it an unauthorized-access risk names no actor", func() { Pattern(`\S`) })
 		})
 		Result(PACMonitorResponse)
 
@@ -325,6 +326,7 @@ var _ = Service("ProcessAuditAndCompliance", func() {
 
 		HTTP(func() {
 			GET("/pac/monitor")
+			Param("justification")
 			Response(StatusOK)
 			Response("forbidden", StatusForbidden)
 			Response("internal_error", StatusInternalServerError)

@@ -787,14 +787,25 @@ func (s *processAuditAndCompliancesrvc) Monitor(ctx context.Context, p *processa
 	}
 
 	risks := make([]*processauditandcompliance.PACComplianceRisk, 0, len(result.Risks))
+	anonymized := map[string]bool{}
 	for _, risk := range result.Risks {
 		if allowed != nil && !allowed[risk.DID] {
 			continue
 		}
+		detail := risk.Detail
+		// The identity of a denied actor is audit-log content: it is shown
+		// only to a request that gives a justification (DCS-FR-PACM-04).
+		if risk.RiskType == qry2.RiskTypeUnauthorizedAccess && p.Justification == nil {
+			if anonymized[risk.DID] {
+				continue
+			}
+			anonymized[risk.DID] = true
+			detail = fmt.Sprintf("unauthorized access to contract %s was attempted and denied", risk.DID)
+		}
 		risks = append(risks, &processauditandcompliance.PACComplianceRisk{
 			Did:        risk.DID,
 			RiskType:   risk.RiskType,
-			Detail:     risk.Detail,
+			Detail:     detail,
 			DetectedAt: risk.DetectedAt.Format(time.RFC3339),
 		})
 	}
