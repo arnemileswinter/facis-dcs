@@ -341,7 +341,7 @@ helm template lifecycle "$CHART_DIR" \
   --set federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary=true \
   >"$TMP_DIR/remote-acknowledged.yaml"
 
-if rg -n 'helm dependency update' \
+if grep -nE 'helm dependency update' \
   "$REPO_ROOT/dev-stack.sh" "$REPO_ROOT/dev-stack2.sh" "$CHART_DIR/deploy.sh" \
   "$CHART_DIR/values.dev.yml" "$CHART_DIR/values.dev2.yml" >/dev/null; then
   fail "an executable/documented development path bypasses Chart.lock"
@@ -349,13 +349,13 @@ fi
 grep -q 'helm dependency build --skip-refresh "$HELM_CHART_PATH"' \
   "$REPO_ROOT/dev-stack2.sh" ||
   fail "second development entrypoint does not build dependencies from Chart.lock"
-if rg -n 'Waiting for Federated Catalogue|app.kubernetes.io/name=federated-catalogue' \
+if grep -nE 'Waiting for Federated Catalogue|app.kubernetes.io/name=federated-catalogue' \
   "$REPO_ROOT/dev-stack2.sh" >/dev/null; then
   fail "FC-disabled second development entrypoint still performs a blanket FC wait"
 fi
-if rg -n 'SyncWithRetry|FC_SCHEMA_SYNC_(MAX_WAIT|RETRY_INTERVAL)' \
+if grep -rnE 'SyncWithRetry|FC_SCHEMA_SYNC_(MAX_WAIT|RETRY_INTERVAL)' \
   "$REPO_ROOT/backend" "$REPO_ROOT/dev-stack.sh" "$CHART_DIR" \
-  --glob '!federated_catalogue_lifecycle_test.sh' >/dev/null; then
+  --exclude=federated_catalogue_lifecycle_test.sh --exclude-dir=gen --exclude-dir=node_modules >/dev/null; then
   fail "obsolete FC retry/warm-up configuration remains"
 fi
 
