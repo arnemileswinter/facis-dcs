@@ -29,8 +29,8 @@ Feature: Process audit and compliance management
   Scenario: Compliance Officer runs continuous monitoring
     When the Compliance Officer requests continuous monitoring
     Then get http 200:Success code
-    # The sweep event itself carries no resource DID and is anchored only to
-    # the global chain, not the per-component PAC read path — the auditable
+    # The sweep event itself carries no resource DID and is anchored only in
+    # the Merkle checkpoints (ADR-16), not the per-component PAC read path — the auditable
     # per-contract artifact (PAC_COMPLIANCE_RISK) is asserted by the
     # "Compliance monitoring detects risk during approval" scenario in
     # 03_contract_creation/contract_approval.feature.
