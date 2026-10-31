@@ -159,7 +159,7 @@ python3 testWallet/demo_wallet.py
 BDD scenarios live in `features/` at the project root. Tests are run against a full stack in an ephemeral [kind](https://kind.sigs.k8s.io/) cluster.
 
 ### Prerequisites
-- `kind` — `go install sigs.k8s.io/kind@v0.23.0` or see [kind releases](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- `kind` — `go install sigs.k8s.io/kind@v0.30.0` (its default CNI enforces NetworkPolicy; `tests/bdd/kind-config.yaml` pins the node image) or see [kind releases](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - `kubectl` and `helm`
 - Docker (to build the DCS image)
 - Python 3.10+
@@ -654,6 +654,7 @@ Two trust configurations follow from that:
   - ORCE, DSS and the Federated Catalogue stack (fc-service, Keycloak, portal): every source, because the ingress routes them, peers and the second BDD release call them, and they authenticate their callers. Fuseki: fc-service; the catalogue PostgreSQL: fc-service and Keycloak. Loki: its own policy (push from the collector, query from `logging.queryFrom`).
 - Kubelet probes come from the node, which a NetworkPolicy does not block. Where a CNI blocks them, add the node CIDR as an `ipBlock` to `networkPolicy.extraFrom`; it is added to every restricted rule.
 - Port-forwards (`kubectl port-forward`, used by the BDD harness) and `kubectl exec` do not pass through NetworkPolicies.
+- The BDD and e2e kind stacks (kind v0.30.0, `tests/bdd/kind-config.yaml`) enforce the policies with the default values. Before the suite, `tests/bdd/scripts/run_bdd_helm.sh` checks that a pod without the backend labels is dropped at the IPFS RPC API, reaches the backend API, and that the API server proxy to the backend `/metrics` (used by the load test) works. kindnet does not filter traffic that root processes on the node start (the API server, kubelet probes), so the BDD values add nothing to `networkPolicy.extraFrom`.
 - The dev profiles set `networkPolicy.enabled: false`: the dev backend runs on the host and reaches the services through NodePorts.
 - Kubo RPC token (DCS-NFR-SF-02): with `ipfs.api.auth.enabled` (on by default) the co-deployed Kubo accepts RPC calls only with the bearer token of the Secret `<release>-ipfs-api` (key `token`, random on install, kept on upgrade; Kubo `API.Authorizations`). The backend gets it as `IPFS_API_TOKEN`. For a Kubo outside the release, set `ipfs.apiTokenSecretRef`. The `ipfs` CLI in the IPFS pod needs `--api-auth "bearer:$IPFS_API_TOKEN"`.
 
