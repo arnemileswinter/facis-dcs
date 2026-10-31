@@ -388,9 +388,10 @@ orce:
       value: "true"
     # DCS_URL must carry the API base path (DCS_API_PATH mounts every app
     # endpoint under /digital-contracting-service/api) — the flow's callback
-    # legs append /contract/deployment/callback to it.
+    # legs append /contract/deployment/callback to it. The https port is the
+    # TLS proxy of the backend pod (global.internalTLS).
     - name: DCS_URL
-      value: "http://dcs-digital-contracting-service:8991/digital-contracting-service/api"
+      value: "https://dcs-digital-contracting-service:8443/digital-contracting-service/api"
     # The credential the contract-target flow authenticates its callback with.
     # It matches the contractTargets entry's oauth_client_id below, which is
     # what binds the caller to the registry row the deployment went to.

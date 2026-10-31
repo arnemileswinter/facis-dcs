@@ -479,6 +479,11 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- end }}
+        {{- if .Values.global.internalTLS.enabled }}
+        # In-cluster callers (ORCE callbacks) reach the API over TLS 1.3 on the
+        # https port (DCS-NFR-SEC-14). Ingress and probes use the http port.
+        {{- include "digital-contracting-service.internalTLSProxy" (dict "root" . "upstreamPort" .Values.service.port) | nindent 8 }}
+        {{- end }}
         {{- if .Values.statusListLocalhostProxy.enabled }}
         - name: statuslist-localhost-proxy
           image: "{{ .Values.statusListLocalhostProxy.image.repository }}:{{ .Values.statusListLocalhostProxy.image.tag }}"
@@ -509,6 +514,7 @@ spec:
       volumes:
       {{- if .Values.global.internalTLS.enabled }}
         {{- include "digital-contracting-service.internalCAVolume" . | nindent 8 }}
+        {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
       {{- end }}
       {{- if .Values.customCA.enabled }}
         - name: custom-ca-certs

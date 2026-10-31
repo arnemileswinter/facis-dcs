@@ -83,8 +83,14 @@ spec:
             - name: http
               containerPort: 1880
               protocol: TCP
-          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv }}
+          {{- if or .Values.global.archiveAuditTokenSecretRef.name .Values.global.archiveAuditToken .Values.global.auditExecutorTokenSecretRef.name .Values.global.auditExecutorToken .Values.global.workflowGateTokenSecretRef.name .Values.global.workflowGateToken .Values.checkpointSink.url .Values.extraEnv $tls }}
           env:
+            {{- if $tls }}
+            # Node.js trusts the internal CA for HTTPS calls to the DCS backend
+            # and Hydra (DCS-NFR-SEC-14).
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/dcs-internal-tls/ca.crt
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -161,6 +167,9 @@ spec:
               mountPath: /etc/orce/pki-root
               readOnly: true
             {{- end }}
+            {{- if $tls }}
+            {{- include "digital-contracting-service.internalCAVolumeMount" . | nindent 12 }}
+            {{- end }}
             {{- if .Values.flowsFile.enabled }}
             - name: flows-merged
               mountPath: /data/flows.json
@@ -199,6 +208,7 @@ spec:
       volumes:
         {{- if $tls }}
         {{- include "digital-contracting-service.internalTLSVolume" . | nindent 8 }}
+        {{- include "digital-contracting-service.internalCAVolume" . | nindent 8 }}
         {{- end }}
         - name: settings
           configMap:

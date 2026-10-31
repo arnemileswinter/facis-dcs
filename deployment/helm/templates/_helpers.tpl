@@ -373,11 +373,12 @@ In-cluster Hydra public API (OIDC discovery, token) for DCS backend HTTP calls.
 {{- end }}
 
 {{/*
-Hydra admin API base URL (login/consent accept).
+Hydra admin API base URL (login/consent accept): the TLS proxy of the Hydra
+pod when global.internalTLS.enabled.
 */}}
 {{- define "digital-contracting-service.hydraAdminURL" -}}
 {{- if .Values.hydra.enabled -}}
-{{- printf "http://%s-hydra:%d" .Release.Name (.Values.hydra.service.adminPort | int) -}}
+{{- include "digital-contracting-service.componentURL" (dict "root" . "host" (printf "%s-hydra" .Release.Name) "port" (.Values.hydra.service.adminPort | int)) -}}
 {{- end -}}
 {{- end }}
 

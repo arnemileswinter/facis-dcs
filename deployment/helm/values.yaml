@@ -174,6 +174,8 @@ global:
   #     container in their pods serves TLS 1.3 on proxy.port, and the backend
   #     calls them there. Their plain ports stay for probes, ingress and
   #     port-forwards.
+  #   - The backend API and the Hydra admin API have the same TLS proxy for
+  #     in-cluster callers (ORCE, the backend, the Hydra client job).
   # The backend, the backup and the compliance monitor trust the CA. Another
   # client of the co-deployed PostgreSQL or NATS (Hydra, statuslist-service)
   # needs sslmode=verify-full&sslrootcert=/etc/dcs-internal-tls/ca.crt in its
