@@ -1,4 +1,3 @@
-import { getConfig } from '@/config'
 import { Parser } from 'n3'
 import {
   fetchHubJson,
@@ -7,6 +6,7 @@ import {
   OntologyGraph,
   readRdfList,
 } from '@template-repository/utils/ontology-domain-fields'
+import { getConfig } from '@/config'
 import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 
 /**

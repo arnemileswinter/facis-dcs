@@ -1,5 +1,5 @@
-import { getConfig } from '@/config'
 import { Parser, type Quad } from 'n3'
+import { getConfig } from '@/config'
 
 /**
  * The DCS ODRL profile catalog: the profile IRI, the default constraint

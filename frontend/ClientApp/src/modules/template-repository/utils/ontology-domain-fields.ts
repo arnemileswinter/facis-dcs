@@ -1,6 +1,6 @@
-import { getConfig } from '@/config'
 import { Parser, type Quad } from 'n3'
 import { shallowReactive } from 'vue'
+import { getConfig } from '@/config'
 import { compactXsdDatatype, type XsdDatatype } from '@/models/dcs-jsonld'
 import type {
   DomainFieldDefinition,
