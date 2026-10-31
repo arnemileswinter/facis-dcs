@@ -171,11 +171,12 @@ var ContractTemplateSearchResponse = Type("ContractTemplateSearchResponse", func
 	Attribute("required_templates", ArrayOf(String), "DIDs of the templates a parent contract must be made from (DCS-FR-TR-23)")
 	Attribute("compliance_status", String, "Regulatory compliance status from the template policy audit at approval (DCS-FR-TR-10)", func() { Enum("UNASSESSED", "COMPLIANT", "NON_COMPLIANT") })
 
+	Attribute("created_by", String, "Identifier of who created the contract template (DCS-IR-TR-08)")
 	Attribute("created_at", String, "The timestamp when the contract template was created")
 
 	Attribute("updated_at", String, "The timestamp when the contract template was updated")
 
-	Required("did", "state", "template_type", "created_at", "updated_at", "version", "party_type")
+	Required("did", "state", "template_type", "created_by", "created_at", "updated_at", "version", "party_type")
 })
 
 var ContractTemplateRetrieveRequest = Type("ContractTemplateRetrieveRequest", func() {

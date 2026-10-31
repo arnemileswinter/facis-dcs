@@ -75,7 +75,7 @@ func (h *Rejecter) Handle(ctx context.Context, cmd RejectCmd) error {
 	}
 
 	if !exist {
-		return errors.New("invalid user")
+		return fmt.Errorf("%w: invalid user", ErrInvalidRequest)
 	}
 
 	err = h.ATRepo.UpdateState(ctx, tx, cmd.DID, cmd.RejectedBy, approvaltaskstate.Rejected.String())

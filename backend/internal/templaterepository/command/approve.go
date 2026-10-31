@@ -65,7 +65,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	if processData.State != contracttemplatestate.Reviewed.String() {
-		return errors.New("invalid contract template state")
+		return ErrInvalidTemplateState
 	}
 
 	valid, err := h.ATRepo.IsValidApprover(ctx, tx, cmd.DID, cmd.ApprovedBy)
@@ -74,7 +74,7 @@ func (h *Approver) Handle(ctx context.Context, cmd ApproveCmd) error {
 	}
 
 	if !valid {
-		return errors.New("invalid user")
+		return fmt.Errorf("%w: invalid user", ErrInvalidRequest)
 	}
 
 	// DCS-FR-TR-26: the required templates can have changed since submission.

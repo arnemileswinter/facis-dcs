@@ -46,6 +46,7 @@ type GetAllMetadataByFilterResult struct {
 	PartyType    string
 	Name         *string
 	Description  *string
+	CreatedBy    string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	MetaData     datatype.JSON
@@ -137,6 +138,7 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 			PartyType:    data.PartyType,
 			Name:         data.Name,
 			Description:  data.Description,
+			CreatedBy:    data.CreatedBy,
 			CreatedAt:    data.CreatedAt,
 			UpdatedAt:    data.UpdatedAt,
 

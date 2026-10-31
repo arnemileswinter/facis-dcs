@@ -57,7 +57,7 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 	if cmd.TemplateData != nil && cmd.TemplateData.IsNotNullValue() {
 		normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 		if err != nil {
-			return fmt.Errorf("template data validation failed: %w", err)
+			return fmt.Errorf("%w: template data validation failed: %w", ErrInvalidRequest, err)
 		}
 		cmd.TemplateData = normalizedTemplateData
 	}
@@ -88,7 +88,7 @@ func (h *UpdateManager) Handle(ctx context.Context, cmd UpdateManageCmd) error {
 		oldData.State == contracttemplatestate.Approved.String() ||
 		oldData.State == contracttemplatestate.Reviewed.String() ||
 		oldData.State == contracttemplatestate.Deleted.String() {
-		return errors.New("invalid contract template state")
+		return ErrInvalidTemplateState
 	}
 
 	// DCS-IR-TR-03: an edit in review needs a new verification.

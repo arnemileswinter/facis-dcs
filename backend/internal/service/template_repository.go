@@ -17,7 +17,6 @@ import (
 
 	"digital-contracting-service/internal/templaterepository/query"
 
-	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
 	templaterepository "digital-contracting-service/gen/template_repository"
 	"digital-contracting-service/internal/auth"
 	"digital-contracting-service/internal/base"
@@ -75,10 +74,10 @@ func NewTemplateRepository(db *sqlx.DB, jwtAuth auth.JWTAuthenticator, CTRepo db
 	}
 }
 
-// Create a new template.
-// mapTemplateCommandError maps a client-input document error (a Semantic Hub
-// ontology-prefix conflict, DCS-FR-TR-03) to bad_request; everything else
-// stays an internal error.
+// mapTemplateCommandError maps the errors a client causes (invalid input, a
+// state that does not allow the command, a failed policy audit, an unknown
+// template) to bad_request and a stale view to conflict; everything else
+// stays an internal error (DCS-IR-TR-04).
 func mapTemplateCommandError(err error) error {
 	if errors.Is(err, validation.ErrDocumentSchemaConflict) || errors.Is(err, command.ErrInvalidTemplateState) ||
 		errors.Is(err, templatestructure.ErrInvalid) || errors.Is(err, command.ErrTemplateNotCompliant) ||
@@ -106,12 +105,12 @@ func (s *templateRepositorysrvc) Create(ctx context.Context, req *templatereposi
 	}
 	templateType, err := contracttemplatetype.NewContractTemplateType(req.TemplateType)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	templateData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	did, err := base.GenerateID()
@@ -189,14 +188,14 @@ func (s *templateRepositorysrvc) Submit(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var actionFlag *actionflag.ActionFlag
 	if req.ForwardTo != nil {
 		flag, err := actionflag.NewActionFlag(*req.ForwardTo)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		actionFlag = &flag
 	}
@@ -234,12 +233,12 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var partyType partytype.PartyType
@@ -254,7 +253,7 @@ func (s *templateRepositorysrvc) Update(ctx context.Context, req *templatereposi
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
@@ -299,12 +298,12 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	metaData, err := datatype.NewJSON(req.TemplateData)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	var partyType partytype.PartyType
@@ -319,7 +318,7 @@ func (s *templateRepositorysrvc) UpdateManage(ctx context.Context, req *template
 	if req.TemplateType != nil {
 		tType, err := contracttemplatetype.NewContractTemplateType(*req.TemplateType)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 		templateType = &tType
 	}
@@ -382,7 +381,7 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 	if req.State != nil {
 		tState, err := contracttemplatestate.NewContractTemplateState(*req.State)
 		if err != nil {
-			return nil, templaterepository.MakeInternalError(err)
+			return nil, templaterepository.MakeBadRequest(err)
 		}
 
 		state = &tState
@@ -430,6 +429,7 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 			PartyType:         item.PartyType,
 			Name:              item.Name,
 			Description:       item.Description,
+			CreatedBy:         item.CreatedBy,
 			CreatedAt:         item.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:         item.UpdatedAt.Format(time.RFC3339),
 			Jurisdiction:      item.Jurisdiction,
@@ -460,7 +460,7 @@ func (s *templateRepositorysrvc) RetrieveHistoryByID(ctx context.Context, req *t
 	}
 	result, err := queryHandler.Handle(ctx, qry)
 	if err != nil {
-		return nil, contractworkflowengine.MakeInternalError(err)
+		return nil, templaterepository.MakeInternalError(err)
 	}
 
 	var contractTemplates []*templaterepository.ContractTemplateHistoryRetrieveByIDResponse
@@ -686,7 +686,7 @@ func (s *templateRepositorysrvc) Approve(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ApproveCmd{
@@ -720,7 +720,7 @@ func (s *templateRepositorysrvc) Reject(ctx context.Context, req *templatereposi
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.RejectCmd{
@@ -835,7 +835,7 @@ func (s *templateRepositorysrvc) Archive(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.ArchiveCmd{
@@ -940,7 +940,7 @@ func (s *templateRepositorysrvc) Publish(ctx context.Context, req *templaterepos
 
 	updatedAt, err := time.Parse(time.RFC3339, req.UpdatedAt)
 	if err != nil {
-		return nil, templaterepository.MakeInternalError(err)
+		return nil, templaterepository.MakeBadRequest(err)
 	}
 
 	cmd := command.PublishCmd{

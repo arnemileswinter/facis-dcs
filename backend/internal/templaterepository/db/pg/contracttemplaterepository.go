@@ -198,7 +198,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaData(ctx context.Context, tx *
 
 	var params []any
 	if pagination.Limit > 0 {
-		offset := (pagination.Offset - 1) * pagination.Limit
+		offset := max(pagination.Offset-1, 0) * pagination.Limit
 		query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`
 		params = append(params, pagination.Limit, offset)
 	}
@@ -228,7 +228,7 @@ func (r *PostgresContractTemplateRepo) ReadAllMetaDataByFilter(ctx context.Conte
 	}
 
 	if pagination.Limit > 0 {
-		offset := (pagination.Offset - 1) * pagination.Limit
+		offset := max(pagination.Offset-1, 0) * pagination.Limit
 		n := len(params) + 1
 		query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", n, n+1)
 		params = append(params, pagination.Limit, offset)

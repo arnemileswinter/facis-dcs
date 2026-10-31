@@ -55,7 +55,7 @@ type Registrar struct {
 func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error) {
 
 	if cmd.DID == "" {
-		return nil, errors.New("did is empty")
+		return nil, fmt.Errorf("%w: did is empty", ErrInvalidRequest)
 	}
 
 	tx, err := h.DB.BeginTxx(ctx, nil)
@@ -158,7 +158,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		}
 
 		if cmd.Version < 1 {
-			return nil, errors.New("version must be greater than 0")
+			return nil, fmt.Errorf("%w: version must be greater than 0", ErrInvalidRequest)
 		}
 
 		if h.FCClient == nil {
@@ -194,10 +194,10 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		}
 
 		if fcTemplate.TemplateType == nil || strings.TrimSpace(*fcTemplate.TemplateType) == "" {
-			return nil, errors.New("template type is missing from Federated Catalogue")
+			return nil, fmt.Errorf("%w: template type is missing from Federated Catalogue", ErrInvalidRequest)
 		}
 		if fcTemplate.PartyType == nil {
-			return nil, errors.New("party type is missing from Federated Catalogue")
+			return nil, fmt.Errorf("%w: party type is missing from Federated Catalogue", ErrInvalidRequest)
 		}
 		partyType, err := partytype.New(*fcTemplate.PartyType)
 		if err != nil {

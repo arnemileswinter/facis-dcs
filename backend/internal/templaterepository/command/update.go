@@ -57,7 +57,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	if cmd.TemplateData != nil && cmd.TemplateData.IsNotNullValue() {
 		normalizedTemplateData, err := validation.NormalizeTemplateDataForPersistence(cmd.TemplateData, cmd.DID)
 		if err != nil {
-			return fmt.Errorf("template data validation failed: %w", err)
+			return fmt.Errorf("%w: template data validation failed: %w", ErrInvalidRequest, err)
 		}
 		cmd.TemplateData = normalizedTemplateData
 	}
@@ -85,13 +85,13 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	if oldData.State == contracttemplatestate.Draft.String() || oldData.State == contracttemplatestate.Rejected.String() {
 
 		if !cmd.UserRoles.HasRoles(userrole.TemplateCreator, userrole.TemplateManager) {
-			return errors.New("invalid user permission")
+			return fmt.Errorf("%w: invalid user permission", ErrInvalidRequest)
 		}
 
 	} else if oldData.State == contracttemplatestate.Submitted.String() {
 
 		if !cmd.UserRoles.HasRoles(userrole.TemplateReviewer, userrole.TemplateManager) {
-			return errors.New("invalid user permission")
+			return fmt.Errorf("%w: invalid user permission", ErrInvalidRequest)
 		}
 
 		if cmd.UserRoles.HasRoles(userrole.TemplateReviewer) {
@@ -100,12 +100,12 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 				return err
 			}
 			if !isValidReviewer {
-				return errors.New("user is not a valid reviewer for that contract template")
+				return fmt.Errorf("%w: user is not a valid reviewer for that contract template", ErrInvalidRequest)
 			}
 		}
 
 	} else {
-		return errors.New("current contract template state is invalid")
+		return ErrInvalidTemplateState
 	}
 
 	err = h.RTRepo.ReopenTasks(ctx, tx, cmd.DID)
