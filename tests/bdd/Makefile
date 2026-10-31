@@ -86,6 +86,7 @@ BDD_RUNNER_SCRIPT ?= scripts/run_bdd_helm.sh
 RUN_MODE ?= bdd
 COREDNS_REWRITE_SCRIPT ?= scripts/kind_coredns_rewrite.sh
 ORCE_PERSISTENCE_SCRIPT ?= scripts/ensure_orce_persistence.sh
+DUMP_CLUSTER_LOGS_SCRIPT ?= scripts/dump_cluster_logs.sh
 
 # Second DCS release ("dcs2", instance B) for the @two-instance peer-trust
 # scenarios (features/17_peer_trust) — see deployment/helm/values.bdd2.yml.
@@ -107,7 +108,7 @@ BDD_HELM_SET_B := \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/callback" \
 	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN_B)/digital-contracting-service/api/auth/logout-complete"
 
-.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once run_load_kind_once kind_down
+.PHONY: kind_export_kubeconfig setup_environment ensure_venv run_bdd_test run_bdd_fast run_bdd_helm ensure_kind ensure_k8s_tools kind_create kind_delete kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b kind_coredns_rewrite kind_dump kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci run_e2e_kind run_e2e_kind_ci run_bdd_audit_kind_ci build_dcs_image clean help kind_up kind_up_audit run_bdd_kind_once run_bdd_audit_kind_once run_load_kind_once kind_down
 
 help:
 	@echo "make setup_environment   # Create venv and install bdd-executor"
@@ -221,7 +222,7 @@ ensure_k8s_tools:
 # host-port datapath (18080) always reaches the kind cluster.
 KIND_KUBECONFIG := $(CURDIR)/.tmp/kind-kubeconfig
 KIND_GOALS := kind_create kind_load_image kind_load_pdf_core_image kind_deploy kind_deploy_b \
-	kind_coredns_rewrite kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
+	kind_coredns_rewrite kind_dump kind_uninstall run_bdd_kind run_bdd_kind_all run_bdd_kind_ci \
 	run_e2e_kind run_e2e_kind_ci \
 	run_bdd_audit_kind_ci kind_up kind_up_audit run_bdd_kind_once \
 	run_bdd_audit_kind_once run_load_kind_once kind_down
@@ -346,7 +347,8 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 		--values "$(HELM_CHART_PATH)/values.issuer-base.yml" \
 		--values "$(HELM_CHART_PATH)/values.issuer.bdd.yml"
 	@"$(KUBECTL_BIN)" -n "$(KIND_NAMESPACE)" rollout status \
-		deployment/"$(ISSUER_RELEASE)"-orce --timeout "$(HELM_TIMEOUT)"
+		deployment/"$(ISSUER_RELEASE)"-orce --timeout "$(HELM_TIMEOUT)" || { \
+		$(MAKE) --no-print-directory kind_dump; exit 1; }
 	@# The image tag is static, so an unchanged manifest never rolls the pods
 	@# even though kind load just replaced the node image — restart both
 	@# freshly-built workloads so the run tests the image that was built.
@@ -378,6 +380,7 @@ kind_deploy: kind_load_image kind_load_pdf_core_image kind_load_dss_image
 		echo "=== FC REALM PROVISION JOB LOGS ==="; \
 		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
 			job/"$(DCS_DEPLOYMENT)"-fc-realm-provision --tail=100 || true; \
+		$(MAKE) --no-print-directory kind_dump; \
 		exit 1; \
 	fi
 
@@ -433,8 +436,15 @@ kind_deploy_b: kind_deploy
 		echo "=== HSM PROVISION JOB LOGS (instance B) ==="; \
 		"$(KUBECTL_BIN)" logs -n "$(KIND_NAMESPACE)" \
 			job/"$(DCS_DEPLOYMENT_B)"-hsm-provision --tail=100 || true; \
+		$(MAKE) --no-print-directory kind_dump; \
 		exit 1; \
 	fi
+
+# State and logs of every container of every pod in the cluster, with the
+# previous run of each restarted container (scripts/dump_cluster_logs.sh).
+kind_dump:
+	@echo "=== ALL PODS, ALL CONTAINERS ==="
+	@KUBECTL_BIN="$(KUBECTL_BIN)" bash "$(DUMP_CLUSTER_LOGS_SCRIPT)" || true
 
 kind_uninstall:
 	@"$(HELM_BIN)" uninstall "$(ISSUER_RELEASE)" --namespace "$(KIND_NAMESPACE)" >/dev/null 2>&1 || true

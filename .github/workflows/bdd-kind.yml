@@ -129,6 +129,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
           # The backend is not the only container in that pod. A sidecar that
@@ -290,6 +293,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
             -c digital-contracting-service --tail=2000 --prefix || true
           kubectl logs -n dcs-bdd -l app.kubernetes.io/component=backend \
@@ -458,6 +464,9 @@ jobs:
           set -euo pipefail
           kubectl get pods -n dcs-bdd -o wide || true
           kubectl get events -n dcs-bdd --sort-by=.lastTimestamp || true
+          # Every container of every pod in every namespace (issuer releases,
+          # Traefik, hook jobs), with the previous run of a restarted one.
+          bash tests/bdd/scripts/dump_cluster_logs.sh || true
           # Per-deployment so both instances (dcs + dcs2) are captured whole and a
           # large tail keeps the export/regeneration diagnostics that fire near the
           # end of a run inside the window.
