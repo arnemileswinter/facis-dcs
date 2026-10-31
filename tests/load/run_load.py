@@ -7,10 +7,22 @@ tests/bdd run_load_kind_once), which supplies the environment and the venv.
 2. Runs tests/load/dcs_load.js (k6 container) against one DCS replica.
 3. Scales the DCS deployment to two replicas and runs it again at the same
    arrival rate. The same limits apply, and each replica must serve at least
-   a quarter of the requests, so the added replica takes load. Both replicas
-   share the runner's one kind node, so this phase proves the spread of the
-   load, not added capacity.
-4. Restores the replica count.
+   a quarter of the requests, so the added replica takes load.
+4. Capacity (DCS-NFR-PER-02): with one and then two replicas, raises the read
+   rate step by step (LOAD_CAPACITY_RATES) until a step breaks a limit. The
+   capacity is the highest rate that held every limit; at that step the
+   requests each replica served give its throughput at saturation. The test
+   fails when two replicas hold less than one replica.
+5. Restores the replica count.
+
+What one runner shows: the CI runner is one 4-vCPU node that also runs kind,
+PostgreSQL, IPFS, Keycloak, Hydra, ORCE, DSS, pdf-core and k6. Both replicas
+share its CPUs with that stack, so the capacity of two replicas cannot be
+twice that of one there: the test shows that the load spreads, that a replica
+keeps its throughput next to a second one, and the absolute capacity of this
+node. Linear scaling needs a replica per node; run this script against a
+cluster with one node per replica (LOAD_CAPACITY_RATES and the kind config
+are the knobs) to measure it.
 
 The k6 summaries go to tests/bdd/.reports/load/. Exit code 1 when a limit is
 exceeded.
@@ -41,6 +53,8 @@ BASE_URL = os.environ["BDD_DCS_BASE_URL"].rstrip("/")
 READ_RATE = int(os.getenv("LOAD_READ_RATE", "20"))
 WRITE_RATE = int(os.getenv("LOAD_WRITE_RATE", "2"))
 DURATION = os.getenv("LOAD_DURATION", "60s")
+CAPACITY_RATES = [int(r) for r in os.getenv("LOAD_CAPACITY_RATES", "40,80,160,320").split(",")]
+STEP_DURATION = os.getenv("LOAD_STEP_DURATION", "30s")
 REPORTS = ROOT / "tests" / "bdd" / ".reports" / "load"
 MIN_SHARE = 0.25
 
@@ -73,7 +87,7 @@ def scale(replicas):
         time.sleep(2)
 
 
-def run_k6(phase, setup, read_rate, write_rate):
+def run_k6(phase, setup, read_rate, write_rate, duration=DURATION):
     REPORTS.mkdir(parents=True, exist_ok=True)
     # The k6 image runs as its own user; it writes the summary into this directory.
     REPORTS.chmod(0o777)
@@ -87,13 +101,14 @@ def run_k6(phase, setup, read_rate, write_rate):
         "PARTIES": json.dumps(setup["parties"]),
         "READ_RATE": str(read_rate),
         "WRITE_RATE": str(write_rate),
-        "DURATION": DURATION,
+        "DURATION": duration,
+        "MAX_VUS": str(max(100, read_rate * 2)),
     }
     cmd = ["docker", "run", "--rm", "--network", "host", "-v", f"{ROOT / 'tests' / 'load'}:/scripts:ro", "-v", f"{REPORTS}:/out"]
     for key, value in env.items():
         cmd += ["-e", f"{key}={value}"]
     cmd += [K6_IMAGE, "run", "--summary-export", f"/out/{phase}.json", "/scripts/dcs_load.js"]
-    print(f"== k6 {phase}: {read_rate} reads/s, {write_rate} writes/s for {DURATION}", flush=True)
+    print(f"== k6 {phase}: {read_rate} reads/s, {write_rate} writes/s for {duration}", flush=True)
     return subprocess.run(cmd).returncode == 0
 
 
@@ -101,6 +116,26 @@ def p95(phase, kind):
     metrics = json.loads((REPORTS / f"{phase}.json").read_text())["metrics"]
     value = metrics.get(f"http_req_duration{{kind:{kind}}}", {}).get("p(95)")
     return "n/a" if value is None else round(value)
+
+
+def seconds(duration):
+    return float(duration.rstrip("s"))
+
+
+def capacity(replicas, setup):
+    """Highest read rate of CAPACITY_RATES that held every limit, and the
+    requests per second each replica served at that step."""
+    scale(replicas)
+    pods = backend_pods()
+    best, per_replica = 0, {}
+    for rate in CAPACITY_RATES:
+        before = {pod: requests_served(pod) for pod in pods}
+        held = run_k6(f"capacity-{replicas}-{rate}", setup, rate, 0, STEP_DURATION)
+        if not held:
+            break
+        best = rate
+        per_replica = {pod: round((requests_served(pod) - before[pod]) / seconds(STEP_DURATION), 1) for pod in pods}
+    return best, per_replica
 
 
 def main():
@@ -131,6 +166,12 @@ def main():
             if total == 0 or count / total < MIN_SHARE:
                 print(f"FAIL: replica {pod} served {count} of {total} requests (< {MIN_SHARE:.0%})", flush=True)
                 ok = False
+
+        capacities = {replicas: capacity(replicas, setup) for replicas in (1, 2)}
+        print(f"== capacity (reads/s that held every limit, per-replica requests/s): {capacities}", flush=True)
+        if capacities[2][0] < capacities[1][0]:
+            print(f"FAIL: two replicas held {capacities[2][0]} reads/s, less than one replica ({capacities[1][0]})", flush=True)
+            ok = False
     finally:
         scale(original)
 
@@ -144,8 +185,16 @@ def main():
         if (REPORTS / f"{phase}.json").exists():
             lines.append(f"| {replicas} | {factor * READ_RATE}, {factor * WRITE_RATE} | "
                          f"{p95(phase, 'read')} | {p95(phase, 'write')} |")
+    if "capacities" in locals():
+        lines += ["", "| DCS replicas | capacity (reads/s held) | requests/s per replica at that rate |", "|---|---|---|"]
+        for replicas, (best, per_replica) in capacities.items():
+            lines.append(f"| {replicas} | {best} | {', '.join(str(v) for v in per_replica.values()) or 'n/a'} |")
+        lines += ["", f"Capacity steps: {', '.join(map(str, CAPACITY_RATES))} reads/s for {STEP_DURATION} each. "
+                  "One CI node runs both replicas and the whole stack, so this shows the spread and the "
+                  "per-replica throughput at saturation, not linear scaling."]
     lines += ["", "Limits: read p95 < 500 ms, write p95 < 2000 ms, < 1 % failed, no dropped iterations, "
-              f"each of 2 replicas serves >= {MIN_SHARE:.0%}.", f"Result: {'passed' if ok else 'FAILED'}"]
+              f"each of 2 replicas serves >= {MIN_SHARE:.0%}, 2 replicas hold at least the capacity of 1.",
+              f"Result: {'passed' if ok else 'FAILED'}"]
     print("\n".join(lines))
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
