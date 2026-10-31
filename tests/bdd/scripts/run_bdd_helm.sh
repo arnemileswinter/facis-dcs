@@ -238,24 +238,29 @@ else
   echo "'make -C tests/bdd kind_deploy_b' (or kind_up, which now includes it) if you need instance B." >&2
 fi
 
-# NetworkPolicy enforcement (DCS-NFR-SEC-03, DCS-NFR-SF-02). The default CNI of
-# kind v0.24 and later (kindnetd with kube-network-policies) enforces the
-# chart's policies, so the suite runs with them in force. A pod that no policy
-# names reaches the backend API, which admits every source, and is dropped at
-# the IPFS RPC API, which admits only the backend. The API server proxy, which
-# the load test uses to read /metrics, still reaches the backend: the CNI does
-# not filter traffic that root processes on the node start (API server,
-# kubelet probes, port-forwards).
+# NetworkPolicy enforcement (DCS-NFR-SEC-03, DCS-NFR-SF-02, DCS-NFR-SEC-14).
+# The default CNI of kind v0.24 and later (kindnetd with kube-network-policies)
+# enforces the chart's policies, so the suite runs with them in force. The BDD
+# values name the Traefik ingress (networkPolicy.ingressFrom), so the backend
+# API admits the ingress, the pods of the release and the other BDD release. A
+# pod with the release label reaches the backend API and is dropped at the IPFS
+# RPC API, which admits only the backend; a pod without it is dropped at the
+# backend API too. The API server proxy, which the load test uses to read
+# /metrics, still reaches the backend: the CNI does not filter traffic that
+# root processes on the node start (API server, kubelet probes, port-forwards).
 echo "Checking NetworkPolicy enforcement"
 ipfs_rpc_port="$("$KUBECTL_BIN" -n "$K8S_NAMESPACE" get service "${HELM_RELEASE}-ipfs" \
   -o jsonpath='{.spec.ports[?(@.name=="https")].port}')"
-probe_out="$("$KUBECTL_BIN" -n "$K8S_NAMESPACE" run "np-probe-$$" --image=curlimages/curl:8.11.1 \
-  --restart=Never --rm -i --quiet --command -- sh -c '
-    curl -s -o /dev/null --max-time 10 -w "backend=%{http_code}\n" "http://$1:$2/"
-    curl -sk -o /dev/null --connect-timeout 5 "https://$3:$4/api/v0/version"; echo "ipfs_exit=$?"' \
-  probe "${DCS_SERVICE:-$DCS_DEPLOYMENT}" "${SERVICE_PORT:-8991}" "${HELM_RELEASE}-ipfs" "$ipfs_rpc_port" 2>&1)" || true
+np_probe() { # np_probe <name> [labels]
+  "$KUBECTL_BIN" -n "$K8S_NAMESPACE" run "$1" --image=curlimages/curl:8.11.1 ${2:+--labels="$2"} \
+    --restart=Never --rm -i --quiet --command -- sh -c '
+      curl -s -o /dev/null --connect-timeout 5 --max-time 10 -w "backend=%{http_code}\n" "http://$1:$2/"; echo "backend_exit=$?"
+      curl -sk -o /dev/null --connect-timeout 5 "https://$3:$4/api/v0/version"; echo "ipfs_exit=$?"' \
+    probe "${DCS_SERVICE:-$DCS_DEPLOYMENT}" "${SERVICE_PORT:-8991}" "${HELM_RELEASE}-ipfs" "$ipfs_rpc_port" 2>&1 || true
+}
+probe_out="$(np_probe "np-probe-$$" "app.kubernetes.io/instance=${HELM_RELEASE}")"
 if ! grep -Eq '^backend=[1-5][0-9]{2}$' <<<"$probe_out"; then
-  echo "NetworkPolicy check: the probe pod did not reach the backend API, so the check proves nothing:" >&2
+  echo "NetworkPolicy check: a pod of the release did not reach the backend API, so the check proves nothing:" >&2
   echo "$probe_out" >&2
   exit 1
 fi
@@ -266,6 +271,12 @@ if ! grep -qx 'ipfs_exit=28' <<<"$probe_out"; then
   echo "$probe_out" >&2
   exit 1
 fi
+outsider_out="$(np_probe "np-outsider-$$")"
+if ! grep -qx 'backend_exit=28' <<<"$outsider_out"; then
+  echo "NetworkPolicy check: a pod outside the release and the ingress reached the backend API (networkPolicy.ingressFrom):" >&2
+  echo "$outsider_out" >&2
+  exit 1
+fi
 probe_backend_pod="$(wait_for_running_pod "$K8S_NAMESPACE" \
   "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${HELM_RELEASE}")"
 if ! "$KUBECTL_BIN" get --raw \
@@ -274,7 +285,7 @@ if ! "$KUBECTL_BIN" get --raw \
   echo "the load test reads it there. Admit the API server in networkPolicy.extraFrom of the BDD values." >&2
   exit 1
 fi
-echo "NetworkPolicy is enforced: IPFS RPC API dropped for an unlabelled pod, backend API and metrics proxy reachable"
+echo "NetworkPolicy is enforced: backend API reachable for the release and dropped for an outsider, IPFS RPC API dropped, metrics proxy reachable"
 
 # The harness owns these loopback ports. A survivor forward from an earlier
 # run — possibly against a DIFFERENT cluster/kubeconfig — binds first, the

@@ -37,8 +37,15 @@ extraEnv:
   # declare that, so no deployment inherits it by omission.
   - name: DCS_ALLOW_DEV_TRUST
     value: "true"
-  - name: JWT_ALG_NONE_SUPPORTED
-    value: "true"
+  # Access token signatures are checked. The expired-credential scenarios sign
+  # their tokens with the development key steps/support/keys/
+  # access-token-dev.key.pem; this is its public half (UC-IF-20).
+  - name: DCS_DEV_ACCESS_TOKEN_KEY
+    value: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3STLc7Ky2vgK+BpZR5qRzK5Lldg8
+      MOm5sT6tCbop7Anb5Umo6nTNXdNfvkzccGlxKsckiufjhjYuZz6MFlql5g==
+      -----END PUBLIC KEY-----
   - name: AUTH_INSECURE_COOKIES
     value: "true"
   # Federation trust gate (ADR-19): shares instance A's ORCE (no own orce
@@ -354,3 +361,18 @@ contractTargets:
 # DSS B shares with instance A belong to another release with another CA, so B
 # calls them on their plain ports (signing.tsaURL, dss.url, auditExecutor.url,
 # workflowGateExecutor.url, DCS_TRUST_PDP_URL, contractTargets).
+
+# The backend, ORCE and DSS admit only the Traefik ingress, the pods of this
+# release and the other BDD release (DCS-NFR-SEC-14). Instance A's ORCE (release dcs) posts the deployment callbacks of this instance's target.
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik
+  peersFrom:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: dcs

@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
+	"digital-contracting-service/internal/auth/oid4vp/status"
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/conf"
 	"digital-contracting-service/internal/base/datatype"
@@ -101,6 +102,11 @@ var ErrCeremonyNotCallers = errors.New("the signing ceremony was started by anot
 // verifiedCeremonyTTL is how long a verified PID and PoA presentation
 // authorizes the preparation of the document to be signed.
 const verifiedCeremonyTTL = 30 * time.Minute
+
+// signedCeremonyTTL is how long after the PID and PoA presentation a signature
+// is accepted at submit: the preparation within verifiedCeremonyTTL, then the
+// signing itself (a published wallet request stays valid for 15 minutes).
+const signedCeremonyTTL = verifiedCeremonyTTL + 30*time.Minute
 
 // ErrDocumentMismatch rejects a submitted PDF whose initial revision (the
 // bytes before the signatory's incremental PAdES update) is not byte-for-byte
@@ -456,6 +462,12 @@ type Applier struct {
 	// wallet/QTSP, or a desktop PAdES signer) before the DCS records it. Required
 	// by SubmitSignature; the transitional DCS-signing Handle path does not use it.
 	Validator SignatureValidator
+	// CredentialState and PIDState read the live status of the PoA and the
+	// PID the signatory presented. Submit refuses a signature whose PoA or PID
+	// is revoked or suspended, or whose status cannot be read. A nil reader
+	// skips that check.
+	CredentialState CredentialStateReader
+	PIDState        CredentialStateReader
 }
 
 // Prepare produces the to-be-signed PDF the signatory signs externally — with
@@ -682,6 +694,9 @@ func (h *Applier) submitSignature(ctx context.Context, cmd SubmitSignatureCmd) e
 		ceremony.PinnedRendererVersion == nil || ceremony.PinnedSignedCount == nil ||
 		ceremony.PinnedContractVersion == nil || ceremony.RequiredCredentialType == nil {
 		return ErrCeremonyNotPrepared
+	}
+	if err := h.assertCredentialsStillValid(ctx, ceremony, time.Now().UTC()); err != nil {
+		return err
 	}
 
 	// Safety net against staleness between prepare and submit: the contract
@@ -1425,6 +1440,38 @@ func resolveCeremony(ctx context.Context, tx *sqlx.Tx, repo db.CeremonyRepo, cmd
 func assertCeremonyFresh(ceremony *db.SignatureCeremony, now time.Time) error {
 	if ceremony.VerifiedAt == nil || now.Sub(*ceremony.VerifiedAt) > verifiedCeremonyTTL {
 		return fmt.Errorf("%w: the presentation of ceremony %s is older than %s; present the credentials again", ErrCeremonyRequired, ceremony.ID, verifiedCeremonyTTL)
+	}
+	return nil
+}
+
+// assertCredentialsStillValid refuses a submit later than signedCeremonyTTL
+// after the presentation, and a submit whose PoA or PID is revoked or
+// suspended now or whose status cannot be read (DCS-FR-SM-03, DCS-FR-SM-20).
+func (h *Applier) assertCredentialsStillValid(ctx context.Context, ceremony *db.SignatureCeremony, now time.Time) error {
+	if ceremony.VerifiedAt == nil || now.Sub(*ceremony.VerifiedAt) > signedCeremonyTTL {
+		return fmt.Errorf("%w: the presentation of ceremony %s is older than %s; present the credentials again", ErrCeremonyRequired, ceremony.ID, signedCeremonyTTL)
+	}
+	for _, credential := range []struct {
+		name         string
+		read         CredentialStateReader
+		presentation *string
+	}{
+		{"Power of Attorney", h.CredentialState, ceremony.PoAVpToken},
+		{"PID", h.PIDState, ceremony.VpToken},
+	} {
+		if credential.read == nil {
+			continue
+		}
+		if derefStr(credential.presentation) == "" {
+			return fmt.Errorf("%w: ceremony %s keeps no %s presentation", ErrCeremonyRequired, ceremony.ID, credential.name)
+		}
+		state, err := credential.read(ctx, *credential.presentation)
+		if err != nil {
+			return fmt.Errorf("%w: the status of the %s cannot be read: %v", ErrCeremonyRequired, credential.name, err)
+		}
+		if state == status.StateInvalid || state == status.StateSuspended {
+			return fmt.Errorf("%w: the %s presented in ceremony %s is %s", ErrCeremonyRequired, credential.name, ceremony.ID, state)
+		}
 	}
 	return nil
 }

@@ -23,3 +23,11 @@ pkcs11:
   tokenLabel: dcs
 identity:
   existingSecret: dcs-prod-did
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traefik

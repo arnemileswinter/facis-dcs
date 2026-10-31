@@ -33,6 +33,9 @@ type GetAllMetadataByFilterQry struct {
 	Jurisdiction     string
 	Industry         string
 	ComplianceStatus string
+	CreatedBy        string
+	CreatedFrom      string
+	CreatedTo        string
 	HolderDID        string
 	Pagination       datatype.Pagination
 	UserRoles        userrole.UserRoles
@@ -94,6 +97,9 @@ func (h *GetAllMetaDataByFilterHandler) Handle(ctx context.Context, query GetAll
 		Jurisdiction:     query.Jurisdiction,
 		Industry:         query.Industry,
 		ComplianceStatus: query.ComplianceStatus,
+		CreatedBy:        query.CreatedBy,
+		CreatedFrom:      query.CreatedFrom,
+		CreatedTo:        query.CreatedTo,
 	}
 
 	contractTemplates, err := h.CTRepo.ReadAllMetaDataByFilter(ctx, tx, searchValues, query.Pagination)

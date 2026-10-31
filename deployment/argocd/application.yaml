@@ -51,6 +51,15 @@ spec:
           pins:
             # sha256sum of the trust.json key of dcs-acceptance-trust.
             oid4vp-trust-data: "0000000000000000000000000000000000000000000000000000000000000000"
+        networkPolicy:
+          # The pods of the ingress controller of the cluster.
+          ingressFrom:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: traefik
 
   destination:
     server: https://kubernetes.default.svc

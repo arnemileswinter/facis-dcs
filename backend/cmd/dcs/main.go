@@ -690,6 +690,25 @@ func main() {
 			log.Fatalf(ctx, err, "Could not start webhook NATS bridge")
 		}
 	}()
+	// A delivery the subscriber did not accept, or that a stopped replica did
+	// not send, is sent again by one replica at a time (DCS-IR-SI-02).
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := basedb.RunExclusive(ctx, db, "webhook-retry", func() error {
+					webhookDispatcher.RetryDue(ctx)
+					return nil
+				}); err != nil {
+					log.Errorf(ctx, err, "webhook delivery retry")
+				}
+			}
+		}
+	}()
 
 	// Sign contract-lifecycle VCs (DCS-OR-C2PA-004) with the HSM VC key,
 	// producing an ecdsa-rdfc-2019 Data Integrity proof.

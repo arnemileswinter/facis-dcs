@@ -129,6 +129,12 @@ type SearchValues struct {
 	Jurisdiction     string
 	Industry         string
 	ComplianceStatus string
+
+	// CreatedBy matches part of the creator identifier. CreatedFrom and
+	// CreatedTo are days (YYYY-MM-DD); both ends are included.
+	CreatedBy   string
+	CreatedFrom string
+	CreatedTo   string
 }
 
 type ContractTemplatePDFState struct {

@@ -684,17 +684,16 @@ class AuthService:
         """Create an expired JWT token for negative credential tests.
 
         The issuer must match the backend's HYDRA_PUBLIC_ISSUER_URL: go-oidc
-        checks issuer before expiry, so a foreign issuer fails with
-        "issued by a different provider" instead of the "token is expired"
-        message the scenarios assert on. Expiry is checked before the
-        signature, so the token needs no valid signature.
+        checks the signature, then the issuer, then the expiry. The token is
+        signed with the development key whose public half the BDD stack names
+        in DCS_DEV_ACCESS_TOKEN_KEY (deployment/helm/values.bdd.yml), so the
+        backend checks signatures and refuses the token for its expiry.
         """
         issuer = (
             os.getenv("BDD_HYDRA_ISSUER_URL", "").strip()
             or os.getenv("BDD_PUBLIC_ORIGIN", "").strip()
             or "http://localhost:18080"
         ).rstrip("/")
-        header = {"alg": "none"}
         payload = {
             "sub": username,
             "iss": issuer,
@@ -702,7 +701,5 @@ class AuthService:
             "ext": {"roles": roles, "iss": issuer},
             "exp": int(time.time()) - 3600,
         }
-
-        encoded_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
-        encoded_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-        return f"{encoded_header}.{encoded_payload}."
+        key = (Path(__file__).resolve().parents[1] / "keys" / "access-token-dev.key.pem").read_text()
+        return jwt.encode(payload, key, algorithm="ES256")

@@ -343,6 +343,14 @@ func (r *PostgresContractTemplateRepo) Update(ctx context.Context, tx *sqlx.Tx, 
 	return err
 }
 
+// likeEscaper escapes the LIKE wildcards, so a search value matches as text.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// containsPattern is the ILIKE pattern for "contains value" (ESCAPE '\').
+func containsPattern(value string) string {
+	return "%" + likeEscaper.Replace(value) + "%"
+}
+
 func createSearchConditions(values db.SearchValues) (*string, []interface{}, error) {
 	conditions := ""
 	var params []interface{}
@@ -375,28 +383,43 @@ func createSearchConditions(values db.SearchValues) (*string, []interface{}, err
 		paramIndex++
 	}
 	if len(values.Name) > 0 {
-		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Name+"%")
+		conditions += ` name ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Name))
 		paramIndex++
 	}
 	if len(values.Description) > 0 {
-		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Description+"%")
+		conditions += ` description ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Description))
 		paramIndex++
 	}
 	if values.Jurisdiction != "" {
-		conditions += ` jurisdiction ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Jurisdiction+"%")
+		conditions += ` jurisdiction ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Jurisdiction))
 		paramIndex++
 	}
 	if values.Industry != "" {
-		conditions += ` industry ILIKE $` + strconv.Itoa(paramIndex) + ` AND`
-		params = append(params, "%"+values.Industry+"%")
+		conditions += ` industry ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.Industry))
 		paramIndex++
 	}
 	if values.ComplianceStatus != "" {
 		conditions += ` compliance_status = $` + strconv.Itoa(paramIndex) + ` AND`
 		params = append(params, values.ComplianceStatus)
+		paramIndex++
+	}
+	if values.CreatedBy != "" {
+		conditions += ` created_by ILIKE $` + strconv.Itoa(paramIndex) + ` ESCAPE '\' AND`
+		params = append(params, containsPattern(values.CreatedBy))
+		paramIndex++
+	}
+	if values.CreatedFrom != "" {
+		conditions += ` created_at >= $` + strconv.Itoa(paramIndex) + `::date AND`
+		params = append(params, values.CreatedFrom)
+		paramIndex++
+	}
+	if values.CreatedTo != "" {
+		conditions += ` created_at < $` + strconv.Itoa(paramIndex) + `::date + 1 AND`
+		params = append(params, values.CreatedTo)
 		paramIndex++
 	}
 	if len(values.TemplateData) > 0 {

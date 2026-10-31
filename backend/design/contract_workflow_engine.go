@@ -434,7 +434,7 @@ var ContractNegotiationRequest = Type("ContractNegotiationRequest", func() {
 	Attribute("updated_at", String, "The timestamp when the contract was updated")
 
 	Attribute("negotiated_by", String, "The name of the negotiator")
-	Attribute("change_request", Any, "The change request for the negotiation")
+	Attribute("change_request", Any, "A free-text note (JSON string) or an object with name, description, contract_data, start_date and exp_date (RFC 3339), exp_notice_period and exp_policy; any other value is refused with 400")
 
 	Required("did", "negotiated_by", "change_request", "updated_at")
 })

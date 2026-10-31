@@ -36,6 +36,32 @@ func TestTemplateSearchFirstPageAndCreatorPostgres(t *testing.T) {
 	require.Len(t, listed.ContractTemplates, 1)
 }
 
+// DCS-IR-TR-07, DCS-IR-TR-08: the dashboard filters the templates by owner and
+// by creation day; a search value matches as text, not as a LIKE pattern.
+func TestTemplateSearchFiltersByOwnerAndDatePostgres(t *testing.T) {
+	database := pgtest.Open(t)
+	_, err := database.Exec(`INSERT INTO contract_templates (did,created_by,state,template_type,party_type,name,created_at) VALUES
+		('tpl-a','did:web:alpha.example','DRAFT','CONTRACT_TEMPLATE','SINGLE_PARTY','100% supply','2026-03-10T12:00:00Z'),
+		('tpl-b','did:web:beta.example','DRAFT','CONTRACT_TEMPLATE','SINGLE_PARTY','1000 supply','2026-04-20T12:00:00Z')`)
+	require.NoError(t, err)
+	svc := &templateRepositorysrvc{DB: database, CTRepo: &pg.PostgresContractTemplateRepo{}}
+	ctx := middleware.InjectAuthContext(context.Background(), []string{userrole.TemplateManager.String()}, "did:key:holder", "did:web:org.example")
+	dids := func(req *templaterepository.ContractTemplateSearchRequest) []string {
+		found, err := svc.Search(ctx, req)
+		require.NoError(t, err)
+		out := make([]string, 0, len(found))
+		for _, template := range found {
+			out = append(out, template.Did)
+		}
+		return out
+	}
+	owner, from, to, name := "beta", "2026-03-10", "2026-03-10", "100%"
+
+	require.Equal(t, []string{"tpl-b"}, dids(&templaterepository.ContractTemplateSearchRequest{CreatedBy: &owner}))
+	require.Equal(t, []string{"tpl-a"}, dids(&templaterepository.ContractTemplateSearchRequest{CreatedFrom: &from, CreatedTo: &to}))
+	require.Equal(t, []string{"tpl-a"}, dids(&templaterepository.ContractTemplateSearchRequest{Name: &name}))
+}
+
 // DCS-IR-TR-04: input errors of the caller are answered with 400, not 500.
 func TestTemplateClientErrorsAreBadRequests(t *testing.T) {
 	svc := &templateRepositorysrvc{}
