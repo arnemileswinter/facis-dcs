@@ -2,6 +2,8 @@ package webhookplatform
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -22,12 +24,15 @@ func TestPostgresDeliveriesAreSharedAcrossReplicas(t *testing.T) {
 	owner := "did:web:" + uuid.NewString()
 	pending := PendingCallback{EventID: uuid.NewString(), CorrelationID: uuid.NewString(), Event: "contract.created", DID: "did:x", SentAt: time.Now().UTC()}
 
-	if err := dispatching.TrackPending(ctx, pending); err != nil {
-		t.Fatalf("TrackPending: %v", err)
+	delivery := Delivery{SubscriptionID: uuid.NewString(), CallbackURL: "https://a.example", OwnerDID: owner, Payload: []byte(`{}`)}
+	ids, err := dispatching.RecordDispatch(ctx, pending, []Delivery{delivery}, time.Now().Add(time.Minute))
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("RecordDispatch = %v, %v; want one queued delivery", ids, err)
 	}
-	id, err := dispatching.QueueDelivery(ctx, Delivery{EventID: pending.EventID, SubscriptionID: uuid.NewString(), CallbackURL: "https://a.example", OwnerDID: owner, Payload: []byte(`{}`)}, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("QueueDelivery: %v", err)
+	id := ids[0]
+	// NFR-SF-01: a redelivered event carries the same id and is not dispatched again.
+	if again, err := receiving.RecordDispatch(ctx, pending, []Delivery{delivery}, time.Now()); err != nil || again != nil {
+		t.Fatalf("second RecordDispatch = %v, %v; want none: the event is dispatched already", again, err)
 	}
 	if err := dispatching.RecordAttempt(ctx, id, 200, "", time.Time{}); err != nil {
 		t.Fatalf("RecordAttempt: %v", err)
@@ -66,13 +71,11 @@ func TestPostgresDeliveriesAreDueUntilTheyEnd(t *testing.T) {
 	ctx := context.Background()
 	store := PostgresDeliveries{DB: db}
 	pending := PendingCallback{EventID: uuid.NewString(), CorrelationID: uuid.NewString(), Event: "contract.created", DID: "did:x", SentAt: time.Now().UTC()}
-	if err := store.TrackPending(ctx, pending); err != nil {
-		t.Fatal(err)
+	ids, err := store.RecordDispatch(ctx, pending, []Delivery{{SubscriptionID: uuid.NewString(), CallbackURL: "https://a.example", OwnerDID: "did:web:a", Payload: []byte(`{"a":1}`)}}, time.Now().Add(time.Minute))
+	if err != nil || len(ids) != 1 {
+		t.Fatal(ids, err)
 	}
-	id, err := store.QueueDelivery(ctx, Delivery{EventID: pending.EventID, SubscriptionID: uuid.NewString(), CallbackURL: "https://a.example", OwnerDID: "did:web:a", Payload: []byte(`{"a":1}`)}, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := ids[0]
 	if due, err := store.DueDeliveries(ctx, time.Now(), 10); err != nil || len(due) != 0 {
 		t.Fatalf("a delivery is due before its retry time: %+v, %v", due, err)
 	}
@@ -99,27 +102,57 @@ func TestPostgresDeliveriesAreDueUntilTheyEnd(t *testing.T) {
 	}
 }
 
-// NFR-26 (DCS-NFR-SF-01): a DCS event reaches the webhook subscribers from the
-// outbox table, without NATS, and only once.
-func TestWebhookDeliveriesAreReadFromTheOutbox(t *testing.T) {
+// DCS-NFR-SF-01, ADR-39: webhook delivery is at least once. A replica that
+// recorded a dispatch and stopped before it sent leaves the delivery due; the
+// redelivered event is not dispatched again, and RetryDue on any replica sends
+// the recorded delivery.
+func TestARecordedDeliveryIsSentAfterTheReplicaStopped(t *testing.T) {
 	db := pgtest.Open(t)
 	ctx := context.Background()
-	if _, err := db.Exec(`INSERT INTO outbox_events (component, event_type, event_data, did) VALUES
-		('CONTRACT_TEMPLATE_REPOSITORY', 'CREATE_CONTRACT_TEMPLATE', '{"did":"did:web:a.example:template:1"}', 'did:web:a.example:template:1')`); err != nil {
+	hits := make(chan string, 4)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- r.Header.Get("webhook-id")
+	}))
+	defer receiver.Close()
+	secret, err := NewSecret()
+	if err != nil {
 		t.Fatal(err)
 	}
-	store := newMemDeliveries()
-	subs := &fakeSubscriptions{subs: []Subscription{{ID: "s", Event: "template.created", CallbackURL: "https://receiver.example/hook", Secret: "whsec_x", OwnerDID: orgA}}}
-	consumer := OutboxConsumer(db, NewDispatcher(subs, store, admitAll, nil))
+	subID := uuid.NewString()
+	subs := &fakeSubscriptions{subs: []Subscription{{ID: subID, Event: "contract.created", CallbackURL: receiver.URL, Secret: secret, OwnerDID: orgA}}}
+	store := PostgresDeliveries{DB: db}
+	d := NewDispatcher(subs, store, admitAll, nil)
+	d.httpClient = receiver.Client()
 
-	for range 2 {
-		if err := consumer.Poll(ctx); err != nil {
-			t.Fatal(err)
-		}
+	// The stopped replica: the dispatch and its delivery are recorded, nothing is sent.
+	pending := PendingCallback{EventID: "event-9", CorrelationID: uuid.NewString(), Event: "contract.created", DID: "did:x", SentAt: time.Now().UTC()}
+	if _, err := store.RecordDispatch(ctx, pending, []Delivery{{SubscriptionID: subID, CallbackURL: receiver.URL, OwnerDID: orgA, Payload: []byte(`{"event_id":"event-9"}`)}}, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	// JetStream delivers the event again to another replica.
+	if err := d.Dispatch(ctx, "event-9", "contract.created", "did:x", nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-hits:
+		t.Fatalf("the redelivered event %s was dispatched a second time", id)
+	case <-time.After(300 * time.Millisecond):
 	}
 
-	got, _ := store.ListDeliveries(ctx, orgA)
-	if len(got) != 1 || got[0].Event != "template.created" || got[0].DID != "did:web:a.example:template:1" {
-		t.Fatalf("deliveries = %+v, want one template.created delivery", got)
+	if _, err := db.Exec(`UPDATE webhook_deliveries SET next_attempt_at = now() - interval '1 second'`); err != nil {
+		t.Fatal(err)
+	}
+	d.RetryDue(ctx)
+	select {
+	case id := <-hits:
+		if id != "event-9" {
+			t.Fatalf("webhook-id %q, want event-9", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the recorded delivery was not sent")
+	}
+	got, err := store.ListDeliveries(ctx, orgA)
+	if err != nil || len(got) != 1 || got[0].StatusCode != http.StatusOK || got[0].Attempts != 1 {
+		t.Fatalf("deliveries = %+v, %v; want one delivery accepted on its first attempt", got, err)
 	}
 }

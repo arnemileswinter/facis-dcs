@@ -80,8 +80,13 @@ grep -q '^host ' <<<"$hba" && fail "pg_hba accepts TCP without TLS"
 
 # NATS: TLS 1.3 required.
 grep -q 'min_version: "1.3"' <<<"$(obj "$f" ConfigMap dcs-nats "x['data']['nats.conf']")" || fail "NATS without TLS 1.3 minimum"
-[[ "$(obj "$f" Deployment dcs-nats "x['spec']['template']['spec']['containers'][0]['args']")" == "['-js', '-c', '/etc/nats/nats.conf']" ]] \
+[[ "$(obj "$f" Deployment dcs-nats "x['spec']['template']['spec']['containers'][0]['args']")" == "['-js', '-sd', '/data', '-c', '/etc/nats/nats.conf']" ]] \
   || fail "NATS does not load its TLS config"
+# NATS: the JetStream store is on the PersistentVolumeClaim (ADR-39).
+[[ "$(obj "$f" Deployment dcs-nats "[v['persistentVolumeClaim']['claimName'] for v in x['spec']['template']['spec']['volumes'] if v['name'] == 'data']")" == "['dcs-nats']" ]] \
+  || fail "the NATS JetStream store is not on a PersistentVolumeClaim"
+[[ "$(obj "$f" PersistentVolumeClaim dcs-nats "x['spec']['resources']['requests']['storage']")" == 1Gi ]] \
+  || fail "no PersistentVolumeClaim dcs-nats"
 [[ "$(env_of "$f" Deployment $B $C NATS_URL)" == tls://dcs-nats:4222 ]] || fail "NATS_URL is not tls://"
 
 # HTTP components: TLS proxy in each pod, the backend calls it and trusts the CA.

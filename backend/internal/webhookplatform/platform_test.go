@@ -275,8 +275,8 @@ func TestSubscribeRejectsCallbackURLsThatAreNotHTTPS(t *testing.T) {
 
 func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
 	store := newMemDeliveries()
-	_, _ = store.QueueDelivery(context.Background(), Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA}, time.Now())
-	_, _ = store.QueueDelivery(context.Background(), Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB}, time.Now())
+	store.queue(Delivery{EventID: "a", CallbackURL: "https://a.example", OwnerDID: orgA}, time.Now())
+	store.queue(Delivery{EventID: "b", CallbackURL: "https://b.example", OwnerDID: orgB}, time.Now())
 	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
 	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll, nil), validate, nil)
 
@@ -296,8 +296,10 @@ func TestDeliveriesListOnlyTheCallerOrganization(t *testing.T) {
 func TestCallbackAcknowledgesOnlyTheCallerOrganizationDeliveries(t *testing.T) {
 	store := newMemDeliveries()
 	ctx := context.Background()
-	_ = store.TrackPending(ctx, PendingCallback{EventID: "evt", Event: "contract.created"})
-	_, _ = store.QueueDelivery(ctx, Delivery{EventID: "evt", CallbackURL: "https://a.example", OwnerDID: orgA}, time.Now())
+	if _, err := store.RecordDispatch(ctx, PendingCallback{EventID: "evt", Event: "contract.created"},
+		[]Delivery{{EventID: "evt", CallbackURL: "https://a.example", OwnerDID: orgA}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	validate := func(_ context.Context, token string) (Caller, error) { return testCallers[token], nil }
 	p := New(&fakeSubscriptions{}, store, NewDispatcher(&fakeSubscriptions{}, store, admitAll, nil), validate, nil)
 	body := `{"event_id":"evt","status":"done"}`

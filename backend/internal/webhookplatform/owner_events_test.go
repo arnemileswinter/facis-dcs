@@ -52,7 +52,9 @@ func TestDispatchNamesTheContractOwner(t *testing.T) {
 	d.httpClient = receiver.Client()
 
 	for _, event := range []string{"contract.renewal_due", "template.updated"} {
-		d.Dispatch(context.Background(), event, "did:web:org-a.example:x:1", nil)
+		if err := d.Dispatch(context.Background(), "id-"+event, event, "did:web:org-a.example:x:1", nil); err != nil {
+			t.Fatal(err)
+		}
 		var payload struct {
 			Event string `json:"event"`
 			Owner *struct {

@@ -243,11 +243,12 @@ const maxDeliveries = 512
 
 // Deliveries stores the dispatches, their deliveries and the outcomes.
 type Deliveries interface {
-	// TrackPending records an in-flight dispatch so its callback can be correlated.
-	TrackPending(ctx context.Context, p PendingCallback) error
-	// QueueDelivery records the delivery of a dispatch to one subscription
-	// before the first attempt, due again at retryAt, and returns its id.
-	QueueDelivery(ctx context.Context, d Delivery, retryAt time.Time) (int64, error)
+	// RecordDispatch records the dispatch of an event and its delivery to
+	// each subscription in one transaction, every delivery due again at
+	// retryAt, and returns the delivery ids in the order given. It returns
+	// nil when a dispatch of p.EventID is recorded already: its deliveries
+	// exist and RetryDue sends them.
+	RecordDispatch(ctx context.Context, p PendingCallback, deliveries []Delivery, retryAt time.Time) ([]int64, error)
 	// RecordAttempt records the outcome of one attempt. The delivery is due
 	// again at next; a zero next ends it.
 	RecordAttempt(ctx context.Context, id int64, statusCode int, errText string, next time.Time) error
@@ -269,25 +270,38 @@ type PostgresDeliveries struct {
 	DB *sqlx.DB
 }
 
-func (s PostgresDeliveries) TrackPending(ctx context.Context, p PendingCallback) error {
-	if _, err := s.DB.ExecContext(ctx, `
+func (s PostgresDeliveries) RecordDispatch(ctx context.Context, p PendingCallback, deliveries []Delivery, retryAt time.Time) ([]int64, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
         INSERT INTO webhook_dispatches (event_id, correlation_id, event, did, sent_at)
-        VALUES ($1, $2, $3, $4, $5)`,
-		p.EventID, p.CorrelationID, p.Event, p.DID, p.SentAt); err != nil {
-		return fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (event_id) DO NOTHING`,
+		p.EventID, p.CorrelationID, p.Event, p.DID, p.SentAt)
+	if err != nil {
+		return nil, fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
 	}
-	return nil
-}
-
-func (s PostgresDeliveries) QueueDelivery(ctx context.Context, d Delivery, retryAt time.Time) (int64, error) {
-	var id int64
-	if err := s.DB.GetContext(ctx, &id, `
-        INSERT INTO webhook_deliveries (event_id, subscription_id, callback_url, owner_did, payload, next_attempt_at)
-        VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6) RETURNING id`,
-		d.EventID, d.SubscriptionID, d.CallbackURL, d.OwnerDID, d.Payload, retryAt); err != nil {
-		return 0, fmt.Errorf("queue webhook delivery %s: %w", d.EventID, err)
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return nil, err
 	}
-	return id, nil
+	ids := make([]int64, 0, len(deliveries))
+	for _, d := range deliveries {
+		var id int64
+		if err := tx.GetContext(ctx, &id, `
+            INSERT INTO webhook_deliveries (event_id, subscription_id, callback_url, owner_did, payload, next_attempt_at)
+            VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6) RETURNING id`,
+			p.EventID, d.SubscriptionID, d.CallbackURL, d.OwnerDID, d.Payload, retryAt); err != nil {
+			return nil, fmt.Errorf("queue webhook delivery %s: %w", p.EventID, err)
+		}
+		ids = append(ids, id)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("record webhook dispatch %s: %w", p.EventID, err)
+	}
+	return ids, nil
 }
 
 func (s PostgresDeliveries) RecordAttempt(ctx context.Context, id int64, statusCode int, errText string, next time.Time) error {

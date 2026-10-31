@@ -18,20 +18,32 @@ func newMemDeliveries() *memDeliveries {
 	return &memDeliveries{pending: make(map[string]PendingCallback), due: make(map[int64]time.Time)}
 }
 
-func (s *memDeliveries) TrackPending(_ context.Context, p PendingCallback) error {
+func (s *memDeliveries) RecordDispatch(_ context.Context, p PendingCallback, deliveries []Delivery, retryAt time.Time) ([]int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.pending[p.EventID]; ok {
+		return nil, nil
+	}
 	s.pending[p.EventID] = p
-	return nil
+	ids := make([]int64, 0, len(deliveries))
+	for _, d := range deliveries {
+		ids = append(ids, s.add(d, retryAt))
+	}
+	return ids, nil
 }
 
-func (s *memDeliveries) QueueDelivery(_ context.Context, d Delivery, retryAt time.Time) (int64, error) {
+// queue records one delivery due at retryAt, as a stopped replica leaves it.
+func (s *memDeliveries) queue(d Delivery, retryAt time.Time) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.add(d, retryAt)
+}
+
+func (s *memDeliveries) add(d Delivery, retryAt time.Time) int64 {
 	d.ID = int64(len(s.deliveries) + 1)
 	s.deliveries = append(s.deliveries, d)
 	s.due[d.ID] = retryAt
-	return d.ID, nil
+	return d.ID
 }
 
 func (s *memDeliveries) RecordAttempt(_ context.Context, id int64, statusCode int, errText string, next time.Time) error {

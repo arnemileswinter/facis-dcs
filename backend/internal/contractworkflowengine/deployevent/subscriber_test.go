@@ -3,8 +3,10 @@ package deployevent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/contractworkflowengine/command"
@@ -25,9 +27,14 @@ func (r *recordingDeployer) Handle(_ context.Context, cmd command.DeployCmd) (*c
 	return &command.DeployResult{DID: cmd.DID}, nil
 }
 
-func appliedSignatureEvent(t *testing.T, did string) json.RawMessage {
+func appliedSignatureEvent(t *testing.T, did string) cloudevent.Event {
 	t.Helper()
-	return json.RawMessage(`{"did":"` + did + `"}`)
+	evt := cloudevent.New()
+	evt.SetID("1")
+	evt.SetSource("test")
+	evt.SetType("APPLIED_SIGNATURE")
+	require.NoError(t, evt.SetData(cloudevent.ApplicationJSON, json.RawMessage(`{"did":"`+did+`"}`)))
+	return evt
 }
 
 // Both deployment paths run the same multi-signer gate, and that gate reads
@@ -45,6 +52,25 @@ func TestAutoDeployPassesThisInstancesOwnPeerIdentity(t *testing.T) {
 	require.Equal(t, "did:web:dcs-a.localhost", deployer.commands[0].LocalPeer)
 	require.Equal(t, "did:web:example#contract", deployer.commands[0].DID)
 	require.Equal(t, "system:auto-deploy", deployer.commands[0].RequestedBy)
+}
+
+// DCS-NFR-SF-01: the event id becomes the deployment's correlation id, so a
+// redelivered event is recognized (command.ErrAlreadyDispatched) and
+// acknowledged, while a failure a later attempt can overcome is redelivered.
+func TestAutoDeployIsIdempotentPerEvent(t *testing.T) {
+	deployer := &recordingDeployer{}
+	sub := &Subscriber{Deployer: deployer}
+	evt := appliedSignatureEvent(t, "did:web:example#contract")
+
+	require.NoError(t, sub.consume(evt))
+	require.Len(t, deployer.commands, 1)
+	require.Equal(t, evt.ID(), deployer.commands[0].EventID)
+
+	deployer.notReady = command.ErrAlreadyDispatched
+	require.NoError(t, sub.consume(evt), "a redelivered event is acknowledged")
+
+	deployer.notReady = errors.New("connection refused")
+	require.Error(t, sub.consume(evt), "a transient failure is delivered again")
 }
 
 func TestAutoDeployIgnoresAnEventWithoutAContract(t *testing.T) {

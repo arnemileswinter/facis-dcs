@@ -92,7 +92,12 @@ jobs:
       - name: Install kind
         uses: helm/kind-action@v1.10.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run kind-backed BDD suite
         id: bdd
@@ -270,7 +275,12 @@ jobs:
       - name: Install kind
         uses: helm/kind-action@v1.10.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run isolated audit BDD gate
         run: |
@@ -419,7 +429,12 @@ jobs:
       - name: Install kind
         uses: helm/kind-action@v1.10.0
         with:
-          version: v0.23.0
+          # Only the tools: the Makefile creates the cluster from
+          # tests/bdd/kind-config.yaml, which pins the node image. The default
+          # CNI of kind v0.24 and later enforces NetworkPolicy.
+          version: v0.30.0
+          kubectl_version: v1.34.0
+          install_only: true
 
       - name: Run Playwright E2E on its own kind stack
         run: |

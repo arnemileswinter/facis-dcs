@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -67,22 +68,22 @@ func NewDispatcher(subs Subscriptions, store Deliveries, audience Audience, owne
 }
 
 // Dispatch sends event to every subscriber registered for that event whose
-// organization the audience admits.
-func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.RawMessage) {
+// organization the audience admits. eventID identifies the event: an event
+// that is dispatched already is not sent again.
+func (d *Dispatcher) Dispatch(ctx context.Context, eventID, event, did string, data json.RawMessage) error {
 	subs, err := d.subs.ByEvent(ctx, event)
 	if err != nil {
-		log.Printf("webhookplatform: load subscribers for %s: %v", event, err)
-		return
+		return fmt.Errorf("webhookplatform: load subscribers for %s: %w", event, err)
 	}
 	subs = slices.DeleteFunc(subs, func(sub Subscription) bool {
 		return !d.audience(ctx, event, did, sub.OwnerDID)
 	})
 	if len(subs) == 0 {
-		return
+		return nil
 	}
 
 	payload := WebhookPayload{
-		EventID:       uuid.New().String(),
+		EventID:       eventID,
 		CorrelationID: uuid.New().String(),
 		Event:         event,
 		DID:           did,
@@ -95,36 +96,34 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("webhookplatform: marshal payload of %s: %v", event, err)
-		return
+		return fmt.Errorf("webhookplatform: marshal payload of %s: %w", event, err)
 	}
-	if err := d.store.TrackPending(ctx, PendingCallback{
+	deliveries := make([]Delivery, 0, len(subs))
+	for _, sub := range subs {
+		deliveries = append(deliveries, Delivery{
+			EventID: payload.EventID, CorrelationID: payload.CorrelationID, Event: event, DID: did,
+			SubscriptionID: sub.ID, CallbackURL: sub.CallbackURL, OwnerDID: sub.OwnerDID, Payload: body,
+		})
+	}
+	// The dispatch and every delivery are recorded together before the first
+	// attempt, each due again after retryDelay(0). A replica that stops before
+	// it records them leaves the event to the next JetStream delivery; one that
+	// stops after leaves the deliveries to RetryDue. Delivery is at least once.
+	ids, err := d.store.RecordDispatch(ctx, PendingCallback{
 		EventID:       payload.EventID,
 		CorrelationID: payload.CorrelationID,
 		Event:         event,
 		DID:           did,
 		SentAt:        payload.OccurredAt,
-	}); err != nil {
-		log.Printf("webhookplatform: %v", err)
-		return
+	}, deliveries, time.Now().Add(retryDelay(0)))
+	if err != nil {
+		return fmt.Errorf("webhookplatform: %w", err)
 	}
-
-	// Each delivery is recorded before its first attempt, due again after
-	// retryDelay(0): if this replica stops or the attempt fails, RetryDue
-	// sends it again.
-	for _, sub := range subs {
-		delivery := Delivery{
-			EventID: payload.EventID, CorrelationID: payload.CorrelationID, Event: event, DID: did,
-			SubscriptionID: sub.ID, CallbackURL: sub.CallbackURL, OwnerDID: sub.OwnerDID, Payload: body,
-		}
-		id, err := d.store.QueueDelivery(ctx, delivery, time.Now().Add(retryDelay(0)))
-		if err != nil {
-			log.Printf("webhookplatform: %v", err)
-			continue
-		}
-		delivery.ID = id
-		go d.attempt(context.WithoutCancel(ctx), delivery, sub.Secret)
+	for i, id := range ids {
+		deliveries[i].ID = id
+		go d.attempt(context.WithoutCancel(ctx), deliveries[i], subs[i].Secret)
 	}
+	return nil
 }
 
 // maxDeliveryAttempts ends a delivery the subscriber did not accept.
@@ -163,12 +162,12 @@ func (d *Dispatcher) RetryDue(ctx context.Context) {
 
 // DispatchFromDCS is a convenience wrapper that translates a raw DCS NATS
 // event type to its webhook event name before dispatching.
-func (d *Dispatcher) DispatchFromDCS(ctx context.Context, dcsEventType, did string, data json.RawMessage) {
+func (d *Dispatcher) DispatchFromDCS(ctx context.Context, eventID, dcsEventType, did string, data json.RawMessage) error {
 	event, ok := DCSEventMap[dcsEventType]
 	if !ok {
-		return
+		return nil
 	}
-	d.Dispatch(ctx, event, did, data)
+	return d.Dispatch(ctx, eventID, event, did, data)
 }
 
 // errUnreachable is the delivery error a subscriber reads. The transport

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	cloudevent "github.com/cloudevents/sdk-go/v2/event"
 )
 
 func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
@@ -30,7 +32,9 @@ func TestDeliveryIsSignedOverTheSentBody(t *testing.T) {
 	store := newMemDeliveries()
 	d := NewDispatcher(subs, store, admitAll, nil)
 	d.httpClient = receiver.Client()
-	d.Dispatch(context.Background(), "template.updated", "did:web:org-a.example:template:1", json.RawMessage(`{"name":"a<b&c","version":1.0}`))
+	if err := d.Dispatch(context.Background(), "evt-signed", "template.updated", "did:web:org-a.example:template:1", json.RawMessage(`{"name":"a<b&c","version":1.0}`)); err != nil {
+		t.Fatal(err)
+	}
 	delivered := waitForAttempts(t, store, orgA, 1)
 	payload := delivered[0]
 
@@ -74,7 +78,9 @@ func TestDispatchDeliversOnlyToAdmittedOrganizations(t *testing.T) {
 	d := NewDispatcher(subs, newMemDeliveries(), audience, nil)
 	d.httpClient = receiver.Client()
 
-	d.Dispatch(context.Background(), "contract.created", "contract-1", json.RawMessage(`{"contract_data":{}}`))
+	if err := d.Dispatch(context.Background(), "event-1", "contract.created", "contract-1", json.RawMessage(`{"contract_data":{}}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case path := <-hits:
@@ -91,6 +97,53 @@ func TestDispatchDeliversOnlyToAdmittedOrganizations(t *testing.T) {
 	}
 }
 
+// DCS-NFR-SF-01: JetStream delivers an event at least once. A redelivered
+// event has the same CloudEvent id, which is the webhook event id, and is not
+// sent to the subscriber a second time.
+func TestRedeliveredEventIsDispatchedOnce(t *testing.T) {
+	hits := make(chan string, 2)
+	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits <- r.Header.Get("webhook-id")
+	}))
+	defer receiver.Close()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := &fakeSubscriptions{subs: []Subscription{
+		{ID: "a", Event: "contract.created", CallbackURL: receiver.URL, Secret: secret, OwnerDID: orgA},
+	}}
+	d := NewDispatcher(subs, newMemDeliveries(), admitAll, nil)
+	d.httpClient = receiver.Client()
+
+	evt := cloudevent.New()
+	evt.SetID("event-7")
+	evt.SetSource("CONTRACT_WORKFLOW_ENGINE")
+	evt.SetType("CREATE_CONTRACT")
+	if err := evt.SetData(cloudevent.ApplicationJSON, json.RawMessage(`{"did":"contract-1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := handleNATSEvent(context.Background(), evt, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	select {
+	case id := <-hits:
+		if id != "event-7" {
+			t.Fatalf("webhook-id %q, want the CloudEvent id", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no delivery")
+	}
+	select {
+	case <-hits:
+		t.Fatal("the redelivered event was sent again")
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
 func TestDefaultClientRefusesLoopbackCallbacks(t *testing.T) {
 	receiver := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("the dispatcher reached a loopback callback")
@@ -103,7 +156,9 @@ func TestDefaultClientRefusesLoopbackCallbacks(t *testing.T) {
 	store := newMemDeliveries()
 	subs := &fakeSubscriptions{subs: []Subscription{{ID: "s", Event: "template.updated", CallbackURL: receiver.URL, Secret: secret, OwnerDID: orgA}}}
 	d := NewDispatcher(subs, store, admitAll, nil)
-	d.Dispatch(context.Background(), "template.updated", "did:web:org-a.example:template:1", nil)
+	if err := d.Dispatch(context.Background(), "evt-loopback", "template.updated", "did:web:org-a.example:template:1", nil); err != nil {
+		t.Fatal(err)
+	}
 	got := waitForAttempts(t, store, orgA, 1)
 	// UC-IF-25: the subscriber reads that the URL was not reached, not the
 	// dial error, which names addresses inside the deployment.
@@ -134,7 +189,9 @@ func TestADeliveryIsRetriedUntilTheSubscriberAcceptsIt(t *testing.T) {
 	d.httpClient = receiver.Client()
 	ctx := context.Background()
 
-	d.Dispatch(ctx, "template.updated", "did:web:org-a.example:template:1", nil)
+	if err := d.Dispatch(ctx, "evt-retried", "template.updated", "did:web:org-a.example:template:1", nil); err != nil {
+		t.Fatal(err)
+	}
 	refused := waitForAttempts(t, store, orgA, 1)
 	if refused[0].StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("first attempt = %+v, want the 503", refused[0])
@@ -145,7 +202,7 @@ func TestADeliveryIsRetriedUntilTheSubscriberAcceptsIt(t *testing.T) {
 	}
 
 	// A delivery queued by a replica that stopped before its first attempt.
-	stopped, _ := store.QueueDelivery(ctx, Delivery{EventID: "lost", SubscriptionID: "s", CallbackURL: receiver.URL, OwnerDID: orgA, Payload: []byte(`{}`)}, time.Now())
+	stopped := store.queue(Delivery{EventID: "lost", SubscriptionID: "s", CallbackURL: receiver.URL, OwnerDID: orgA, Payload: []byte(`{}`)}, time.Now())
 
 	store.mu.Lock()
 	for id := range store.due {

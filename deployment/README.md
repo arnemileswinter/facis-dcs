@@ -159,7 +159,7 @@ python3 testWallet/demo_wallet.py
 BDD scenarios live in `features/` at the project root. Tests are run against a full stack in an ephemeral [kind](https://kind.sigs.k8s.io/) cluster.
 
 ### Prerequisites
-- `kind` — `go install sigs.k8s.io/kind@v0.23.0` or see [kind releases](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- `kind` — `go install sigs.k8s.io/kind@v0.30.0` (its default CNI enforces NetworkPolicy; `tests/bdd/kind-config.yaml` pins the node image) or see [kind releases](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - `kubectl` and `helm`
 - Docker (to build the DCS image)
 - Python 3.10+
@@ -654,6 +654,7 @@ Two trust configurations follow from that:
   - ORCE, DSS and the Federated Catalogue stack (fc-service, Keycloak, portal): every source, because the ingress routes them, peers and the second BDD release call them, and they authenticate their callers. Fuseki: fc-service; the catalogue PostgreSQL: fc-service and Keycloak. Loki: its own policy (push from the collector, query from `logging.queryFrom`).
 - Kubelet probes come from the node, which a NetworkPolicy does not block. Where a CNI blocks them, add the node CIDR as an `ipBlock` to `networkPolicy.extraFrom`; it is added to every restricted rule.
 - Port-forwards (`kubectl port-forward`, used by the BDD harness) and `kubectl exec` do not pass through NetworkPolicies.
+- The BDD and e2e kind stacks (kind v0.30.0, `tests/bdd/kind-config.yaml`) enforce the policies with the default values. Before the suite, `tests/bdd/scripts/run_bdd_helm.sh` checks that a pod without the backend labels is dropped at the IPFS RPC API, reaches the backend API, and that the API server proxy to the backend `/metrics` (used by the load test) works. kindnet does not filter traffic that root processes on the node start (the API server, kubelet probes), so the BDD values add nothing to `networkPolicy.extraFrom`.
 - The dev profiles set `networkPolicy.enabled: false`: the dev backend runs on the host and reaches the services through NodePorts.
 - Kubo RPC token (DCS-NFR-SF-02): with `ipfs.api.auth.enabled` (on by default) the co-deployed Kubo accepts RPC calls only with the bearer token of the Secret `<release>-ipfs-api` (key `token`, random on install, kept on upgrade; Kubo `API.Authorizations`). The backend gets it as `IPFS_API_TOKEN`. For a Kubo outside the release, set `ipfs.apiTokenSecretRef`. The `ipfs` CLI in the IPFS pod needs `--api-auth "bearer:$IPFS_API_TOKEN"`.
 
@@ -705,7 +706,7 @@ Values (production and acceptance):
 | `federatedCatalogue.remote.acknowledgeAdminAllTrustBoundary: true` | A remote Federated Catalogue: its service account has `ADMIN_ALL`, so it is safe only inside one trusted administrative boundary ([ADR-18](../docs/adr-18-fc-catalogue-single-service-account.md)). Without it the chart refuses to render. |
 | `signing.issuerDID` (or `signing.issuerDIDSecretRef`) | The DID of this instance (`ISSUER_DID`), `did:web:<host>`. |
 | `signing.tsaURL` | The RFC 3161 timestamp authority (`TSA_URL`). The backend does not start without it. A deployment without its own TSA can use the ORCE TSA (`orce.enabled`, `http://<release>-orce:1880/tsa/`); `signing.tsaTrustCertSecret` then names the Secret with its certificate (key `tsa-cert.pem`). |
-| `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`). `values.prod.yml` co-deploys none. |
+| `messaging.natsURL`, `messaging.secretRef` or `nats.enabled` | The NATS server (`NATS_URL`), with JetStream enabled and a persistent store: the backend creates the stream `DCS_EVENTS` and a durable consumer per consumer group on it (ADR-39). `values.prod.yml` co-deploys none. |
 | `oid4vp.trust.enabled: true`, `oid4vp.trust.existingConfigMap` | The trusted credential issuers ("Credential issuers", "The trust document"). |
 | `configIntegrity.pins.oid4vp-trust-data` | The SHA-256 of that trust document (`sha256sum` of the ConfigMap key); the backend refuses to start when the ConfigMap differs (DCS-NFR-SEC-04). |
 | `hydra.clients` | The login client of the backend (`dcs-client`, redirect URIs under `route.publicBaseURL`); both profiles carry it with `client_secretSecretRef`. |
@@ -736,7 +737,7 @@ A production cluster also needs a CNI that enforces NetworkPolicy ("Network poli
 
 Database (DCS-OE-05): the backend needs PostgreSQL. PostgreSQL 16 is the version the chart deploys and the tests run on; other versions are not tested. The backend keeps its replicas consistent with PostgreSQL functions that a "PostgreSQL-compatible" server may not have: transaction-level advisory locks (`pg_advisory_xact_lock`, `pg_try_advisory_xact_lock`) keyed with `hashtext`, `LISTEN`/`NOTIFY` (`pg_notify`), `gen_random_uuid`, `jsonb` and full-text search (`tsvector`). A server without them, for example CockroachDB, is not supported ([ADR-38](../docs/adr-38-recorded-deviations-of-the-pilot.md) §9).
 
-Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back. The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
+Availability (DCS-NFR-PER-03): `values.prod.yml` runs 3 backend replicas, which prefer different nodes, and 2 Hydra replicas. The co-deployed IPFS node, NATS server, Loki and DSS run one replica each: a restart of one of them interrupts what depends on it (artifact reads and writes, events, log ingestion, signature validation) until the pod is back; the outbox delivers the events written meanwhile once NATS is back, and JetStream keeps each event on the NATS volume (PersistentVolumeClaim `<release>-nats`) until every consumer group has it (ADR-39). The database is the operator's external PostgreSQL (`database.secretRef`) with its own availability.
 
 Other values for every profile:
 

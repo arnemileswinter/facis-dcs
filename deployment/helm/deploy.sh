@@ -233,6 +233,7 @@ storageclass_check() {
 log "Checking StorageClass of the at-rest-relevant PVCs"
 storageclass_check "postgres"  "${RELEASE}-postgresql"
 storageclass_check "ipfs"      "${RELEASE}-ipfs"
+storageclass_check "nats"      "${RELEASE}-nats"
 storageclass_check "hsm-token" "${RELEASE}-digital-contracting-service-hsm-token"
 # The dumps hold the wrapped content keys, the logs can hold personal data.
 storageclass_check "backup"    "${RELEASE}-digital-contracting-service-db-backup"

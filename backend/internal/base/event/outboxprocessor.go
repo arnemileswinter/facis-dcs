@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"digital-contracting-service/internal/base"
@@ -120,9 +121,9 @@ func (j OutboxProcessor) publishPending(ctx context.Context) error {
 // publishInOrder publishes events in their order and marks each one published.
 // It stops at the first event that cannot be published: the next run starts
 // with it again, and no later event goes out ahead of it.
-func publishInOrder(events []datatype.OutboxEvent, publish func(component, eventType string, data json.RawMessage) error, markPublished func(id int64) error) error {
+func publishInOrder(events []datatype.OutboxEvent, publish func(id, component, eventType string, data json.RawMessage) error, markPublished func(id int64) error) error {
 	for _, event := range events {
-		if err := publish(event.Component, event.EventType, event.EventData); err != nil {
+		if err := publish(cloudEventID(event), event.Component, event.EventType, event.EventData); err != nil {
 			log.Printf("could not publish event %d, stopping the batch: %v", event.ID, err)
 			return nil
 		}
@@ -131,6 +132,13 @@ func publishInOrder(events []datatype.OutboxEvent, publish func(component, event
 		}
 	}
 	return nil
+}
+
+// cloudEventID is the CloudEvent id of an outbox event. It is the same on
+// every publish of the event, so the stream stores a republished event once
+// and a consumer recognizes a redelivered one.
+func cloudEventID(event datatype.OutboxEvent) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, fmt.Appendf(nil, "dcs-outbox-event:%d:%d", event.ID, event.CreatedAt.UnixNano())).String()
 }
 
 func (j OutboxProcessor) startProcessingJob(ctx context.Context, interval time.Duration) {
