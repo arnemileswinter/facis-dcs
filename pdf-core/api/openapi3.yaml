@@ -362,6 +362,36 @@ paths:
                     $ref: '#/components/responses/BadRequest'
                 "415":
                     $ref: '#/components/responses/UnsupportedMediaType'
+    /manifest/reference:
+        post:
+            tags:
+                - dcspdfcore
+            summary: Read the remote C2PA manifest reference
+            description: |
+                Return the remote C2PA manifest URL that the PDF references in its XMP
+                dcterms:provenance property (DCS-OR-C2PA-008). The reference stays in the
+                PDF when the embedded manifest is removed, so a verifier gets the
+                manifest from this URL.
+            operationId: manifestReference
+            requestBody:
+                required: true
+                content:
+                    application/pdf:
+                        schema:
+                            type: string
+                            format: binary
+                            description: PDF whose XMP metadata references a remote manifest
+            responses:
+                "200":
+                    description: The remote manifest URL.
+                    content:
+                        text/plain:
+                            schema:
+                                type: string
+                "404":
+                    description: The PDF references no remote manifest.
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
     /ontology/dcs-pdf-core:
         get:
             tags:

@@ -962,6 +962,28 @@ func (s *service) extractManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(manifestStore)
 }
 
+// manifestReference returns the remote C2PA manifest URL the PDF references in
+// its XMP metadata (DCS-OR-C2PA-008). A verifier gets the manifest from this
+// URL when the PDF carries no embedded manifest.
+func (s *service) manifestReference(w http.ResponseWriter, r *http.Request) {
+	if err := checkMediaType(r.Header.Get("Content-Type"), "application/pdf"); err != nil {
+		writeError(w, err)
+		return
+	}
+	raw, err := limitRead(r.Body, 32<<20)
+	if err != nil {
+		writeError(w, errBadRequest(err))
+		return
+	}
+	ref := compiler.ExtractRemoteManifestURL(raw)
+	if ref == "" {
+		writeError(w, &httpError{status: http.StatusNotFound, name: "not_found", message: "PDF references no remote C2PA manifest"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(ref))
+}
+
 // extractPayload returns the machine-readable JSON-LD contract payload embedded
 // in the PDF (the latest version). A peer that receives a contract PDF rebuilds
 // its local copy from this; the DCS never parses PDF bytes itself (ADR-13).

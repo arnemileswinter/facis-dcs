@@ -211,6 +211,12 @@ func ExtractManifestStore(pdf []byte) ([]byte, error) {
 	return extractEmbeddedStreamByFileSpecName(pdf, "content_credential.c2pa")
 }
 
+// ExtractRemoteManifestURL returns the remote C2PA manifest URL that the PDF's
+// XMP dcterms:provenance property references, or "" when there is none
+// (DCS-OR-C2PA-008). The reference stays in the PDF when the embedded manifest
+// is removed, so a verifier can use it to get the manifest.
+func ExtractRemoteManifestURL(pdf []byte) string { return extractRemoteManifestURLFromXMP(pdf) }
+
 // updatePDF is the shared implementation behind all Update*/Reanchor entry
 // points. The "no changes" guard is bypassed when vcBytes is non-nil or the
 // call is a re-anchor.

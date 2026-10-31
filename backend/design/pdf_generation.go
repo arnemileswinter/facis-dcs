@@ -42,6 +42,9 @@ var PDFVerifyResult = Type("PDFVerifyResult", func() {
 	// be made about the content they were supposed to carry.
 	Attribute("discrepancy", String, "Failure class when match is false: 'content_hash_mismatch' (manifest present, content differs from the embedded JSON-LD), 'artifact_not_authentic' (stored bytes failed authenticated decryption — altered or substituted at rest), or 'verification_failed' (any other check failure). Empty when match is true.")
 
+	// Set only by the verification of a submitted copy (DCS-OR-C2PA-008).
+	Attribute("c2pa_manifest_source", String, "Which C2PA manifest the verification of a submitted copy used: 'embedded' when the copy carries its manifest, 'remote' when the copy carries no embedded manifest and the remote manifest it references was used (DCS-OR-C2PA-008). Empty when no manifest was used.")
+
 	Required("match", "jsonld_hash", "base_pdf_hash", "stored_base_pdf_hash", "c2pa_manifest_found", "c2pa_signature_status", "vc_proof_status", "status_list_check", "pdf_signature_status")
 })
 
@@ -217,6 +220,34 @@ var _ = Service("PDFGeneration", func() {
 			Response("not_found", StatusNotFound)
 			Response("forbidden", StatusForbidden)
 			GET("/pdf/verify/contract/{did}")
+			Response(StatusOK)
+		})
+	})
+
+	// verify_contract_pdf_copy — POST /pdf/verify/contract/{did}
+	Method("verify_contract_pdf_copy", func() {
+		Description("Verify a copy of a contract PDF that the caller submits (DCS-OR-C2PA-008). A copy that carries its embedded C2PA manifest is verified against that manifest. A copy without an embedded manifest is verified against the remote manifest it references in its XMP metadata: the reference must be this contract's GET /c2pa/manifest/{did}, the contract PDF that holds that manifest is verified, and the copy must show the same pages and carry the same machine-readable payload. c2pa_manifest_source names the manifest that was used.")
+		Meta("dcs:requirements", "DCS-OR-C2PA-008")
+		Security(JWTAuth, func() {
+			Scope("Contract Manager")
+			Scope("Contract Reviewer")
+			Scope("Contract Approver")
+			Scope("Contract Observer")
+			Scope("Auditor")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "DID of the contract")
+			Attribute("pdf", Bytes, "The copy of the contract PDF to verify")
+			Required("did", "pdf")
+		})
+		Result(PDFVerifyResult)
+		Error("forbidden", ErrorResult)
+		Error("not_found", ErrorResult)
+		HTTP(func() {
+			Response("not_found", StatusNotFound)
+			Response("forbidden", StatusForbidden)
+			POST("/pdf/verify/contract/{did}")
 			Response(StatusOK)
 		})
 	})

@@ -222,6 +222,41 @@ func (s *pdfGenerationSrvc) VerifyContractPdf(ctx context.Context, p *pdfgen.Ver
 	return result, nil
 }
 
+func (s *pdfGenerationSrvc) VerifyContractPdfCopy(ctx context.Context, p *pdfgen.VerifyContractPdfCopyPayload) (*pdfgen.PDFVerifyResult, error) {
+	if err := authorizeContractRead(ctx, s.DB, s.LocalPeer, p.Did); err != nil {
+		return nil, err
+	}
+
+	handler := pdfquery.VerifyContractPdfCopyHandler{
+		Stored: &pdfquery.VerifyContractPdfHandler{
+			DB:               s.DB,
+			CRepo:            s.CRepo,
+			Artifacts:        s.Artifacts,
+			PDFCore:          s.PDFCore,
+			VCIssuer:         s.VCIssuer,
+			IssuerDID:        s.IssuerDID,
+			Credentials:      s.Credentials,
+			CredentialStatus: s.CredentialStatus,
+		},
+		Export: &pdfquery.ExportContractPdfHandler{
+			DB:        s.DB,
+			CRepo:     s.CRepo,
+			Artifacts: s.Artifacts,
+			PDFCore:   s.PDFCore,
+			VCIssuer:  s.VCIssuer,
+			IssuerDID: s.IssuerDID,
+		},
+	}
+	result, err := handler.Handle(ctx, pdfquery.VerifyContractPdfCopyQry{DID: p.Did, PDF: p.Pdf})
+	if err != nil {
+		if artifactstore.IsShredded(err) || isNotFoundErr(err) {
+			return nil, pdfgen.MakeNotFound(err)
+		}
+		return nil, pdfgen.MakeInternalError(fmt.Errorf("verify copy of contract PDF %s: %w", p.Did, err))
+	}
+	return result, nil
+}
+
 func (s *pdfGenerationSrvc) VerifyTemplatePdf(ctx context.Context, p *pdfgen.VerifyTemplatePdfPayload) (*pdfgen.PDFVerifyResult, error) {
 	handler := pdfquery.VerifyTemplatePdfHandler{
 		DB:               s.DB,
