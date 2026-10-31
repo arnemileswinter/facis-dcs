@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"digital-contracting-service/internal/base/datatype"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/db"
 )
@@ -22,7 +25,7 @@ func TestBuildArchiveEntryStoresEverySignatureWithHashedCredentials(t *testing.T
 	}
 	peers := json.RawMessage(`[{"party":"did:web:peer","signatory":"did:jwk:peer"}]`)
 	entry, err := BuildArchiveEntry(&db.Contract{DID: "did:web:contract", ContractVersion: 1, State: contractstate.Signed.String(), CreatedAt: now, UpdatedAt: now},
-		"did:web:operator", []ArchiveSigningEvidence{signature("1"), signature("2")}, peers)
+		nil, "did:web:operator", []ArchiveSigningEvidence{signature("1"), signature("2")}, peers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +75,7 @@ func TestArchiveContentHashCoversTheSignerIdentities(t *testing.T) {
 	contract := &db.Contract{DID: "did:web:contract", ContractVersion: 1, State: contractstate.Signed.String(), CreatedAt: now, UpdatedAt: now}
 	entry := func(signer string) db.ContractArchiveEntry {
 		t.Helper()
-		built, err := BuildArchiveEntry(contract, "did:web:operator", []ArchiveSigningEvidence{{Signer: signer, CredentialType: "AES", SignedAt: now, PDFHash: strings.Repeat("a", 64)}}, nil)
+		built, err := BuildArchiveEntry(contract, nil, "did:web:operator", []ArchiveSigningEvidence{{Signer: signer, CredentialType: "AES", SignedAt: now, PDFHash: strings.Repeat("a", 64)}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,4 +88,42 @@ func TestArchiveContentHashCoversTheSignerIdentities(t *testing.T) {
 	if first.ContentHash == second.ContentHash {
 		t.Fatal("the content hash does not cover the signer identity")
 	}
+}
+
+// DCS-FR-CWE-20: the archive entry holds the version history (version, actor,
+// time, content hash) inside the notarized snapshot, so a changed history row
+// gives another hash. The replaced content itself is not in the snapshot.
+func TestBuildArchiveEntrySnapshotCarriesTheVersionHistory(t *testing.T) {
+	now := time.Now().UTC()
+	contract := &db.Contract{DID: "did:web:contract", ContractVersion: 2, State: contractstate.Signed.String(), CreatedAt: now, UpdatedAt: now}
+	draft := datatype.JSON(`{"clause":"first draft"}`)
+	author := "Org A"
+	history := []db.ContractHistory{{DID: contract.DID, ContractVersion: 1, State: "DRAFT", ContractData: &draft, ModifiedBy: &author, ModifiedAt: &now}}
+	build := func(history []db.ContractHistory) db.ContractArchiveEntry {
+		t.Helper()
+		built, err := BuildArchiveEntry(contract, history, "did:web:operator", []ArchiveSigningEvidence{{Signer: "did:jwk:alice", SignedAt: now}}, nil)
+		require.NoError(t, err)
+		return built
+	}
+	entry := build(history)
+
+	var snapshot struct {
+		VersionHistory []map[string]any `json:"version_history"`
+	}
+	require.NoError(t, json.Unmarshal(entry.ContractSnapshot, &snapshot))
+	require.Len(t, snapshot.VersionHistory, 1)
+	version := snapshot.VersionHistory[0]
+	require.EqualValues(t, 1, version["contract_version"])
+	require.Equal(t, "Org A", version["modified_by"])
+	require.NotEmpty(t, version["modified_at"])
+	require.Regexp(t, `^sha256:[0-9a-f]{64}$`, version["content_hash"])
+	require.NotContains(t, string(entry.ContractSnapshot), "first draft")
+
+	other := "Org B"
+	changed := []db.ContractHistory{history[0]}
+	changed[0].ModifiedBy = &other
+	require.NotEqual(t, entry.ContentHash, build(changed).ContentHash)
+	manual, err := BuildManualArchiveEntry(contract, history, "did:web:operator")
+	require.NoError(t, err)
+	require.Contains(t, string(manual.ContractSnapshot), `"version_history"`)
 }

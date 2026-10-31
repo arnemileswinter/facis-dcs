@@ -19,8 +19,9 @@ type Change struct {
 
 // changeEvents are the audit events that change what a dashboard shows. Read
 // events are left out: a dashboard that refetches after a change writes one,
-// and streaming it would start the refetch again. PEER_EXCHANGE carries the
-// changes the counterparty instance shipped (DCS-NFR-BR-08).
+// and streaming it would start the refetch again. PEER_EXCHANGE is the event
+// of a change that a counterparty instance sent (an offer, a counteroffer, a
+// signed copy, a settlement).
 var changeEvents = map[string]bool{
 	"CREATE_CONTRACT": true, "UPDATE_CONTRACT": true, "SUBMIT_CONTRACT": true,
 	"OFFER_CONTRACT": true, "WITHDRAW_CONTRACT": true, "NEGOTIATE_CONTRACT": true,
@@ -44,7 +45,8 @@ func New() *Feed {
 }
 
 // Subscribe returns the changes from now on and a function that ends the
-// subscription.
+// subscription. The channel is closed when the subscriber fell behind and lost
+// a change; the subscriber then reloads what it shows.
 func (f *Feed) Subscribe() (<-chan Change, func()) {
 	ch := make(chan Change, 64)
 	f.mu.Lock()
@@ -52,13 +54,16 @@ func (f *Feed) Subscribe() (<-chan Change, func()) {
 	f.mu.Unlock()
 	return ch, func() {
 		f.mu.Lock()
-		delete(f.subs, ch)
+		if _, ok := f.subs[ch]; ok {
+			delete(f.subs, ch)
+			close(ch)
+		}
 		f.mu.Unlock()
 	}
 }
 
 // Publish passes a change to every subscriber. A subscriber with a full buffer
-// does not get the change; its dashboard shows the change at the next reload.
+// loses the change, so its subscription ends (the channel is closed).
 func (f *Feed) Publish(change Change) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -66,6 +71,8 @@ func (f *Feed) Publish(change Change) {
 		select {
 		case ch <- change:
 		default:
+			delete(f.subs, ch)
+			close(ch)
 		}
 	}
 }

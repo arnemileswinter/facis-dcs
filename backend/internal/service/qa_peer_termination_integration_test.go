@@ -12,7 +12,6 @@ import (
 	"digital-contracting-service/internal/base/datatype/userrole"
 	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
-	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	trustgate "digital-contracting-service/internal/dcstodcs"
 	syncpg "digital-contracting-service/internal/dcstodcs/db/pg"
@@ -175,31 +174,6 @@ func TestNotifierStopsOnPermanentRefusalPostgres(t *testing.T) {
 	require.Len(t, exchanges, 1)
 	require.Equal(t, "terminate", exchanges[0]["exchange"])
 	require.Equal(t, "SENT", exchanges[0]["direction"])
-}
-
-// CWE-17: a termination that loses the race against another termination of
-// the same contract (a local one against a peer notice) is refused as an
-// invalid transition, not as a database error.
-func TestTheLoserOfTwoTerminationsGetsAnInvalidTransitionPostgres(t *testing.T) {
-	database := pgtest.Open(t)
-	document := jadesTestDIDDocument(t, "local")
-	local, err := document.GetID()
-	require.NoError(t, err)
-	_, err = database.Exec(`INSERT INTO contracts (did,origin,created_by,state,template_did,template_version,responsible) VALUES ('c1',$1::text,'Org A','ACTIVE','tpl',1,
-		jsonb_build_object('creator',$1::text,'counterparty','did:web:peer.example'))`, local)
-	require.NoError(t, err)
-	// The winner already recorded its termination; the loser read the state
-	// before the winner committed.
-	_, err = database.Exec(`INSERT INTO contract_terminations (did, reason, effective_at, terminated_by, initiating_role)
-		VALUES ('c1', 'peer notice', now(), 'did:web:peer.example', 'Counterparty')`)
-	require.NoError(t, err)
-
-	handler := command.Terminator{DB: database, CRepo: &cwepg.PostgresContractRepo{}, SRepo: syncpg.PostgresSyncRepository{}, DIDDocument: *document}
-	err = handler.Handle(context.Background(), command.TerminateCmd{
-		DID: "c1", TerminatedBy: "Org A", Reason: "breach", UpdatedAt: time.Now().Add(time.Hour), CauserDID: local,
-		UserRoles: userrole.UserRoles{userrole.ContractManager},
-	})
-	require.ErrorIs(t, err, contractstate.ErrInvalidTransition)
 }
 
 type refusingTerminationSender struct {

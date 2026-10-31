@@ -88,6 +88,8 @@ func (s *contractStorageArchivesrvc) Retrieve(ctx context.Context, p *contractst
 
 	qry := contract.GetArchivedContractsQry{
 		RetrievedBy: middleware.GetParticipantID(ctx),
+		HolderDID:   middleware.GetHolderDID(ctx),
+		UserRoles:   middleware.GetUserRoles(ctx),
 	}
 
 	queryHandler := contract.GetArchivedContractsHandler{
@@ -143,6 +145,8 @@ func (s *contractStorageArchivesrvc) Search(ctx context.Context, p *contractstor
 		ContractVersion: intValue(p.ContractVersion),
 		State:           state,
 		RetrievedBy:     middleware.GetParticipantID(ctx),
+		HolderDID:       middleware.GetHolderDID(ctx),
+		UserRoles:       middleware.GetUserRoles(ctx),
 		Name:            stringValue(p.Name),
 		Description:     stringValue(p.Description),
 		ContractData:    stringValue(p.ContractData),

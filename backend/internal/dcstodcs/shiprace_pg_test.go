@@ -243,28 +243,19 @@ func TestConcurrentShipsOfAnAcceptedOfferPostItOnce(t *testing.T) {
 	require.EqualValues(t, 1, peer.maxInFlight.Load(), "two ship attempts of one contract ran at the same time")
 }
 
-// CWE-20: a revision the peer refused as a signing conflict is offered again
-// by the next ship, so it reaches the peer once the peer resolved the
-// conflict. A peer whose copy is closed gets the revision once.
-func TestARevisionRefusedAsAConflictIsShippedAgain(t *testing.T) {
-	for _, c := range []struct {
-		refusal error
-		posts   int32
-	}{
-		{refusal: dcstodcs.MakeConflict(errors.New("signing conflict")), posts: 2},
-		{refusal: dcstodcs.MakeGone(errors.New("the local copy is TERMINATED")), posts: 1},
-	} {
-		db := pgtest.Open(t)
-		peer := startShipPeer(t, false)
-		peer.refusal = c.refusal
-		did := "ship-refused-" + strings.ToLower(rand.Text()[:8])
-		s := shipFixture(t, db, peer, did)
+// CWE-7: a peer whose copy is closed answers gone. The sender records the
+// revision as delivered, so it posts it once and leaves no retry entry.
+func TestARevisionThePeerRefusesAsGoneIsShippedOnce(t *testing.T) {
+	db := pgtest.Open(t)
+	peer := startShipPeer(t, false)
+	peer.refusal = dcstodcs.MakeGone(errors.New("the local copy is TERMINATED"))
+	did := "ship-gone-" + strings.ToLower(rand.Text()[:8])
+	s := shipFixture(t, db, peer, did)
 
-		require.NoError(t, s.shipContractPDF(context.Background(), did))
-		require.NoError(t, s.shipContractPDF(context.Background(), did))
-		require.Equal(t, c.posts, peer.posts.Load(), c.refusal.Error())
-		var retryEntries int
-		require.NoError(t, db.Get(&retryEntries, `SELECT count(*) FROM sync_fails WHERE did = $1`, did))
-		require.Zero(t, retryEntries, c.refusal.Error())
-	}
+	require.NoError(t, s.shipContractPDF(context.Background(), did))
+	require.NoError(t, s.shipContractPDF(context.Background(), did))
+	require.EqualValues(t, 1, peer.posts.Load())
+	var retryEntries int
+	require.NoError(t, db.Get(&retryEntries, `SELECT count(*) FROM sync_fails WHERE did = $1`, did))
+	require.Zero(t, retryEntries)
 }

@@ -112,8 +112,10 @@ func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) 
 		`UPDATE contract_negotiations SET change_request = '{}'::jsonb WHERE did = $1 AND change_request IS DISTINCT FROM '{}'::jsonb`,
 		`UPDATE contract_negotiation_decisions SET rejection_reason = NULL
 		 WHERE rejection_reason IS NOT NULL AND negotiation_id IN (SELECT id FROM contract_negotiations WHERE did = $1)`,
-		`UPDATE contract_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
-		`UPDATE contract_peer_terminations SET reason = '' WHERE did = $1 AND reason <> ''`,
+		// A termination always records a reason (contract_terminations_reason_present),
+		// so an erased one reads as the erased marker.
+		`UPDATE contract_terminations SET reason = '` + ErasedReason + `' WHERE did = $1 AND reason <> '` + ErasedReason + `'`,
+		`UPDATE contract_peer_terminations SET reason = '` + ErasedReason + `' WHERE did = $1 AND reason <> '` + ErasedReason + `'`,
 		`DELETE FROM contract_negotiation_drafts WHERE contract_did = $1`,
 		`UPDATE contract_archive_entries SET contract_snapshot = '{}'::jsonb WHERE did = $1 AND contract_snapshot <> '{}'::jsonb`,
 		`UPDATE signature_ceremonies SET pinned_payload = NULL, prepared_pdf = NULL, pid_claims = NULL, vp_token = NULL, poa_vp_token = NULL
@@ -128,6 +130,9 @@ func eraseContractContent(ctx context.Context, tx *sqlx.Tx, contractIRI string) 
 	}
 	return eraseOutboxBodies(ctx, tx, contractIRI)
 }
+
+// ErasedReason replaces an erased termination reason.
+const ErasedReason = "[erased]"
 
 // partyNamesOnly keeps the dcs:legalName of each dcs:parties node: the
 // organization names contractreadpolicy authorizes on. Party nodes carry no

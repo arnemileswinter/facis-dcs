@@ -363,8 +363,9 @@ func main() {
 	ipfsAPIClient := ipfs.NewClient(mfsBaseURL)
 
 	aAttemptRepo := &pg.PostgresAccessAttemptRepo{}
-	lockRepo := &pg.PostgresIPLockoutRepo{}
+	lockRepo := &pg.PostgresLockoutRepo{}
 	jwtAuth := auth.NewJWTAuthenticator(hydraJWTValidator, db, aAttemptRepo, lockRepo)
+	jwtAuth.Limiter = middleware.NewRateLimiter(db, conf.APIRateLimitPerMinute())
 
 	ctRepo := tplrepo.PostgresContractTemplateRepo{}
 	ctRTRepo := tplrepo.PostgresReviewTaskRepo{}
@@ -646,6 +647,9 @@ func main() {
 		}); err != nil {
 			log.Fatalf(ctx, err, "failed to sync federated catalogue schemas")
 		}
+		// A terminated, expired or revoked contract is withdrawn from the
+		// catalogue (DCS-FR-CWE-23).
+		(&cwecommand.CatalogueWithdrawer{DB: db, FCClient: templateCatalogueClient}).Start(ctx, time.Minute)
 	}
 
 	// Initialize the webhook platform (ORCE integration).
@@ -870,7 +874,7 @@ func main() {
 		workflowGateCoordinator = &workflowgate.Coordinator{DB: db, Client: workflowGateClient}
 
 		presentationRepo := pg.NewPostgresPresentationAttemptRepo(db)
-		authSvc, err = service.NewAuth(db, presentationRepo, authCfg)
+		authSvc, err = service.NewAuth(db, presentationRepo, jwtAuth, authCfg)
 		if err != nil {
 			log.Fatalf(ctx, err, "auth service init failed")
 		}
@@ -878,7 +882,7 @@ func main() {
 		contractStorageArchiveSvc = service.NewContractStorageArchive(db, jwtAuth, &cweRepo, *didDocument, auditTrailReader, ipfsAPIClient, contractEraser, cekRepo, eraseRepo, archiveNotaryClient, tsaClient)
 		contractWorkflowEngineSvc = service.NewContractWorkflowEngine(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweNORepo, &cweCTRepo, &syncRepo, euTrustPool, templateCatalogueClient, auditTrailReader, *didDocument, archiveNotaryClient, tsaClient, cweDeploymentRepo, &cweTargetRepo, contractTargetClient,
 			workflowGateCoordinator, machineIdentities, authCfg.Hydra, authCfg.Hydra.PublicIssuerURL(), contractChanges)
-		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder)
+		dcsToDcsSvc = service.NewDcsToDcs(db, jwtAuth, &cweRepo, &cweRTRepo, &cweATRepo, &cweNTRepo, &cweNRepo, &cweCTRepo, &syncRepo, euTrustPool, *didDocument, artifactStore, pdfCoreClient, trustGate, counterpartyPoAGate, shredder, archiveNotaryClient, tsaClient)
 		// The credentials this instance issued verify against its own published
 		// document without a round trip; a peer's lifecycle or signing-summary
 		// credential — carried inside a verbatim-stored inbound PDF — resolves to

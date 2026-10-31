@@ -533,7 +533,7 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			return err
 		}
 		client := NewDCSToDCSHttpClient(hostname, peerPrefix)
-		held, err := s.deliverPdf(ctx, client, peer, &dcstodcs.DCSToDCSContractPdfRequest{
+		if err := s.deliverPdf(ctx, client, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}, &dcstodcs.DCSToDCSContractPdfRequest{
 			FromPeerDid:    localPeer,
 			ContractIri:    did,
 			Pdf:            pdfBytes,
@@ -543,19 +543,8 @@ func (s *DCSToDCSSynchronizer) shipToPeers(ctx context.Context, localPeer, did, 
 			ContractState:  &state,
 			WrappedCek:     WireWrappedCEK(wrappedCEK),
 			PinnedShapes:   WirePinnedShapes(pinnedShapes),
-		})
-		if err != nil {
+		}); err != nil {
 			return err
-		}
-		// The peer holds this revision, or its copy is closed and takes no
-		// ship. Either way the revision is not posted to this peer again. A
-		// signing conflict is not recorded: once the peer resolved it, the next
-		// ship of this revision reaches it.
-		if !held {
-			continue
-		}
-		if err := s.recordPDFDelivery(ctx, db2.PDFDelivery{DID: did, PeerDID: peer, ContractState: state, PDFCID: pdfCID}); err != nil {
-			log.Printf(ctx, "could not record the delivery of %s to %s: %v", did, peer, err)
 		}
 	}
 	return nil
@@ -573,26 +562,32 @@ func (s *DCSToDCSSynchronizer) recordPDFDelivery(ctx context.Context, delivery d
 	return tx.Commit()
 }
 
-// deliverPdf posts one PDF ship to one peer and reports whether the peer
-// holds the revision now. A peer that refuses the copy as a signing conflict
-// (ADR-38 §2) is recorded on this instance and the ship gets no retry entry. A
-// peer whose copy is closed (TERMINATED, EXPIRED or WITHDRAWN) takes no ship.
-func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, peer string, req *dcstodcs.DCSToDCSContractPdfRequest) (bool, error) {
+// deliverPdf posts one revision to delivery.PeerDID. A revision the peer
+// accepted is recorded as delivered and is not posted to that peer again. A
+// revision the peer refused as a signing conflict (ADR-38 §2) is recorded as a
+// conflict on this instance, gets no retry entry and is not recorded as
+// delivered, so the next ship offers it again once the peer resolved the
+// conflict. A peer whose copy is closed (TERMINATED, EXPIRED or WITHDRAWN)
+// takes no ship: the revision is recorded as delivered and not posted again.
+func (s *DCSToDCSSynchronizer) deliverPdf(ctx context.Context, client *dcstodcs.Client, delivery db2.PDFDelivery, req *dcstodcs.DCSToDCSContractPdfRequest) error {
+	peer := delivery.PeerDID
 	if _, err := client.PostPdf(ctx, req); err != nil {
 		switch peerRefusal(err) {
 		case "conflict":
 			log.Printf(ctx, "peer %s refused the copy of %s as a signing conflict: %v", peer, req.ContractIri, err)
-			return false, s.recordSigningConflict(ctx, req.ContractIri, peer, err)
+			return s.recordSigningConflict(ctx, req.ContractIri, peer, err)
 		case "gone":
 			log.Printf(ctx, "peer %s holds a closed copy of %s and takes no ship: %v", peer, req.ContractIri, err)
-			return true, nil
+		default:
+			return err
 		}
-		return false, err
-	}
-	if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
+	} else if err := RecordPeerExchange(ctx, s.DB, req.ContractIri, "post_pdf", ExchangeSent, peer); err != nil {
 		log.Printf(ctx, "could not audit the ship of %s to %s: %v", req.ContractIri, peer, err)
 	}
-	return true, nil
+	if err := s.recordPDFDelivery(ctx, delivery); err != nil {
+		log.Printf(ctx, "could not record the delivery of %s to %s: %v", req.ContractIri, peer, err)
+	}
+	return nil
 }
 
 // peerRefusal returns the name of the error a peer answered with, or "".

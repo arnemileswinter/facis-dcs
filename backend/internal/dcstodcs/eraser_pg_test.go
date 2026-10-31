@@ -186,8 +186,8 @@ func TestShredErasesTheFreeTextOfTheContract(t *testing.T) {
 		     + (SELECT count(*) FROM contract_history WHERE did = $1 AND num_nonnulls(name, description) > 0)
 		     + (SELECT count(*) FROM contract_negotiation_decisions d JOIN contract_negotiations n ON n.id = d.negotiation_id
 		         WHERE n.did = $1 AND d.rejection_reason IS NOT NULL)
-		     + (SELECT count(*) FROM contract_terminations WHERE did = $1 AND reason <> '')
-		     + (SELECT count(*) FROM contract_peer_terminations WHERE did = $1 AND reason <> '')`, erasedDID))
+		     + (SELECT count(*) FROM contract_terminations WHERE did = $1 AND reason <> $2)
+		     + (SELECT count(*) FROM contract_peer_terminations WHERE did = $1 AND reason <> $2)`, erasedDID, ErasedReason))
 	require.Zero(t, freeText, "free text about the contract survived the erasure")
 }
 

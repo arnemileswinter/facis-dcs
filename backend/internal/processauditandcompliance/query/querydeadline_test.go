@@ -52,7 +52,7 @@ func TestMissedDeadlineRisksFlagOnlyPassedUnreportedDuties(t *testing.T) {
 	checkedAt := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	contracts := []activeContract{{DID: "did:web:c1", ContractData: []byte(deadlineContract)}}
 
-	risks := missedDeadlineRisksFrom(contracts, map[string]bool{}, checkedAt)
+	risks := missedDeadlineRisksFrom(contracts, map[string]time.Time{}, checkedAt)
 
 	require.Len(t, risks, 2)
 	require.Equal(t, RiskTypeDeadlineMissed, risks[0].RiskType)
@@ -61,10 +61,23 @@ func TestMissedDeadlineRisksFlagOnlyPassedUnreportedDuties(t *testing.T) {
 	require.Contains(t, risks[0].Detail, "2026-09-30T23:59:59Z")
 	require.Contains(t, risks[1].Detail, "urn:uuid:pay-by")
 
-	reported := map[string]bool{"did:web:c1|urn:uuid:report-q3": true}
+	reported := map[string]time.Time{"did:web:c1|urn:uuid:report-q3": time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)}
 	risks = missedDeadlineRisksFrom(contracts, reported, checkedAt)
 	require.Len(t, risks, 1)
 	require.Contains(t, risks[0].Detail, "urn:uuid:pay-by")
+}
+
+// DCS-FR-CWE-09: a report that arrives after the deadline does not cover it;
+// the miss stays a violation.
+func TestALateReportDoesNotCoverAMissedDeadline(t *testing.T) {
+	checkedAt := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	contracts := []activeContract{{DID: "did:web:c1", ContractData: []byte(deadlineContract)}}
+	late := map[string]time.Time{"did:web:c1|urn:uuid:report-q3": time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)}
+
+	risks := missedDeadlineRisksFrom(contracts, late, checkedAt)
+
+	require.Len(t, risks, 2)
+	require.Contains(t, risks[0].Detail, "urn:uuid:report-q3")
 }
 
 // The detail derives from the document only, so the register sees the same

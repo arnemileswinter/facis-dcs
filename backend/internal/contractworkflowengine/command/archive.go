@@ -30,8 +30,8 @@ type ArchiveSigningEvidence struct {
 // once the signature workflow completes, with every signature, the credential
 // hashes of each signature keyed by its ceremony, and the signatures a peer
 // applied (peerSignatures, may be nil). The last signature names the final
-// signed PDF.
-func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
+// signed PDF. history is the contract's version history (ReadHistoryByDID).
+func BuildArchiveEntry(contract *db.Contract, history []db.ContractHistory, storedBy string, signatures []ArchiveSigningEvidence, peerSignatures json.RawMessage) (db.ContractArchiveEntry, error) {
 	if contract == nil {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract is required")
 	}
@@ -57,7 +57,7 @@ func BuildArchiveEntry(contract *db.Contract, storedBy string, signatures []Arch
 	// The snapshot carries the signatures, so the content hash that is
 	// notarized and timestamped is a proof of execution over the signer
 	// identities, the signing times and the signed PDF hashes (DCS-FR-SM-10).
-	snapshotJSON, err := buildContractSnapshot(contract, entries, peerSignatures)
+	snapshotJSON, err := buildContractSnapshot(contract, history, entries, peerSignatures)
 	if err != nil {
 		return db.ContractArchiveEntry{}, err
 	}
@@ -109,7 +109,34 @@ func archivePDFHash(hash string) string {
 	return "sha256:" + strings.TrimPrefix(hash, "sha256:")
 }
 
-func buildContractSnapshot(contract *db.Contract, signatures []map[string]any, peerSignatures json.RawMessage) (datatype.JSON, error) {
+// archiveVersionHistory lists the replaced versions of a contract for the
+// archive snapshot (DCS-FR-CWE-20): version, actor, time and the SHA-256 of
+// the version's content. The content itself stays out, so an erased version
+// does not change the notarized hash.
+func archiveVersionHistory(history []db.ContractHistory) []map[string]any {
+	versions := make([]map[string]any, 0, len(history))
+	for _, entry := range history {
+		content := []byte(`{}`)
+		if entry.ContractData != nil && entry.ContractData.IsNotNullValue() {
+			content = *entry.ContractData
+		}
+		sum := sha256.Sum256(content)
+		modifiedBy := ""
+		if entry.ModifiedBy != nil {
+			modifiedBy = *entry.ModifiedBy
+		}
+		versions = append(versions, map[string]any{
+			"contract_version": entry.ContractVersion,
+			"state":            entry.State,
+			"modified_by":      modifiedBy,
+			"modified_at":      formatArchiveTime(entry.ModifiedAt),
+			"content_hash":     "sha256:" + hex.EncodeToString(sum[:]),
+		})
+	}
+	return versions
+}
+
+func buildContractSnapshot(contract *db.Contract, history []db.ContractHistory, signatures []map[string]any, peerSignatures json.RawMessage) (datatype.JSON, error) {
 	contractData := json.RawMessage(`{}`)
 	if contract.ContractData != nil && contract.ContractData.IsNotNullValue() {
 		contractData = json.RawMessage(*contract.ContractData)
@@ -131,6 +158,7 @@ func buildContractSnapshot(contract *db.Contract, signatures []map[string]any, p
 		"responsible":       contract.Responsible,
 		"contract_data":     contractData,
 		"signatures":        signatures,
+		"version_history":   archiveVersionHistory(history),
 	}
 	if len(peerSignatures) > 0 {
 		snapshot["peer_signatures"] = peerSignatures

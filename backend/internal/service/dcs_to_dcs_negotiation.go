@@ -182,7 +182,7 @@ func (s *dcsToDcssrvc) persistShippedProposal(
 		if err != nil {
 			return contractworkflowengine.MakeBadRequest(err)
 		}
-		err = s.CRepo.UpdateState(ctx, tx, req.ContractIri, contractstate.Negotiation.String())
+		err = s.CRepo.UpdateState(ctx, tx, req.ContractIri, processData.State, contractstate.Negotiation.String())
 		if err != nil {
 			return contractworkflowengine.MakeInternalError(
 				fmt.Errorf("could not move received proposal into negotiation: %w", err))
@@ -216,7 +216,7 @@ func persistShippedOfferAccepted(
 		return contractworkflowengine.MakeBadRequest(err)
 	}
 
-	err = cRepo.UpdateState(ctx, tx, req.ContractIri, contractstate.Negotiation.String())
+	err = cRepo.UpdateState(ctx, tx, req.ContractIri, processData.State, contractstate.Negotiation.String())
 	if err != nil {
 		return contractworkflowengine.MakeInternalError(
 			fmt.Errorf("could not move origin copy into negotiation after offer accepted: %w", err))

@@ -2,8 +2,6 @@ package middleware
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -11,47 +9,30 @@ import (
 )
 
 // DCS-FR-CWE-28 with more than one replica: two limiter instances over the
-// same database enforce one budget per credential, not one budget each.
-func TestRateLimitAuthenticatedEnforcesOneBudgetAcrossReplicas(t *testing.T) {
+// same database enforce one budget per caller, not one budget each.
+func TestRateLimiterEnforcesOneBudgetAcrossReplicas(t *testing.T) {
 	db := pgtest.Open(t)
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	replicas := []http.Handler{RateLimitAuthenticated(db, 3, next), RateLimitAuthenticated(db, 3, next)}
-
-	do := func(replica int, token string) int {
-		req := httptest.NewRequest(http.MethodGet, "/contract/search", nil)
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		rec := httptest.NewRecorder()
-		replicas[replica].ServeHTTP(rec, req)
-		return rec.Code
-	}
-
+	replicas := []*RateLimiter{NewRateLimiter(db, 3), NewRateLimiter(db, 3)}
+	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		if code := do(i%2, "alice"); code != http.StatusOK {
-			t.Fatalf("request %d within budget got %d", i+1, code)
+		if _, ok := replicas[i%2].Allow(ctx, "did:example:alice"); !ok {
+			t.Fatalf("request %d within budget refused", i+1)
 		}
 	}
-	for replica := range replicas {
-		if code := do(replica, "alice"); code != http.StatusTooManyRequests {
-			t.Fatalf("request over budget on replica %d got %d, want 429", replica, code)
+	for replica, l := range replicas {
+		if wait, ok := l.Allow(ctx, "did:example:alice"); ok || wait <= 0 {
+			t.Fatalf("request over budget on replica %d allowed (wait %v)", replica, wait)
 		}
 	}
-	// A different credential has its own budget.
-	if code := do(1, "bob"); code != http.StatusOK {
-		t.Fatalf("other credential got %d, want 200", code)
-	}
-	// Unauthenticated requests are never counted or limited.
-	for i := 0; i < 10; i++ {
-		if code := do(i%2, ""); code != http.StatusOK {
-			t.Fatalf("unauthenticated request got %d, want 200", code)
-		}
+	// A different caller has its own budget.
+	if _, ok := replicas[1].Allow(ctx, "did:example:bob"); !ok {
+		t.Fatal("other caller refused")
 	}
 }
 
 func TestRateLimiterWindowResets(t *testing.T) {
 	db := pgtest.Open(t)
-	l := &rateLimiter{db: db, limit: 1}
+	l := NewRateLimiter(db, 1)
 	ctx := context.Background()
 	now := time.Now()
 	if _, ok, err := l.take(ctx, "tok", now); err != nil || !ok {
@@ -69,7 +50,7 @@ func TestRateLimiterWindowResets(t *testing.T) {
 // exactly once.
 func TestRateLimiterCountsConcurrentRequestsAtomically(t *testing.T) {
 	db := pgtest.Open(t)
-	replicas := []*rateLimiter{{db: db, limit: 10}, {db: db, limit: 10}}
+	replicas := []*RateLimiter{NewRateLimiter(db, 10), NewRateLimiter(db, 10)}
 	now := time.Now()
 	results := make(chan bool, 30)
 	for i := 0; i < 30; i++ {
@@ -93,7 +74,7 @@ func TestRateLimiterCountsConcurrentRequestsAtomically(t *testing.T) {
 // grow with every credential ever seen.
 func TestRateLimiterDeletesEndedWindows(t *testing.T) {
 	db := pgtest.Open(t)
-	l := &rateLimiter{db: db, limit: 10}
+	l := NewRateLimiter(db, 10)
 	ctx := context.Background()
 	now := time.Now()
 	if _, _, err := l.take(ctx, "old", now); err != nil {

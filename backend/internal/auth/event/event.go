@@ -83,3 +83,20 @@ func (e MachineIdentityChangedEvent) EventType() string {
 func (e MachineIdentityChangedEvent) GetDID() string {
 	return e.OAuthClientID
 }
+
+// LockoutLiftedEvent is emitted when an administrator ends a lockout before
+// its time (FR-UC-01-4).
+type LockoutLiftedEvent struct {
+	LockoutKey          string    `json:"lockout_key"`
+	ActorDID            string    `json:"actor_did"`
+	ActorParticipantDID string    `json:"actor_participant_did"`
+	OccurredAt          time.Time `json:"occurred_at"`
+}
+
+func (e LockoutLiftedEvent) EventType() string {
+	return eventtype.LockoutLifted.String()
+}
+
+func (e LockoutLiftedEvent) GetDID() string {
+	return e.LockoutKey
+}

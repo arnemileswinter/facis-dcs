@@ -25,15 +25,15 @@ var archivableStates = map[string]bool{
 // BuildManualArchiveEntry freezes the current version of a SIGNED, TERMINATED
 // or EXPIRED contract for an archive entry an Archive Manager stores. The
 // entry records no signature evidence: the signing workflow is its only
-// source.
-func BuildManualArchiveEntry(contract *db.Contract, storedBy string) (db.ContractArchiveEntry, error) {
+// source. history is the contract's version history (ReadHistoryByDID).
+func BuildManualArchiveEntry(contract *db.Contract, history []db.ContractHistory, storedBy string) (db.ContractArchiveEntry, error) {
 	if contract == nil {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract is required")
 	}
 	if !archivableStates[contract.State] {
 		return db.ContractArchiveEntry{}, fmt.Errorf("contract %s is %s; only SIGNED, TERMINATED or EXPIRED contracts can be archived", contract.DID, contract.State)
 	}
-	snapshot, err := buildContractSnapshot(contract, nil, nil)
+	snapshot, err := buildContractSnapshot(contract, history, nil, nil)
 	if err != nil {
 		return db.ContractArchiveEntry{}, err
 	}

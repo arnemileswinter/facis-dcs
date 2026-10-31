@@ -18,6 +18,7 @@ import (
 	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/base/identity"
 	"digital-contracting-service/internal/base/jades"
+	"digital-contracting-service/internal/base/tsa"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 
 	trustgate "digital-contracting-service/internal/dcstodcs"
@@ -57,6 +58,10 @@ type dcsToDcssrvc struct {
 	PoAGate     trustgate.CounterpartyPoAGate
 	Shredder    trustgate.ScopeShredder
 	Erasure     trustgate.PeerErasure
+	// ArchiveNotary and ArchiveTSA notarize and timestamp the execution proof
+	// written when the last counterparty signature arrives (DCS-FR-SM-10).
+	ArchiveNotary command.ArchiveNotary
+	ArchiveTSA    command.ArchiveTimestampIssuer
 	auth.JWTAuthenticator
 }
 
@@ -70,9 +75,12 @@ func NewDcsToDcs(db *sqlx.DB, jwtAuth auth.JWTAuthenticator,
 	ntRepo db.NegotiationTaskRepo, nRepo db.NegotiationRepo, ctRepo db.ContractTemplateRepo, syncRepo db2.SyncRepository,
 	trustPool *identity.EUTrustPool,
 	didDocument identity.DIDDocument, artifacts *artifactstore.Store, pdfCore *pdfcore.Client, trustGate trustgate.TrustGate,
-	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder) dcstodcs.Service {
+	poaGate trustgate.CounterpartyPoAGate, shredder trustgate.ScopeShredder,
+	archiveNotary command.ArchiveNotary, archiveTSA *tsa.APIClient) dcstodcs.Service {
 
 	return &dcsToDcssrvc{
+		ArchiveNotary:    archiveNotary,
+		ArchiveTSA:       archiveTSA,
 		JWTAuthenticator: jwtAuth,
 		DB:               db,
 		CRepo:            cRepo,
@@ -273,7 +281,7 @@ func (s *dcsToDcssrvc) PostPdf(ctx context.Context, req *dcstodcs.DCSToDCSContra
 	}
 
 	if syncSignature != nil {
-		if err := s.recordSyncSignature(ctx, *syncSignature); err != nil {
+		if err := s.recordSyncSignature(ctx, *syncSignature, localPeer, req.Pdf); err != nil {
 			return nil, contractworkflowengine.MakeInternalError(err)
 		}
 	}
@@ -310,7 +318,7 @@ func receiverError(contractIRI string, err error) error {
 // recordSyncSignature stores the verified signature a peer shipped. This
 // instance archives the contract when its own signatures are complete, so a
 // counterparty signature that arrives later goes into that archive entry too.
-func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.SyncSignature) error {
+func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.SyncSignature, localPeer string, signedPDF []byte) error {
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -324,7 +332,23 @@ func (s *dcsToDcssrvc) recordSyncSignature(ctx context.Context, signature db2.Sy
 			return fmt.Errorf("add the peer signatures to the archive entry of %s: %w", signature.DID, err)
 		}
 	}
+	// The last counterparty signature completes the contract after this
+	// instance archived it: the proof of execution covers it (DCS-FR-SM-10).
+	if _, err := s.executionProofs().Record(ctx, tx, command.ExecutionProofInput{
+		DID: signature.DID, LocalPeer: localPeer, PeerDID: signature.FromPeerDID, PeerJAdES: signature.JadesSignature,
+		SignedPDF: signedPDF, StoredBy: signature.FromPeerDID,
+	}); err != nil {
+		return fmt.Errorf("record the execution proof of %s: %w", signature.DID, err)
+	}
 	return tx.Commit()
+}
+
+func (s *dcsToDcssrvc) executionProofs() command.ExecutionProofRecorder {
+	recorder := command.ExecutionProofRecorder{CRepo: s.CRepo, Notary: s.ArchiveNotary, TSA: s.ArchiveTSA}
+	if s.Artifacts != nil {
+		recorder.Storer = s.Artifacts
+	}
+	return recorder
 }
 
 // Erase shreds this instance's wrapped CEKs for a contract on request of the
