@@ -178,7 +178,8 @@ func (r *PostgresContractRepo) RevokeSignature(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-// ReadLatestEnvelopeByContractDID retrieves the most recent non-revoked signature record for did.
+// ReadLatestEnvelopeByContractDID retrieves the most recent signature record
+// for did, of any status and any field.
 func (r *PostgresContractRepo) ReadLatestEnvelopeByContractDID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractSignatureEnvelope, error) {
 	var signature db.ContractSignature
 	err := tx.GetContext(ctx, &signature,
@@ -331,6 +332,14 @@ func (r *PostgresContractRepo) ReadPeerSignatureEvidence(ctx context.Context, tx
 		return nil, err
 	}
 	return evidence, nil
+}
+
+func (r *PostgresContractRepo) ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]db.PeerSigner, error) {
+	var signers []db.PeerSigner
+	if err := tx.SelectContext(ctx, &signers, `SELECT from_peer_did, received_at FROM contract_sync_signatures WHERE did = $1`, did); err != nil {
+		return nil, fmt.Errorf("read the peer signers of %s: %w", did, err)
+	}
+	return signers, nil
 }
 
 func (r *PostgresContractRepo) CollectComplianceFindings(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error) {

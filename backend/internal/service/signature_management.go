@@ -357,9 +357,14 @@ func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signatu
 		HolderDID:   middleware.GetHolderDID(ctx),
 		UserRoles:   middleware.GetUserRoles(ctx),
 	}
+	localPeer, err := s.DIDDocument.GetID()
+	if err != nil {
+		return nil, signaturemanagement.MakeInternalError(err)
+	}
 	queryHandler := query.GetByIDHandler{
-		DB:    s.DB,
-		CRepo: s.CRepo,
+		DB:        s.DB,
+		CRepo:     s.CRepo,
+		LocalPeer: localPeer,
 	}
 
 	result, err := queryHandler.Handle(ctx, qry)
@@ -379,6 +384,16 @@ func (s *signatureManagementsrvc) RetrieveByID(ctx context.Context, req *signatu
 	}
 
 	res = &signaturemanagement.SMContractRetrieveByIDResponse{Contract: &contract}
+	for _, field := range result.SignatureFields {
+		status := &signaturemanagement.SMSignatureFieldStatus{FieldName: field.FieldName, Status: "UNSIGNED", Remote: field.Remote, SignerDid: field.SignerDID}
+		if field.Signed {
+			status.Status = "SIGNED"
+		}
+		if field.SignedAt != nil {
+			status.SignedAt = optString(field.SignedAt.UTC().Format(time.RFC3339))
+		}
+		res.SignatureFields = append(res.SignatureFields, status)
+	}
 
 	// An APPROVED-unsigned contract has no signature envelope yet; the signer
 	// still needs to read its content to sign it.

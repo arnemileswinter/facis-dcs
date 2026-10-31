@@ -191,4 +191,13 @@ type ContractRepo interface {
 	// contract's signed PDF arrived from a peer (contract_sync_signatures
 	// poa_evidence), or nil when none were recorded.
 	ReadPeerSignatureEvidence(ctx context.Context, tx *sqlx.Tx, did string) (json.RawMessage, error)
+	// ReadPeerSigners returns the peers whose verified cross-instance
+	// signature this instance holds for the contract, with its receipt time.
+	ReadPeerSigners(ctx context.Context, tx *sqlx.Tx, did string) ([]PeerSigner, error)
+}
+
+// PeerSigner is a peer whose cross-instance signature this instance holds.
+type PeerSigner struct {
+	PeerDID    string    `db:"from_peer_did"`
+	ReceivedAt time.Time `db:"received_at"`
 }
