@@ -36,7 +36,7 @@ func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *cwe.Contrac
 	handler := command.EvidenceRecorder{DB: s.DB, CRepo: s.CRepo, DIDDocument: s.DIDDocument, Artifacts: s.ATrailReader.Artifacts}
 	id, err := handler.Handle(ctx, command.RecordEvidenceCmd{DID: req.Did, UpdatedAt: updated, CauserDID: peer, RecordedBy: middleware.GetParticipantID(ctx), HolderDID: middleware.GetHolderDID(ctx), UserRoles: middleware.GetUserRoles(ctx), Evidence: command.Evidence{Content: req.Content, Filename: req.Filename, Description: req.Description, MediaType: media}})
 	if err != nil {
-		if errors.Is(err, command.ErrInvalidEvidence) || errors.Is(err, command.ErrEvidenceTerminated) {
+		if errors.Is(err, command.ErrInvalidEvidence) || errors.Is(err, command.ErrEvidenceTerminated) || errors.Is(err, command.ErrEvidenceCreatorDraftOnly) {
 			return nil, cwe.MakeBadRequest(err)
 		}
 		if errors.Is(err, base.ErrUpdatedElsewhere) {
