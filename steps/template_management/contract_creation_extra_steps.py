@@ -84,6 +84,10 @@ def _clause_catalog_document(clause_names: list[str]) -> dict:
             }
         )
         layout_children.append({"@id": block_id})
+    # The first clause binds the canonical fixture's filled field, so the
+    # template policy audit (FACIS-TPL-CLAUSE-001) finds no error.
+    canonical = TemplateService.canonical_document_data("BDD Reusable Clause Template")
+    blocks[0]["dcs:content"]["@list"].append({"@id": "urn:uuid:field-service-description"})
     return {
         "@context": {"dcs": "https://w3id.org/facis/dcs/ontology/v1#"},
         "@type": "dcs:ContractTemplate",
@@ -99,6 +103,8 @@ def _clause_catalog_document(clause_names: list[str]) -> dict:
                 }
             ],
         },
+        "dcs:contractFields": canonical["dcs:contractFields"],
+        "dcs:policies": canonical["dcs:policies"],
     }
 
 

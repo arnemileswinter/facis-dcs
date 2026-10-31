@@ -238,6 +238,7 @@ func mapContractCommandError(err error) error {
 		errors.Is(err, validation.ErrContractNotClosed) ||
 		errors.Is(err, command.ErrContractHierarchyCycle) ||
 		errors.Is(err, command.ErrInvalidOriginatorRole) ||
+		errors.Is(err, command.ErrTemplateNotCompliant) ||
 		errors.Is(err, templatestructure.ErrInvalid) ||
 		errors.Is(err, command.ErrDeploymentNotFound) ||
 		errors.Is(err, command.ErrKPIVerdictUnknown) ||

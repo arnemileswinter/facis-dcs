@@ -39,6 +39,9 @@ const initialContractVersion = 1
 
 var ErrInvalidOriginatorRole = errors.New("originator role must be one of exactly two template roles")
 
+// ErrTemplateNotCompliant is a client-input error (map to 4xx).
+var ErrTemplateNotCompliant = errors.New("the template policy audit at approval found errors, the template is NON_COMPLIANT")
+
 type CreateCmd struct {
 	DID         string `json:"did"`
 	TemplateDID string `json:"template_did"`
@@ -200,6 +203,10 @@ func (h *Creator) Handle(ctx context.Context, cmd CreateCmd) error {
 	contractTemplate, err := h.CTRepo.ReadContractTemplateDataByID(ctx, tx, cmd.TemplateDID)
 	if err != nil {
 		return fmt.Errorf("could not read contract template data: %w", err)
+	}
+	// DCS-FR-TR-07: a template that failed the policy audit at approval is not used.
+	if contractTemplate.ComplianceStatus == "NON_COMPLIANT" {
+		return fmt.Errorf("%w: template %s", ErrTemplateNotCompliant, cmd.TemplateDID)
 	}
 	// DCS-FR-TR-26: the templates it requires must still be usable.
 	if err := templatestructure.CheckTemplate(ctx, tx, cmd.TemplateDID); err != nil {
