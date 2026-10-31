@@ -78,6 +78,39 @@ def step_when_presentation_wrong_poa(context):
     )
 
 
+@when('the ceremony presentation is completed with a revoked Power of Attorney')
+def step_when_presentation_revoked_poa(context):
+    """Present a PoA whose status-list bit is revoked first. The PoA names a
+    dedicated probe organization with a reserved index of its own
+    (dcs_wallet.status_list.RESERVED_INDEX), so the revocation reaches no
+    login credential of the suite. The PoA is verified, status list included,
+    before its organization is compared with the signed party."""
+    from steps.support.status_list_probe import revoke_credential_bit  # noqa: PLC0415
+    from steps.real_signing_vertical.dcs_real_signing_vertical_steps import _build_poa_presentation  # noqa: PLC0415
+
+    AuthService._ensure_dcs_wallet_importable()
+    from dcs_wallet.credential import decode_jwt_payload  # noqa: PLC0415
+    from dcs_wallet.sdjwt import split_sd_jwt  # noqa: PLC0415
+
+    c = context.poa_ceremony
+    poa = _build_poa_presentation(
+        organization="BDD PoA Revocation Probe Org", roles=["Contract Signer"], aud=ceremony_aud(context), nonce=c["nonce"],
+    )
+    issuer_jwt, _disclosures, _kb = split_sd_jwt(poa)
+    revoke_credential_bit(context, decode_jwt_payload(issuer_jwt))
+    context.requests_response = _complete_ceremony_via_presentation(
+        context, c["id"], c["presentation"], c["subject_did"], "PoA Signatory", "BDD-Testperson",
+        nonce=c["nonce"], poa_presentation=poa,
+    )
+
+
+@then('the ceremony presentation is refused for the revoked Power of Attorney')
+def step_then_presentation_refused_revoked_poa(context):
+    from steps.support.status_list_probe import assert_refused_for_the_revoked_bit  # noqa: PLC0415
+
+    assert_refused_for_the_revoked_bit(context, context.requests_response, "the Power of Attorney at the ceremony")
+
+
 @then('the signing request is rejected because the Power of Attorney does not authorize this signature')
 def step_then_poa_rejected(context):
     resp = context.requests_response
