@@ -13,6 +13,7 @@ import (
 	goa "goa.design/goa/v3/pkg"
 
 	cwe "digital-contracting-service/gen/contract_workflow_engine"
+	"digital-contracting-service/internal/base/pgtest"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 	"digital-contracting-service/internal/middleware"
 	fcclient "digital-contracting-service/internal/templatecatalogueintegration/client"
@@ -22,7 +23,7 @@ import (
 // with its metadata only, and the registration is audited. A draft is refused
 // before the catalogue is called.
 func TestContractCataloguePublishPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)

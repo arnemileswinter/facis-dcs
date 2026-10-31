@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"digital-contracting-service/internal/base/datatype/userrole"
+	"digital-contracting-service/internal/base/pgtest"
 	"digital-contracting-service/internal/contractworkflowengine/command"
 	cwepg "digital-contracting-service/internal/contractworkflowengine/db/pg"
 )
@@ -15,7 +16,7 @@ import (
 // DCS-FR-CWE-03: submit runs the required metadata check for a draft and for a
 // rejected contract before the contract enters negotiation.
 func TestSubmitRefusesContractWithoutRequiredMetadataPostgres(t *testing.T) {
-	database, _ := qaPostgresSchema(t)
+	database := pgtest.Open(t)
 	document := jadesTestDIDDocument(t, "local")
 	peer, err := document.GetID()
 	require.NoError(t, err)
