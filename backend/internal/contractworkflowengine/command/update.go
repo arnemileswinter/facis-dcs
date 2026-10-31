@@ -34,6 +34,10 @@ import (
 // mapped to a 4xx client error by the HTTP layer.
 var ErrContractHierarchyCycle = errors.New("contract parent chain contains a cycle")
 
+// ErrNotCreator is returned when a local caller changes the content of a
+// contract that another organization created. It is mapped to 403.
+var ErrNotCreator = errors.New("invalid participant: only the creating organization may change this contract")
+
 type UpdateCmd struct {
 	DID             string                             `json:"did"`
 	UpdatedAt       time.Time                          `json:"updated_at"`
@@ -104,6 +108,11 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 		}
 
 		return fmt.Errorf("updates are just allowed contract's owner peer")
+	}
+
+	// Only the creating organization edits the draft, the same rule as Submit.
+	if cmd.CauserDID == localPeer && cmd.UpdatedBy != oldData.CreatedBy {
+		return ErrNotCreator
 	}
 
 	// Optimistic concurrency: reject if the caller's view of the contract is

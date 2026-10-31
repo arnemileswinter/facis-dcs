@@ -122,7 +122,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 		// This avoids that state changes on different DCS are possible
 		if cmd.CauserDID == localPeer && cmd.SubmittedBy != processData.CreatedBy {
-			return errors.New("invalid participant")
+			return ErrNotCreator
 		}
 
 		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {
@@ -162,7 +162,7 @@ func (h *Submitter) Handle(ctx context.Context, cmd SubmitCmd) error {
 
 		// This avoids that state changes on different DCS are possible
 		if cmd.CauserDID == localPeer && cmd.SubmittedBy != processData.CreatedBy {
-			return errors.New("invalid participant")
+			return ErrNotCreator
 		}
 
 		if err := requireAssemblyMetadata(ctx, tx, h.CRepo, cmd.DID); err != nil {

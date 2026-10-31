@@ -18,7 +18,7 @@ import (
 func (s *contractWorkflowEnginesrvc) Store(ctx context.Context, req *cwe.ContractStoreRequest) (*cwe.ContractStoreResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
-	if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
+	if err := authorizeContractWrite(ctx, s.DB, s.DIDDocument, req.Did); err != nil {
 		return nil, err
 	}
 	updated, err := time.Parse(time.RFC3339, req.UpdatedAt)
