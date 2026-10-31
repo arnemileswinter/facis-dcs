@@ -123,7 +123,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event, did string, data json.
 			continue
 		}
 		delivery.ID = id
-		go d.attempt(delivery, sub.Secret)
+		go d.attempt(context.WithoutCancel(ctx), delivery, sub.Secret)
 	}
 }
 
@@ -157,7 +157,7 @@ func (d *Dispatcher) RetryDue(ctx context.Context) {
 			}
 			continue
 		}
-		d.attempt(delivery, sub.Secret)
+		d.attempt(ctx, delivery, sub.Secret)
 	}
 }
 
@@ -179,8 +179,8 @@ const errUnreachable = "the callback URL could not be reached"
 // attempt posts the delivery's payload once, signed with secret, and records
 // the outcome: a 2xx answer or the last allowed attempt ends the delivery,
 // anything else makes it due again after retryDelay.
-func (d *Dispatcher) attempt(delivery Delivery, secret string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (d *Dispatcher) attempt(ctx context.Context, delivery Delivery, secret string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	statusCode, errText := d.post(ctx, delivery, secret)
 	next := time.Time{}
