@@ -264,7 +264,7 @@ func (s *processAuditAndCompliancesrvc) gatherAuditEvidence(ctx context.Context,
 
 	archiveEntriesByDID := map[string][]*processauditandcompliance.PACResourceAuditTrailEntry{}
 	if scopeConfig.includeArchiveTrail {
-		result, err := s.auditArchiveTrailEntries(ctx)
+		result, err := s.auditArchiveTrailEntries(ctx, "")
 		if err != nil {
 			return nil, processauditandcompliance.MakeInternalError(err)
 		}

@@ -517,7 +517,7 @@ var _ = Service("ContractStorageArchive", func() {
 	})
 
 	Method("audit", func() {
-		Description("Retrieve the archive audit log: actor, timestamp, operation, and contract DID for every recorded archive-affecting event (store/retrieve/search/delete) — DCS-IR-CSA-04, UC-07-03.")
+		Description("Retrieve the archive audit log per readable archived contract: every recorded archive operation (store, retrieve, search, annotate, delete, evidence, sections, failures, key erasure) with actor, timestamp, operation and contract DID, followed by the entry summary and the integrity checks — DCS-IR-CSA-04, UC-07-03. The operations that name no single contract are returned to a caller who may read every contract.")
 		Meta("dcs:requirements", "DCS-IR-CSA-04")
 		Security(JWTAuth, func() {
 			Scope("Auditor")

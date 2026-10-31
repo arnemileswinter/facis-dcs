@@ -516,36 +516,45 @@ func (s *contractStorageArchivesrvc) Annotate(ctx context.Context, p *contractst
 	}, nil
 }
 
-// Audit returns the archive component's audit log (DCS-IR-CSA-04,
-// UC-07-03): every event recorded under componenttype.ContractStorageArchive
-// (store/retrieve/search/delete), across every DID's chain plus the
-// DID-less "*" chain used by component-wide operations (retrieve/search) —
-// reusing the same cross-component reader process_audit_and_compliance's
-// own audit method is built on (qry.Auditor / ReadAuditLogEntriesByComponent).
+// Audit returns, per readable archived contract, the archive operation log
+// (DCS-IR-CSA-04, UC-07-03): every event recorded under
+// componenttype.ContractStorageArchive, with the entry summaries and the
+// integrity checks. The DID-less "*" chain of the component-wide operations
+// (retrieve/search) is returned to a caller who may read every contract. A
+// did filter applies before the integrity checks run.
 func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstoragearchive.AuditPayload) (res []*contractstoragearchive.PACAuditResponse, err error) {
 	ctx, err = contractReadContext(ctx, s.DIDDocument)
 	if err != nil {
 		return nil, err
 	}
-	if p.Did != nil && strings.TrimSpace(*p.Did) != "" {
-		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, strings.TrimSpace(*p.Did)); err != nil {
+	did := strings.TrimSpace(stringValue(p.Did))
+	if did != "" {
+		if err := authorizeContractReadDocument(ctx, s.DB, s.DIDDocument, did); err != nil {
 			return nil, err
 		}
+	}
+	allowed, err := readableContractDIDs(ctx, s.DB)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, conf.TransactionTimeout())
 	defer cancel()
 
 	core := processAuditAndCompliancesrvc{DB: s.DB, CRepo: s.CRepo, ATrailReader: s.ATrailReader}
-	entriesByDID, err := core.auditArchiveTrailEntries(ctx)
+	entriesByDID, err := core.auditArchiveTrailEntries(ctx, did)
 	if err != nil {
 		return nil, contractstoragearchive.MakeInternalError(err)
 	}
+	chains, err := s.readArchiveChains(ctx)
+	if err != nil {
+		return nil, contractstoragearchive.MakeInternalError(err)
+	}
+	for chainDID, operations := range archiveOperationLog(chains, did, allowed) {
+		entriesByDID[chainDID] = append(operations, entriesByDID[chainDID]...)
+	}
 	result := make([]*contractstoragearchive.PACAuditResponse, 0, len(entriesByDID))
 	for did, entries := range entriesByDID {
-		if p.Did != nil && strings.TrimSpace(*p.Did) != "" && did != strings.TrimSpace(*p.Did) {
-			continue
-		}
 		trail := make([]*contractstoragearchive.PACResourceAuditTrailEntry, 0, len(entries))
 		for _, entry := range entries {
 			trail = append(trail, &contractstoragearchive.PACResourceAuditTrailEntry{ID: entry.ID, Component: entry.Component, EventType: entry.EventType, EventData: entry.EventData, Did: entry.Did, CreatedAt: entry.CreatedAt, ResLogPredCid: entry.ResLogPredCid, Kind: entry.Kind, Result: entry.Result, RuleID: entry.RuleID, Reason: entry.Reason})
@@ -553,6 +562,16 @@ func (s *contractStorageArchivesrvc) Audit(ctx context.Context, p *contractstora
 		result = append(result, &contractstoragearchive.PACAuditResponse{Did: did, Component: componenttype.ContractStorageArchive.String(), CreatedAt: time.Now().UTC().Format(time.RFC3339), AuditTrail: trail})
 	}
 	return result, nil
+}
+
+// readArchiveChains reads the ContractStorageArchive audit chains.
+func (s *contractStorageArchivesrvc) readArchiveChains(ctx context.Context) ([][]datatype.AuditLogEntry, error) {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	return s.ATrailReader.ReadAuditLogEntriesByComponent(ctx, tx, componenttype.ContractStorageArchive)
 }
 
 func toArchiveContractItem(item db.ContractMetadata) *contractstoragearchive.ContractItem {
