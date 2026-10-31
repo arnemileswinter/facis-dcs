@@ -14,3 +14,23 @@ func TestTrustedListClientAcceptsTLS12(t *testing.T) {
 		t.Fatalf("trusted-list transport %#v, want MinVersion TLS 1.2", tslClient.Transport)
 	}
 }
+
+// UC-IF-28: peers are checked against the EU trusted lists unless the
+// operator turns it off or the stack declares itself a dev stack.
+func TestEUTrustPoolIsOnByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		pool, devTrust string
+		want           bool
+	}{
+		{"", "", true},
+		{"", "true", false},
+		{"false", "", false},
+		{"true", "true", true},
+	} {
+		t.Setenv("DCS_EU_TRUST_POOL", tc.pool)
+		t.Setenv("DCS_ALLOW_DEV_TRUST", tc.devTrust)
+		if got := EUTrustPoolEnabled(); got != tc.want {
+			t.Errorf("DCS_EU_TRUST_POOL=%q DCS_ALLOW_DEV_TRUST=%q: enabled = %t, want %t", tc.pool, tc.devTrust, got, tc.want)
+		}
+	}
+}
