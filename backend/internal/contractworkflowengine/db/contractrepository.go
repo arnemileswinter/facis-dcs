@@ -212,13 +212,27 @@ type ExecutionProof struct {
 	TSAReceipt    *datatype.JSON
 }
 
+// ListOptions narrows and orders the contract list before the page is cut
+// (DCS-IR-CWE-11).
+type ListOptions struct {
+	// States keeps contracts in one of these states. Empty keeps all.
+	States []string
+	// ParentDID keeps contracts whose dcs:parentContract references this DID.
+	ParentDID string
+	// SortBy is created_at, updated_at, state or name. Empty is created_at.
+	SortBy string
+	// Ascending sorts from low to high. The default is from high to low.
+	Ascending bool
+}
+
 type SearchValues struct {
 	DID             string
 	ContractVersion int
-	State           string
-	Name            string
-	Description     string
-	ContractData    string
+	// States keeps contracts in one of these states. Empty keeps all.
+	States       []string
+	Name         string
+	Description  string
+	ContractData string
 	// Tag filters archived contracts by an assigned annotation tag
 	// (DCS-FR-CSA-11); only meaningful for the archive queries, whose
 	// backing view exposes archive_tags.
@@ -273,6 +287,9 @@ type ContractRepo interface {
 	// ReadChildrenDIDs returns the DIDs of all locally-known contracts whose
 	// dcs:parentContract references did, ordered by did.
 	ReadChildrenDIDs(ctx context.Context, tx *sqlx.Tx, did string) ([]string, error)
+	// ReadOpenRenewalDID returns a renewal of originalDID that is not
+	// withdrawn, revoked, terminated or expired, or "" when there is none.
+	ReadOpenRenewalDID(ctx context.Context, tx *sqlx.Tx, originalDID string) (string, error)
 	ReadExpiredContracts(ctx context.Context, tx *sqlx.Tx) ([]ContractMetadata, error)
 	// ReadRenewalDueContracts returns the SIGNED or ACTIVE contracts whose
 	// notice period before exp_date has started and that have no renewal
@@ -320,7 +337,7 @@ type ContractRepo interface {
 	ReadArchivedContractsByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues) ([]ContractMetadata, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
 	ReadProcessDataByDIDOrNil(ctx context.Context, tx *sqlx.Tx, did string) (*ContractProcessData, error)
-	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractMetadata, error)
+	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination, options ListOptions) ([]ContractMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractMetadata, error)
 	// ExpireContract persists EXPIRED for did if its expiry has passed and it
 	// is in a state that expires (the ReadExpiredContracts condition). It

@@ -163,3 +163,14 @@ it('lets the contract creator store evidence', async () => {
   mocks.auth.user.roles = ['CONTRACT_MANAGER']
   wrapper.unmount()
 })
+
+// DCS-IR-CWE-12: outside a draft only the manager stores evidence.
+it('offers the contract creator no evidence upload once the contract left draft', async () => {
+  mocks.auth.user.roles = ['CONTRACT_CREATOR']
+  mocks.listEvidence.mockResolvedValue([])
+  const wrapper = mount(ContractEvidencePanel, { props: { contract } })
+  await flushPromises()
+  expect(wrapper.findAll('button').some((button) => button.text() === 'Store evidence')).toBe(false)
+  mocks.auth.user.roles = ['CONTRACT_MANAGER']
+  wrapper.unmount()
+})

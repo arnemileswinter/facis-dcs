@@ -73,6 +73,8 @@ func (s *contractStorageArchivesrvc) auditRetrieval(ctx context.Context, did str
 	defer func() { _ = tx.Rollback() }()
 	evt := contractevents.RetrieveArchivedEvent{
 		RetrievedBy:  middleware.GetParticipantID(ctx),
+		HolderDID:    middleware.GetHolderDID(ctx),
+		UserRoles:    middleware.GetUserRoles(ctx),
 		ContractDIDs: []string{did},
 		OccurredAt:   time.Now().UTC(),
 	}

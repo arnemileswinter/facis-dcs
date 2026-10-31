@@ -14,9 +14,13 @@ const MAX_RECONNECT_MS = 60_000
 // The server sends a heartbeat every 30 seconds; silence beyond this is a dead connection.
 const SILENCE_MS = 75_000
 
+/** The server sends RESYNC when it dropped changes for this stream. */
+export const RESYNC = 'RESYNC'
+
 /**
  * Splits a server-sent event buffer into the changes it holds and the
- * unfinished rest. Events without a contract (CONNECTED, HEARTBEAT) are dropped.
+ * unfinished rest. Events without a contract (CONNECTED, HEARTBEAT) are
+ * dropped, except RESYNC.
  */
 export function parseContractChanges(buffer: string): { changes: ContractChange[]; rest: string } {
   const blocks = buffer.split('\n\n')
@@ -30,7 +34,7 @@ export function parseContractChanges(buffer: string): { changes: ContractChange[
       .join('\n')
     try {
       const change = JSON.parse(data) as ContractChange
-      if (change.did) changes.push(change)
+      if (change.did || change.event_type === RESYNC) changes.push(change)
     } catch {
       // not a JSON event
     }
@@ -42,9 +46,10 @@ export function parseContractChanges(buffer: string): { changes: ContractChange[
  * Calls onChange for each change to a contract the user may read, while the
  * component is mounted. The stream reconnects after a drop and refreshes an
  * expired session. fetch is used because EventSource cannot send the
- * Authorization header.
+ * Authorization header. onGap is called when changes can be lost: a stream
+ * connects after a failed one, or the server reports RESYNC.
  */
-export function useContractChanges(onChange: (change: ContractChange) => void) {
+export function useContractChanges(onChange: (change: ContractChange) => void, onGap?: () => void) {
   let stopped = false
   let controller: AbortController | null = null
 
@@ -52,7 +57,7 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
    * Resolves true when a stream that delivered events ended, which the server
    * does after the token lifetime; the next stream then starts at once.
    */
-  async function listen(): Promise<boolean> {
+  async function listen(onConnected: () => void): Promise<boolean> {
     controller = new AbortController()
     let silence = setTimeout(() => controller?.abort(), SILENCE_MS)
     try {
@@ -69,6 +74,7 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
         return false
       }
       if (!response.ok || !response.body) return false
+      onConnected()
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -81,7 +87,10 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
         silence = setTimeout(() => controller?.abort(), SILENCE_MS)
         const parsed = parseContractChanges(buffer + decoder.decode(value, { stream: true }))
         buffer = parsed.rest
-        parsed.changes.forEach(onChange)
+        for (const change of parsed.changes) {
+          if (change.event_type === RESYNC) onGap?.()
+          else onChange(change)
+        }
       }
     } catch {
       // aborted or dropped: reconnect below
@@ -94,7 +103,9 @@ export function useContractChanges(onChange: (change: ContractChange) => void) {
   async function run() {
     let failures = 0
     while (!stopped) {
-      const ended = await listen()
+      const ended = await listen(() => {
+        if (failures > 0) onGap?.()
+      })
       failures = ended ? 0 : failures + 1
       if (!stopped && !ended) {
         const delay = Math.min(RECONNECT_MS * 2 ** (failures - 1), MAX_RECONNECT_MS)
