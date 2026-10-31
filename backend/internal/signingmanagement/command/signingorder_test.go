@@ -78,7 +78,7 @@ func orderCeremony(field string) *db.SignatureCeremony {
 	verifiedAt := time.Now().UTC()
 	return &db.SignatureCeremony{
 		ID: "ceremony-" + field, ContractDID: orderContractDID, FieldName: field, Status: db.CeremonyVerified, SignerDID: &signer,
-		VerifiedAt: &verifiedAt,
+		VerifiedAt:  &verifiedAt,
 		PreparedPDF: []byte("%PDF-prepared"), PinnedContentHash: &hash, PinnedRendererVersion: &renderer,
 		PinnedSignedCount: &count, PinnedContractVersion: &version, RequiredCredentialType: &credential,
 	}

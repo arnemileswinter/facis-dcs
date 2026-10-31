@@ -114,4 +114,3 @@ func TestTheDocumentRetrievalIsAuditedOncePerDocument(t *testing.T) {
 	require.NoError(t, database.Get(&retrievals, `SELECT count(*) FROM outbox_events WHERE event_type = 'RETRIEVE_CONTRACT_FOR_SIGNING'`))
 	require.Equal(t, 1, retrievals)
 }
-

@@ -45,15 +45,15 @@ const (
 	// StoreExecutionProof records the proof of contract execution over every
 	// signature, written when the last counterparty signature arrives after
 	// the archive entry (DCS-FR-SM-10).
-	StoreExecutionProof EventType = "STORE_EXECUTION_PROOF"
-	ArchiveOperationFailed      EventType = "ARCHIVE_OPERATION_FAILED"
-	RetrieveByID                EventType = "RETRIEVE_CONTRACT_BY_ID"
-	AccessDenied                EventType = "CONTRACT_ACCESS_DENIED"
-	RetrieveHistoryByDID        EventType = "RETRIEVE_CONTRACT_HISTORY_BY_DID"
-	Search                      EventType = "SEARCH_CONTRACT"
-	Review                      EventType = "REVIEW_CONTRACT"
-	Audit                       EventType = "AUDIT_CONTRACT"
-	Terminate                   EventType = "TERMINATE_CONTRACT"
+	StoreExecutionProof    EventType = "STORE_EXECUTION_PROOF"
+	ArchiveOperationFailed EventType = "ARCHIVE_OPERATION_FAILED"
+	RetrieveByID           EventType = "RETRIEVE_CONTRACT_BY_ID"
+	AccessDenied           EventType = "CONTRACT_ACCESS_DENIED"
+	RetrieveHistoryByDID   EventType = "RETRIEVE_CONTRACT_HISTORY_BY_DID"
+	Search                 EventType = "SEARCH_CONTRACT"
+	Review                 EventType = "REVIEW_CONTRACT"
+	Audit                  EventType = "AUDIT_CONTRACT"
+	Terminate              EventType = "TERMINATE_CONTRACT"
 	// Activate records the deployment acknowledgement that moves a contract
 	// from SIGNED to ACTIVE.
 	Activate                 EventType = "ACTIVATE_CONTRACT"

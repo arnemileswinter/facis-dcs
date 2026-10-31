@@ -21,20 +21,20 @@ const (
 // that must complete before a PAdES signature can be applied (FR-SM-14,
 // UC-04-02).
 type SignatureCeremony struct {
-	ID          string  `db:"id"`
-	ContractDID string  `db:"contract_did"`
-	FieldName   string  `db:"field_name"`
-	RequestedBy string  `db:"requested_by"`
+	ID          string `db:"id"`
+	ContractDID string `db:"contract_did"`
+	FieldName   string `db:"field_name"`
+	RequestedBy string `db:"requested_by"`
 	// RequestedHolderDID is the holder of the session that started the
 	// ceremony. Only that session may prepare, publish and submit for it.
-	RequestedHolderDID string `db:"requested_holder_did"`
-	Status      string  `db:"status"`
-	WalletURI   *string `db:"wallet_uri"`
-	Nonce       string  `db:"nonce"`
-	SignerDID   *string `db:"signer_did"`
-	VpToken     *string `db:"vp_token"`
-	PidClaims   []byte  `db:"pid_claims"`
-	KbSdHash    *string `db:"kb_sd_hash"`
+	RequestedHolderDID string  `db:"requested_holder_did"`
+	Status             string  `db:"status"`
+	WalletURI          *string `db:"wallet_uri"`
+	Nonce              string  `db:"nonce"`
+	SignerDID          *string `db:"signer_did"`
+	VpToken            *string `db:"vp_token"`
+	PidClaims          []byte  `db:"pid_claims"`
+	KbSdHash           *string `db:"kb_sd_hash"`
 	// The Power of Attorney presented at signing (UC-14, FR-SM-03): the verified
 	// organization the signatory is authorized to act for, their roles, and the
 	// presentation itself as the wallet delivered it — the evidence a

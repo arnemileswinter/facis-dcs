@@ -78,16 +78,16 @@ func (h *StartCeremonyHandler) Handle(ctx context.Context, cmd StartCeremonyCmd)
 	expiresAt := now.Add(ceremonyTTL)
 
 	ceremony := db.SignatureCeremony{
-		ID:          id,
-		ContractDID: cmd.ContractDID,
-		FieldName:   cmd.FieldName,
-		RequestedBy: cmd.RequestedBy,
+		ID:                 id,
+		ContractDID:        cmd.ContractDID,
+		FieldName:          cmd.FieldName,
+		RequestedBy:        cmd.RequestedBy,
 		RequestedHolderDID: cmd.RequestedHolderDID,
-		Status:      db.CeremonyPending,
-		WalletURI:   &walletURI,
-		Nonce:       nonce,
-		CreatedAt:   now,
-		ExpiresAt:   expiresAt,
+		Status:             db.CeremonyPending,
+		WalletURI:          &walletURI,
+		Nonce:              nonce,
+		CreatedAt:          now,
+		ExpiresAt:          expiresAt,
 	}
 	if err := h.CeremonyRepo.CreateCeremony(ctx, tx, ceremony); err != nil {
 		return nil, err
