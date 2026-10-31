@@ -600,10 +600,8 @@ function shortDid(did: string): string {
                       class="mt-1 text-xs wrap-anywhere"
                       :data-testid="`archive-termination-${entry.did}`"
                     >
-                      Terminated {{ formatTimestamp(entry.terminated_at) }} by {{ entry.termination_role }}<template
-                        v-if="entry.termination_reason"
-                        >: {{ entry.termination_reason }}</template
-                      >
+                      Terminated {{ formatTimestamp(entry.terminated_at) }} by {{ entry.termination_role }}
+                      <div v-if="entry.termination_reason">Reason: {{ entry.termination_reason }}</div>
                     </div>
                   </td>
                   <td :data-testid="`archive-annotation-${entry.did}`">
