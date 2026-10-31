@@ -13,6 +13,9 @@ import (
 
 var ErrContractTemplateNotFound = errors.New("template not found")
 
+// ErrInvalidTemplateState refuses a command that the template's current state does not allow.
+var ErrInvalidTemplateState = errors.New("invalid contract template state")
+
 type ContractTemplate struct {
 	DID          string         `db:"did"`
 	Version      int            `db:"version"`
@@ -24,8 +27,10 @@ type ContractTemplate struct {
 	CreatedBy    string         `db:"created_by"`
 	CreatedAt    time.Time      `db:"created_at"`
 	UpdatedAt    time.Time      `db:"updated_at"`
-	TemplateData *datatype.JSON `db:"template_data"`
-	BaseTemplate *string        `db:"base_template"`
+	// ContentUpdatedAt moves only when the content changes (see ContractTemplateProcessData).
+	ContentUpdatedAt time.Time      `db:"content_updated_at"`
+	TemplateData     *datatype.JSON `db:"template_data"`
+	BaseTemplate     *string        `db:"base_template"`
 	SearchableMetadata
 	Structure
 }
@@ -139,7 +144,9 @@ type ContractTemplateRepo interface {
 	ReadAllMetaData(ctx context.Context, tx *sqlx.Tx, pagination datatype.Pagination) ([]ContractTemplateMetadata, error)
 	ReadAllMetaDataByFilter(ctx context.Context, tx *sqlx.Tx, values SearchValues, pagination datatype.Pagination) ([]ContractTemplateMetadata, error)
 	ReadProcessDataByDID(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplateProcessData, error)
-	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error
+	// UpdateState changes the state only when the stored state is from;
+	// otherwise it returns ErrInvalidTemplateState.
+	UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string) error
 	Update(ctx context.Context, tx *sqlx.Tx, data ContractTemplateUpdateData) error
 	ReadPDFState(ctx context.Context, tx *sqlx.Tx, did string) (*ContractTemplatePDFState, error)
 	// ReadDIDsMissingStoredPDF returns the DIDs of at most limit templates that

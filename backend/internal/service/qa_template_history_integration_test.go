@@ -21,8 +21,8 @@ func TestQATemplateHistoryRecordsStateChangesPostgres(t *testing.T) {
 	_, err = repo.Create(ctx, tx, db.ContractTemplate{DID: "provenance", CreatedBy: "tester", State: "DRAFT", TemplateType: "CONTRACT_TEMPLATE", PartyType: "SINGLE_PARTY"})
 	require.NoError(t, err)
 
-	require.NoError(t, repo.UpdateState(ctx, tx, "provenance", "SUBMITTED"))
-	require.NoError(t, repo.UpdateState(ctx, tx, "provenance", "APPROVED"))
+	require.NoError(t, repo.UpdateState(ctx, tx, "provenance", "DRAFT", "SUBMITTED"))
+	require.NoError(t, repo.UpdateState(ctx, tx, "provenance", "SUBMITTED", "APPROVED"))
 
 	history, err := repo.ReadHistoryByDID(ctx, tx, "provenance")
 	require.NoError(t, err)

@@ -28,7 +28,7 @@ import (
 )
 
 // ErrInvalidTemplateState refuses a command that the template's current state does not allow.
-var ErrInvalidTemplateState = errors.New("invalid contract template state")
+var ErrInvalidTemplateState = db.ErrInvalidTemplateState
 
 type RegisterCmd struct {
 	DID          string
@@ -72,11 +72,6 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		return nil, fmt.Errorf("could not check if contract template already exists: %w", err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("could not commit transaction: %w", err)
-	}
-
 	if existing != nil {
 
 		// Only an approved template enters the pool of contract-ready
@@ -90,17 +85,7 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 			return nil, fmt.Errorf("%w: %s cannot be registered", ErrInvalidTemplateState, existing.State)
 		}
 
-		tx, err := h.DB.BeginTxx(ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("could not start transaction: %w", err)
-		}
-		defer func(tx *sqlx.Tx) {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				log.Printf("could not rollback transaction: %v", err)
-			}
-		}(tx)
-
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Registered.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, existing.State, contracttemplatestate.Registered.String())
 		if err != nil {
 			return nil, fmt.Errorf("could not update registered state: %w", err)
 		}
@@ -142,6 +127,11 @@ func (h *Registrar) Handle(ctx context.Context, cmd RegisterCmd) (*string, error
 		return &cmd.DID, nil
 
 	} else {
+
+		// The import does remote calls; it does not keep the read transaction open.
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("could not commit transaction: %w", err)
+		}
 
 		if cmd.Version < 1 {
 			return nil, errors.New("version must be greater than 0")

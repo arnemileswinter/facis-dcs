@@ -148,7 +148,7 @@ func (r *PostgresContractTemplateRepo) Create(ctx context.Context, tx *sqlx.Tx, 
 func (r *PostgresContractTemplateRepo) ReadDataByID(ctx context.Context, tx *sqlx.Tx, did string) (*db.ContractTemplate, error) {
 	query := `
         SELECT did, version, state, name, description,
-               created_by, created_at, updated_at, template_data, template_type, party_type,
+               created_by, created_at, updated_at, content_updated_at, template_data, template_type, party_type,
                base_template, jurisdiction, industry, compliance_status, template_level, required_templates
         FROM contract_templates WHERE did = $1
     `
@@ -250,26 +250,19 @@ func (r *PostgresContractTemplateRepo) ReadProcessDataByDID(ctx context.Context,
 	err := tx.GetContext(ctx, &processData, query, did)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("contract template with DID %s", did)
+			return nil, fmt.Errorf("%w: did=%s", db.ErrContractTemplateNotFound, did)
 		}
 		return nil, err
 	}
 	return &processData, nil
 }
 
-func (r *PostgresContractTemplateRepo) UpdateStateForAllTasks(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
-	statement := `
-        UPDATE contract_templates SET state = $2
-        WHERE did = $1
-    `
-	_, err := tx.ExecContext(ctx, statement, did, state)
-	return err
-}
-
 // UpdateState keeps the replaced state as a history entry, so the template
 // provenance lists every lifecycle step (F04). A refused change returns an
-// error and the caller's rollback removes the entry.
-func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, state string) error {
+// error and the caller's rollback removes the entry. The update applies only
+// while the stored state is from: of two concurrent transitions, the second
+// waits for the first and then finds a changed state.
+func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx.Tx, did string, from string, to string) error {
 	if err := r.CreateHistoryEntryForDID(ctx, tx, did); err != nil {
 		return fmt.Errorf("could not create history entry: %w", err)
 	}
@@ -277,6 +270,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
         UPDATE contract_templates ct
         SET state = $2::contract_template_state
         WHERE did = $1
+          AND state = $3::contract_template_state
           AND (
               $2::contract_template_state NOT IN ('REGISTERED', 'PUBLISHED')
               OR NOT EXISTS (
@@ -289,7 +283,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
               )
           )
     `
-	result, err := tx.ExecContext(ctx, statement, did, state)
+	result, err := tx.ExecContext(ctx, statement, did, to, from)
 	if err != nil {
 		return fmt.Errorf("could not update registered state: %w", err)
 	}
@@ -298,7 +292,7 @@ func (r *PostgresContractTemplateRepo) UpdateState(ctx context.Context, tx *sqlx
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("could not update state for DID %q: not found or conflicting version already active", did)
+		return fmt.Errorf("%w: %s cannot change from %s to %s: the state changed or a version with that number is already active", db.ErrInvalidTemplateState, did, from, to)
 	}
 	return nil
 }

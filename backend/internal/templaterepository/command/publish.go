@@ -109,7 +109,7 @@ func (h *Publisher) Handle(ctx context.Context, cmd PublishCmd) error {
 		return errors.New("contract template must be in registered state to publish")
 	}
 
-	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Published.String())
+	err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Published.String())
 	if err != nil {
 		return fmt.Errorf("could not update state: %w", err)
 	}

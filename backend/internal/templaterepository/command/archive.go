@@ -75,14 +75,14 @@ func (h *Archiver) Handle(ctx context.Context, cmd ArchiveCmd) error {
 
 	if processData.State == contracttemplatestate.Registered.String() || processData.State == contracttemplatestate.Published.String() {
 
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Deprecated.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Deprecated.String())
 		if err != nil {
 			return fmt.Errorf("could not update state: %w", err)
 		}
 
 	} else {
 
-		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, contracttemplatestate.Deleted.String())
+		err = h.CTRepo.UpdateState(ctx, tx, cmd.DID, processData.State, contracttemplatestate.Deleted.String())
 		if err != nil {
 			return fmt.Errorf("could not update state: %w", err)
 		}

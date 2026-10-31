@@ -78,7 +78,7 @@ func (h *Updater) Handle(ctx context.Context, cmd UpdateCmd) error {
 	}
 
 	// Optimistic concurrency (see command package doc / ADR-0007).
-	if cmd.UpdatedAt.Unix() < oldData.UpdatedAt.Unix() {
+	if cmd.UpdatedAt.Unix() < oldData.ContentUpdatedAt.Unix() {
 		return fmt.Errorf("contract template %w, please reload", base.ErrUpdatedElsewhere)
 	}
 

@@ -58,7 +58,7 @@ func TestQAPartyTypePostgres(t *testing.T) {
 	row, err = repo.ReadDataByID(ctx, tx, "copy")
 	require.NoError(t, err)
 	require.Equal(t, "MULTI_PARTY", row.PartyType)
-	require.NoError(t, repo.UpdateState(ctx, tx, "single", "REGISTERED"))
+	require.NoError(t, repo.UpdateState(ctx, tx, "single", "DRAFT", "REGISTERED"))
 	version, err := repo.CopyFromDID(ctx, tx, "single", "version-two")
 	require.NoError(t, err)
 	require.Equal(t, 2, version)
