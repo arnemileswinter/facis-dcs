@@ -1,5 +1,5 @@
 import type { DcsTemplateData } from '../dcs-jsonld'
-import type { TemplateComplianceStatus } from '@/models/contract-template/contract-template'
+import type { TemplateComplianceStatus, TemplateLevel } from '@/models/contract-template/contract-template'
 import type { ContractTemplateActionFlag } from '@/types/contract-template-action-flag'
 import type { ContractTemplateState } from '@/types/contract-template-state'
 import type { PartyType } from '@/types/party-type'
@@ -8,6 +8,8 @@ import type { TemplateType } from '@/types/template-type'
 export interface ContractTemplateCreateRequest {
   party_type: PartyType
   jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
   industry?: string
   template_type: TemplateType
   name?: string
@@ -32,6 +34,8 @@ export interface ContractTemplateSubmitRequest {
 export interface ContractTemplateUpdateRequest {
   party_type?: PartyType
   jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
   industry?: string
   did: string
   updated_at: string
@@ -44,6 +48,8 @@ export interface ContractTemplateUpdateRequest {
 export interface ContractTemplateUpdateManageRequest {
   party_type?: PartyType
   jurisdiction?: string
+  template_level?: TemplateLevel
+  required_templates?: string[]
   industry?: string
   did: string
   updated_at: string

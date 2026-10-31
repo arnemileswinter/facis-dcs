@@ -64,6 +64,7 @@ const responseMapper = (response: ContractTemplateSearchResponse) =>
     jurisdiction: item.jurisdiction,
     industry: item.industry,
     compliance_status: item.compliance_status,
+    template_level: item.template_level,
   }))
 </script>
 
