@@ -152,6 +152,11 @@ for v in DSS_URL PAC_AUDIT_EXECUTOR_URL PAC_WORKFLOW_GATE_EXECUTOR_URL TSA_URL D
   [[ "$(env_of "$TMP/ci-bdd.yaml" Deployment $B $C $v)" == https://dcs-*:8443* ]] || fail "values.bdd.yml: $v without TLS"
 done
 [[ "$(env_of "$TMP/ci-bdd.yaml" Deployment dcs-orce orce DCS_URL)" == https://$B:8443/* ]] || fail "values.bdd.yml: ORCE calls the backend without TLS"
+# deploy.sh probes DCS_TRUST_PDP_URL with curl in the backend pod. curl does not
+# read the internal CA from SSL_CERT_DIR, so the probe gives it the CA file.
+pdp_probe="$(sed -n '/^pdp_url=/,/^fi$/p' "$CHART_DIR/deploy.sh")"
+grep -q -- '--cacert' <<<"$pdp_probe" && grep -q '/etc/dcs-internal-tls/ca.crt' <<<"$pdp_probe" \
+  || fail "deploy.sh probes the trust PDP without the internal CA"
 
 # The issuer release renders the orce chart on its own, without the parent.
 helm template dcs-issuer "$CHART_DIR/charts/orce" -f "$CHART_DIR/values.issuer-base.yml" -f "$CHART_DIR/values.issuer.bdd.yml" \

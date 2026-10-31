@@ -544,15 +544,20 @@ def step_then_contract_provenance_and_rebase(context):
     )
     assert context.realistic_contract_response.get("template_did") == context.realistic_template_did
 
+    # dcs:shape points at a domain field of a published ontology; that IRI
+    # is external and keeps its namespace.
+    domain_shapes = {shape for shape, _ in FIELD_SHAPES.values()}
     template_internal_ids = [
         node_id
         for node_id in _document_ids(context.realistic_template_data)
-        if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
+        if ("#block-" in node_id or "#field-" in node_id or "#data-" in node_id)
+        and node_id not in domain_shapes
     ]
     contract_internal_ids = [
         node_id
         for node_id in _document_ids(context.realistic_contract_data)
-        if "#block-" in node_id or "#field-" in node_id or "#data-" in node_id
+        if ("#block-" in node_id or "#field-" in node_id or "#data-" in node_id)
+        and node_id not in domain_shapes
     ]
     assert template_internal_ids and all(
         _scoped_to_did(node_id, context.realistic_template_did) for node_id in template_internal_ids

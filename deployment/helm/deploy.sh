@@ -178,8 +178,15 @@ pdp_url="$(backend_env DCS_TRUST_PDP_URL)"
 if [ -z "$pdp_url" ]; then
   echo "  note: DCS_TRUST_PDP_URL unset — this instance will not federate (see federation.trustPdpURL)"
 else
+  # curl (OpenSSL) reads only hashed files from SSL_CERT_DIR, so it does not
+  # find the internal CA there as the Go backend does. Give it the system
+  # bundle plus the internal CA.
   code="$(kubectl -n "$NAMESPACE" exec "$BACKEND" -- sh -c \
-    "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    "ca=/etc/ssl/certs/ca-certificates.crt
+     if [ -r /etc/dcs-internal-tls/ca.crt ]; then
+       cat \$ca /etc/dcs-internal-tls/ca.crt > /tmp/deploy-sh-ca.crt && ca=/tmp/deploy-sh-ca.crt
+     fi
+     curl -s --cacert \$ca -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
      -d '{\"peerDID\":\"did:web:deploy-sh-probe\",\"direction\":\"inbound\"}' '$pdp_url'" 2>/dev/null || echo 000)"
   case "$code" in
     2*) echo "  ok: trust policy endpoint answered $code" ;;
