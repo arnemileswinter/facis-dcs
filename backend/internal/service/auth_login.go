@@ -238,7 +238,7 @@ func (s *authSvc) PresentationCallback(ctx context.Context, p *genauth.Presentat
 	var verified *oid4vp.VerifiedLoginClaims
 	presentation, err := extractSinglePresentation(vpToken, queryIDs...)
 	if err == nil {
-		if holder := oid4vp.HolderLockoutKey(presentation); holder != "" {
+		if holder := oid4vp.HolderLockoutKey(presentation, s.trust, oid4vp.PurposeLogin); holder != "" {
 			lockKey = holder
 		}
 		if until, locked := s.LockedUntil(ctx, lockKey); locked {

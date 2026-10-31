@@ -15,6 +15,7 @@ import (
 	"digital-contracting-service/internal/contractworkflowengine/datatype/contractstate"
 	"digital-contracting-service/internal/contractworkflowengine/datatype/negotiationtaskstate"
 	cwedb "digital-contracting-service/internal/contractworkflowengine/db"
+	"digital-contracting-service/internal/contractworkflowengine/negotiationmerging"
 	trustgate "digital-contracting-service/internal/dcstodcs"
 
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
@@ -109,6 +110,9 @@ func (s *dcsToDcssrvc) persistShippedProposal(
 		if err != nil {
 			return contractworkflowengine.MakeBadRequest(
 				fmt.Errorf("post_negotiation rejected: change_request is not JSON: %w", err))
+		}
+		if _, _, err := negotiationmerging.Decode(encoded); err != nil {
+			return contractworkflowengine.MakeBadRequest(fmt.Errorf("post_negotiation rejected: %w", err))
 		}
 		raw := datatype.JSON(encoded)
 		changeRequest = &raw

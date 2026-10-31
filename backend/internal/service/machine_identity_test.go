@@ -98,13 +98,13 @@ func (s *stubIdentityRegistry) Read(_ context.Context, id string) (*machineident
 	return nil, nil
 }
 
-func (s *stubIdentityRegistry) Create(_ context.Context, data machineidentity.Identity) (*machineidentity.Identity, error) {
+func (s *stubIdentityRegistry) Create(_ context.Context, _ *sqlx.Tx, data machineidentity.Identity) (*machineidentity.Identity, error) {
 	data.ID = data.OAuthClientID
 	s.rows[data.OAuthClientID] = data
 	return &data, nil
 }
 
-func (s *stubIdentityRegistry) Update(_ context.Context, data machineidentity.Identity) (*machineidentity.Identity, error) {
+func (s *stubIdentityRegistry) Update(_ context.Context, _ *sqlx.Tx, data machineidentity.Identity) (*machineidentity.Identity, error) {
 	existing, ok := s.rows[data.ID]
 	if !ok {
 		return nil, nil
@@ -114,7 +114,7 @@ func (s *stubIdentityRegistry) Update(_ context.Context, data machineidentity.Id
 	return &data, nil
 }
 
-func (s *stubIdentityRegistry) Delete(_ context.Context, id string) error {
+func (s *stubIdentityRegistry) Delete(_ context.Context, _ *sqlx.Tx, id string) error {
 	delete(s.rows, id)
 	return nil
 }
@@ -124,7 +124,7 @@ func (s *stubIdentityRegistry) DeleteByClientIDTx(_ context.Context, _ *sqlx.Tx,
 	return nil
 }
 
-func (s *stubIdentityRegistry) TouchSecretIssuedAt(context.Context, string, time.Time) error {
+func (s *stubIdentityRegistry) TouchSecretIssuedAt(context.Context, *sqlx.Tx, string, time.Time) error {
 	return nil
 }
 

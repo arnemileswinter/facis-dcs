@@ -103,13 +103,13 @@ func (a JWTAuthenticator) JWTAuth(ctx context.Context, token string, scheme *sec
 		}
 	}
 
-	finalize := func(err error) {
-		a.logAttempt(ctx, db.AccessAttempt{IPAddress: ip, AttemptBy: &info.HolderDID, Roles: rolesJSON(info.Roles), Success: true, Outcome: accessOutcome(err)})
+	finalize := func(err error) error {
+		return a.recordAttempt(ctx, db.AccessAttempt{IPAddress: ip, AttemptBy: &info.HolderDID, Roles: rolesJSON(info.Roles), Success: true, Outcome: accessOutcome(err)})
 	}
 	if pending, ok := ctx.Value(accessFinalizerKey{}).(*accessFinalizer); ok {
 		pending.record = finalize
-	} else {
-		finalize(nil)
+	} else if err := finalize(nil); err != nil {
+		log.Printf("could not record an access attempt: %v", err)
 	}
 
 	ctx = middleware.InjectAuthContext(ctx, info.Roles, info.HolderDID, info.ParticipantDID)
@@ -142,19 +142,28 @@ func hasAnyRole(roles []string, required []string) bool {
 	return false
 }
 
-// logAttempt writes an access attempt. Errors are ignored so that a
-// database issue does not block the request.
+// logAttempt writes an access attempt. A failed write is logged and does not
+// block the request.
 func (a JWTAuthenticator) logAttempt(ctx context.Context, attempt db.AccessAttempt) {
-	tx, err := a.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return
+	if err := a.recordAttempt(ctx, attempt); err != nil {
+		log.Printf("could not record an access attempt: %v", err)
 	}
-	defer rollback(tx)
-	a.createAttempt(ctx, tx, attempt)
-	_ = tx.Commit()
 }
 
-func (a JWTAuthenticator) createAttempt(ctx context.Context, tx *sqlx.Tx, attempt db.AccessAttempt) {
+// recordAttempt writes an access attempt and reports a failed write.
+func (a JWTAuthenticator) recordAttempt(ctx context.Context, attempt db.AccessAttempt) error {
+	tx, err := a.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	if err := a.createAttempt(ctx, tx, attempt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (a JWTAuthenticator) createAttempt(ctx context.Context, tx *sqlx.Tx, attempt db.AccessAttempt) error {
 	metadata := accessMetadataFromContext(ctx)
 	attempt.AttemptedAt = time.Now().UTC()
 	attempt.Service, _ = ctx.Value(goa.ServiceKey).(string)
@@ -163,7 +172,7 @@ func (a JWTAuthenticator) createAttempt(ctx context.Context, tx *sqlx.Tx, attemp
 		attempt.Roles = "null"
 	}
 	attempt.Scope, attempt.DID, attempt.Justification = metadata.Scope, metadata.DID, metadata.Justification
-	_ = a.AAttemptRepo.Create(ctx, tx, attempt)
+	return a.AAttemptRepo.Create(ctx, tx, attempt)
 }
 
 func rollback(tx *sqlx.Tx) {
@@ -183,7 +192,10 @@ func (a JWTAuthenticator) RecordInvalidCredential(ctx context.Context, key, ip s
 	}
 	defer rollback(tx)
 
-	a.createAttempt(ctx, tx, db.AccessAttempt{IPAddress: ip, AttemptBy: attemptBy, Outcome: db.AccessOutcomeFailed, LockoutKey: &key})
+	if err := a.createAttempt(ctx, tx, db.AccessAttempt{IPAddress: ip, AttemptBy: attemptBy, Outcome: db.AccessOutcomeFailed, LockoutKey: &key}); err != nil {
+		log.Printf("could not record an invalid credential: %v", err)
+		return
+	}
 
 	now := time.Now()
 	since := now.Add(-conf.LoginLockoutDuration())

@@ -654,6 +654,36 @@ var _ = Service("SignatureManagement", func() {
 		})
 	})
 
+	Method("preparedDocument", func() {
+		Description("serve the to-be-signed PDF that prepareSignature pinned on a ceremony as application/pdf (DCS-IR-CI-02). Only the session that started the ceremony reads it.")
+		Meta("dcs:requirements", "DCS-IR-CI-02", "DCS-FR-SM-16")
+
+		Security(JWTAuth, func() {
+			Scope("Contract Signer")
+		})
+
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("ceremony_id", String, "The ceremony prepareSignature pinned the document on")
+			Required("ceremony_id")
+		})
+
+		Error("forbidden", ErrorResult, "The caller did not start the ceremony")
+		Error("not_found", ErrorResult, "No prepared document for this ceremony")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/signature/prepare/{ceremony_id}/document")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK, func() {
+				ContentType("application/pdf")
+			})
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("submitSignature", func() {
 		Description("accept a signature the signatory produced externally (wallet/QTSP or desktop PAdES signer) and finalize the contract once it validates and its certificate identifies the signatory (sole control, ADR-12, FR-SM-16/-18).")
 		Meta("dcs:requirements", "DCS-FR-SM-16")

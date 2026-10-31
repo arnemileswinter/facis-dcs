@@ -92,6 +92,13 @@ const (
 	// carries no contract content and is anchored under the instance scope so
 	// the destruction record survives the shredding it documents.
 	KeyShredded EventType = "KEY_SHREDDED"
+
+	// CreateContractTarget, UpdateContractTarget and DeleteContractTarget
+	// record an administrator's change to a contract target system
+	// (FR-UC-09-2). An update includes enabling and disabling the target.
+	CreateContractTarget EventType = "CREATE_CONTRACT_TARGET"
+	UpdateContractTarget EventType = "UPDATE_CONTRACT_TARGET"
+	DeleteContractTarget EventType = "DELETE_CONTRACT_TARGET"
 )
 
 func (s EventType) String() string {

@@ -42,3 +42,21 @@ it('sends the chosen state and keeps the creator of each result', async () => {
     [2, 'did:web:example.com:creator'],
   ])
 })
+
+it('sends the creation days and the owner', async () => {
+  search.mockResolvedValue([])
+  const wrapper = mount(TemplateListSearch, { props: { templates: [] } })
+  const input = (text: string) => {
+    const label = wrapper.findAll('label').find((candidate) => candidate.text() === text)!
+    return wrapper.get(`#${CSS.escape(label.attributes('for')!)}`)
+  }
+
+  await input('Created from').setValue('2026-03-01')
+  await input('Created to').setValue('2026-03-31')
+  await flushPromises()
+
+  expect(search).toHaveBeenLastCalledWith(
+    expect.objectContaining({ created_from: '2026-03-01', created_to: '2026-03-31' }),
+  )
+  expect(wrapper.text()).toContain('Owner')
+})

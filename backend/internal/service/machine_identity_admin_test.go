@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 
 	contractworkflowengine "digital-contracting-service/gen/contract_workflow_engine"
@@ -39,6 +40,9 @@ func (o *auditOutbox) events(t *testing.T) []authevents.MachineIdentityChangedEv
 	t.Helper()
 	out := make([]authevents.MachineIdentityChangedEvent, 0, len(o.rows))
 	for _, row := range o.rows {
+		if !strings.HasPrefix(row[1].(string), "MACHINE_IDENTITY_") {
+			continue
+		}
 		var evt authevents.MachineIdentityChangedEvent
 		if err := json.Unmarshal(row[2].([]byte), &evt); err != nil {
 			t.Fatal(err)

@@ -7,28 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	pdfgen "digital-contracting-service/gen/pdf_generation"
 	"digital-contracting-service/internal/auth/oid4vp/sdjwt"
-	"digital-contracting-service/internal/base/artifactstore"
 	"digital-contracting-service/internal/pdfgeneration/pdfcore"
 	"digital-contracting-service/internal/pdfgeneration/provenance"
 	"digital-contracting-service/internal/signingmanagement/dss"
 )
-
-type PDFStateData struct {
-	IPFSCID         string
-	RendererVersion string
-	C2PAState       string
-	PayloadHash     string
-}
-
-type pdfStateUpdater func(ctx context.Context, tx *sqlx.Tx, did string, state PDFStateData) error
 
 // PDFSignatureValidator validates every PAdES signature a PDF carries. The EU
 // DSS client (signingmanagement/dss), which /signature/validate also uses, is
@@ -131,107 +118,6 @@ const (
 	discrepancyNotAuthentic = "artifact_not_authentic"
 	discrepancyFailed       = "verification_failed"
 )
-
-// stampLifecycle embeds a C2PA lifecycle assertion (DCS-OR-C2PA-003) for the
-// given contract state into pdfBytes and returns the updated PDF plus the
-// renderer version pdf-core reports. It performs no IPFS storage or DB
-// bookkeeping — callers decide what to do with the result. This is the
-// building block shared by:
-//   - apply.go, which stamps the "active" lifecycle state into the base PDF
-//     BEFORE PAdES-signing it (update-then-sign), so the signed artefact
-//     already carries its final pre-signature-freeze manifest and never
-//     needs a post-signature revision for that transition; and
-//   - appendAndCache below, for lifecycle transitions that happen entirely
-//     before any PAdES signature exists (draft-state edits).
-//
-// A PDF that already carries a PAdES signature must never be passed to this
-// function again: rewriting a referenced embedded-file object (the C2PA
-// manifest attachment) after signing, however carefully byte-range-preserving,
-// is treated as an unexplained modification by standards-compliant PAdES
-// validators (Adobe Reader, pyHanko's diff-analysis) — even though the CMS
-// signature itself stays cryptographically valid. See
-// exportcontract.go/verifycontract.go, which freeze the PDF once its C2PA
-// state is no longer "draft".
-//
-// This restriction is specific to re-stamping lifecycle state. It is not a
-// general "never append to a signed PDF" rule: DCS-OR-C2PA-002 mandates
-// appending via PDF incremental updates, and signingmanagement's finalize()
-// appends a provenance-only manifest after signing (ADR-26). (There is no
-// DCS-FR-SM-16/B sub-clause; the earlier citation here was wrong.)
-func stampLifecycle(
-	ctx context.Context,
-	did, state string,
-	jsonldBytes, pdfBytes []byte,
-	pdfCore *pdfcore.Client,
-	vcIssuer provenance.VCIssuer,
-	issuerDID string,
-) ([]byte, string, error) {
-	c2paState, err := provenance.MapCWEStateToC2PA(state)
-	if err != nil {
-		return pdfBytes, "", fmt.Errorf("map lifecycle state %q: %w", state, err)
-	}
-
-	log.Printf("pdfgeneration: stampLifecycle %s state=%s c2paState=%s pdfLen=%d",
-		did, state, c2paState, len(pdfBytes))
-
-	reason := provenance.DefaultLifecycleReason(c2paState)
-
-	h := sha256.Sum256(pdfBytes)
-	assetHash := hex.EncodeToString(h[:])
-
-	_, vcBytes, err := vcIssuer.IssueContractLifecycleVC(
-		ctx, did, assetHash, c2paState, reason, issuerDID, time.Now().UTC(),
-	)
-	if err != nil {
-		return pdfBytes, "", fmt.Errorf("issue lifecycle VC (DCS-OR-C2PA-004): %w", err)
-	}
-
-	updatedPDF, rendererVersion, err := pdfCore.Update(ctx, pdfBytes, jsonldBytes, vcBytes, provenance.RemoteManifestURL(did))
-	if err != nil {
-		return pdfBytes, "", fmt.Errorf("pdf-core update for %s: %w", did, err)
-	}
-	return updatedPDF, rendererVersion, nil
-}
-
-func appendAndCache(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	did, state string,
-	jsonldBytes, pdfBytes []byte,
-	artifacts *artifactstore.Store,
-	scope artifactstore.Scope,
-	pdfCore *pdfcore.Client,
-	vcIssuer provenance.VCIssuer,
-	issuerDID string,
-	updateState pdfStateUpdater,
-) ([]byte, error) {
-	c2paState, err := provenance.MapCWEStateToC2PA(state)
-	if err != nil {
-		return pdfBytes, fmt.Errorf("map lifecycle state %q: %w", state, err)
-	}
-
-	updatedPDF, rendererVersion, err := stampLifecycle(ctx, did, state, jsonldBytes, pdfBytes, pdfCore, vcIssuer, issuerDID)
-	if err != nil {
-		return pdfBytes, err
-	}
-
-	pdfCID, err := artifacts.Put(ctx, scope, updatedPDF)
-	if err != nil {
-		return updatedPDF, fmt.Errorf("store PDF in IPFS for %s: %w", did, err)
-	}
-
-	if err := updateState(ctx, tx, did, PDFStateData{
-		IPFSCID:         pdfCID,
-		RendererVersion: rendererVersion,
-		C2PAState:       c2paState,
-		PayloadHash:     payloadHash(jsonldBytes),
-	}); err != nil {
-		return nil, fmt.Errorf("persist PDF state for %s: %w", did, err)
-	}
-
-	log.Printf("pdfgeneration: appendAndCache %s done → CID=%s pdfLen=%d", did, pdfCID, len(updatedPDF))
-	return updatedPDF, nil
-}
 
 // tamperedVerifyResult is the verdict for an artifact that failed
 // authenticated decryption. Every check reports negative rather than absent:

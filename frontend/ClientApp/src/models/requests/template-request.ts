@@ -73,6 +73,9 @@ export interface ContractTemplateSearchRequest {
   state?: ContractTemplateState
   name?: string
   description?: string
+  created_by?: string
+  created_from?: string
+  created_to?: string
   filter?: string
 }
 

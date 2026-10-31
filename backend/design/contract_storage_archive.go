@@ -345,6 +345,43 @@ var _ = Service("ContractStorageArchive", func() {
 		})
 	})
 
+	Method("evidenceContent", func() {
+		Description("Serve one evidence document of an archived contract as a file (DCS-IR-CI-02): a PDF as application/pdf, any other document as application/octet-stream. The read is recorded in the archive audit log.")
+		Meta("dcs:requirements", "DCS-IR-CI-02", "DCS-IR-CSA-02")
+		Security(JWTAuth, func() {
+			Scope("Archive Manager")
+			Scope("Auditor")
+			Scope("Compliance Officer")
+		})
+		Payload(func() {
+			Token("token", String, "JWT token")
+			Attribute("did", String, "Decentralized Identifier of the archived contract")
+			Attribute("evidence_id", String, "Identifier of the evidence document")
+			Required("did", "evidence_id")
+		})
+		Result(func() {
+			Attribute("content_type", String, "application/pdf or application/octet-stream")
+			Required("content_type")
+		})
+
+		Error("forbidden", ErrorResult, "The caller may not read the contract")
+		Error("not_found", ErrorResult, "No such evidence document, or its keys are shredded")
+		Error("internal_error", ErrorResult, "Internal server error")
+
+		HTTP(func() {
+			GET("/archive/evidence/content")
+			Param("did")
+			Param("evidence_id")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK, func() {
+				Header("content_type:Content-Type")
+			})
+			Response("forbidden", StatusForbidden)
+			Response("not_found", StatusNotFound)
+			Response("internal_error", StatusInternalServerError)
+		})
+	})
+
 	Method("sections", func() {
 		Description("List the archived sections of a contract (DCS-FR-CSA-26) that the caller's organization is assigned to, with their content. The Auditor and the system roles read every section. A request for one section the caller is not assigned to is refused. The read is recorded in the archive audit log.")
 		Meta("dcs:requirements", "DCS-FR-CSA-26", "DCS-FR-CSA-18")

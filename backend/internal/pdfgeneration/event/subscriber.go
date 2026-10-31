@@ -566,7 +566,7 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 		}
 	}
 
-	pdfBytes, err = s.appendOneTemplateManifest(ctx, tx, tplEvt.DID, tpl.State, jsonldBytes, pdfBytes, tplEvt.OccurredAt)
+	pdfBytes, err = s.appendOneTemplateManifest(ctx, tx, tplEvt.DID, tpl.State, tplEvt.Reason, jsonldBytes, pdfBytes, tplEvt.OccurredAt)
 	if err != nil {
 		return fmt.Errorf("append C2PA manifest for template %s: %w", tplEvt.DID, err)
 	}
@@ -585,7 +585,7 @@ func (s *Subscriber) appendTemplateC2PA(ctx context.Context, tplEvt minimalCWEEv
 // It returns the updated PDF bytes.
 func (s *Subscriber) appendOneTemplateManifest(
 	ctx context.Context, tx *sqlx.Tx,
-	did, state string, jsonldBytes, pdfBytes []byte, effectiveAt time.Time,
+	did, state, reason string, jsonldBytes, pdfBytes []byte, effectiveAt time.Time,
 ) ([]byte, error) {
 	c2paState, err := provenance.MapCWEStateToC2PA(state)
 	if err != nil {
@@ -598,7 +598,7 @@ func (s *Subscriber) appendOneTemplateManifest(
 	currentPayloadHash := hex.EncodeToString(payloadHashSum[:])
 
 	_, vcBytes, err := s.VCIssuer.IssueContractLifecycleVC(
-		ctx, did, fileHash, c2paState, "", s.IssuerDID, effectiveAt,
+		ctx, did, fileHash, c2paState, reason, s.IssuerDID, effectiveAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("issue lifecycle VC: %w", err)

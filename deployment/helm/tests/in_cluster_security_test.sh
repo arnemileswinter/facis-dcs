@@ -178,7 +178,7 @@ for prof in "all" "bdd" "bdd2"; do
     all) f="$TMP/a.yaml" ;;
     *) f="$TMP/ci-$prof.yaml" ;;
   esac
-  python3 - "$f" <<'EOF' || fail "NetworkPolicies of $prof"
+  python3 - "$f" "$prof" <<'EOF' || fail "NetworkPolicies of $prof"
 import sys, yaml
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 nps = {d["metadata"]["name"]: d["spec"] for d in docs if d["kind"] == "NetworkPolicy"}
@@ -222,7 +222,8 @@ for n, spec in nps.items():
             if not any(port["port"] in t[2] for t in targets):
                 errors.append("%s: no selected pod has port %s" % (n, port["port"]))
         for f in r.get("from", []):
-            if "podSelector" in f and "namespaceSelector" not in f and not selected(f["podSelector"]):
+            other_release = f.get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/instance", rel) != rel
+            if "podSelector" in f and "namespaceSelector" not in f and not other_release and not selected(f["podSelector"]):
                 errors.append("%s: peer %s selects no pod" % (n, f))
 
 def admitted(component, port):
@@ -246,14 +247,48 @@ for component, port in (("hydra", "admin"), ("hydra", "https"), ("ipfs", "api"),
 clients = backend | {p[0] for p in pods if p[1].get("app.kubernetes.io/name") == "hydra" or p[0].endswith(("-db-backup", "-pac-monitor"))}
 if admitted("postgresql", "postgres") != [clients]:
     errors.append("postgresql admits %s, not its clients %s" % (admitted("postgresql", "postgres"), clients))
-for component, port in (("hydra", "public"), ("backend", "https")):
-    if admitted(component, port) != [None] and component not in deployed_elsewhere:
-        errors.append("%s port %s is not open" % (component, port))
+if admitted("hydra", "public") != [None] and "hydra" not in deployed_elsewhere:
+    errors.append("hydra port public is not open")
+# DCS-NFR-SEC-14: without networkPolicy.ingressFrom the backend, ORCE and DSS
+# admit every source; the BDD renders name the Traefik ingress and the other
+# BDD release, and then they admit only those and the pods of the release.
+prof = sys.argv[2]
+other = {"bdd": "dcs2", "bdd2": "dcs"}.get(prof)
+ingress = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+           "podSelector": {"matchLabels": {"app.kubernetes.io/name": "traefik"}}}
+def peers(component):
+    np = next((sp for n, sp in nps.items() if n.endswith("-" + component)), None)
+    return None if np is None else [r_.get("from") for r_ in np.get("ingress", []) if "metrics" not in [x["port"] for x in r_.get("ports", [])]]
+if other is None:
+    if admitted("backend", "https") != [None]:
+        errors.append("backend port https is not open without ingressFrom")
+    if any(n.endswith(("-orce", "-dss")) for n in nps):
+        errors.append("ORCE or DSS restricted without ingressFrom")
+else:
+    want = [ingress, {"podSelector": {"matchLabels": {"app.kubernetes.io/instance": rel}}},
+            {"podSelector": {"matchLabels": {"app.kubernetes.io/instance": other}}}]
+    for component in ("backend", "orce", "dss"):
+        deployed = any(p[1].get("app.kubernetes.io/name") == component or (component == "backend" and p[0] in backend) for p in pods)
+        if deployed and peers(component) != [want]:
+            errors.append("%s admits %s, not only the ingress, release %s and release %s" % (component, peers(component), rel, other))
+    public = next((sp for n, sp in nps.items() if n.endswith("-public")), None)
+    if public and {"orce", "dss"} & set(next(e["values"] for e in public["podSelector"]["matchExpressions"] if e["key"] == "app.kubernetes.io/name")):
+        errors.append("ORCE or DSS still open to every source")
 if errors:
     sys.exit("\n".join(errors))
 EOF
 done
 [[ "$(render "${ALL[@]}" --set networkPolicy.enabled=false | grep -c 'kind: NetworkPolicy')" == 0 ]] || fail "NetworkPolicies with networkPolicy.enabled=false"
+# A production-like release with an ingress names the ingress controller.
+out="$(render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" --set networkPolicy.ingressFrom=null 2>&1 || true)"
+grep -q 'networkPolicy.ingressFrom: the pods of the ingress controller' <<<"$out" || fail "a production render without networkPolicy.ingressFrom"
+render -f "$CHART_DIR/values.prod.yml" -f "$CHART_DIR/tests/prod.prerequisites.yml" --show-only templates/networkpolicy.yaml \
+  | python3 -c "
+import sys, yaml
+nps = {d['metadata']['name']: d['spec'] for d in yaml.safe_load_all(sys.stdin) if d}
+backend = next(sp for n, sp in nps.items() if n.endswith('-backend'))
+assert all('from' in r for r in backend['ingress']), 'the prod backend admits every source'
+" || fail "the production backend admits every source"
 # An empty peer list leaves the rule out instead of admitting every source.
 render "${ALL[@]}" --set networkPolicy.metricsFrom=null --show-only templates/networkpolicy.yaml | grep -q 'port: metrics' \
   && fail "metrics port admitted without metricsFrom"

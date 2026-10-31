@@ -69,46 +69,12 @@ func (h *VerifyTemplatePdfHandler) Handle(ctx context.Context, qry VerifyTemplat
 		return nil, fmt.Errorf("map template state %q to C2PA state: %w", tpl.State, err)
 	}
 
+	// Verify is read-only, as for a contract: the regenerator is the only
+	// writer of the template PDF, under its per-template lock. While a
+	// regeneration is in flight the stored PDF can lag the template's state;
+	// lifecycle_status reports the template's state, and the checks report
+	// what the stored PDF holds.
 	latestCID := pdfState.IPFSCID
-
-	if pdfState.IPFSCID != "" && pdfState.C2PAState != currentC2PAState {
-		log.Printf("pdfgeneration: VerifyTemplatePdf %s state advanced %q→%q; appending before verify",
-			qry.DID, pdfState.C2PAState, currentC2PAState)
-
-		var jsonldBytes []byte
-		if tpl.TemplateData != nil {
-			jsonldBytes = []byte(*tpl.TemplateData)
-		}
-
-		pdf, err := h.Artifacts.Get(ctx, artifactstore.TemplateScope(qry.DID), pdfState.IPFSCID)
-		if artifactstore.IsTampered(err) {
-			return tamperedVerifyResult(currentC2PAState), nil
-		}
-		if err != nil || len(pdf) == 0 {
-			return nil, fmt.Errorf("fetch cached template PDF %s from IPFS for verify append: %w", qry.DID, err)
-		}
-
-		updater := func(ctx context.Context, tx *sqlx.Tx, did string, state PDFStateData) error {
-			return h.TRepo.UpdatePDFState(ctx, tx, did, tpldb.ContractTemplatePDFState{
-				IPFSCID:         state.IPFSCID,
-				RendererVersion: state.RendererVersion,
-				C2PAState:       state.C2PAState,
-				PayloadHash:     state.PayloadHash,
-			})
-		}
-
-		updatedPDF, err := appendAndCache(ctx, tx, qry.DID, tpl.State, jsonldBytes, pdf,
-			h.Artifacts, artifactstore.TemplateScope(qry.DID), h.PDFCore, h.VCIssuer, h.IssuerDID, updater)
-		if err != nil {
-			return nil, fmt.Errorf("append template C2PA assertion before verify for %s: %w", qry.DID, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit pre-verify append tx for template %s: %w", qry.DID, err)
-		}
-
-		return runVerify(ctx, updatedPDF, h.PDFCore, h.Credentials, h.CredentialStatus, nil, h.signerAnchors(), currentC2PAState)
-	}
-
 	if latestCID == "" {
 		return nil, fmt.Errorf("no cached PDF for template %s; call export first", qry.DID)
 	}

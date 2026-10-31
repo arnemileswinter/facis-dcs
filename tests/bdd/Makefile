@@ -61,7 +61,8 @@ BDD_HELM_SET = \
 	--set-string hydra.config.logoutURL="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
 	--set-string hydra.clients[0].redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/callback" \
 	--set-string hydra.clients[0].post_logout_redirect_uris[0]="$(BDD_PUBLIC_ORIGIN)/digital-contracting-service/api/auth/logout-complete" \
-	--set-string orce.checkpointSink.url="https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints"
+	--set-string orce.checkpointSink.url="https://$(BDD_CHECKPOINT_SINK_HOST):18443/checkpoints" \
+	--set-string webhooks.insecureHosts="$(BDD_CHECKPOINT_SINK_HOST):18444"
 HELM_CHART_PATH ?= ../../deployment/helm
 HELM_TIMEOUT ?= 20m
 

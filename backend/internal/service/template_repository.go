@@ -409,6 +409,9 @@ func (s *templateRepositorysrvc) Search(ctx context.Context, req *templatereposi
 		Jurisdiction:     base.DerefString(req.Jurisdiction),
 		Industry:         base.DerefString(req.Industry),
 		ComplianceStatus: base.DerefString(req.ComplianceStatus),
+		CreatedBy:        base.DerefString(req.CreatedBy),
+		CreatedFrom:      base.DerefString(req.CreatedFrom),
+		CreatedTo:        base.DerefString(req.CreatedTo),
 	}
 	queryHandler := contracttemplate.GetAllMetaDataByFilterHandler{
 		DB:     s.DB,

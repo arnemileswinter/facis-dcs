@@ -55,14 +55,21 @@ of an event:
 
 | Consumer | Redelivery | Error returned for |
 |---|---|---|
-| Webhooks | The CloudEvent id is the webhook event id (`webhook-id`). `webhook_dispatches` has it as primary key, and an id that is recorded already is not sent again. | loading the subscribers, recording the dispatch |
+| Webhooks | The CloudEvent id is the webhook event id (`webhook-id`). `webhook_dispatches` has it as primary key, and an id that is recorded already is not dispatched again. | loading the subscribers, recording the dispatch |
 | PDF regeneration | Each handler compares the stored PDF state with the record and does nothing when the PDF is current; regenerations of one entity are serialized by an advisory lock. | every failed regeneration; the retry pass (`retryPendingRegenerations`) continues after the last delivery |
 | Automatic deployment | The CloudEvent id is the correlation id of the deployment. A deployment with that id makes `Handle` return `ErrAlreadyDispatched`, and nothing is sent to the target. | failures other than the operator outcomes (no target, target not registered or disabled, signing incomplete, gate blocked, contract not SIGNED) |
 | DCS-to-DCS | A ship skips the peers that hold the revision (`contract_pdf_deliveries`), settlements and negotiation messages are re-sent only while undelivered. | none: the ship records its failure for the sync-fail scheduler |
 
-- The webhook dispatch is recorded before the requests are sent. A replica
-  that stops between the two does not send that event, and the redelivery
-  finds it recorded.
+- Webhook delivery is at least once. The dispatch and one delivery row per
+  subscription (`webhook_deliveries`, with the signed payload) are written in
+  one transaction before the first request, each due again one minute later.
+  A replica that stops before that transaction leaves the event to the
+  redelivery. A replica that stops after it leaves the rows due, and the
+  retry job (`Dispatcher.RetryDue`, every minute, one replica at a time) sends
+  them. A delivery that the subscriber does not answer with 2xx is sent again
+  after 1, 2, 4, ... minutes (at most 1 hour), at most 10 attempts. A
+  subscriber can receive one event twice (the attempt was sent but its
+  outcome not recorded); it recognises the repeat by `webhook-id`.
 - Events can be handled out of order: the replicas and the handler goroutines
   work in parallel, and a redelivered event comes after later ones. Every
   handler reads the current state of the entity instead of the event data.
@@ -74,6 +81,8 @@ of an event:
   `TestFailedEventIsRedelivered` (`internal/base/event`, in-process NATS
   server with JetStream), `TestRepublishedEventKeepsItsCloudEventID`,
   `TestRedeliveredEventIsDispatchedOnce`,
+  `TestARecordedDeliveryIsSentAfterTheReplicaStopped`,
+  `TestADeliveryIsRetriedUntilTheSubscriberAcceptsIt`,
   `TestPostgresDeliveriesAreSharedAcrossReplicas`,
   `TestRedeliveredDeployEventDispatchesNothing`,
   `TestAutoDeployIsIdempotentPerEvent`.

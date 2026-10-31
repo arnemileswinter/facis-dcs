@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -76,14 +75,14 @@ func (p *Platform) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // GET  /webhooks   — management role
 // POST /webhooks   — management role
 // DELETE /webhooks/{id} — management role
-// POST /callbacks  — authenticated
+// POST /callbacks  — management role
 func (p *Platform) routes() {
 	p.mux.HandleFunc("GET /health", p.health)
 	p.mux.HandleFunc("GET /events", p.auth(p.listEvents))
 	p.mux.HandleFunc("GET /webhooks", p.auth(p.manage(p.listWebhooks)))
 	p.mux.HandleFunc("POST /webhooks", p.auth(p.manage(p.subscribe)))
 	p.mux.HandleFunc("DELETE /webhooks/{id}", p.auth(p.manage(p.unsubscribe)))
-	p.mux.HandleFunc("POST /callbacks", p.auth(p.callback))
+	p.mux.HandleFunc("POST /callbacks", p.auth(p.manage(p.callback)))
 	p.mux.HandleFunc("GET /deliveries", p.auth(p.manage(p.listDeliveries)))
 }
 
@@ -204,8 +203,8 @@ func (p *Platform) subscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "event and callback_url are required")
 		return
 	}
-	if u, err := url.Parse(req.CallbackURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
-		jsonError(w, http.StatusBadRequest, "callback_url must be an absolute http or https URL without credentials")
+	if err := ValidateCallbackURL(req.CallbackURL); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error()+"; plain http only for a host the deployment names")
 		return
 	}
 	if !isKnownEvent(req.Event) {
@@ -287,7 +286,9 @@ func (p *Platform) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, ok, err := p.store.ResolvePending(r.Context(), req.EventID)
+	// Only an organization that received the event acknowledges it, and
+	// only its own deliveries.
+	pending, ok, err := p.store.ResolvePending(r.Context(), req.EventID, callerFromCtx(r.Context()).ParticipantDID)
 	if err != nil {
 		log.Printf("webhookplatform: %v", err)
 		jsonError(w, http.StatusInternalServerError, "could not resolve the callback")
@@ -302,7 +303,7 @@ func (p *Platform) callback(w http.ResponseWriter, r *http.Request) {
 		req.EventID, pending.Event, pending.DID, req.Status, holderDIDFromCtx(r.Context()))
 
 	if p.onCallback != nil {
-		go p.onCallback(r.Context(), pending, req.Status, req.Result)
+		go p.onCallback(context.WithoutCancel(r.Context()), pending, req.Status, req.Result)
 	}
 
 	jsonOK(w, map[string]string{"status": "accepted"})
